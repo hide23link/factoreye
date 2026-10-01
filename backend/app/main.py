@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -44,6 +45,15 @@ app = FastAPI(
 app.state.limiter = limiter
 # slowapiのハンドラ型はStarletteの例外ハンドラ型と厳密には一致しない（ライブラリ側のstub起因）
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+# CORS: 明示的にFRONTEND_URLのみ許可（`*`禁止、docs/factoreye-architecture.md §Security参照）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.frontend_url],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(sensors.router)
 app.include_router(ingest.router)
