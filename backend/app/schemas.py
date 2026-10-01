@@ -120,3 +120,8 @@ class AlarmRead(CamelModel):
 class AlarmListResponse(CamelModel):
     alarms: list[AlarmRead]
     total: int
+
+
+class AlarmAck(CamelModel):
+    # Phase 0はUserテーブルがないため文字列固定可（例: "admin"）
+    acknowledged_by: str = Field(min_length=1, max_length=100)

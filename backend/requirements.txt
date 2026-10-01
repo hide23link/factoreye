@@ -9,6 +9,7 @@ pydantic>=2.9.0
 pydantic-settings>=2.5.0
 slowapi>=0.1.9
 python-dotenv>=1.0.0
+aiosmtplib>=3.0.2
 
 # --- backend/tests, backend/pyproject.toml の [tool.*] で設定するdev依存 ---
 pytest>=8.3.0

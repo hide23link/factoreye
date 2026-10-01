@@ -5,14 +5,18 @@ docs/factoreye-architecture.md §Ingest バッファ & バッチ書き込み 参
 """
 import asyncio
 import logging
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.alarm_engine import evaluate_alarms
 from app.db.models import Reading
 from app.db.session import engine
+from app.notifications import send_alarm_email
 
 FLUSH_INTERVAL_SECONDS = 1.0
 
@@ -43,6 +47,16 @@ class IngestBuffer:
 
 buffer = IngestBuffer()
 
+# fire-and-forgetタスクへの強参照を保持（asyncio.create_task結果を即座に手放すと
+# イベントループによってはタスクがGCされ、送信前に消えることがあるため）
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _fire_and_forget(coro: Coroutine[Any, Any, None]) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 async def flush_once() -> int:
     """バッファの内容を1回だけDBへbatch INSERTする。戻り値は書き込んだ件数。"""
@@ -57,7 +71,12 @@ async def flush_once() -> int:
                 for p in pending
             ]
         )
+        notifications = await evaluate_alarms(session, pending)
         await session.commit()
+
+    for notification in notifications:
+        _fire_and_forget(send_alarm_email(notification))
+
     return len(pending)
 
 

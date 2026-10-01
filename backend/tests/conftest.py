@@ -17,6 +17,8 @@ from app.main import app
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def _schema() -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
+        # drop_all を先に実行し、前回の異常終了等で残った状態があっても毎回まっさらから始める
+        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
     yield
     async with engine.begin() as conn:
