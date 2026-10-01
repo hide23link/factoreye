@@ -110,6 +110,8 @@ class Dashboard(SQLModel, table=True):
     layout_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+    # soft-delete（Sensorと同じ方針、§Data Model参照）
+    deleted_at: datetime | None = Field(default=None, index=True)
 
     widgets: list["Widget"] = Relationship(back_populates="dashboard")
 

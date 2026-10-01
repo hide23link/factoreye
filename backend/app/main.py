@@ -16,7 +16,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
-from app.api import alarms, ingest, readings, sensors
+from app.api import alarms, dashboards, ingest, readings, sensors, widgets
 from app.config import settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
@@ -49,6 +49,8 @@ app.include_router(sensors.router)
 app.include_router(ingest.router)
 app.include_router(readings.router)
 app.include_router(alarms.router)
+app.include_router(dashboards.router)
+app.include_router(widgets.router)
 
 
 @app.get("/health")

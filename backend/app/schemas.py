@@ -4,6 +4,7 @@ JSON配線フォーマットはcamelCase（docs/factoreye-architecture.md のAPI
 Python/DB側はsnake_case（PEP 8）のまま、alias_generatorで変換する。
 """
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -125,3 +126,76 @@ class AlarmListResponse(CamelModel):
 class AlarmAck(CamelModel):
     # Phase 0はUserテーブルがないため文字列固定可（例: "admin"）
     acknowledged_by: str = Field(min_length=1, max_length=100)
+
+
+# ──────────────────────────────────────────────────────────────
+# Widget
+# ──────────────────────────────────────────────────────────────
+
+
+class WidgetCreate(CamelModel):
+    # "SensorGraph" | "ProductionStatus" | "AlarmAlert" | "MultiSensorComparison" | プラグイン定義
+    type: str = Field(min_length=1, max_length=50)
+    sensor_id: UUID | None = None
+    grid_column: int = Field(ge=1, le=3)
+    grid_row: int = Field(ge=1)
+    grid_width: int = Field(ge=1, le=3)
+    grid_height: int = Field(ge=1)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class WidgetUpdate(CamelModel):
+    sensor_id: UUID | None = None
+    grid_column: int | None = Field(default=None, ge=1, le=3)
+    grid_row: int | None = Field(default=None, ge=1)
+    grid_width: int | None = Field(default=None, ge=1, le=3)
+    grid_height: int | None = Field(default=None, ge=1)
+    config: dict[str, Any] | None = None
+
+
+class WidgetRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    id: UUID
+    dashboard_id: UUID
+    sensor_id: UUID | None
+    type: str
+    grid_column: int
+    grid_row: int
+    grid_width: int
+    grid_height: int
+    config: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+# ──────────────────────────────────────────────────────────────
+# Dashboard
+# ──────────────────────────────────────────────────────────────
+
+
+class DashboardCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    layout_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class DashboardUpdate(CamelModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    layout_config: dict[str, Any] | None = None
+
+
+class DashboardRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str | None
+    layout_config: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class DashboardDetail(DashboardRead):
+    widgets: list[WidgetRead] = Field(default_factory=list)
