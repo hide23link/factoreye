@@ -6,7 +6,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.config import settings
 
-engine = create_async_engine(settings.database_url, echo=settings.debug, pool_size=5, max_overflow=5)
+engine = create_async_engine(
+    settings.database_url, echo=settings.debug, pool_size=5, max_overflow=5
+)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

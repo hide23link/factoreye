@@ -6,11 +6,12 @@ Alembic環境設定。
 """
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlmodel import SQLModel
 
+import app.db.models  # noqa: F401  モデルをメタデータに登録するため import
+from alembic import context
 from app.config import settings
-from app.db.models import SQLModel  # noqa: F401  モデルをメタデータに登録するため import
 
 config = context.config
 

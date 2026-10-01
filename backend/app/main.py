@@ -5,8 +5,10 @@ FactorEye バックエンド エントリポイント
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 開発
     uvicorn app.main:app --host 0.0.0.0 --port 8000             # 本番（docker-compose経由）
 """
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI
 from sqlalchemy import text
@@ -16,7 +18,7 @@ from app.db.session import engine
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     await engine.dispose()
 
@@ -33,7 +35,7 @@ app = FastAPI(
 
 
 @app.get("/health")
-async def health_check() -> dict:
+async def health_check() -> dict[str, Any]:
     db_status = "connected"
     try:
         async with engine.connect() as conn:
@@ -43,6 +45,6 @@ async def health_check() -> dict:
 
     return {
         "status": "ok" if db_status == "connected" else "degraded",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "services": {"database": db_status},
     }

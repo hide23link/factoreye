@@ -6,8 +6,9 @@ FactorEye データモデル（Phase 0 MVP）
 
 エンティティ: Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig / Plugin / PluginConfig
 """
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column
@@ -16,16 +17,16 @@ from sqlmodel import Field, Relationship, SQLModel
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class AlarmStatus(str, Enum):
+class AlarmStatus(StrEnum):
     ACTIVE = "active"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
 
 
-class ThresholdBreached(str, Enum):
+class ThresholdBreached(StrEnum):
     MIN = "min"
     MAX = "max"
 
@@ -38,7 +39,8 @@ class Sensor(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(unique=True, max_length=100)
-    # REST ingest 識別子（旧 mqttTopic）。デバイス側は POST /api/ingest/readings にこの値を含めて送信する
+    # REST ingest 識別子（旧 mqttTopic）
+    # デバイス側は POST /api/ingest/readings にこの値を含めて送信する
     ingest_key: str = Field(unique=True, max_length=100, index=True)
     unit: str = Field(max_length=20)
     threshold_min: float | None = None
@@ -68,7 +70,7 @@ class Reading(SQLModel, table=True):
     sensor: Sensor = Relationship(back_populates="readings")
 
     # 複合インデックス (sensor_id, recorded_at) は時系列範囲検索用に必須
-    # → alembicマイグレーションで Index("ix_reading_sensor_recorded", "sensor_id", "recorded_at") を追加
+    # → alembicマイグレーションで Index("ix_reading_sensor_recorded", ...) を追加
 
 
 # ──────────────────────────────────────────────────────────────
@@ -101,7 +103,7 @@ class Dashboard(SQLModel, table=True):
     name: str = Field(max_length=100)
     description: str | None = Field(default=None, max_length=500)
     # グリッドレイアウト設定（3列 x N行）
-    layout_config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    layout_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -122,7 +124,7 @@ class Widget(SQLModel, table=True):
     grid_width: int = Field(ge=1, le=3)
     grid_height: int
     # グラフ色・Y軸範囲など
-    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -136,7 +138,7 @@ class WidgetConfig(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     widget_id: UUID = Field(foreign_key="widgets.id", index=True)
-    settings: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     widget: Widget = Relationship(back_populates="widget_configs")
 
@@ -153,7 +155,7 @@ class Plugin(SQLModel, table=True):
     version: str = Field(max_length=20)
     enabled: bool = Field(default=False)
     installed_at: datetime = Field(default_factory=_utcnow)
-    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     plugin_configs: list["PluginConfig"] = Relationship(back_populates="plugin")
 
@@ -163,6 +165,6 @@ class PluginConfig(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     plugin_id: UUID = Field(foreign_key="plugins.id", index=True)
-    data: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     plugin: Plugin = Relationship(back_populates="plugin_configs")
