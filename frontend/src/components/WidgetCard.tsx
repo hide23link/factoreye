@@ -1,9 +1,9 @@
-import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-import { deleteWidget, updateWidget } from "../lib/api";
-import type { Widget } from "../types";
+import { deleteWidget } from "../lib/api";
+import type { DashboardDetail, Widget } from "../types";
+import { WidgetFormModal } from "./WidgetFormModal";
 import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
 import { MultiSensorComparisonWidget } from "./widgets/MultiSensorComparisonWidget";
 import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
@@ -24,95 +24,62 @@ function WidgetBody({ widget }: { widget: Widget }) {
   }
 }
 
-export function WidgetCard({ widget, dashboardId }: { widget: Widget; dashboardId: string }) {
+export function WidgetCard({
+  widget,
+  dashboard,
+}: {
+  widget: Widget;
+  dashboard: DashboardDetail;
+}) {
   const queryClient = useQueryClient();
-  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
-    id: widget.id,
-  });
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: widget.id });
+  const [isEditing, setEditing] = useState(false);
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteWidget(widget.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboard.id] });
     },
   });
-
-  const resizeMutation = useMutation({
-    mutationFn: (data: { gridWidth?: number; gridHeight?: number }) =>
-      updateWidget(widget.id, data),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
-    },
-  });
-
-  const style = {
-    gridColumn: `${widget.gridColumn} / span ${widget.gridWidth}`,
-    gridRow: `${widget.gridRow} / span ${widget.gridHeight}`,
-    transform: transform ? CSS.Translate.toString(transform) : undefined,
-    opacity: isDragging ? 0.5 : 1,
-  };
 
   return (
-    <div
-      ref={(node) => {
-        setDragRef(node);
-        setDropRef(node);
-      }}
-      style={style}
-      className={`flex min-h-[160px] flex-col rounded-lg border bg-white p-3 shadow-sm ${
-        isOver ? "border-blue-400 ring-2 ring-blue-200" : "border-gray-200"
-      }`}
-    >
+    <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          {...listeners}
-          {...attributes}
-          className="cursor-grab touch-none select-none text-gray-400 hover:text-gray-600"
+        <span
+          className="widget-drag-handle cursor-grab touch-none select-none text-gray-400 hover:text-gray-600"
           aria-label="ドラッグして移動"
         >
           ⠿
-        </button>
-        <div className="flex items-center gap-1 text-xs text-gray-400">
-          <label>
-            幅
-            <select
-              value={widget.gridWidth}
-              onChange={(e) => resizeMutation.mutate({ gridWidth: Number(e.target.value) })}
-              className="ml-1 rounded border border-gray-200 px-1"
-            >
-              {[1, 2, 3].map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            高さ
-            <input
-              type="number"
-              min={1}
-              max={3}
-              value={widget.gridHeight}
-              onChange={(e) => resizeMutation.mutate({ gridHeight: Number(e.target.value) })}
-              className="ml-1 w-12 rounded border border-gray-200 px-1"
-            />
-          </label>
+        </span>
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="hover:text-blue-600"
+            aria-label="ウィジェットを編集"
+          >
+            ⚙ 編集
+          </button>
           <button
             type="button"
             onClick={() => deleteMutation.mutate()}
-            className="ml-1 text-red-400 hover:text-red-600"
+            className="text-red-400 hover:text-red-600"
             aria-label="ウィジェットを削除"
           >
             ✕
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <WidgetBody widget={widget} />
       </div>
+
+      {isEditing && (
+        <WidgetFormModal
+          dashboard={dashboard}
+          widget={widget}
+          onClose={() => setEditing(false)}
+        />
+      )}
     </div>
   );
 }

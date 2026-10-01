@@ -125,10 +125,12 @@ class Widget(SQLModel, table=True):
     sensor_id: UUID | None = Field(default=None, foreign_key="sensors.id")
     # 例: "temperature-graph", "power-graph", "production-status"
     type: str = Field(max_length=50)
-    grid_column: int = Field(ge=1, le=3)
-    grid_row: int
-    grid_width: int = Field(ge=1, le=3)
-    grid_height: int
+    # 12列グリッド（react-grid-layoutのドラッグ&ドロップ配置・マウスリサイズに対応、
+    # frontend/src/components/DashboardView.tsx の GRID_COLS と一致させる）
+    grid_column: int = Field(ge=1, le=12)
+    grid_row: int = Field(ge=1)
+    grid_width: int = Field(ge=1, le=12)
+    grid_height: int = Field(ge=1)
     # グラフ色・Y軸範囲など
     config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow)

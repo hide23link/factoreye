@@ -17,7 +17,8 @@ import type { Widget } from "../../types";
 
 export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const { data, isLoading } = useSensorReadings(widget.sensorId, widget.config.timeRange);
+  const hours = widget.config.timeRangeHours ?? 1;
+  const { data, isLoading } = useSensorReadings(widget.sensorId, hours);
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
@@ -27,9 +28,15 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
+  // 24時間を超える範囲では日付が無いと時刻表示が曖昧になるため出し分ける
+  const formatTime = (iso: string) =>
+    hours > 24
+      ? new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : new Date(iso).toLocaleTimeString("ja-JP");
+
   const chartData = [...data.readings]
     .reverse()
-    .map((r) => ({ time: new Date(r.recordedAt).toLocaleTimeString("ja-JP"), value: r.value }));
+    .map((r) => ({ time: formatTime(r.recordedAt), value: r.value }));
 
   const color = widget.config.color ?? "#2563eb";
   const graphType = widget.config.graphType ?? "line";

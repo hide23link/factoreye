@@ -3,7 +3,7 @@ import type { Widget } from "../../types";
 
 export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const { data, isLoading } = useSensorReadings(widget.sensorId, "1h");
+  const { data, isLoading } = useSensorReadings(widget.sensorId, 1);
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {

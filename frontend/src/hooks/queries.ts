@@ -7,7 +7,6 @@ import {
   fetchSensorReadings,
   fetchSensors,
 } from "../lib/api";
-import type { WidgetConfig } from "../types";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -32,21 +31,11 @@ export const useAlarms = (status?: string) =>
     refetchInterval: POLL_INTERVAL_MS,
   });
 
-const RANGE_MS: Record<NonNullable<WidgetConfig["timeRange"]>, number> = {
-  "1h": 60 * 60 * 1000,
-  "6h": 6 * 60 * 60 * 1000,
-  "24h": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-};
-
-export const useSensorReadings = (
-  sensorId: string | null,
-  timeRange: WidgetConfig["timeRange"] = "1h",
-) =>
+export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({
-    queryKey: ["readings", sensorId, timeRange],
+    queryKey: ["readings", sensorId, hours],
     queryFn: () => {
-      const from = new Date(Date.now() - RANGE_MS[timeRange]).toISOString();
+      const from = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
       return fetchSensorReadings(sensorId as string, from);
     },
     enabled: sensorId !== null,

@@ -137,18 +137,19 @@ class WidgetCreate(CamelModel):
     # "SensorGraph" | "ProductionStatus" | "AlarmAlert" | "MultiSensorComparison" | プラグイン定義
     type: str = Field(min_length=1, max_length=50)
     sensor_id: UUID | None = None
-    grid_column: int = Field(ge=1, le=3)
+    # 12列グリッド（frontend の react-grid-layout GRID_COLS と一致）
+    grid_column: int = Field(ge=1, le=12)
     grid_row: int = Field(ge=1)
-    grid_width: int = Field(ge=1, le=3)
+    grid_width: int = Field(ge=1, le=12)
     grid_height: int = Field(ge=1)
     config: dict[str, Any] = Field(default_factory=dict)
 
 
 class WidgetUpdate(CamelModel):
     sensor_id: UUID | None = None
-    grid_column: int | None = Field(default=None, ge=1, le=3)
+    grid_column: int | None = Field(default=None, ge=1, le=12)
     grid_row: int | None = Field(default=None, ge=1)
-    grid_width: int | None = Field(default=None, ge=1, le=3)
+    grid_width: int | None = Field(default=None, ge=1, le=12)
     grid_height: int | None = Field(default=None, ge=1)
     config: dict[str, Any] | None = None
 

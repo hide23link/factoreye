@@ -37,9 +37,11 @@ export type WidgetType = "SensorGraph" | "ProductionStatus" | "AlarmAlert" | "Mu
 export interface WidgetConfig {
   graphType?: "line" | "bar" | "area";
   color?: string;
+  // 未指定(undefined)ならRechartsの自動スケール（"auto"）
   yAxisMin?: number;
   yAxisMax?: number;
-  timeRange?: "1h" | "6h" | "24h" | "7d";
+  // 直近何時間分を表示するか（自由入力、例: 0.5 = 30分、168 = 7日）
+  timeRangeHours?: number;
   sensorIds?: string[];
   onThreshold?: number;
 }

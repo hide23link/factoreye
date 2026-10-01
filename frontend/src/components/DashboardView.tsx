@@ -1,19 +1,40 @@
-import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Responsive, WidthProvider } from "react-grid-layout/legacy";
+import type { Layout } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 
 import { useDashboard } from "../hooks/queries";
 import { deleteDashboard, updateWidget } from "../lib/api";
+import type { Widget } from "../types";
 import { useUiStore } from "../store/useUiStore";
-import { AddWidgetModal } from "./AddWidgetModal";
 import { WidgetCard } from "./WidgetCard";
+import { WidgetFormModal } from "./WidgetFormModal";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
+
+// react-grid-layout は0始まりのx/y、backendは1始まりのgridColumn/gridRow
+const GRID_COLS = { lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 };
+const ROW_HEIGHT = 36;
+
+function toLayoutItem(widget: Widget): Layout[number] {
+  return {
+    i: widget.id,
+    x: widget.gridColumn - 1,
+    y: widget.gridRow - 1,
+    w: widget.gridWidth,
+    h: widget.gridHeight,
+    minW: 1,
+    minH: 2,
+  };
+}
 
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading } = useDashboard(dashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const [isModalOpen, setModalOpen] = useState(false);
   const queryClient = useQueryClient();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const deleteDashboardMutation = useMutation({
     mutationFn: () => deleteDashboard(dashboardId),
@@ -23,15 +44,21 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     },
   });
 
-  const swapMutation = useMutation({
-    mutationFn: async (vars: {
-      a: { id: string; gridColumn: number; gridRow: number };
-      b: { id: string; gridColumn: number; gridRow: number };
-    }) => {
-      await Promise.all([
-        updateWidget(vars.a.id, { gridColumn: vars.b.gridColumn, gridRow: vars.b.gridRow }),
-        updateWidget(vars.b.id, { gridColumn: vars.a.gridColumn, gridRow: vars.a.gridRow }),
-      ]);
+  const persistLayoutMutation = useMutation({
+    mutationFn: async (layout: Layout) => {
+      if (!dashboard) return;
+      const updates = layout.flatMap((item) => {
+        const widget = dashboard.widgets.find((w) => w.id === item.i);
+        if (!widget) return [];
+        const next = { gridColumn: item.x + 1, gridRow: item.y + 1, gridWidth: item.w, gridHeight: item.h };
+        const changed =
+          widget.gridColumn !== next.gridColumn ||
+          widget.gridRow !== next.gridRow ||
+          widget.gridWidth !== next.gridWidth ||
+          widget.gridHeight !== next.gridHeight;
+        return changed ? [updateWidget(widget.id, next)] : [];
+      });
+      await Promise.all(updates);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
@@ -42,19 +69,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
   }
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const widgetA = dashboard.widgets.find((w) => w.id === active.id);
-    const widgetB = dashboard.widgets.find((w) => w.id === over.id);
-    if (!widgetA || !widgetB) return;
-
-    swapMutation.mutate({
-      a: { id: widgetA.id, gridColumn: widgetA.gridColumn, gridRow: widgetA.gridRow },
-      b: { id: widgetB.id, gridColumn: widgetB.gridColumn, gridRow: widgetB.gridRow },
-    });
-  };
+  const layout = dashboard.widgets.map(toLayoutItem);
 
   return (
     <div className="p-4">
@@ -96,17 +111,27 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           まだウィジェットがありません。「+ ウィジェット追加」から追加してください。
         </p>
       ) : (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {dashboard.widgets.map((widget) => (
-              <WidgetCard key={widget.id} widget={widget} dashboardId={dashboardId} />
-            ))}
-          </div>
-        </DndContext>
+        <ResponsiveGridLayout
+          className="layout"
+          layouts={{ lg: layout, md: layout, sm: layout, xs: layout, xxs: layout }}
+          breakpoints={{ lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 }}
+          cols={GRID_COLS}
+          rowHeight={ROW_HEIGHT}
+          margin={[12, 12]}
+          draggableHandle=".widget-drag-handle"
+          onDragStop={(l) => persistLayoutMutation.mutate(l)}
+          onResizeStop={(l) => persistLayoutMutation.mutate(l)}
+        >
+          {dashboard.widgets.map((widget) => (
+            <div key={widget.id}>
+              <WidgetCard widget={widget} dashboard={dashboard} />
+            </div>
+          ))}
+        </ResponsiveGridLayout>
       )}
 
       {isModalOpen && (
-        <AddWidgetModal dashboard={dashboard} onClose={() => setModalOpen(false)} />
+        <WidgetFormModal dashboard={dashboard} onClose={() => setModalOpen(false)} />
       )}
     </div>
   );
