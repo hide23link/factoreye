@@ -1,0 +1,168 @@
+"""
+FactorEye データモデル（Phase 0 MVP）
+
+仕様: docs/factoreye-architecture.md の Data Model セクション参照
+(ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
+
+エンティティ: Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig / Plugin / PluginConfig
+"""
+from datetime import datetime, timezone
+from enum import Enum
+from uuid import UUID, uuid4
+
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlmodel import Field, Relationship, SQLModel
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class AlarmStatus(str, Enum):
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+class ThresholdBreached(str, Enum):
+    MIN = "min"
+    MAX = "max"
+
+
+# ──────────────────────────────────────────────────────────────
+# Sensor
+# ──────────────────────────────────────────────────────────────
+class Sensor(SQLModel, table=True):
+    __tablename__ = "sensors"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(unique=True, max_length=100)
+    # REST ingest 識別子（旧 mqttTopic）。デバイス側は POST /api/ingest/readings にこの値を含めて送信する
+    ingest_key: str = Field(unique=True, max_length=100, index=True)
+    unit: str = Field(max_length=20)
+    threshold_min: float | None = None
+    threshold_max: float | None = None
+    enabled: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    readings: list["Reading"] = Relationship(back_populates="sensor")
+    alarms: list["Alarm"] = Relationship(back_populates="sensor")
+    widgets: list["Widget"] = Relationship(back_populates="sensor")
+
+
+# ──────────────────────────────────────────────────────────────
+# Reading
+# ──────────────────────────────────────────────────────────────
+class Reading(SQLModel, table=True):
+    __tablename__ = "readings"
+
+    # BigSerial: 時系列データの大量蓄積を想定しBIGINT必須
+    id: int | None = Field(default=None, primary_key=True)
+    sensor_id: UUID = Field(foreign_key="sensors.id", index=True)
+    value: float
+    # ingest時刻を採用（デバイス時刻は信頼しない、Phase 0の簡潔さ重視）
+    recorded_at: datetime = Field(default_factory=_utcnow, index=True)
+
+    sensor: Sensor = Relationship(back_populates="readings")
+
+    # 複合インデックス (sensor_id, recorded_at) は時系列範囲検索用に必須
+    # → alembicマイグレーションで Index("ix_reading_sensor_recorded", "sensor_id", "recorded_at") を追加
+
+
+# ──────────────────────────────────────────────────────────────
+# Alarm（監査ログとして追記専用。DELETE禁止）
+# ──────────────────────────────────────────────────────────────
+class Alarm(SQLModel, table=True):
+    __tablename__ = "alarms"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    sensor_id: UUID = Field(foreign_key="sensors.id", index=True)
+    triggered_at: datetime = Field(default_factory=_utcnow)
+    resolved_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    # Phase 0はUserテーブルがないため文字列固定（例: "admin"）
+    acknowledged_by: str | None = Field(default=None, max_length=100)
+    value: float
+    status: AlarmStatus = Field(default=AlarmStatus.ACTIVE)
+    threshold_breached: ThresholdBreached
+
+    sensor: Sensor = Relationship(back_populates="alarms")
+
+
+# ──────────────────────────────────────────────────────────────
+# Dashboard / Widget / WidgetConfig
+# ──────────────────────────────────────────────────────────────
+class Dashboard(SQLModel, table=True):
+    __tablename__ = "dashboards"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    # グリッドレイアウト設定（3列 x N行）
+    layout_config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    widgets: list["Widget"] = Relationship(back_populates="dashboard")
+
+
+class Widget(SQLModel, table=True):
+    __tablename__ = "widgets"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    dashboard_id: UUID = Field(foreign_key="dashboards.id", index=True)
+    # 複数センサー対象のウィジェットではnullable
+    sensor_id: UUID | None = Field(default=None, foreign_key="sensors.id")
+    # 例: "temperature-graph", "power-graph", "production-status"
+    type: str = Field(max_length=50)
+    grid_column: int = Field(ge=1, le=3)
+    grid_row: int
+    grid_width: int = Field(ge=1, le=3)
+    grid_height: int
+    # グラフ色・Y軸範囲など
+    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    dashboard: Dashboard = Relationship(back_populates="widgets")
+    sensor: Sensor | None = Relationship(back_populates="widgets")
+    widget_configs: list["WidgetConfig"] = Relationship(back_populates="widget")
+
+
+class WidgetConfig(SQLModel, table=True):
+    __tablename__ = "widget_configs"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    widget_id: UUID = Field(foreign_key="widgets.id", index=True)
+    settings: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+    widget: Widget = Relationship(back_populates="widget_configs")
+
+
+# ──────────────────────────────────────────────────────────────
+# Plugin / PluginConfig
+# ──────────────────────────────────────────────────────────────
+class Plugin(SQLModel, table=True):
+    __tablename__ = "plugins"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # フォルダ名と一致（例: "slack-notifier"）
+    name: str = Field(unique=True, max_length=100)
+    version: str = Field(max_length=20)
+    enabled: bool = Field(default=False)
+    installed_at: datetime = Field(default_factory=_utcnow)
+    config: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+    plugin_configs: list["PluginConfig"] = Relationship(back_populates="plugin")
+
+
+class PluginConfig(SQLModel, table=True):
+    __tablename__ = "plugin_configs"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    plugin_id: UUID = Field(foreign_key="plugins.id", index=True)
+    data: dict = Field(default_factory=dict, sa_column=Column(JSONB))
+
+    plugin: Plugin = Relationship(back_populates="plugin_configs")
