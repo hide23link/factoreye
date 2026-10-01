@@ -59,10 +59,15 @@ function ConfigEditor({ plugin }: { plugin: Plugin }) {
 function PluginRow({ plugin }: { plugin: Plugin }) {
   const queryClient = useQueryClient();
   const [isConfigOpen, setConfigOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggleMutation = useMutation({
     mutationFn: () => (plugin.enabled ? disablePlugin(plugin.name) : enablePlugin(plugin.name)),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["plugins"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
   });
 
   return (
@@ -94,6 +99,7 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
           </button>
         </div>
       </div>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       {isConfigOpen && <ConfigEditor plugin={plugin} />}
     </div>
   );
@@ -107,6 +113,7 @@ export function PluginSettingsPanel() {
       <h2 className="mb-1 text-lg font-bold text-gray-900">プラグイン</h2>
       <p className="mb-3 text-xs text-gray-400">
         サードパーティプラグインはサンドボックス化されていません（Phase 0の既知の制限）。信頼できるプラグインのみ有効化してください。
+        また設定（config）はAPI経由で平文のまま読み書きされるため、APIキー等の秘密情報は保存しないでください。
       </p>
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}

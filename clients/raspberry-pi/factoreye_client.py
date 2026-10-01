@@ -46,6 +46,9 @@ class FactorEyeClient:
         self._buffer: deque[_BufferedReading] = deque(maxlen=_BUFFER_CAPACITY)
         self._consecutive_failures = 0
         self._next_attempt_at = 0.0
+        # テストで実時間の経過を待たずに済むよう差し替え可能にしている（非公開属性だが
+        # tests/test_factoreye_client.py から直接差し替える想定）
+        self._clock = time.monotonic
 
     @property
     def pending_count(self) -> int:
@@ -59,7 +62,7 @@ class FactorEyeClient:
         バックオフ中・送信失敗の場合は False（内部でバッファに保持済み）。
         ブロッキングのリトライは行わない（呼び出し元のループを止めない）。
         """
-        now = time.monotonic()
+        now = self._clock()
         if now < self._next_attempt_at:
             self._buffer.append(_BufferedReading(ingest_key, value))
             return False
@@ -113,4 +116,4 @@ class FactorEyeClient:
         backoff = min(2.0 ** (self._consecutive_failures - 1), _BACKOFF_CAP_SECONDS)
         jitter = backoff * 0.1
         delay = backoff + random.uniform(-jitter, jitter)
-        self._next_attempt_at = time.monotonic() + delay
+        self._next_attempt_at = self._clock() + delay

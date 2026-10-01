@@ -37,6 +37,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const deleteDashboardMutation = useMutation({
@@ -52,14 +53,17 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
       void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      setSettingsError(null);
       setSettingsOpen(false);
     },
+    onError: (e: Error) => setSettingsError(e.message),
   });
 
   const openSettings = () => {
     if (!dashboard) return;
     setEditName(dashboard.name);
     setEditDescription(dashboard.description ?? "");
+    setSettingsError(null);
     setSettingsOpen(true);
   };
 
@@ -187,6 +191,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
             </label>
+            {settingsError && <p className="mb-3 text-xs text-red-600">{settingsError}</p>}
             <div className="flex justify-end gap-2">
               <button
                 type="button"

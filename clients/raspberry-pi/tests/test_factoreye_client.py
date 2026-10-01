@@ -9,13 +9,25 @@ from __future__ import annotations
 import json
 import sys
 import threading
-import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from factoreye_client import FactorEyeClient  # noqa: E402
+
+
+class _FakeClock:
+    """time.monotonic の差し替え用。実時間を待たずにバックオフ経過をテストするため。"""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 class _MockIngestServer:
@@ -65,6 +77,8 @@ class FactorEyeClientTest(unittest.TestCase):
     def setUp(self) -> None:
         self.mock = _MockIngestServer()
         self.client = FactorEyeClient(self.mock.url, "test-api-key", timeout=2.0)
+        self.clock = _FakeClock()
+        self.client._clock = self.clock  # type: ignore[assignment]
 
     def tearDown(self) -> None:
         self.mock.shutdown()
@@ -105,7 +119,7 @@ class FactorEyeClientTest(unittest.TestCase):
         self.client.send("sensor-1", 1.0)
         self.assertEqual(self.client.pending_count, 1)
 
-        time.sleep(1.2)  # 初回バックオフ（約1秒+ジッター）が明けるまで待つ
+        self.clock.advance(2.0)  # 初回バックオフ（約1秒+ジッター）を実時間を待たず経過させる
 
         self.mock.next_status = 202
         ok = self.client.send("sensor-1", 2.0)
@@ -124,7 +138,7 @@ class FactorEyeClientTest(unittest.TestCase):
         self.client.send("sensor-2", 9.0)
         self.assertEqual(self.client.pending_count, 2)
 
-        time.sleep(1.2)
+        self.clock.advance(2.0)
         self.mock.next_status = 202
         self.client.send("sensor-1", 2.0)
 

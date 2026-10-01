@@ -18,6 +18,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
   const [unit, setUnit] = useState(sensor.unit);
   const [thresholdMin, setThresholdMin] = useState<NumOrBlank>(sensor.thresholdMin ?? "");
   const [thresholdMax, setThresholdMax] = useState<NumOrBlank>(sensor.thresholdMax ?? "");
+  const [error, setError] = useState<string | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["sensors"] });
 
@@ -31,120 +32,147 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
       }),
     onSuccess: () => {
       void invalidate();
+      setError(null);
       setEditing(false);
     },
+    onError: (e: Error) =>
+      setError(e.message.includes("409") ? "その名前は既に使われています。" : e.message),
   });
 
   const toggleEnabledMutation = useMutation({
     mutationFn: () => updateSensor(sensor.id, { enabled: !sensor.enabled }),
-    onSuccess: () => void invalidate(),
+    onSuccess: () => {
+      void invalidate();
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteSensor(sensor.id),
-    onSuccess: () => void invalidate(),
+    onSuccess: () => {
+      void invalidate();
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
   });
+
+  const errorRow = error && (
+    <tr className="border-b border-gray-100 bg-red-50">
+      <td colSpan={7} className="px-2 py-1 text-xs text-red-600">
+        {error}
+      </td>
+    </tr>
+  );
 
   if (isEditing) {
     return (
-      <tr className="border-b border-gray-100 bg-blue-50/40">
-        <td className="p-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
-          />
-        </td>
-        <td className="p-2 text-sm text-gray-400">{sensor.ingestKey}</td>
-        <td className="p-2">
-          <input
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
-          />
-        </td>
-        <td className="p-2">
-          <input
-            type="number"
-            placeholder="なし"
-            value={thresholdMin}
-            onChange={(e) => setThresholdMin(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
-          />
-        </td>
-        <td className="p-2">
-          <input
-            type="number"
-            placeholder="なし"
-            value={thresholdMax}
-            onChange={(e) => setThresholdMax(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
-          />
-        </td>
-        <td className="p-2 text-sm text-gray-400">{sensor.enabled ? "有効" : "無効"}</td>
-        <td className="p-2 text-right">
-          <button
-            type="button"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-            className="mr-2 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            保存
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditing(false)}
-            className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
-          >
-            キャンセル
-          </button>
-        </td>
-      </tr>
+      <>
+        <tr className="border-b border-gray-100 bg-blue-50/40">
+          <td className="p-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+            />
+          </td>
+          <td className="p-2 text-sm text-gray-400">{sensor.ingestKey}</td>
+          <td className="p-2">
+            <input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
+            />
+          </td>
+          <td className="p-2">
+            <input
+              type="number"
+              placeholder="なし"
+              value={thresholdMin}
+              onChange={(e) => setThresholdMin(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+            />
+          </td>
+          <td className="p-2">
+            <input
+              type="number"
+              placeholder="なし"
+              value={thresholdMax}
+              onChange={(e) => setThresholdMax(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+            />
+          </td>
+          <td className="p-2 text-sm text-gray-400">{sensor.enabled ? "有効" : "無効"}</td>
+          <td className="p-2 text-right">
+            <button
+              type="button"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="mr-2 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+            >
+              キャンセル
+            </button>
+          </td>
+        </tr>
+        {errorRow}
+      </>
     );
   }
 
   return (
-    <tr className="border-b border-gray-100">
-      <td className="p-2 text-sm font-medium text-gray-900">{sensor.name}</td>
-      <td className="p-2 font-mono text-xs text-gray-400">{sensor.ingestKey}</td>
-      <td className="p-2 text-sm text-gray-600">{sensor.unit}</td>
-      <td className="p-2 text-sm text-gray-600">{sensor.thresholdMin ?? "—"}</td>
-      <td className="p-2 text-sm text-gray-600">{sensor.thresholdMax ?? "—"}</td>
-      <td className="p-2 text-sm">
-        <button
-          type="button"
-          onClick={() => toggleEnabledMutation.mutate()}
-          disabled={toggleEnabledMutation.isPending}
-          className={
-            sensor.enabled
-              ? "rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 hover:bg-green-200"
-              : "rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-200"
-          }
-        >
-          {sensor.enabled ? "有効" : "無効"}
-        </button>
-      </td>
-      <td className="p-2 text-right text-xs">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="mr-3 text-gray-500 hover:text-blue-600"
-        >
-          編集
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (confirm(`センサー「${sensor.name}」を削除しますか？`)) {
-              deleteMutation.mutate();
+    <>
+      <tr className="border-b border-gray-100">
+        <td className="p-2 text-sm font-medium text-gray-900">{sensor.name}</td>
+        <td className="p-2 font-mono text-xs text-gray-400">{sensor.ingestKey}</td>
+        <td className="p-2 text-sm text-gray-600">{sensor.unit}</td>
+        <td className="p-2 text-sm text-gray-600">{sensor.thresholdMin ?? "—"}</td>
+        <td className="p-2 text-sm text-gray-600">{sensor.thresholdMax ?? "—"}</td>
+        <td className="p-2 text-sm">
+          <button
+            type="button"
+            onClick={() => toggleEnabledMutation.mutate()}
+            disabled={toggleEnabledMutation.isPending}
+            className={
+              sensor.enabled
+                ? "rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 hover:bg-green-200"
+                : "rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-200"
             }
-          }}
-          className="text-red-400 hover:text-red-600"
-        >
-          削除
-        </button>
-      </td>
-    </tr>
+          >
+            {sensor.enabled ? "有効" : "無効"}
+          </button>
+        </td>
+        <td className="p-2 text-right text-xs">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="mr-3 text-gray-500 hover:text-blue-600"
+          >
+            編集
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                confirm(`センサー「${sensor.name}」を削除しますか？（履歴データは保持されます）`)
+              ) {
+                deleteMutation.mutate();
+              }
+            }}
+            className="text-red-400 hover:text-red-600"
+          >
+            削除
+          </button>
+        </td>
+      </tr>
+      {errorRow}
+    </>
   );
 }
 
