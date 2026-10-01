@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -48,6 +48,10 @@ class Sensor(SQLModel, table=True):
     enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+    # soft-delete（Reading/Alarmを保持するためDELETE文は使わない）
+    # 制約: name/ingest_keyのunique制約はdeleted_at済み行にも及ぶため、
+    # 削除済みセンサーと同名・同ingestKeyは再登録できない（Phase 0は許容）
+    deleted_at: datetime | None = Field(default=None, index=True)
 
     readings: list["Reading"] = Relationship(back_populates="sensor")
     alarms: list["Alarm"] = Relationship(back_populates="sensor")
@@ -59,18 +63,18 @@ class Sensor(SQLModel, table=True):
 # ──────────────────────────────────────────────────────────────
 class Reading(SQLModel, table=True):
     __tablename__ = "readings"
+    # 複合インデックス: 時系列範囲検索 `WHERE sensor_id = ? AND recorded_at BETWEEN ? AND ?` 用
+    # （TimescaleDB代替、docs/factoreye-architecture.md §TimescaleDB参照）
+    __table_args__ = (Index("ix_reading_sensor_recorded", "sensor_id", "recorded_at"),)
 
     # BigSerial: 時系列データの大量蓄積を想定しBIGINT必須
     id: int | None = Field(default=None, primary_key=True)
-    sensor_id: UUID = Field(foreign_key="sensors.id", index=True)
+    sensor_id: UUID = Field(foreign_key="sensors.id")
     value: float
     # ingest時刻を採用（デバイス時刻は信頼しない、Phase 0の簡潔さ重視）
-    recorded_at: datetime = Field(default_factory=_utcnow, index=True)
+    recorded_at: datetime = Field(default_factory=_utcnow)
 
     sensor: Sensor = Relationship(back_populates="readings")
-
-    # 複合インデックス (sensor_id, recorded_at) は時系列範囲検索用に必須
-    # → alembicマイグレーションで Index("ix_reading_sensor_recorded", ...) を追加
 
 
 # ──────────────────────────────────────────────────────────────

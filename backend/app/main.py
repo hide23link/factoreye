@@ -5,21 +5,29 @@ FactorEye バックエンド エントリポイント
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 開発
     uvicorn app.main:app --host 0.0.0.0 --port 8000             # 本番（docker-compose経由）
 """
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
+from app.api import alarms, ingest, readings, sensors
 from app.config import settings
 from app.db.session import engine
+from app.ingest_buffer import flush_loop
+from app.rate_limit import limiter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    flush_task = asyncio.create_task(flush_loop())
     yield
+    flush_task.cancel()
     await engine.dispose()
 
 
@@ -32,6 +40,15 @@ app = FastAPI(
     redoc_url="/redoc" if settings.debug else None,
     openapi_url="/openapi.json" if settings.debug else None,
 )
+
+app.state.limiter = limiter
+# slowapiのハンドラ型はStarletteの例外ハンドラ型と厳密には一致しない（ライブラリ側のstub起因）
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+app.include_router(sensors.router)
+app.include_router(ingest.router)
+app.include_router(readings.router)
+app.include_router(alarms.router)
 
 
 @app.get("/health")
