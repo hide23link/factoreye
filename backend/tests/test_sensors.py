@@ -33,6 +33,21 @@ async def test_create_sensor_duplicate_ingest_key_conflicts(client: httpx.AsyncC
     assert second.status_code == 409
 
 
+async def test_update_sensor_duplicate_name_conflicts(client: httpx.AsyncClient) -> None:
+    payload_a = {"name": "センサーC", "ingestKey": "sensor-c", "unit": "C"}
+    payload_b = {"name": "センサーD", "ingestKey": "sensor-d", "unit": "C"}
+    await client.post("/api/sensors", json=payload_a)
+    created_b = await client.post("/api/sensors", json=payload_b)
+    sensor_b_id = created_b.json()["id"]
+
+    resp = await client.put(f"/api/sensors/{sensor_b_id}", json={"name": "センサーC"})
+    assert resp.status_code == 409
+
+    # 自分自身の現在の名前に「更新」するのは衝突として扱わない
+    unchanged = await client.put(f"/api/sensors/{sensor_b_id}", json={"name": "センサーD"})
+    assert unchanged.status_code == 200
+
+
 async def test_get_update_delete_sensor(client: httpx.AsyncClient) -> None:
     created = await client.post(
         "/api/sensors", json={"name": "湿度計B-1", "ingestKey": "humidity-b1", "unit": "%"}

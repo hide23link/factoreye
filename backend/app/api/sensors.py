@@ -59,6 +59,16 @@ async def update_sensor(
     sensor_id: UUID, payload: SensorUpdate, session: AsyncSession = Depends(get_session)
 ) -> Sensor:
     sensor = await _get_active_sensor(session, sensor_id)
+
+    if payload.name is not None and payload.name != sensor.name:
+        existing = await session.exec(
+            select(Sensor).where(Sensor.name == payload.name, Sensor.id != sensor_id)
+        )
+        if existing.first() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="name already in use"
+            )
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(sensor, field, value)
     sensor.updated_at = datetime.now(UTC)

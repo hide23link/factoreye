@@ -112,5 +112,22 @@ async def test_disable_stops_reading_dispatch(client: httpx.AsyncClient) -> None
     )
     await flush_once()
 
-    stats = await client.get(f"/api/plugins/{PLUGIN_NAME}/stats")
-    assert stats.json()["readingsSeen"] == 0
+    # /stats自体がdisable中は403で塞がれるため（test_disabled_plugin_routes_return_403参照）、
+    # on_readingが実際に呼ばれなかったことはプラグインインスタンスを直接見て確認する
+    assert reading_logger_plugin.readings_seen == 0
+
+
+async def test_disabled_plugin_routes_return_403(client: httpx.AsyncClient) -> None:
+    await _load_plugins()
+
+    # 発見直後（enabled=False）はルート自体は登録済みだが403で弾かれる
+    before_enable = await client.get(f"/api/plugins/{PLUGIN_NAME}/stats")
+    assert before_enable.status_code == 403
+
+    await client.patch(f"/api/plugins/{PLUGIN_NAME}/enable")
+    while_enabled = await client.get(f"/api/plugins/{PLUGIN_NAME}/stats")
+    assert while_enabled.status_code == 200
+
+    await client.patch(f"/api/plugins/{PLUGIN_NAME}/disable")
+    after_disable = await client.get(f"/api/plugins/{PLUGIN_NAME}/stats")
+    assert after_disable.status_code == 403

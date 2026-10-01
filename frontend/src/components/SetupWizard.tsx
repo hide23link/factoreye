@@ -39,11 +39,15 @@ function StepHeader({ step }: { step: Step }) {
 
 export function SetupWizard() {
   const [step, setStep] = useState<Step>(1);
-  const [name, setName] = useState("デモセンサー");
-  const [ingestKey, setIngestKey] = useState("demo-sensor-1");
+  // マウントの度に末尾をユニーク化する（ガイドを2回目以降実行しても
+  // 前回作成した「デモセンサー」とname/ingestKeyが衝突して無言で失敗しないように）
+  const [suffix] = useState(() => Date.now().toString(36));
+  const [name, setName] = useState(() => `デモセンサー-${suffix}`);
+  const [ingestKey, setIngestKey] = useState(() => `demo-sensor-${suffix}`);
   const [unit, setUnit] = useState("C");
   const [sensorId, setSensorId] = useState<string | null>(null);
   const [dashboardId, setDashboardId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const setView = useUiStore((s) => s.setView);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
@@ -56,13 +60,20 @@ export function SetupWizard() {
     }
   }, [step, readingsData]);
 
+  const describeError = (e: Error): string =>
+    e.message.includes("409")
+      ? "その名前またはIngest Keyは既に使われています。別の値に変更して再試行してください。"
+      : `エラーが発生しました: ${e.message}`;
+
   const createSensorMutation = useMutation({
     mutationFn: () => createSensor({ name, ingestKey, unit }),
     onSuccess: (sensor) => {
       void queryClient.invalidateQueries({ queryKey: ["sensors"] });
+      setErrorMessage(null);
       setSensorId(sensor.id);
       setStep(2);
     },
+    onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
   const createDashboardMutation = useMutation({
@@ -82,9 +93,11 @@ export function SetupWizard() {
     },
     onSuccess: (id) => {
       void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      setErrorMessage(null);
       setDashboardId(id);
       setStep(4);
     },
+    onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
   const curlCommand = sensorId
@@ -99,6 +112,12 @@ export function SetupWizard() {
       </p>
 
       <StepHeader step={step} />
+
+      {errorMessage && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {errorMessage}
+        </div>
+      )}
 
       {step === 1 && (
         <div className="rounded-lg border border-gray-200 bg-white p-4">

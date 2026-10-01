@@ -13,13 +13,16 @@ docs/factoreye-architecture.md §Plugin System ライフサイクル 参照。
 要 `PATCH /api/plugins/{name}/enable`）を正とする。
 """
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models import Plugin
+from app.db.session import get_session
 from app.plugins.base import FactorEyePlugin, FactorEyeWidget, SensorReadingEvent
 from app.plugins.registry import discover_plugins
 
@@ -65,11 +68,31 @@ async def _get_or_create_row(
     return row
 
 
+def _require_plugin_enabled(name: str) -> Callable[..., Coroutine[Any, Any, None]]:
+    """disable中はプラグイン自身のHTTPルートも403で塞ぐ。
+
+    on_reading の dispatch を止めるだけでは、disableしたつもりでもプラグイン自身の
+    カスタムルートは生き続けてしまう（QAレビューで指摘された既知の制限への対応）。
+    """
+
+    async def _dependency(session: AsyncSession = Depends(get_session)) -> None:
+        result = await session.exec(select(Plugin).where(Plugin.name == name))
+        row = result.first()
+        if row is None or not row.enabled:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="plugin disabled")
+
+    return _dependency
+
+
 def _mount_routes(app: FastAPI, name: str, loaded_plugin: LoadedPlugin) -> None:
     if loaded_plugin.routes_mounted:
         return
     if loaded_plugin.instance.routes is not None:
-        app.include_router(loaded_plugin.instance.routes, prefix=f"/api/plugins/{name}")
+        app.include_router(
+            loaded_plugin.instance.routes,
+            prefix=f"/api/plugins/{name}",
+            dependencies=[Depends(_require_plugin_enabled(name))],
+        )
     # ルートが無いプラグインも「マウント試行済み」として扱い、include_router の二重呼び出しを防ぐ
     loaded_plugin.routes_mounted = True
 
@@ -84,9 +107,9 @@ async def load_plugins(app: FastAPI, session: AsyncSession) -> None:
         # load_plugins は冪等にする（同じインスタンスに対し複数回呼ばれても
         # ルートを二重マウントしない／on_startを二重実行しない）。
         loaded_plugin = _loaded.setdefault(name, LoadedPlugin(instance=instance))
-        # routesはプラグインの有効/無効に関わらずマウントする（Phase 0の制約:
-        # FastAPIはルート登録後の動的な取り消しをサポートしないため、disable後も
-        # エンドポイント自体は残る。実際の権限制御はon_reading dispatch側で行う）
+        # routesはenabled状態に関わらず一度だけinclude_routerする（FastAPIはルート登録後の
+        # 動的な取り消しをサポートしないため）。実際のアクセス制御は _require_plugin_enabled
+        # の依存関係がリクエスト毎にDBを見て行う（disable中は403）。
         _mount_routes(app, name, loaded_plugin)
 
         if row.enabled:
