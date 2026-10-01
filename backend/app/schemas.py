@@ -200,3 +200,23 @@ class DashboardRead(CamelModel):
 
 class DashboardDetail(DashboardRead):
     widgets: list[WidgetRead] = Field(default_factory=list)
+
+
+# ──────────────────────────────────────────────────────────────
+# Plugin
+# ──────────────────────────────────────────────────────────────
+
+
+class PluginRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    id: UUID
+    name: str
+    version: str
+    enabled: bool
+    installed_at: datetime
+    config: dict[str, Any]
+
+
+class PluginConfigUpdate(CamelModel):
+    config: dict[str, Any]

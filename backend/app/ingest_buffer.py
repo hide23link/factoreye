@@ -17,6 +17,8 @@ from app.alarm_engine import evaluate_alarms
 from app.db.models import Reading
 from app.db.session import engine
 from app.notifications import send_alarm_email
+from app.plugins.base import SensorReadingEvent
+from app.plugins.manager import dispatch_reading
 
 FLUSH_INTERVAL_SECONDS = 1.0
 
@@ -76,6 +78,15 @@ async def flush_once() -> int:
 
     for notification in notifications:
         _fire_and_forget(send_alarm_email(notification))
+
+    for p in pending:
+        await dispatch_reading(
+            SensorReadingEvent(
+                sensor_id=str(p.sensor_id),
+                value=p.value,
+                timestamp=p.recorded_at.isoformat(),
+            )
+        )
 
     return len(pending)
 

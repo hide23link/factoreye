@@ -16,16 +16,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api import alarms, dashboards, ingest, readings, sensors, widgets
+from app.api import alarms, dashboards, ingest, plugins, readings, sensors, widgets
 from app.config import settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
+from app.plugins.manager import load_plugins
 from app.rate_limit import limiter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with AsyncSession(engine) as session:
+        await load_plugins(app, session)
     flush_task = asyncio.create_task(flush_loop())
     yield
     flush_task.cancel()
@@ -61,6 +65,7 @@ app.include_router(readings.router)
 app.include_router(alarms.router)
 app.include_router(dashboards.router)
 app.include_router(widgets.router)
+app.include_router(plugins.router)
 
 
 @app.get("/health")
