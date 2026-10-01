@@ -72,3 +72,12 @@ export interface Dashboard {
 export interface DashboardDetail extends Dashboard {
   widgets: Widget[];
 }
+
+export interface Plugin {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  installedAt: string;
+  config: Record<string, unknown>;
+}

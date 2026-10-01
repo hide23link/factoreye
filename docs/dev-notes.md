@@ -53,3 +53,24 @@
 **検証方法**: Docker Desktopを起動し、CI（`.github/workflows/backend-test.yml`）と同じ手順（`pytest` / `mypy .` / `ruff check .` / `pip-audit`）をpython:3.12-slimコンテナ+本物のpostgresコンテナで実行。pytest 28件全通過、mypy・ruffともにエラーなし（pip-auditはbaseイメージ同梱の`pip`自体の既知脆弱性のみを検出、本プロジェクトの依存関係には問題なし）。ブラウザでの実機確認は未実施（フロントエンドUIが伴わないため次回のPlugin設定UI実装時にまとめて行う）。
 
 **次フェーズ（未着手）**: Plugin configuration UI（OQ-8方針: 単純項目フォーム＋複雑設定はJSONエディタ）、Quick setup wizard、Sensor/Alarm/Dashboard設定画面。
+
+---
+
+### 2026-10-02: Sprint 6後半（frontend） — Plugin設定UI・Quick Setup Wizard・設定画面
+
+**背景**: 前述のPlugin System backend実装に続き、Sprint 6のfrontend部分を実装。ナビゲーションが今まで「ダッシュボード一覧⇔詳細」の2画面しかなかったため、`useUiStore`に`view: "main" | "settings" | "wizard"`を追加しグローバルナビゲーションを新設。
+
+**実装内容**:
+- `store/useUiStore.ts`: `view`状態とヘッダーnaviゲーション（`App.tsx`に`Nav`コンポーネント追加）
+- `components/SettingsPage.tsx` + `components/settings/`: センサー・アラーム・プラグインの3タブ構成
+  - `SensorSettingsPanel`: 一覧テーブル＋インライン編集（名前/単位/閾値）＋有効/無効トグル＋削除＋新規作成フォーム
+  - `AlarmSettingsPanel`: 発生中/確認済み/解決済み/すべてでフィルタ、確認（ack）ボタン
+  - `PluginSettingsPanel`: 有効/無効トグル、configのJSONエディタ（OQ-8方針通りJSONフォールバックのみ、スキーマ情報がないため個別フォームは未実装）
+- `components/SetupWizard.tsx`: 4ステップのクイックセットアップ（センサー登録→テストデータ送信→ダッシュボード自動作成→完了）。`DashboardListPage`がダッシュボード0件のときバナーで誘導
+  - ステップ2は実機curlコマンドを表示する方式を採用（INGEST_API_KEYはbackendの`.env`秘密情報のため、フロントエンドのバンドルに埋め込んで直接送信する設計は避けた。プレースホルダーで案内し、受信をポーリング検知して自動で次へ進む）
+- `components/DashboardView.tsx`: ⚙設定ボタンから名前・説明を編集するモーダルを追加（Dashboard設定画面に相当）
+- `lib/api.ts` / `types.ts` / `hooks/queries.ts`: `updateSensor`/`deleteSensor`/`fetchPlugins`/`enablePlugin`/`disablePlugin`/`updatePluginConfig`と`Plugin`型を追加
+
+**検証方法**: `tsc --noEmit`・`eslint .`は両方エラーなし。さらにDocker Desktopで`docker compose up -d --build`し、実際にChromeでウィザードを最初から最後まで実行（センサー作成→curlでテストデータ送信→自動遷移→ダッシュボード自動作成→グラフ表示まで確認）。設定画面でセンサーの上限閾値を50に変更後、値55のテストデータを送ったところ実際にアラームが発生→確認（ack）まで動作。プラグインの有効化トグルも実際にbackendの`PATCH .../enable`を呼び出し、有効化後は`on_reading`フックでstatsがカウントアップすることをcurlで確認済み。
+
+**ハマりどころ（今回の作業中に発覧、プラグインシステムとは無関係）**: ローカルのpostgresボリュームが`alembic_version`テーブルだけ残り実データテーブルが無い不整合な状態だった（過去のテストセッションの後始末漏れとみられる）。`DROP TABLE alembic_version`してから`alembic upgrade head`で復旧。今後同じ現象が出たら同じ手順で直せる。

@@ -8,6 +8,7 @@ import { useUiStore } from "../store/useUiStore";
 export function DashboardListPage() {
   const { data: dashboards, isLoading } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
+  const setView = useUiStore((s) => s.setView);
   const queryClient = useQueryClient();
   const [newName, setNewName] = useState("");
 
@@ -50,9 +51,18 @@ export function DashboardListPage() {
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 
       {!isLoading && dashboards?.length === 0 && (
-        <p className="text-sm text-gray-400">
-          まだダッシュボードがありません。上のフォームから作成してください。
-        </p>
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <p className="mb-2 text-sm text-blue-900">
+            はじめての方は、5分のセットアップガイドでセンサー登録からダッシュボード表示までを体験できます。
+          </p>
+          <button
+            type="button"
+            onClick={() => setView("wizard")}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
+          >
+            セットアップガイドを始める
+          </button>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

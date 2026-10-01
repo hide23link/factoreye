@@ -2,8 +2,17 @@ import { useEffect } from "react";
 
 import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardView } from "./components/DashboardView";
+import { SettingsPage } from "./components/SettingsPage";
+import { SetupWizard } from "./components/SetupWizard";
 import { useHealthStore } from "./store/useHealthStore";
 import { useUiStore } from "./store/useUiStore";
+import type { AppView } from "./store/useUiStore";
+
+const NAV_ITEMS: { value: AppView; label: string }[] = [
+  { value: "main", label: "ダッシュボード" },
+  { value: "settings", label: "設定" },
+  { value: "wizard", label: "セットアップガイド" },
+];
 
 function HealthBadge() {
   const { health, error, check } = useHealthStore();
@@ -25,21 +34,52 @@ function HealthBadge() {
   );
 }
 
+function Nav() {
+  const view = useUiStore((s) => s.view);
+  const setView = useUiStore((s) => s.setView);
+
+  return (
+    <nav className="flex gap-1">
+      {NAV_ITEMS.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          onClick={() => setView(item.value)}
+          className={
+            view === item.value
+              ? "rounded bg-gray-900 px-3 py-1.5 text-sm text-white"
+              : "rounded px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100"
+          }
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function App() {
+  const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
-        <span className="text-lg font-bold">FactorEye</span>
+        <div className="flex items-center gap-4">
+          <span className="text-lg font-bold">FactorEye</span>
+          <Nav />
+        </div>
         <HealthBadge />
       </header>
       <main>
-        {selectedDashboardId ? (
-          <DashboardView dashboardId={selectedDashboardId} />
-        ) : (
-          <DashboardListPage />
-        )}
+        {view === "settings" && <SettingsPage />}
+        {view === "wizard" && <SetupWizard />}
+        {view === "main" &&
+          (selectedDashboardId ? (
+            <DashboardView dashboardId={selectedDashboardId} />
+          ) : (
+            <DashboardListPage />
+          ))}
       </main>
     </div>
   );

@@ -6,7 +6,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { useDashboard } from "../hooks/queries";
-import { deleteDashboard, updateWidget } from "../lib/api";
+import { deleteDashboard, updateDashboard, updateWidget } from "../lib/api";
 import type { Widget } from "../types";
 import { useUiStore } from "../store/useUiStore";
 import { WidgetCard } from "./WidgetCard";
@@ -34,6 +34,9 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading } = useDashboard(dashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const [isModalOpen, setModalOpen] = useState(false);
+  const [isSettingsOpen, setSettingsOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const queryClient = useQueryClient();
 
   const deleteDashboardMutation = useMutation({
@@ -43,6 +46,22 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
       selectDashboard(null);
     },
   });
+
+  const updateDashboardMutation = useMutation({
+    mutationFn: () => updateDashboard(dashboardId, { name: editName, description: editDescription }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      setSettingsOpen(false);
+    },
+  });
+
+  const openSettings = () => {
+    if (!dashboard) return;
+    setEditName(dashboard.name);
+    setEditDescription(dashboard.description ?? "");
+    setSettingsOpen(true);
+  };
 
   const persistLayoutMutation = useMutation({
     mutationFn: async (layout: Layout) => {
@@ -82,7 +101,20 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           >
             ← 一覧へ
           </button>
-          <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
+            {dashboard.description && (
+              <p className="text-xs text-gray-400">{dashboard.description}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={openSettings}
+            className="text-xs text-gray-400 hover:text-blue-600"
+            aria-label="ダッシュボード設定"
+          >
+            ⚙ 設定
+          </button>
         </div>
         <div className="flex gap-2">
           <button
@@ -132,6 +164,48 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
 
       {isModalOpen && (
         <WidgetFormModal dashboard={dashboard} onClose={() => setModalOpen(false)} />
+      )}
+
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">
+            <h2 className="mb-3 text-lg font-bold">ダッシュボード設定</h2>
+            <label className="mb-2 block text-sm">
+              名前
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+            <label className="mb-3 block text-sm">
+              説明
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={!editName.trim() || updateDashboardMutation.isPending}
+                onClick={() => updateDashboardMutation.mutate()}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import {
   fetchAlarms,
   fetchDashboard,
   fetchDashboards,
+  fetchPlugins,
   fetchSensorReadings,
   fetchSensors,
 } from "../lib/api";
@@ -30,6 +31,9 @@ export const useAlarms = (status?: string) =>
     queryFn: () => fetchAlarms(status),
     refetchInterval: POLL_INTERVAL_MS,
   });
+
+export const usePlugins = () =>
+  useQuery({ queryKey: ["plugins"], queryFn: fetchPlugins, refetchInterval: POLL_INTERVAL_MS });
 
 export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({

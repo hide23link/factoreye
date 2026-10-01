@@ -2,6 +2,7 @@ import type {
   Alarm,
   Dashboard,
   DashboardDetail,
+  Plugin,
   Reading,
   Sensor,
   Widget,
@@ -44,6 +45,20 @@ export const createSensor = (data: {
   thresholdMin?: number | null;
   thresholdMax?: number | null;
 }) => request<Sensor>("/api/sensors", { method: "POST", body: JSON.stringify(data) });
+
+export const updateSensor = (
+  id: string,
+  data: Partial<{
+    name: string;
+    unit: string;
+    thresholdMin: number | null;
+    thresholdMax: number | null;
+    enabled: boolean;
+  }>,
+) => request<Sensor>(`/api/sensors/${id}`, { method: "PUT", body: JSON.stringify(data) });
+
+export const deleteSensor = (id: string) =>
+  request<void>(`/api/sensors/${id}`, { method: "DELETE" });
 
 // ---- Readings ----
 export const fetchSensorReadings = (sensorId: string, from?: string) => {
@@ -115,3 +130,18 @@ export const updateWidget = (
 
 export const deleteWidget = (widgetId: string) =>
   request<void>(`/api/widgets/${widgetId}`, { method: "DELETE" });
+
+// ---- Plugins ----
+export const fetchPlugins = () => request<Plugin[]>("/api/plugins");
+
+export const enablePlugin = (name: string) =>
+  request<Plugin>(`/api/plugins/${name}/enable`, { method: "PATCH" });
+
+export const disablePlugin = (name: string) =>
+  request<Plugin>(`/api/plugins/${name}/disable`, { method: "PATCH" });
+
+export const updatePluginConfig = (name: string, config: Record<string, unknown>) =>
+  request<Plugin>(`/api/plugins/${name}/config`, {
+    method: "PUT",
+    body: JSON.stringify({ config }),
+  });
