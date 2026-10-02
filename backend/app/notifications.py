@@ -12,6 +12,7 @@ DetachedInstanceErrorになる（セッションが閉じた後にSensor/Alarm�
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 # Discord Webhook/MessageのSUPPRESS_NOTIFICATIONSフラグ。付けて送信すると、チャンネルには
 # 表示されるが受信者への通知音・プッシュ通知は出ない（軽故障をサイレントにするために使う）
 _DISCORD_FLAG_SUPPRESS_NOTIFICATIONS = 1 << 12
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+_SEVERITY_LABEL = {AlarmSeverity.CRITICAL: ("🚨", "重故障"), AlarmSeverity.WARNING: ("⚠️", "軽故障")}
+_DIRECTION_LABEL = {ThresholdBreached.MAX: "上限超過", ThresholdBreached.MIN: "下限未達"}
+
+
+def _format_jst(dt: datetime) -> str:
+    """ISO 8601のUTC表記は読みにくいため、日本時間の短い表記にする（例: 10月2日 21時41分）。"""
+    local = dt.astimezone(_JST)
+    return f"{local.month}月{local.day}日 {local.hour}時{local.minute:02d}分"
 
 
 @dataclass
@@ -38,15 +50,14 @@ class AlarmNotification:
 
 
 async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) -> None:
-    label = "🚨 重故障" if notification.severity == AlarmSeverity.CRITICAL else "⚠️ 軽故障"
-    if notification.is_repeat:
-        label += "（再通知・未解決）"
+    emoji, severity_label = _SEVERITY_LABEL[notification.severity]
+    repeat_suffix = "（再通知・未解決）" if notification.is_repeat else ""
+    direction = _DIRECTION_LABEL[notification.threshold_breached]
 
     content = (
-        f"**[FactorEye] {label}: {notification.sensor_name}**\n"
-        f"値: {notification.value} {notification.sensor_unit}\n"
-        f"閾値超過: {notification.threshold_breached.value}\n"
-        f"発生時刻: {notification.triggered_at.isoformat()}"
+        f"{emoji} **{severity_label}: {notification.sensor_name}**{repeat_suffix}\n"
+        f"{notification.value}{notification.sensor_unit}（{direction}）\n"
+        f"{_format_jst(notification.triggered_at)}"
     )
 
     body: dict[str, object] = {"content": content}
