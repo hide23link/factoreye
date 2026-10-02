@@ -14,6 +14,7 @@ htmlcov/
 node_modules/
 dist/
 .vite/
+coverage/
 
 # Env / secrets
 .env
