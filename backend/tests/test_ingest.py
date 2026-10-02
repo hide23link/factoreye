@@ -50,6 +50,39 @@ async def test_ingest_unknown_ingest_key_returns_404(client: httpx.AsyncClient) 
     assert resp.status_code == 404
 
 
+async def test_ingest_missing_ingest_key_returns_400(client: httpx.AsyncClient) -> None:
+    # ingestKey自体が無い（Pydanticのバリデーションエラー経路）
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"value": 1.0},
+    )
+    assert resp.status_code == 400
+
+
+async def test_ingest_neither_value_nor_readings_returns_400(client: httpx.AsyncClient) -> None:
+    await _create_sensor(client, "empty-payload-sensor")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "empty-payload-sensor"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_ingest_disabled_sensor_returns_403(client: httpx.AsyncClient) -> None:
+    sensor_id = await _create_sensor(client, "disabled-ingest-sensor")
+    disable = await client.put(f"/api/sensors/{sensor_id}", json={"enabled": False})
+    assert disable.status_code == 200
+
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "disabled-ingest-sensor", "value": 1.0},
+    )
+    assert resp.status_code == 403
+
+
 async def test_ingest_single_reading_persists_after_flush(client: httpx.AsyncClient) -> None:
     sensor_id = await _create_sensor(client, "single-reading-sensor")
 
@@ -88,3 +121,8 @@ async def test_ingest_batch_handles_many_readings(client: httpx.AsyncClient) -> 
 
     flushed = await flush_once()
     assert flushed == 1000
+
+
+async def test_flush_once_with_empty_buffer_returns_zero() -> None:
+    # 何も溜まっていない状態でflushが呼ばれても0件として正常終了する
+    assert await flush_once() == 0

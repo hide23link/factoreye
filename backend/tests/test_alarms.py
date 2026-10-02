@@ -138,3 +138,34 @@ async def test_alarm_delete_not_allowed(client: httpx.AsyncClient) -> None:
 
     resp = await client.delete(f"/api/alarms/{alarm_id}")
     assert resp.status_code in (404, 405)
+
+
+async def test_get_alarm_by_id(client: httpx.AsyncClient) -> None:
+    await _create_sensor(client, "get-alarm-sensor", threshold_max=40.0)
+    await _ingest(client, "get-alarm-sensor", 45.0)
+    await flush_once()
+    alarm_id = (await client.get("/api/alarms")).json()["alarms"][0]["id"]
+
+    resp = await client.get(f"/api/alarms/{alarm_id}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == alarm_id
+
+
+async def test_get_alarm_not_found_returns_404(client: httpx.AsyncClient) -> None:
+    resp = await client.get("/api/alarms/00000000-0000-0000-0000-000000000000")
+    assert resp.status_code == 404
+
+
+async def test_list_alarms_filtered_by_sensor_id(client: httpx.AsyncClient) -> None:
+    sensor_a = await _create_sensor(client, "filter-alarm-a", threshold_max=40.0)
+    await _create_sensor(client, "filter-alarm-b", threshold_max=40.0)
+    await _ingest(client, "filter-alarm-a", 45.0)
+    await _ingest(client, "filter-alarm-b", 45.0)
+    await flush_once()
+
+    # list_alarmsのsensor_idクエリパラメータはaliasが無く、JSONボディと違いcamelCase化されない
+    resp = await client.get("/api/alarms", params={"sensor_id": sensor_a})
+    assert resp.status_code == 200
+    alarms = resp.json()["alarms"]
+    assert len(alarms) == 1
+    assert alarms[0]["sensorId"] == sensor_a

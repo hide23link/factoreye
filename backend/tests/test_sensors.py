@@ -1,5 +1,10 @@
 """センサー管理API（CRUD）のテスト。JSON配線フォーマットはcamelCase。"""
+from datetime import UTC, datetime, timedelta
+
 import httpx
+
+from app.config import settings
+from app.ingest_buffer import flush_once
 
 
 async def test_create_sensor(client: httpx.AsyncClient) -> None:
@@ -79,3 +84,39 @@ async def test_list_sensors_excludes_deleted(client: httpx.AsyncClient) -> None:
     listed = await client.get("/api/sensors")
     assert listed.status_code == 200
     assert all(s["id"] != sensor_id for s in listed.json())
+
+
+async def test_sensor_readings_filtered_by_from_and_to(client: httpx.AsyncClient) -> None:
+    created = await client.post(
+        "/api/sensors",
+        json={"name": "範囲フィルタ用", "ingestKey": "range-filter-sensor", "unit": "C"},
+    )
+    sensor_id = created.json()["id"]
+
+    await client.post(
+        "/api/ingest/readings",
+        headers={"X-API-Key": settings.ingest_api_key},
+        json={"ingestKey": "range-filter-sensor", "value": 1.0},
+    )
+    await flush_once()
+
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+
+    # fromが未来 → 該当なし
+    none_resp = await client.get(
+        f"/api/sensors/{sensor_id}/readings", params={"from": future}
+    )
+    assert none_resp.json()["total"] == 0
+
+    # toが過去 → 該当なし
+    none_resp_to = await client.get(
+        f"/api/sensors/{sensor_id}/readings", params={"to": past}
+    )
+    assert none_resp_to.json()["total"] == 0
+
+    # from/toが現在時刻を跨ぐ → 該当あり
+    some_resp = await client.get(
+        f"/api/sensors/{sensor_id}/readings", params={"from": past, "to": future}
+    )
+    assert some_resp.json()["total"] == 1

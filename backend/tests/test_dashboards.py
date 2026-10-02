@@ -77,3 +77,10 @@ async def test_add_update_delete_widget(client: httpx.AsyncClient) -> None:
 
     detail_after = await client.get(f"/api/dashboards/{dashboard_id}")
     assert detail_after.json()["widgets"] == []
+
+
+async def test_update_widget_not_found_returns_404(client: httpx.AsyncClient) -> None:
+    resp = await client.put(
+        "/api/widgets/00000000-0000-0000-0000-000000000000", json={"gridWidth": 2}
+    )
+    assert resp.status_code == 404
