@@ -24,6 +24,12 @@ plugins = ["pydantic.mypy"]
 # alembic autogenerateの生成物は手で厳密型付けするものではない（業界標準の慣行）
 exclude = ["^alembic/versions/"]
 
+[tool.coverage.run]
+# SQLAlchemyの非同期エンジンはDBAPI呼び出しをgreenlet経由で実行するため、
+# デフォルトのスレッドトレーサーだけでは app/api/ 配下の大半が未計測として
+# 誤計測される（coverage.py公式のgreenlet対応設定）。
+concurrency = ["greenlet", "thread"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # app.db.session.engine はモジュールレベルの単一インスタンス（単一イベントループ前提）のため、
