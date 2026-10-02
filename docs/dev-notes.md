@@ -181,3 +181,20 @@
 **対象外**: ダッシュボードの論理削除はそのまま変更していない。今回の問題はセンサー特有のもので、ダッシュボードには影響せず、変更依頼も無かったためである。
 
 **次フェーズ**: pushしてCI全部（backend-test / frontend-build / e2e-test）がグリーンになることを確認する。
+
+---
+
+### 2026-10-02: アラーム通知をEmail→Discord Webhookに変更
+
+**背景**: プロジェクトリードの方針で、基本機能のアラーム通知をEmail（SMTP）からDiscord Webhookに変更する。
+
+**実装内容**:
+- `app/notifications.py`: `aiosmtplib`によるメール送信を削除し、`httpx`で指定したDiscord Webhook URLにJSON（`{"content": ...}`）をPOSTする方式に変更。関数名も`send_alarm_email`→`send_alarm_discord`に変更
+- `app/config.py`: `smtp_*`系の設定7項目を削除し、`discord_webhook_url`1項目に置き換え
+- `backend/.env.example`: `SMTP_*`を`DISCORD_WEBHOOK_URL`に置き換え
+- `backend/requirements.txt`: `aiosmtplib`を削除。`httpx`は元々テスト専用だったが、本番コードでも使うようになったため本番依存の位置に移動
+- `backend/tests/test_notifications.py`: `aiosmtplib.send`のモックを`httpx.AsyncClient.post`のモックに置き換えて書き直し（未設定時は送信をスキップ・設定時は送信する・送信失敗時も例外を外に漏らさない、の3パターンは維持）
+
+**確認方法**: ローカルの開発用DBを一切使わず、専用のdocker network・postgresコンテナ・python:3.12-slimコンテナを都度新規作成して検証した（既存の開発用コンテナには触れていない）。pytest 55件全通過、mypy・ruffともにエラーなし。検証後はコンテナ・networkを削除済み。
+
+**設計書との対応**: `docs/factoreye-architecture.md`の「Security & Operational Constraints」と「主要な決定事項」を本変更に合わせて更新済み。

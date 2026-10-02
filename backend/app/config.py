@@ -11,14 +11,8 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-this-in-production"
     frontend_url: str = "http://localhost:3001"
 
-    # アラーム通知用SMTP（self-hosted運用者が自前のSMTPを指定。未設定なら送信をスキップする）
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from: str = "factoreye@localhost"
-    smtp_to: str = ""
-    smtp_use_tls: bool = True
+    # アラーム通知用Discord Webhook URL（未設定なら送信をスキップする）
+    discord_webhook_url: str = ""
 
     @property
     def debug(self) -> bool:

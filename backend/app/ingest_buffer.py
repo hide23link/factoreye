@@ -16,7 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.alarm_engine import evaluate_alarms
 from app.db.models import Reading
 from app.db.session import engine
-from app.notifications import send_alarm_email
+from app.notifications import send_alarm_discord
 from app.plugins.base import SensorReadingEvent
 from app.plugins.manager import dispatch_reading
 
@@ -77,7 +77,7 @@ async def flush_once() -> int:
         await session.commit()
 
     for notification in notifications:
-        _fire_and_forget(send_alarm_email(notification))
+        _fire_and_forget(send_alarm_discord(notification))
 
     for p in pending:
         await dispatch_reading(
