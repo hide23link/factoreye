@@ -11,7 +11,9 @@ test("セットアップウィザードでセンサー登録からダッシュ�
 }) => {
   await page.goto("/");
 
-  await page.getByRole("button", { name: "セットアップガイド" }).click();
+  // ダッシュボード0件時はDashboardListPageのバナーにも「セットアップガイドを始める」ボタンが
+  // 出るため、ヘッダーnav内に絞ってクリックする（部分一致で2件ヒットするのを避ける）
+  await page.locator("nav").getByRole("button", { name: "セットアップガイド" }).click();
   await expect(page.getByRole("heading", { name: "1. センサーを登録しましょう" })).toBeVisible();
 
   const ingestKey = await page.getByLabel("Ingest Key（デバイスが送信時に使う識別子）").inputValue();
