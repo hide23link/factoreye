@@ -46,11 +46,7 @@ async def ingest_readings(
             status_code=status.HTTP_400_BAD_REQUEST, detail="value or readings is required"
         )
 
-    # SQLModelのクラス属性はmypyには素のPython型に見えるため.is_()はunion-attrで誤検知される
-    sensor_query = select(Sensor).where(
-        Sensor.ingest_key == payload.ingest_key,
-        Sensor.deleted_at.is_(None),  # type: ignore[union-attr]
-    )
+    sensor_query = select(Sensor).where(Sensor.ingest_key == payload.ingest_key)
     result = await session.exec(sensor_query)
     sensor = result.first()
     if sensor is None:

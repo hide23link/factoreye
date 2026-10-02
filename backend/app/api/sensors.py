@@ -23,16 +23,14 @@ router = APIRouter(prefix="/api/sensors", tags=["sensors"])
 
 async def _get_active_sensor(session: AsyncSession, sensor_id: UUID) -> Sensor:
     sensor = await session.get(Sensor, sensor_id)
-    if sensor is None or sensor.deleted_at is not None:
+    if sensor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="sensor not found")
     return sensor
 
 
 @router.get("", response_model=list[SensorRead])
 async def list_sensors(session: AsyncSession = Depends(get_session)) -> list[Sensor]:
-    # SQLModelのクラス属性はmypyには素のPython型に見えるため.is_()はunion-attrで誤検知される
-    query = select(Sensor).where(Sensor.deleted_at.is_(None))  # type: ignore[union-attr]
-    result = await session.exec(query)
+    result = await session.exec(select(Sensor))
     return list(result.all())
 
 
@@ -88,10 +86,10 @@ async def update_sensor(
 
 @router.delete("/{sensor_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sensor(sensor_id: UUID, session: AsyncSession = Depends(get_session)) -> None:
+    """物理削除。測定値・アラーム履歴もCASCADEで一緒に消える（2026-10-02、社長の明示的な
+    判断）。ウィジェットは消さず、紐付け（sensor_id）だけがNULLになる。"""
     sensor = await _get_active_sensor(session, sensor_id)
-    sensor.deleted_at = datetime.now(UTC)
-    sensor.enabled = False
-    session.add(sensor)
+    await session.delete(sensor)
     await session.commit()
 
 

@@ -169,7 +169,10 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
             type="button"
             onClick={() => {
               if (
-                confirm(`センサー「${sensor.name}」を削除しますか？（履歴データは保持されます）`)
+                confirm(
+                  `センサー「${sensor.name}」を削除しますか？\n` +
+                    "測定値・アラーム履歴も完全に削除されます。元に戻せません。",
+                )
               ) {
                 deleteMutation.mutate();
               }

@@ -48,14 +48,19 @@ class Sensor(SQLModel, table=True):
     enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
-    # soft-delete（Reading/Alarmを保持するためDELETE文は使わない）
-    # 制約: name/ingest_keyのunique制約はdeleted_at済み行にも及ぶため、
-    # 削除済みセンサーと同名・同ingestKeyは再登録できない（Phase 0は許容）
-    deleted_at: datetime | None = Field(default=None, index=True)
 
-    readings: list["Reading"] = Relationship(back_populates="sensor")
-    alarms: list["Alarm"] = Relationship(back_populates="sensor")
-    widgets: list["Widget"] = Relationship(back_populates="sensor")
+    # passive_deletes=True: センサー削除時にSQLAlchemy ORMがこれらの子をわざわざロードして
+    # FKをNULL化する既定動作をやめさせ、DB側のON DELETE CASCADE/SET NULLに任せる
+    # （無いとAlarm.sensor_idのような非NULL許容カラムでも黙ってNULL化されてしまう）
+    readings: list["Reading"] = Relationship(
+        back_populates="sensor", sa_relationship_kwargs={"passive_deletes": True}
+    )
+    alarms: list["Alarm"] = Relationship(
+        back_populates="sensor", sa_relationship_kwargs={"passive_deletes": True}
+    )
+    widgets: list["Widget"] = Relationship(
+        back_populates="sensor", sa_relationship_kwargs={"passive_deletes": True}
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -69,7 +74,9 @@ class Reading(SQLModel, table=True):
 
     # BigSerial: 時系列データの大量蓄積を想定しBIGINT必須
     id: int | None = Field(default=None, primary_key=True)
-    sensor_id: UUID = Field(foreign_key="sensors.id")
+    # センサー削除時に測定値も一緒に物理削除する（2026-10-02、社長の明示的な判断。
+    # 旧soft-delete方式は削除済みセンサーと同名・同ingestKeyで再登録できない問題があったため撤廃）
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE")
     value: float
     # ingest時刻を採用（デバイス時刻は信頼しない、Phase 0の簡潔さ重視）
     recorded_at: datetime = Field(default_factory=_utcnow)
@@ -78,13 +85,14 @@ class Reading(SQLModel, table=True):
 
 
 # ──────────────────────────────────────────────────────────────
-# Alarm（監査ログとして追記専用。DELETE禁止）
+# Alarm（基本は追記専用の監査ログだが、センサー削除時はCASCADEで追従削除される。
+# 2026-10-02、社長の明示的な判断: センサー削除＝関連データ全削除を優先）
 # ──────────────────────────────────────────────────────────────
 class Alarm(SQLModel, table=True):
     __tablename__ = "alarms"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    sensor_id: UUID = Field(foreign_key="sensors.id", index=True)
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", index=True)
     triggered_at: datetime = Field(default_factory=_utcnow)
     resolved_at: datetime | None = None
     acknowledged_at: datetime | None = None
@@ -121,8 +129,9 @@ class Widget(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     dashboard_id: UUID = Field(foreign_key="dashboards.id", index=True)
-    # 複数センサー対象のウィジェットではnullable
-    sensor_id: UUID | None = Field(default=None, foreign_key="sensors.id")
+    # 複数センサー対象のウィジェットではnullable。センサー削除時はウィジェットごと消さず
+    # 紐付けだけ外す（NULL化）
+    sensor_id: UUID | None = Field(default=None, foreign_key="sensors.id", ondelete="SET NULL")
     # 例: "temperature-graph", "power-graph", "production-status"
     type: str = Field(max_length=50)
     # 12列グリッド（react-grid-layoutのドラッグ&ドロップ配置・マウスリサイズに対応、

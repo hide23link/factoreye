@@ -170,3 +170,22 @@
 - E2E実行時、直前のLANアクセス設定用`.env`（`VITE_API_URL=http://192.168.0.25:8000`等）が残ったままだったため、Playwrightが`localhost:3001`で開いたページのOriginとbackendのCORS許可Origin（`192.168.0.25:3001`）が食い違い、全シナリオが「backend未接続」「Failed to fetch」で失敗した。自分の実装のリグレッションではなく環境設定の残留が原因と確認（`.env`を一時的に外して再ビルド→E2E全通過を確認→LAN設定を復元して再ビルドし直した）。**教訓**: 同じdocker-composeスタックを「社長が他のPCから見る用」と「E2E検証用」で同時に使い回すと、ベースURL前提（localhost vs LAN IP）の食い違いで混乱しやすい。本来は分離すべきだが、Phase 0のソロ運用では都度一時的に戻す運用で許容する
 
 **次フェーズ**: OEEに着手する場合は、停止時間＋理由の記録（新規DowntimeEventテーブル相当）とシフトカレンダー（負荷時間の定義）が新規で必要（strategy-agentの分析参照）。
+
+---
+
+### 2026-10-02: センサー削除をsoft-delete→物理削除に変更
+
+**背景**: デモ環境でエミュレータのセンサーを削除→同じ名前で再登録しようとしたところ失敗（409）。原因はsoft-delete方式の既知の制限（`db/models.py`に以前から「name/ingest_keyのunique制約はdeleted_at済み行にも及ぶ」とコメントされていた）。社長に方針を確認し、「アラーム履歴が削除時に一緒に消えるリスクを許容してでも完全削除にする」で合意（AskUserQuestionで3択提示し選択いただいた）。
+
+**実装内容**:
+- `Sensor.deleted_at`フィールドを削除。`DELETE /api/sensors/:id`を物理削除（`session.delete(sensor)`）に変更
+- `Reading.sensor_id`・`Alarm.sensor_id`のFKに`ondelete="CASCADE"`、`Widget.sensor_id`に`ondelete="SET NULL"`を設定（マイグレーション`532b37a49a1d`で制約を貼り替え）。ウィジェット自体は消さず、センサーとの紐付けだけ外れる
+- `list_sensors`・`_get_active_sensor`・ingest時のセンサー検索から`deleted_at`フィルタを除去
+- frontendの削除確認ダイアログを「履歴データは保持されます」→「測定値・アラーム履歴も完全に削除されます。元に戻せません」に修正（実態と合わせる）
+- backendテスト3件追加（名前再利用が成功すること・Reading/AlarmがCASCADE削除されること・Widgetの紐付けだけNULL化されウィジェット自体は残ること）。55件全通過、mypy/ruff/pip-audit確認済み
+
+**ハマりどころ**: FKに`ondelete="CASCADE"`を設定しただけでは不十分だった。`session.delete(sensor)`経由の削除では、SQLAlchemy ORMが既定で関連オブジェクト（readings/alarms/widgets）を先にロードしてFKをNULL化しようとする（DBのON DELETE設定より先にORM側の既定動作が効いてしまう）ため、非NULL許容のはずの`Alarm.sensor_id`が黙ってNULLに書き換えられ、テストで発覚した。`Sensor`側の3つの`Relationship`に`sa_relationship_kwargs={"passive_deletes": True}`を追加し、ORMに子をロードさせずDBのCASCADE/SET NULLに任せることで解決。
+
+**意図的に対象外**: Dashboardの`deleted_at`（soft-delete）はそのまま。今回の問題はSensorのunique制約（name/ingestKey）特有のものでDashboardには無く、変更依頼も無かったため触っていない。
+
+**次フェーズ**: 変更をpush後、GitHub Actions（backend-test / frontend-build / e2e-test）が全てグリーンになることを確認する。

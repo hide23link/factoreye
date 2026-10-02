@@ -86,6 +86,90 @@ async def test_list_sensors_excludes_deleted(client: httpx.AsyncClient) -> None:
     assert all(s["id"] != sensor_id for s in listed.json())
 
 
+async def test_delete_sensor_allows_reuse_of_name_and_ingest_key(
+    client: httpx.AsyncClient,
+) -> None:
+    """物理削除なので、削除済みと同じ名前・ingestKeyで再登録できる
+    （旧soft-delete方式はunique制約に引っかかって不可能だった）。"""
+    payload = {"name": "再利用センサー", "ingestKey": "reuse-sensor", "unit": "C"}
+    first = await client.post("/api/sensors", json=payload)
+    assert first.status_code == 201
+    await client.delete(f"/api/sensors/{first.json()['id']}")
+
+    second = await client.post("/api/sensors", json=payload)
+    assert second.status_code == 201
+    assert second.json()["id"] != first.json()["id"]
+
+
+async def test_delete_sensor_cascades_readings_and_alarms(client: httpx.AsyncClient) -> None:
+    created = await client.post(
+        "/api/sensors",
+        json={
+            "name": "カスケード削除テスト用",
+            "ingestKey": "cascade-delete-sensor",
+            "unit": "C",
+            "thresholdMax": 10.0,
+        },
+    )
+    sensor_id = created.json()["id"]
+
+    await client.post(
+        "/api/ingest/readings",
+        headers={"X-API-Key": settings.ingest_api_key},
+        json={"ingestKey": "cascade-delete-sensor", "value": 15.0},
+    )
+    await flush_once()
+
+    # 測定値・アラームが作られたことを前提条件として確認
+    readings_before = await client.get("/api/readings", params={"sensor_id": sensor_id})
+    assert readings_before.json()["total"] >= 1
+    alarms_before = await client.get("/api/alarms")
+    assert any(a["sensorId"] == sensor_id for a in alarms_before.json()["alarms"])
+
+    deleted = await client.delete(f"/api/sensors/{sensor_id}")
+    assert deleted.status_code == 204
+
+    readings_after = await client.get("/api/readings", params={"sensor_id": sensor_id})
+    assert readings_after.json()["total"] == 0
+    alarms_after = await client.get("/api/alarms")
+    assert all(a["sensorId"] != sensor_id for a in alarms_after.json()["alarms"])
+
+
+async def test_delete_sensor_nulls_widget_reference_without_deleting_widget(
+    client: httpx.AsyncClient,
+) -> None:
+    dashboard = await client.post("/api/dashboards", json={"name": "ウィジェットNULL化テスト用"})
+    dashboard_id = dashboard.json()["id"]
+
+    sensor = await client.post(
+        "/api/sensors",
+        json={"name": "ウィジェット紐付けテスト用", "ingestKey": "widget-null-sensor", "unit": "C"},
+    )
+    sensor_id = sensor.json()["id"]
+
+    widget = await client.post(
+        f"/api/dashboards/{dashboard_id}/widgets",
+        json={
+            "type": "SensorGraph",
+            "sensorId": sensor_id,
+            "gridColumn": 1,
+            "gridRow": 1,
+            "gridWidth": 2,
+            "gridHeight": 1,
+            "config": {},
+        },
+    )
+    widget_id = widget.json()["id"]
+
+    await client.delete(f"/api/sensors/{sensor_id}")
+
+    detail = await client.get(f"/api/dashboards/{dashboard_id}")
+    widgets = detail.json()["widgets"]
+    assert len(widgets) == 1
+    assert widgets[0]["id"] == widget_id
+    assert widgets[0]["sensorId"] is None
+
+
 async def test_sensor_readings_filtered_by_from_and_to(client: httpx.AsyncClient) -> None:
     created = await client.post(
         "/api/sensors",
