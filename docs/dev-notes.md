@@ -9,6 +9,12 @@
 
 - **コマンドライン実行中のコメント（Bashツールの説明文）は日本語で、なるべくわかりやすく書く**
   （2026-10-01、社長からの指示）
+- **`docker compose down -v` ・ `docker compose down --volumes` は、起動前に`docker compose ps`で
+  「自分が今回起動したコンテナかどうか」を必ず確認してから実行する**（起動時点で既にRunning状態
+  だったコンテナ・ボリュームは社長が使用中の可能性が高いため、`-v`を付けずに`down`する、または
+  何もしない）。2026-10-02、E2Eテスト検証後の後片付けで、既に起動済みだったdev DBのボリューム
+  （`factoreye_postgres-data`）を確認不足のまま`-v`付きで削除し、手動作成データを失わせる事故が
+  発生したため（詳細は変更履歴参照）。
 
 ---
 
@@ -90,3 +96,25 @@
   -e DATABASE_URL=postgresql+asyncpg://factoreye:password@factoreye-postgres-1:5432/factoreye_test
   ```
 - CI（GitHub Actions）は専用のpostgres serviceコンテナを都度起動しており本番/開発データと無関係なため、この問題は起きない（ローカルでdocker-composeの開発用DBに相乗りする時だけ要注意）。
+
+---
+
+### 2026-10-02: Sprint 7完了 — frontend単体テスト・E2Eテスト・README整備
+
+**背景**: `docs/factoreye-architecture.md` のロードマップ通りSprint 7残課題（frontend単体テスト・E2E・README整備）に着手。backendのテストは既に完了済みだった。
+
+**実装内容**:
+- **frontend単体テスト**（Vitest + Testing Library、`frontend/`）: `vitest.config.ts`・`src/test/setup.ts`・`src/test/test-utils.tsx`（QueryClientProviderラッパー）を追加。`lib/time.ts`・`hooks/useNow.ts`・`store/useUiStore.ts`・`store/useHealthStore.ts`・`lib/api.ts`の単体テストと、`SensorSettingsPanel`・`AlarmSettingsPanel`のコンポーネントテスト（`../../lib/api`をvi.mockしてAPI呼び出しを検証）を追加。計24件、全通過。`npm run test`で実行、CIにも追加（`.github/workflows/frontend-build.yml`）
+- **E2Eテスト**（Playwright、新規`e2e/`ディレクトリ、frontendとは別package.json）: docker-compose起動済みのスタック（backend:8000 / frontend:3001）に対し実ブラウザ（Chromium）で操作する2シナリオ
+  - `setup-wizard.spec.ts`: Quick Setup Wizardをセンサー登録→（curlの代わりにPlaywrightの`request`でingest API直叩き）→ダッシュボード自動作成→Rechartsグラフ描画まで通しで確認
+  - `alarm-flow.spec.ts`: 設定画面でセンサー閾値を編集→閾値超過データ送信→アラーム発生→確認(ack)まで確認
+  - 新規CI `e2e-test.yml`: `docker compose up -d --build`→ヘルスチェック待ち→Playwright実行→失敗時はコンテナログを出力→`docker compose down -v`で後片付け
+- **README.md**（リポジトリ直下、新規）: プロジェクト概要・クイックスタート（docker-compose）・開発環境セットアップ（backend/frontend個別）・テストの実行方法・ディレクトリ構成を整備
+
+**検証方法**: frontend単体テストは`npm run test`（24件全通過）・`npm run typecheck`・`npm run lint`をエラーなしで確認。E2Eは実際にDocker Desktopで`docker compose up -d --build`してスタックを起動し、`npx playwright test`を実行、2シナリオとも実ブラウザで通過を確認（並列実行でも安定）。
+
+**ハマりどころ**: `alarm-flow.spec.ts`で、編集モード中のセンサー行をセンサー名（`hasText: sensorName`）で再取得しようとして失敗した。編集モードでは名前欄が`<input>`に置き換わり、Playwrightの`hasText`はinputのvalueを要素のテキストとして見てくれないため。常にプレーンテキストの`<td>`のまま残るingestKey列で行を特定するよう修正して解決。
+
+**【事故】検証後の`docker compose down -v`でdev DBのデータを削除**: E2Eテスト検証のため`docker compose up -d --build`を実行した際、`factoreye-postgres-1`・`factoreye-backend-1`は起動前から既にRunning状態だった（社長が使用中だった可能性が高い）。検証後の後片付けで`docker compose down -v`を実行し、既存データが入っていた可能性のあるボリューム`factoreye_postgres-data`を確認なしに削除してしまった。バックアップなし・復元不可。社長に確認の上、空のDBのまま続行することで合意（2026-10-02）。再発防止策は上記「作業時の方針」に追記済み（`-v`付きdown前に`docker compose ps`で起動前の状態を確認する）。
+
+**次フェーズ**: Sprint 8（Polish & Release）。
