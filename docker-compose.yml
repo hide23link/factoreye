@@ -3,10 +3,12 @@ services:
     build: ./backend
     environment:
       - DATABASE_URL=postgresql+asyncpg://factoreye:password@postgres:5432/factoreye
-      - INGEST_API_KEY=change-this-in-production
-      - JWT_SECRET=change-this-in-production
-      - ENVIRONMENT=development
-      - FRONTEND_URL=http://localhost:3001
+      - INGEST_API_KEY=${INGEST_API_KEY:-change-this-in-production}
+      - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで
+      # FRONTEND_URL=http://<このホストのIP>:3001 を指定する（CORSの許可オリジンに使われる）
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
     ports:
       - "8000:8000"
     depends_on:
@@ -14,9 +16,12 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
-    environment:
-      - VITE_API_URL=http://localhost:8000
+    build:
+      context: ./frontend
+      args:
+        # Viteはビルド時に値を静的ファイルへ焼き込むため、build.argsで渡す必要がある
+        # （実行時のenvironment:をいくら変えても効果が無い）。.envでの上書き先はこちら。
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     ports:
       - "3001:3001"
     depends_on:
