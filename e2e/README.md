@@ -16,7 +16,9 @@ Playwrightで、実際のブラウザ（Chromium）からdocker-compose上のbac
 # 1. リポジトリ直下でスタックを起動（初回はビルドが走るため数分かかる）
 docker compose up -d --build
 
-# 2. backend/frontendが応答するまで待つ（docker compose psで状態確認可）
+# 2. backendが応答するまで待つ（docker compose psで状態確認可。マイグレーション中は
+#    「connection reset by peer」になりcurlの--retryが効かないことがあるため、
+#    単発ではなく数回手動でリトライするか、起動ログを目視確認するとよい）
 curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:8000/health
 
 # 3. E2Eテストを実行

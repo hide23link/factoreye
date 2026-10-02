@@ -18,10 +18,33 @@ jobs:
         run: docker compose up -d --build
 
       - name: Wait for backend
-        run: curl --retry 20 --retry-delay 3 --retry-connrefused http://localhost:8000/health
+        # curlの--retry-connrefusedは「connection reset by peer」(migration中などまだ
+        # listenしていない瞬間によく起きる)を再試行対象にしないため、個別のcurl呼び出しの
+        # 成否を無視して独自ループでポーリングする
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "backend is up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::backend did not become healthy in time"
+          docker compose logs backend
+          exit 1
 
       - name: Wait for frontend
-        run: curl --retry 20 --retry-delay 3 --retry-connrefused http://localhost:3001
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3001 >/dev/null 2>&1; then
+              echo "frontend is up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::frontend did not become healthy in time"
+          docker compose logs frontend
+          exit 1
 
       - uses: actions/setup-node@v4
         with:
