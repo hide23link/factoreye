@@ -198,3 +198,34 @@
 **確認方法**: ローカルの開発用DBを一切使わず、専用のdocker network・postgresコンテナ・python:3.12-slimコンテナを都度新規作成して検証した（既存の開発用コンテナには触れていない）。pytest 55件全通過、mypy・ruffともにエラーなし。検証後はコンテナ・networkを削除済み。
 
 **設計書との対応**: `docs/factoreye-architecture.md`の「Security & Operational Constraints」と「主要な決定事項」を本変更に合わせて更新済み。
+
+---
+
+### 2026-10-02: アラーム重要度（軽故障/重故障）・2段階しきい値・重故障の再通知
+
+**背景**: プロジェクトリードの要望で、アラームを軽故障/重故障の2段階に分け、Discordの通知先・通知音を分けたい。しきい値もセンサーごとに軽故障/重故障で別々に設定できるようにしたい。
+
+**実装内容**:
+- `Sensor`: `threshold_min/max`（単一）を廃止し、`threshold_min_warning/critical`・`threshold_max_warning/critical`の4項目に拡張。あわせて不感帯（ヒステリシス、`threshold_dead_band`）を追加し、閾値ぎりぎりでの発生/解除の繰り返しを防止
+- `Alarm`に`severity`（warning/critical）・`last_notified_at`を追加。重要度が変化した場合は新規アラームを作らず既存アラームを更新（重要度変化自体を再通知）
+- 通知設定（`NotificationSettings`、DBのシングルトン行、Settings画面の「通知」タブから編集）: 重故障・軽故障で別々のDiscord Webhook URLを持つ。重故障は通常送信、軽故障はサイレント送信（Discordの`SUPPRESS_NOTIFICATIONS`フラグ）
+- 重故障のみ: 未解決のまま設定時間（分、デフォルト30分・初期値は無効）を超えて継続したら同じアラームを再通知する機能を追加（チェックボックスで有効化、新規アラームは作らず`last_notified_at`を更新するだけ）
+- ダッシュボードの「アラーム」ウィジェットは、従来`active`のみ表示していたため確認（ack）した瞬間に見た目上消えていた。`acknowledged`も合わせて表示するよう修正（本当に解決するまで表示が残る）
+
+**ハマりどころ**: 開発用DBは本番相当の既存データを保持したまま検証していたため、マイグレーションファイルを後から複数回手で編集する度に、alembicの`alembic_version`は「適用済み」のままだがスキーマの実体が古い、という食い違いが発生した。`alembic downgrade -1 && alembic upgrade head`で再適用するか、それでも直らない場合はpsqlで差分のALTER TABLEを直接当てて復旧した。
+
+**確認方法**: 専用のdocker network・postgresコンテナで、マイグレーションのupgrade/downgrade往復・pytest（66件）・mypy・ruffを確認。さらに実際のdocker-composeスタック（既存データ入り）とChromeで、軽故障→重故障への昇格、不感帯での解除抑制、Discordへの実送信（失敗時のログ含む）、設定画面の表示を確認済み。
+
+---
+
+### 2026-10-02: テスト工場エミュレータに手動操作画面を追加
+
+**背景**: エミュレータの自動ランダムウォークでは、狙ったタイミング・狙った値でしきい値アラームを発生させるのが難しい（いつ閾値を超えるか待つしかない）。確実に狙って動かせる手段がほしいという要望。
+
+**実装内容**:
+- `tools/factory-emulator/control_server.py`を新設。標準ライブラリの`http.server`のみ（追加依存なし）で、`emulator.py`と同じプロセス内で別スレッドとして動くWeb画面（`http://localhost:8765`）
+- 生産負荷・温度・電力をそれぞれ独立に「自動」⇄「手動」切り替え可能なスライダーを設置。「手動」ONの指標は自動のランダムウォーク/一時停止ロジックを無視し、スライダーの目標値へ指数平滑で収束＋小さなランダムノイズが乗り続ける（ピタッと静止はしない、という要望を反映）
+- `MachineState`に`ManualControl`（有効フラグ+目標値）を3指標分追加。`tick()`は手動時のみ分岐するが、既存の自動ロジック（一時停止確率等）はそのまま温存
+- メインループとHTTPサーバースレッド間の状態共有は`threading.Lock`で保護
+
+**確認方法**: `python3 -m py_compile`で構文確認後、ネットワークを介さないユニットレベルの動作確認（手動target設定→収束→OFFで自動復帰）をスクリプトで実行。さらに実際にエミュレータを起動し、`POST /control`で温度を手動50°Cに設定→backendのReadingに反映されることをcurlで確認済み。

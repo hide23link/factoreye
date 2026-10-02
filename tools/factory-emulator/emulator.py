@@ -14,9 +14,14 @@ backendやclients/配下の公式クライアントとは別物。動作確認�
     「直近1時間」「本日累計」のような集計・目標達成率表示に使う前提）
   - 一定確率で「一時停止」に入り、生産数は即座に0個、電力は待機電力へ、温度は
     ゆっくり室温へ戻る。数十秒〜数分でランダムに終わり、通常運転へ復帰する
+  - 手動操作画面（http://localhost:8765 、control_server.py）から、生産負荷・温度・
+    電力をそれぞれ独立にスライダーで操作できる。「手動」ONにした指標は自動ロジックを
+    無視し、スライダーの値へじわじわ収束＋小さなランダム変動になる（しきい値アラームを
+    狙って発生/解除させたい時用。詳細はREADME参照）
 
 使い方:
     python3 emulator.py          # Ctrl+C で終了
+    手動操作画面: http://localhost:8765 をブラウザで開く
 
 事前準備:
     backendが起動していること（docker-compose up 等）。センサーは初回起動時に
@@ -30,11 +35,14 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import control_server
 
 # clients/raspberry-pi/factoreye_client.py を再利用する（追加ライブラリ不要、同じ再送/
 # バックオフ仕様をそのまま使う）
@@ -89,18 +97,36 @@ def _register_sensor_if_missing(name: str, ingest_key: str, unit: str) -> None:
 
 
 @dataclass
+class ManualControl:
+    """手動操作画面（control_server.py）のスライダー1本分の状態。"""
+
+    enabled: bool = False
+    target: float = 0.0
+
+
+@dataclass
 class MachineState:
     production_rate: float = 70.0  # 現在の生産負荷の指標（0〜100。温度・電力の計算にのみ使う内部値）
     temperature: float = AMBIENT_TEMPERATURE
     power: float = IDLE_POWER_KW
     paused_until: float | None = None  # time.monotonic()での再開予定時刻（稼働中はNone）
 
+    # 手動操作画面から独立に切り替え可能。手動時はそれぞれ自動ロジックを無視し、
+    # targetへじわじわ収束＋小さなノイズになる
+    production_control: ManualControl = field(
+        default_factory=lambda: ManualControl(target=70.0)
+    )
+    temperature_control: ManualControl = field(
+        default_factory=lambda: ManualControl(target=AMBIENT_TEMPERATURE)
+    )
+    power_control: ManualControl = field(default_factory=lambda: ManualControl(target=IDLE_POWER_KW))
+
     @property
     def is_paused(self) -> bool:
         return self.paused_until is not None
 
     def units_this_tick(self) -> int:
-        """このtick(5秒)で実際に生産した個数。負荷指標から導く実カウント値。"""
+        """このtick(5秒)で実際に生産した個数。負荷指標（手動/自動いずれでも）から導く。"""
         if self.is_paused:
             return 0
         expected = self.production_rate / 100.0 * MAX_UNITS_PER_TICK
@@ -108,36 +134,88 @@ class MachineState:
         return max(0, round(noisy))
 
     def tick(self, now: float) -> None:
-        if self.paused_until is not None:
+        if self.production_control.enabled:
+            # 手動モード: 一時停止ロジックは無視し、スライダーのtargetへ収束＋ノイズ
+            self.paused_until = None
+            self.production_rate += (self.production_control.target - self.production_rate) * 0.5
+            self.production_rate += random.uniform(-2.0, 2.0)
+            self.production_rate = max(0.0, min(100.0, self.production_rate))
+        elif self.paused_until is not None:
             if now >= self.paused_until:
                 self.paused_until = None
                 print("▶ 稼働再開")
             else:
                 self.production_rate = 0.0
-                self._settle_toward(target_power=IDLE_POWER_KW)
-                return
         elif random.random() < PAUSE_CHANCE_PER_TICK:
             duration = random.uniform(*PAUSE_DURATION_RANGE_SECONDS)
             self.paused_until = now + duration
             print(f"⏸ 一時停止します（約{duration:.0f}秒）")
             self.production_rate = 0.0
-            self._settle_toward(target_power=IDLE_POWER_KW)
-            return
+        else:
+            # 通常運転: 生産負荷がゆるやかにランダムウォーク（30〜100の範囲に収める）
+            self.production_rate += random.uniform(-8.0, 8.0)
+            self.production_rate = max(30.0, min(100.0, self.production_rate))
 
-        # 通常運転: 生産負荷がゆるやかにランダムウォーク（30〜100の範囲に収める）
-        self.production_rate += random.uniform(-8.0, 8.0)
-        self.production_rate = max(30.0, min(100.0, self.production_rate))
-        target_power = IDLE_POWER_KW + self.production_rate * 0.08
-        self._settle_toward(target_power=target_power)
+        self._update_temperature()
+        self._update_power()
 
-    def _settle_toward(self, target_power: float) -> None:
-        """温度・電力を指数平滑で目標値へゆっくり近づける（実機の熱慣性を簡易に模擬）。"""
-        target_temperature = AMBIENT_TEMPERATURE + self.production_rate * 0.25
-        self.temperature += (
-            (target_temperature - self.temperature) * 0.3 + random.uniform(-0.2, 0.2)
-        )
-        self.power += (target_power - self.power) * 0.5 + random.uniform(-0.03, 0.03)
+    def _update_temperature(self) -> None:
+        """指数平滑で目標値へゆっくり近づける（実機の熱慣性を簡易に模擬）。
+        手動時はスライダーのtargetそのものが目標値になる。"""
+        if self.temperature_control.enabled:
+            target = self.temperature_control.target
+            self.temperature += (target - self.temperature) * 0.5 + random.uniform(-0.3, 0.3)
+        else:
+            target = AMBIENT_TEMPERATURE + self.production_rate * 0.25
+            self.temperature += (target - self.temperature) * 0.3 + random.uniform(-0.2, 0.2)
+
+    def _update_power(self) -> None:
+        if self.power_control.enabled:
+            target = self.power_control.target
+            self.power += (target - self.power) * 0.5 + random.uniform(-0.05, 0.05)
+        else:
+            target = (
+                IDLE_POWER_KW if self.is_paused else IDLE_POWER_KW + self.production_rate * 0.08
+            )
+            self.power += (target - self.power) * 0.5 + random.uniform(-0.03, 0.03)
         self.power = max(0.0, self.power)
+
+    def to_control_dict(self) -> dict[str, object]:
+        """手動操作画面（/state）向けの現在値・モード・目標値のスナップショット。"""
+        return {
+            "production": {
+                "value": round(self.production_rate, 1),
+                "manual": self.production_control.enabled,
+                "target": self.production_control.target,
+            },
+            "temperature": {
+                "value": round(self.temperature, 2),
+                "manual": self.temperature_control.enabled,
+                "target": self.temperature_control.target,
+            },
+            "power": {
+                "value": round(self.power, 3),
+                "manual": self.power_control.enabled,
+                "target": self.power_control.target,
+            },
+            "paused": self.is_paused,
+        }
+
+    def apply_control(self, payload: dict[str, object]) -> None:
+        """手動操作画面（POST /control）からの更新を反映する。"""
+        controls: dict[str, ManualControl] = {
+            "production": self.production_control,
+            "temperature": self.temperature_control,
+            "power": self.power_control,
+        }
+        for key, control in controls.items():
+            entry = payload.get(key)
+            if not isinstance(entry, dict):
+                continue
+            if "manual" in entry:
+                control.enabled = bool(entry["manual"])
+            if "target" in entry:
+                control.target = float(entry["target"])  # type: ignore[arg-type]
 
 
 def main() -> None:
@@ -152,19 +230,25 @@ def main() -> None:
 
     client = FactorEyeClient(FACTOREYE_HOST, INGEST_API_KEY)
     state = MachineState()
+    state_lock = threading.Lock()
+    control_server.start(state, state_lock)
 
     while True:
-        state.tick(time.monotonic())
-        produced = state.units_this_tick()
+        with state_lock:
+            state.tick(time.monotonic())
+            produced = state.units_this_tick()
+            temperature = round(state.temperature, 2)
+            power = round(state.power, 3)
+            is_paused = state.is_paused
 
         client.send(SENSOR_PRODUCTION, produced)
-        client.send(SENSOR_TEMPERATURE, round(state.temperature, 2))
-        client.send(SENSOR_POWER, round(state.power, 3))
+        client.send(SENSOR_TEMPERATURE, temperature)
+        client.send(SENSOR_POWER, power)
 
-        status = "一時停止中" if state.is_paused else "稼働中  "
+        status = "一時停止中" if is_paused else "稼働中  "
         print(
             f"[{status}] 生産数={produced:2d}個  "
-            f"温度={state.temperature:5.1f}°C  電力={state.power:4.2f}kW  "
+            f"温度={temperature:5.1f}°C  電力={power:4.2f}kW  "
             f"(未送信バッファ: {client.pending_count}件)"
         )
 
