@@ -34,7 +34,12 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   await expect(alarmRow.getByText("上限超過")).toBeVisible();
 
   await alarmRow.getByRole("button", { name: "確認" }).click();
-  await expect(page.getByRole("button", { name: "確認済み" })).toBeVisible();
+  // 「確認済み」ボタンは常時表示のステータスタブと名前が衝突するため、
+  // ackが実際に効いたことは「発生中」一覧からこの行が消えることで検証する
+  await expect(page.locator("tr", { hasText: sensorName })).toHaveCount(0);
+
   await page.getByRole("button", { name: "確認済み" }).click();
-  await expect(page.locator("tr", { hasText: sensorName }).getByText("確認済み")).toBeVisible();
+  const ackedRow = page.locator("tr", { hasText: sensorName });
+  await expect(ackedRow).toBeVisible();
+  await expect(ackedRow.getByText("確認済み")).toBeVisible();
 });

@@ -118,3 +118,27 @@
 **【事故】検証後の`docker compose down -v`でdev DBのデータを削除**: E2Eテスト検証のため`docker compose up -d --build`を実行した際、`factoreye-postgres-1`・`factoreye-backend-1`は起動前から既にRunning状態だった（社長が使用中だった可能性が高い）。検証後の後片付けで`docker compose down -v`を実行し、既存データが入っていた可能性のあるボリューム`factoreye_postgres-data`を確認なしに削除してしまった。バックアップなし・復元不可。社長に確認の上、空のDBのまま続行することで合意（2026-10-02）。再発防止策は上記「作業時の方針」に追記済み（`-v`付きdown前に`docker compose ps`で起動前の状態を確認する）。
 
 **次フェーズ**: Sprint 8（Polish & Release）。
+
+---
+
+### 2026-10-02: qa-agentレビューで発覚したCritical/High修正（Sprint 7の続き）
+
+**背景**: 上記Sprint 7実装をqa-agent（独立したレビューセッション）がレビュー。実際に`docker compose up -d --build`をフレッシュな状態（直前の事故でボリュームが空になった状態）で実行して再現性のあるCriticalバグを発見した。
+
+**Critical: backend起動時にDBマイグレーションが自動実行されず、フレッシュなDBではクラッシュする**
+- 症状: `UndefinedTableError: relation "plugins" does not exist`でbackendがクラッシュループする
+- 原因: `backend/Dockerfile`のCMDが`uvicorn app.main:app ...`のみで、どこにも`alembic upgrade head`を実行する手順が無かった（既存のdocker-composeボリュームには過去の手動マイグレーション適用結果が残っていたため、今回のボリューム消失事故が起きるまで誰も気づいていなかった）
+- 影響: 新設した`e2e-test.yml`はGitHub Actionsの完全フレッシュなrunnerで動くため、このコミットのままでは初回実行から確実に失敗する状態だった
+- **修正**: `backend/Dockerfile`のCMDを`sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"`に変更。postgresの`depends_on: condition: service_healthy`で起動順序は保証済みのため追加のリトライ処理は不要
+- 検証: qa-agent側で`docker compose run --rm backend alembic upgrade head`を手動実行して原因を確定済み。dev側では今回Docker操作がauto modeの権限クラシファイアに（直前の事故を踏まえて）ブロックされたため、実機での再検証ができていない。**次回Dockerが使えるタイミングで`docker compose up -d --build`からの起動確認、および`e2e-test.yml`がGitHub Actions上で実際にグリーンになることの確認が必要**
+
+**High: `alarm-flow.spec.ts`のack検証アサーションが無意味だった**
+- 原因: `page.getByRole("button", { name: "確認済み" })`が、ackボタンのクリックとは無関係に常時表示されているステータスフィルタタブ（同じ文言）にヒットしてしまい、ackが実際に成功したかを何も検証できていなかった（テスト自体はたまたま毎回パスしていた）
+- **修正**: ack後に「発生中」一覧からその行が消えること（`toHaveCount(0)`）を見てから「確認済み」タブに切り替え、そちらに移動していることを確認する形に変更
+
+**Low（対応済み）**: `e2e-test.yml`に`paths`フィルタを追加（`frontend-build.yml`と同様、backend/frontend/e2e/docker-compose.yml以外の変更では起動しないように）。
+
+**Low（Sprint 8バックログへ）**: qa-agentより以下を指摘、coordinator-agentへのバックログ化を推奨
+- frontendのカバレッジ計測ツール（`@vitest/coverage-v8`等）未導入。数値目標（guidelines/12: 70%以上/最低50%）を検証する手段が無い
+- `SetupWizard.tsx`・`WidgetFormModal.tsx`・`DashboardView.tsx`・4つのwidgetコンポーネント・`lib/api.ts`の大半の関数が単体/コンポーネントテスト0件のまま（E2Eのハッピーパスでのみ間接的にカバー）
+- 自宅LXC self-hosted runner移行時、`docker compose down -v`がrunner間で永続化されたdockerホスト上で動くと、project名の衝突により今回と同種のボリューム削除事故がCI経由でも起こりうる。移行時に専用project名（`docker compose -p factoreye-ci ...`等）を使うことをinfra-agentへ要申し送り
