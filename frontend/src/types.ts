@@ -3,8 +3,13 @@ export interface Sensor {
   name: string;
   ingestKey: string;
   unit: string;
-  thresholdMin: number | null;
-  thresholdMax: number | null;
+  // 軽故障（warning）/重故障（critical）の2段階、上限・下限それぞれ独立してnull許容
+  thresholdMinWarning: number | null;
+  thresholdMinCritical: number | null;
+  thresholdMaxWarning: number | null;
+  thresholdMaxCritical: number | null;
+  // 不感帯（ヒステリシス）: 閾値付近で値が揺れた際のアラームのチラつきを防ぐ
+  thresholdDeadBand: number;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -24,6 +29,7 @@ export interface ReadingAggregate {
 
 export type AlarmStatus = "active" | "acknowledged" | "resolved";
 export type ThresholdBreached = "min" | "max";
+export type AlarmSeverity = "warning" | "critical";
 
 export interface Alarm {
   id: string;
@@ -35,9 +41,24 @@ export interface Alarm {
   value: number;
   status: AlarmStatus;
   thresholdBreached: ThresholdBreached;
+  severity: AlarmSeverity;
 }
 
-export type WidgetType = "SensorGraph" | "ProductionStatus" | "AlarmAlert" | "MultiSensorComparison";
+export interface NotificationSettings {
+  discordWebhookUrlCritical: string;
+  discordWebhookUrlWarning: string;
+  enabled: boolean;
+  // 重故障のみ: 未解決のまま一定時間（分）経過したら同じアラームを再通知する
+  criticalRepeatEnabled: boolean;
+  criticalRepeatIntervalMinutes: number;
+}
+
+export type WidgetType =
+  | "SensorGraph"
+  | "ProductionStatus"
+  | "AlarmAlert"
+  | "MultiSensorComparison"
+  | "StatValue";
 
 export interface WidgetConfig {
   graphType?: "line" | "bar" | "area";
@@ -45,12 +66,15 @@ export interface WidgetConfig {
   // 未指定(undefined)ならRechartsの自動スケール（"auto"）
   yAxisMin?: number;
   yAxisMax?: number;
-  // 直近何時間分を表示するか（自由入力、例: 0.5 = 30分、168 = 7日）
+  // 直近何時間分を表示するか（自由入力、例: 0.5 = 30分、168 = 7日）。
+  // StatValueWidgetではスパークライン表示用の窓としても使う
   timeRangeHours?: number;
   sensorIds?: string[];
   onThreshold?: number;
   // ProductionStatusWidget用: 本日の生産目標数（未指定なら達成率は表示しない）
   dailyTarget?: number;
+  // StatValueWidget用: 表示する小数桁数（未指定なら1桁）
+  decimals?: number;
 }
 
 export interface Widget {

@@ -21,10 +21,11 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   await expect(row).toBeVisible();
 
   await row.getByText("編集").click();
-  await row.locator('input[placeholder="なし"]').nth(1).fill("50");
+  // td順: 名前/IngestKey/単位/軽故障(下限/上限)/重故障(下限/上限)/不感帯/状態/操作。
+  // 重故障の上限（nth(4)列内の2番目の入力）を設定する
+  await row.locator("td").nth(4).locator("input").nth(1).fill("50");
   await row.getByRole("button", { name: "保存" }).click();
-  // td順: 名前/IngestKey/単位/下限/上限/状態/操作
-  await expect(row.locator("td").nth(4)).toHaveText("50");
+  await expect(row.locator("td").nth(4)).toHaveText("— / 50");
 
   await sendReading(request, ingestKey, 55);
 
@@ -32,6 +33,8 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   const alarmRow = page.locator("tr", { hasText: sensorName });
   await expect(alarmRow).toBeVisible({ timeout: 15_000 });
   await expect(alarmRow.getByText("上限超過")).toBeVisible();
+  // 重故障のしきい値を超えたので重故障（通常通知）として扱われることを確認
+  await expect(alarmRow.getByText("🚨 重故障")).toBeVisible();
 
   await alarmRow.getByRole("button", { name: "確認" }).click();
   // 「確認済み」ボタンは常時表示のステータスタブと名前が衝突するため、

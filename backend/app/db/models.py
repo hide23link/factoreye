@@ -31,6 +31,13 @@ class ThresholdBreached(StrEnum):
     MAX = "max"
 
 
+class AlarmSeverity(StrEnum):
+    # 軽故障: Discordではサイレント送信（通知音・プッシュ無し、チャンネルには表示）
+    WARNING = "warning"
+    # 重故障: Discordで通常送信（通知音・プッシュあり）
+    CRITICAL = "critical"
+
+
 # ──────────────────────────────────────────────────────────────
 # Sensor
 # ──────────────────────────────────────────────────────────────
@@ -43,8 +50,16 @@ class Sensor(SQLModel, table=True):
     # デバイス側は POST /api/ingest/readings にこの値を含めて送信する
     ingest_key: str = Field(unique=True, max_length=100, index=True)
     unit: str = Field(max_length=20)
-    threshold_min: float | None = None
-    threshold_max: float | None = None
+    # 2段階のしきい値（軽故障/重故障）。各方向・各段階は独立してnull許容（例: 軽故障だけ設定し
+    # 重故障は無しも可。重故障のほうが外側＝より極端な値になる想定だが強制はしない）
+    threshold_min_warning: float | None = None
+    threshold_min_critical: float | None = None
+    threshold_max_warning: float | None = None
+    threshold_max_critical: float | None = None
+    # 不感帯（ヒステリシス）: 閾値ぎりぎりで値が揺れた際に発生/解除を繰り返す「アラームのチラつき」
+    # を防ぐ。発生はしきい値を超えた瞬間（不感帯なし）、解除は「しきい値 ∓ 不感帯」を
+    # 超えて戻るまで待つ、という非対称な扱いにする（検知の即時性は落とさない）
+    threshold_dead_band: float = Field(default=0.0)
     enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
@@ -101,6 +116,10 @@ class Alarm(SQLModel, table=True):
     value: float
     status: AlarmStatus = Field(default=AlarmStatus.ACTIVE)
     threshold_breached: ThresholdBreached
+    severity: AlarmSeverity = Field(default=AlarmSeverity.CRITICAL)
+    # 重故障の再通知（NotificationSettings.critical_repeat_enabled）の間隔判定に使う。
+    # 通知を送るたび（初回発火・重要度変化・再通知）に更新する
+    last_notified_at: datetime | None = None
 
     sensor: Sensor = Relationship(back_populates="alarms")
 
@@ -185,3 +204,20 @@ class PluginConfig(SQLModel, table=True):
     data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     plugin: Plugin = Relationship(back_populates="plugin_configs")
+
+
+# ──────────────────────────────────────────────────────────────
+# NotificationSettings（シングルトン、常にid=1の1行のみ）
+# ──────────────────────────────────────────────────────────────
+class NotificationSettings(SQLModel, table=True):
+    __tablename__ = "notification_settings"
+
+    id: int = Field(default=1, primary_key=True)
+    # 重故障・軽故障で別々のDiscord Webhookに送り分けられるよう、それぞれ専用のURLを持つ
+    # （例: 重故障は緊急対応チャンネル、軽故障はログ用チャンネルに分ける運用を想定）
+    discord_webhook_url_critical: str = Field(default="", max_length=500)
+    discord_webhook_url_warning: str = Field(default="", max_length=500)
+    enabled: bool = Field(default=True)
+    # 重故障のみ: 未解決のまま一定時間経過したら同じアラームを再通知する（チェックを外せば初回のみ）
+    critical_repeat_enabled: bool = Field(default=False)
+    critical_repeat_interval_minutes: int = Field(default=30)

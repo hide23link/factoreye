@@ -2,6 +2,7 @@ import type {
   Alarm,
   Dashboard,
   DashboardDetail,
+  NotificationSettings,
   Plugin,
   Reading,
   ReadingAggregate,
@@ -43,8 +44,11 @@ export const createSensor = (data: {
   name: string;
   ingestKey: string;
   unit: string;
-  thresholdMin?: number | null;
-  thresholdMax?: number | null;
+  thresholdMinWarning?: number | null;
+  thresholdMinCritical?: number | null;
+  thresholdMaxWarning?: number | null;
+  thresholdMaxCritical?: number | null;
+  thresholdDeadBand?: number;
 }) => request<Sensor>("/api/sensors", { method: "POST", body: JSON.stringify(data) });
 
 export const updateSensor = (
@@ -52,8 +56,11 @@ export const updateSensor = (
   data: Partial<{
     name: string;
     unit: string;
-    thresholdMin: number | null;
-    thresholdMax: number | null;
+    thresholdMinWarning: number | null;
+    thresholdMinCritical: number | null;
+    thresholdMaxWarning: number | null;
+    thresholdMaxCritical: number | null;
+    thresholdDeadBand: number;
     enabled: boolean;
   }>,
 ) => request<Sensor>(`/api/sensors/${id}`, { method: "PUT", body: JSON.stringify(data) });
@@ -155,4 +162,16 @@ export const updatePluginConfig = (name: string, config: Record<string, unknown>
   request<Plugin>(`/api/plugins/${name}/config`, {
     method: "PUT",
     body: JSON.stringify({ config }),
+  });
+
+// ---- Notification Settings ----
+export const fetchNotificationSettings = () =>
+  request<NotificationSettings>("/api/settings/notifications");
+
+export const updateNotificationSettings = (
+  data: Partial<NotificationSettings>,
+) =>
+  request<NotificationSettings>("/api/settings/notifications", {
+    method: "PUT",
+    body: JSON.stringify(data),
   });

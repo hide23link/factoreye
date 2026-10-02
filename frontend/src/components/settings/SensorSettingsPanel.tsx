@@ -11,6 +11,22 @@ function toThreshold(v: NumOrBlank): number | null {
   return v === "" ? null : v;
 }
 
+function thresholdInput(
+  value: NumOrBlank,
+  onChange: (v: NumOrBlank) => void,
+  placeholder = "なし",
+) {
+  return (
+    <input
+      type="number"
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+      className="w-16 rounded border border-gray-300 px-1.5 py-1 text-sm"
+    />
+  );
+}
+
 // よく使う単位のプリセット。<datalist>なので一覧から選ぶことも自由入力することもできる
 const UNIT_PRESETS = ["°C", "%", "MPa", "kPa", "Pa", "V", "A", "W", "kWh", "rpm", "Hz", "mm", "L", "kg"];
 
@@ -24,8 +40,11 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
   const [isEditing, setEditing] = useState(false);
   const [name, setName] = useState(sensor.name);
   const [unit, setUnit] = useState(sensor.unit);
-  const [thresholdMin, setThresholdMin] = useState<NumOrBlank>(sensor.thresholdMin ?? "");
-  const [thresholdMax, setThresholdMax] = useState<NumOrBlank>(sensor.thresholdMax ?? "");
+  const [minWarning, setMinWarning] = useState<NumOrBlank>(sensor.thresholdMinWarning ?? "");
+  const [minCritical, setMinCritical] = useState<NumOrBlank>(sensor.thresholdMinCritical ?? "");
+  const [maxWarning, setMaxWarning] = useState<NumOrBlank>(sensor.thresholdMaxWarning ?? "");
+  const [maxCritical, setMaxCritical] = useState<NumOrBlank>(sensor.thresholdMaxCritical ?? "");
+  const [deadBand, setDeadBand] = useState<NumOrBlank>(sensor.thresholdDeadBand);
   const [error, setError] = useState<string | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["sensors"] });
@@ -35,8 +54,11 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
       updateSensor(sensor.id, {
         name,
         unit,
-        thresholdMin: toThreshold(thresholdMin),
-        thresholdMax: toThreshold(thresholdMax),
+        thresholdMinWarning: toThreshold(minWarning),
+        thresholdMinCritical: toThreshold(minCritical),
+        thresholdMaxWarning: toThreshold(maxWarning),
+        thresholdMaxCritical: toThreshold(maxCritical),
+        thresholdDeadBand: deadBand === "" ? 0 : deadBand,
       }),
     onSuccess: () => {
       void invalidate();
@@ -67,7 +89,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
 
   const errorRow = error && (
     <tr className="border-b border-gray-100 bg-red-50">
-      <td colSpan={7} className="px-2 py-1 text-xs text-red-600">
+      <td colSpan={8} className="px-2 py-1 text-xs text-red-600">
         {error}
       </td>
     </tr>
@@ -94,21 +116,26 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
             />
           </td>
           <td className="p-2">
-            <input
-              type="number"
-              placeholder="なし"
-              value={thresholdMin}
-              onChange={(e) => setThresholdMin(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
-            />
+            <div className="flex items-center gap-1">
+              {thresholdInput(minWarning, setMinWarning)}
+              <span className="text-gray-400">/</span>
+              {thresholdInput(maxWarning, setMaxWarning)}
+            </div>
+          </td>
+          <td className="p-2">
+            <div className="flex items-center gap-1">
+              {thresholdInput(minCritical, setMinCritical)}
+              <span className="text-gray-400">/</span>
+              {thresholdInput(maxCritical, setMaxCritical)}
+            </div>
           </td>
           <td className="p-2">
             <input
               type="number"
-              placeholder="なし"
-              value={thresholdMax}
-              onChange={(e) => setThresholdMax(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+              min={0}
+              value={deadBand}
+              onChange={(e) => setDeadBand(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-14 rounded border border-gray-300 px-1.5 py-1 text-sm"
             />
           </td>
           <td className="p-2 text-sm text-gray-400">{sensor.enabled ? "有効" : "無効"}</td>
@@ -141,8 +168,13 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
         <td className="p-2 text-sm font-medium text-gray-900">{sensor.name}</td>
         <td className="p-2 font-mono text-xs text-gray-400">{sensor.ingestKey}</td>
         <td className="p-2 text-sm text-gray-600">{sensor.unit}</td>
-        <td className="p-2 text-sm text-gray-600">{sensor.thresholdMin ?? "—"}</td>
-        <td className="p-2 text-sm text-gray-600">{sensor.thresholdMax ?? "—"}</td>
+        <td className="p-2 text-sm text-gray-600">
+          {sensor.thresholdMinWarning ?? "—"} / {sensor.thresholdMaxWarning ?? "—"}
+        </td>
+        <td className="p-2 text-sm text-gray-600">
+          {sensor.thresholdMinCritical ?? "—"} / {sensor.thresholdMaxCritical ?? "—"}
+        </td>
+        <td className="p-2 text-sm text-gray-600">{sensor.thresholdDeadBand}</td>
         <td className="p-2 text-sm">
           <button
             type="button"
@@ -255,6 +287,9 @@ export function SensorSettingsPanel() {
           追加
         </button>
       </form>
+      <p className="mb-3 text-xs text-gray-400">
+        しきい値（軽故障・重故障・不感帯）は作成後、一覧の「編集」から設定します。
+      </p>
       <datalist id="unit-presets">
         {UNIT_PRESETS.map((u) => (
           <option key={u} value={u} />
@@ -271,8 +306,9 @@ export function SensorSettingsPanel() {
               <th className="p-2">名前</th>
               <th className="p-2">Ingest Key</th>
               <th className="p-2">単位</th>
-              <th className="p-2">下限</th>
-              <th className="p-2">上限</th>
+              <th className="p-2">軽故障（下限/上限）</th>
+              <th className="p-2">重故障（下限/上限）</th>
+              <th className="p-2">不感帯</th>
               <th className="p-2">状態</th>
               <th className="p-2" />
             </tr>

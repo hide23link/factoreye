@@ -11,9 +11,6 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-this-in-production"
     frontend_url: str = "http://localhost:3001"
 
-    # アラーム通知用Discord Webhook URL（未設定なら送信をスキップする）
-    discord_webhook_url: str = ""
-
     @property
     def debug(self) -> bool:
         return self.environment != "production"

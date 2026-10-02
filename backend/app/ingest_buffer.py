@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.alarm_engine import evaluate_alarms
-from app.db.models import Reading
+from app.db.models import AlarmSeverity, NotificationSettings, Reading
 from app.db.session import engine
 from app.notifications import send_alarm_discord
 from app.plugins.base import SensorReadingEvent
@@ -73,11 +73,28 @@ async def flush_once() -> int:
                 for p in pending
             ]
         )
-        notifications = await evaluate_alarms(session, pending)
+        # Webhook URL/有効フラグ/再通知設定はDB管理（Settings画面から変更、2026-10-02に
+        # .envから移行）。重故障の再通知判定にも使うためevaluate_alarms呼び出し前に取得する
+        notif_settings = await session.get(NotificationSettings, 1)
+        notifications = await evaluate_alarms(session, pending, notif_settings)
+        # 重故障・軽故障で別々のURLに送り分ける。セッションがまだ開いている今のうちに
+        # プレーン値へ退避する
+        webhook_urls = {
+            AlarmSeverity.CRITICAL: (
+                notif_settings.discord_webhook_url_critical if notif_settings else ""
+            ),
+            AlarmSeverity.WARNING: (
+                notif_settings.discord_webhook_url_warning if notif_settings else ""
+            ),
+        }
+        notify_enabled = notif_settings.enabled if notif_settings else False
         await session.commit()
 
-    for notification in notifications:
-        _fire_and_forget(send_alarm_discord(notification))
+    if notify_enabled:
+        for notification in notifications:
+            webhook_url = webhook_urls[notification.severity]
+            if webhook_url:
+                _fire_and_forget(send_alarm_discord(webhook_url, notification))
 
     for p in pending:
         await dispatch_reading(

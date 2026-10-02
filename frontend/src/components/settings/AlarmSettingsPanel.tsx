@@ -55,6 +55,7 @@ export function AlarmSettingsPanel() {
           <thead>
             <tr className="border-b border-gray-200 text-xs text-gray-500">
               <th className="p-2">センサー</th>
+              <th className="p-2">重要度</th>
               <th className="p-2">値</th>
               <th className="p-2">超過方向</th>
               <th className="p-2">発生</th>
@@ -69,6 +70,17 @@ export function AlarmSettingsPanel() {
                 <tr key={alarm.id} className="border-b border-gray-100">
                   <td className="p-2 text-sm font-medium text-gray-900">
                     {sensor?.name ?? alarm.sensorId}
+                  </td>
+                  <td className="p-2 text-sm">
+                    {alarm.severity === "critical" ? (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
+                        🚨 重故障
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">
+                        ⚠️ 軽故障
+                      </span>
+                    )}
                   </td>
                   <td className="p-2 text-sm text-gray-600">{alarm.value}</td>
                   <td className="p-2 text-sm text-gray-600">

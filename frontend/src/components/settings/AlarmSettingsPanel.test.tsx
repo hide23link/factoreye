@@ -18,8 +18,11 @@ const sensor: Sensor = {
   name: "圧力計A-1",
   ingestKey: "sensor-abc",
   unit: "MPa",
-  thresholdMin: null,
-  thresholdMax: 10,
+  thresholdMinWarning: null,
+  thresholdMinCritical: null,
+  thresholdMaxWarning: null,
+  thresholdMaxCritical: 10,
+  thresholdDeadBand: 0,
   enabled: true,
   createdAt: "2024-01-01T00:00:00.000Z",
   updatedAt: "2024-01-01T00:00:00.000Z",
@@ -35,6 +38,7 @@ const activeAlarm: Alarm = {
   value: 12.5,
   status: "active",
   thresholdBreached: "max",
+  severity: "critical",
 };
 
 afterEach(() => {

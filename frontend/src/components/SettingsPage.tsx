@@ -1,14 +1,16 @@
 import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
+import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
 import { PluginSettingsPanel } from "./settings/PluginSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 
-type SettingsTab = "sensors" | "alarms" | "plugins";
+type SettingsTab = "sensors" | "alarms" | "notifications" | "plugins";
 
 const TABS: { value: SettingsTab; label: string }[] = [
   { value: "sensors", label: "センサー" },
   { value: "alarms", label: "アラーム" },
+  { value: "notifications", label: "通知" },
   { value: "plugins", label: "プラグイン" },
 ];
 
@@ -39,6 +41,7 @@ export function SettingsPage() {
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         {tab === "sensors" && <SensorSettingsPanel />}
         {tab === "alarms" && <AlarmSettingsPanel />}
+        {tab === "notifications" && <NotificationSettingsPanel />}
         {tab === "plugins" && <PluginSettingsPanel />}
       </div>
     </div>

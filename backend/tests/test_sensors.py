@@ -14,8 +14,8 @@ async def test_create_sensor(client: httpx.AsyncClient) -> None:
             "name": "圧力計A-1",
             "ingestKey": "pressure-a1",
             "unit": "MPa",
-            "thresholdMin": 2.0,
-            "thresholdMax": 8.5,
+            "thresholdMinCritical": 2.0,
+            "thresholdMaxCritical": 8.5,
         },
     )
     assert resp.status_code == 201
@@ -23,7 +23,7 @@ async def test_create_sensor(client: httpx.AsyncClient) -> None:
     assert body["id"]
     assert body["name"] == "圧力計A-1"
     assert body["ingestKey"] == "pressure-a1"
-    assert body["thresholdMax"] == 8.5
+    assert body["thresholdMaxCritical"] == 8.5
     assert body["enabled"] is True
 
 
@@ -63,9 +63,9 @@ async def test_get_update_delete_sensor(client: httpx.AsyncClient) -> None:
     assert got.status_code == 200
     assert got.json()["unit"] == "%"
 
-    updated = await client.put(f"/api/sensors/{sensor_id}", json={"thresholdMax": 65.0})
+    updated = await client.put(f"/api/sensors/{sensor_id}", json={"thresholdMaxCritical": 65.0})
     assert updated.status_code == 200
-    assert updated.json()["thresholdMax"] == 65.0
+    assert updated.json()["thresholdMaxCritical"] == 65.0
 
     deleted = await client.delete(f"/api/sensors/{sensor_id}")
     assert deleted.status_code == 204
@@ -108,7 +108,7 @@ async def test_delete_sensor_cascades_readings_and_alarms(client: httpx.AsyncCli
             "name": "カスケード削除テスト用",
             "ingestKey": "cascade-delete-sensor",
             "unit": "C",
-            "thresholdMax": 10.0,
+            "thresholdMaxCritical": 10.0,
         },
     )
     sensor_id = created.json()["id"]

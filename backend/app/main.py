@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api import alarms, dashboards, ingest, plugins, readings, sensors, widgets
+from app.api import settings as settings_api
 from app.config import settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
@@ -66,6 +67,7 @@ app.include_router(alarms.router)
 app.include_router(dashboards.router)
 app.include_router(widgets.router)
 app.include_router(plugins.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/health")

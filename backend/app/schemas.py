@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from app.db.models import AlarmStatus, ThresholdBreached
+from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached
 
 
 class CamelModel(BaseModel):
@@ -26,15 +26,21 @@ class SensorCreate(CamelModel):
     name: str = Field(min_length=1, max_length=100)
     ingest_key: str = Field(min_length=1, max_length=100)
     unit: str = Field(min_length=1, max_length=20)
-    threshold_min: float | None = None
-    threshold_max: float | None = None
+    threshold_min_warning: float | None = None
+    threshold_min_critical: float | None = None
+    threshold_max_warning: float | None = None
+    threshold_max_critical: float | None = None
+    threshold_dead_band: float = 0.0
 
 
 class SensorUpdate(CamelModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     unit: str | None = Field(default=None, min_length=1, max_length=20)
-    threshold_min: float | None = None
-    threshold_max: float | None = None
+    threshold_min_warning: float | None = None
+    threshold_min_critical: float | None = None
+    threshold_max_warning: float | None = None
+    threshold_max_critical: float | None = None
+    threshold_dead_band: float | None = None
     enabled: bool | None = None
 
 
@@ -45,8 +51,11 @@ class SensorRead(CamelModel):
     name: str
     ingest_key: str
     unit: str
-    threshold_min: float | None
-    threshold_max: float | None
+    threshold_min_warning: float | None
+    threshold_min_critical: float | None
+    threshold_max_warning: float | None
+    threshold_max_critical: float | None
+    threshold_dead_band: float
     enabled: bool
     created_at: datetime
     updated_at: datetime
@@ -121,6 +130,7 @@ class AlarmRead(CamelModel):
     value: float
     status: AlarmStatus
     threshold_breached: ThresholdBreached
+    severity: AlarmSeverity
 
 
 class AlarmListResponse(CamelModel):
@@ -225,3 +235,26 @@ class PluginRead(CamelModel):
 
 class PluginConfigUpdate(CamelModel):
     config: dict[str, Any]
+
+
+# ──────────────────────────────────────────────────────────────
+# NotificationSettings
+# ──────────────────────────────────────────────────────────────
+
+
+class NotificationSettingsRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    discord_webhook_url_critical: str
+    discord_webhook_url_warning: str
+    enabled: bool
+    critical_repeat_enabled: bool
+    critical_repeat_interval_minutes: int
+
+
+class NotificationSettingsUpdate(CamelModel):
+    discord_webhook_url_critical: str | None = Field(default=None, max_length=500)
+    discord_webhook_url_warning: str | None = Field(default=None, max_length=500)
+    enabled: bool | None = None
+    critical_repeat_enabled: bool | None = None
+    critical_repeat_interval_minutes: int | None = Field(default=None, ge=1)

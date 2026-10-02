@@ -4,6 +4,7 @@ import {
   fetchAlarms,
   fetchDashboard,
   fetchDashboards,
+  fetchNotificationSettings,
   fetchPlugins,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
@@ -35,6 +36,9 @@ export const useAlarms = (status?: string) =>
 
 export const usePlugins = () =>
   useQuery({ queryKey: ["plugins"], queryFn: fetchPlugins, refetchInterval: POLL_INTERVAL_MS });
+
+export const useNotificationSettings = () =>
+  useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });
 
 export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({
