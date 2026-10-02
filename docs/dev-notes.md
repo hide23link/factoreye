@@ -130,7 +130,7 @@
 - 原因: `backend/Dockerfile`のCMDが`uvicorn app.main:app ...`のみで、どこにも`alembic upgrade head`を実行する手順が無かった（既存のdocker-composeボリュームには過去の手動マイグレーション適用結果が残っていたため、今回のボリューム消失事故が起きるまで誰も気づいていなかった）
 - 影響: 新設した`e2e-test.yml`はGitHub Actionsの完全フレッシュなrunnerで動くため、このコミットのままでは初回実行から確実に失敗する状態だった
 - **修正**: `backend/Dockerfile`のCMDを`sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"`に変更。postgresの`depends_on: condition: service_healthy`で起動順序は保証済みのため追加のリトライ処理は不要
-- 検証: qa-agent側で`docker compose run --rm backend alembic upgrade head`を手動実行して原因を確定済み。dev側では今回Docker操作がauto modeの権限クラシファイアに（直前の事故を踏まえて）ブロックされたため、実機での再検証ができていない。**次回Dockerが使えるタイミングで`docker compose up -d --build`からの起動確認、および`e2e-test.yml`がGitHub Actions上で実際にグリーンになることの確認が必要**
+- 検証: qa-agent側で`docker compose run --rm backend alembic upgrade head`を手動実行して原因を確定済み。dev側では今回Docker操作がauto modeの権限クラシファイアに（直前の事故を踏まえて）ブロックされローカルでの再検証ができなかったため、修正をpushして**GitHub Actions上のフレッシュなrunnerで直接検証**する方針に切り替えた。結果は下記参照。
 
 **High: `alarm-flow.spec.ts`のack検証アサーションが無意味だった**
 - 原因: `page.getByRole("button", { name: "確認済み" })`が、ackボタンのクリックとは無関係に常時表示されているステータスフィルタタブ（同じ文言）にヒットしてしまい、ackが実際に成功したかを何も検証できていなかった（テスト自体はたまたま毎回パスしていた）
@@ -142,3 +142,10 @@
 - frontendのカバレッジ計測ツール（`@vitest/coverage-v8`等）未導入。数値目標（guidelines/12: 70%以上/最低50%）を検証する手段が無い
 - `SetupWizard.tsx`・`WidgetFormModal.tsx`・`DashboardView.tsx`・4つのwidgetコンポーネント・`lib/api.ts`の大半の関数が単体/コンポーネントテスト0件のまま（E2Eのハッピーパスでのみ間接的にカバー）
 - 自宅LXC self-hosted runner移行時、`docker compose down -v`がrunner間で永続化されたdockerホスト上で動くと、project名の衝突により今回と同種のボリューム削除事故がCI経由でも起こりうる。移行時に専用project名（`docker compose -p factoreye-ci ...`等）を使うことをinfra-agentへ要申し送り
+
+**GitHub Actionsのフレッシュなrunnerで実際に検証した結果、上記のCritical修正だけでは不十分で、さらに2件見つかった（ローカルの使い回しdev DBでは絶対に踏まない、フレッシュ環境特有のバグ）**:
+
+1. **`e2e-test.yml`の「Wait for backend/frontend」が実質リトライしていなかった**: `curl --retry-connrefused`は"connection refused"のみ再試行対象で、コンテナのポートは開いているがアプリがまだlistenしていない瞬間に起きる「Recv failure: Connection reset by peer」は対象外。そのためpostgresが起動し終えた直後、backend/frontendがまだ起動準備中の1回目の呼び出しで即座に失敗していた（`docker compose logs`にbackend-1の出力が1行も無い段階で落ちていたことから確定）。`curl --retry`任せをやめ、個々のcurl失敗を無視して`sleep 3`を挟みながら最大40回ポーリングする素朴なループに変更して解決。
+2. **`setup-wizard.spec.ts`がダッシュボード0件時にボタン名の部分一致で2件ヒットしていた**: `DashboardListPage`はダッシュボードが1件も無いと「セットアップガイドを始める」というCTAボタンを表示する。ヘッダーnavの「セットアップガイド」ボタンをPlaywrightのデフォルト（部分一致）の`getByRole`で探すと、このCTAボタンにも同時にヒットしてstrict mode violationになる。ローカル検証時はdev DBに既存ダッシュボードがあったため0件状態に一度も遭遇せず見逃していた。`page.locator("nav").getByRole(...)`でヘッダーnav内に絞って解決。
+
+**教訓**: 今回のSprint 7実装・レビュー・CI検証を通じて、「ローカルの使い回しdev DB」と「フレッシュな環境（CI・新規セットアップするユーザー）」で挙動が変わる箇所が3つ（マイグレーション未適用・ヘルスチェックの競合状態・ダッシュボード0件時のUI分岐）も見つかった。E2E/統合テストは可能な限りフレッシュな状態（ボリューム未作成）で一度は通しておくべき、というのが今回最大の学び。最終的に`e2e-test.yml`はGitHub Actions上のフレッシュなrunnerで3シナリオ連続グリーンを確認済み（commit `67ff51b`）。
