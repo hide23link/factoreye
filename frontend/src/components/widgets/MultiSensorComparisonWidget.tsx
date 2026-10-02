@@ -86,6 +86,12 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
                 name={sensors?.find((s) => s.id === sensorId)?.name ?? sensorId}
                 stroke={PALETTE[i % PALETTE.length]}
                 dot={false}
+                // 各センサーのReadingは独立したタイミングで記録されるため、同一ミリ秒に
+                // 揃うことはほぼ無い（= 行のほとんどは自分のdataKeyがundefined）。
+                // connectNullsが無いとRechartsはその度に線を途切れさせてしまい、
+                // 実質何も表示されなくなる。自分の実データ点だけを時系列で繋げばよいので
+                // 常にtrueにする
+                connectNulls
               />
             ))}
           </LineChart>
