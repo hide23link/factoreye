@@ -8,6 +8,7 @@ import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
 import { MultiSensorComparisonWidget } from "./widgets/MultiSensorComparisonWidget";
 import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
 import { SensorGraphWidget } from "./widgets/SensorGraphWidget";
+import { StatValueWidget } from "./widgets/StatValueWidget";
 
 function WidgetBody({ widget }: { widget: Widget }) {
   switch (widget.type) {
@@ -19,6 +20,8 @@ function WidgetBody({ widget }: { widget: Widget }) {
       return <ProductionStatusWidget widget={widget} />;
     case "MultiSensorComparison":
       return <MultiSensorComparisonWidget widget={widget} />;
+    case "StatValue":
+      return <StatValueWidget widget={widget} />;
     default:
       return <p className="text-sm text-gray-400">未対応のウィジェットタイプ: {widget.type}</p>;
   }

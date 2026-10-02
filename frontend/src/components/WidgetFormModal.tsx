@@ -11,6 +11,7 @@ const WIDGET_TYPES: { value: WidgetType; label: string }[] = [
   { value: "AlarmAlert", label: "アラーム一覧" },
   { value: "ProductionStatus", label: "稼働ステータス" },
   { value: "MultiSensorComparison", label: "複数センサー比較" },
+  { value: "StatValue", label: "数値（Stat）" },
 ];
 
 // グラフ色のプリセット。普段はここから選ぶだけでよく、細かく指定したい時だけRGB入力に切り替える
@@ -81,6 +82,7 @@ export function WidgetFormModal({
   const [yAxisMax, setYAxisMax] = useState<NumOrBlank>(widget?.config.yAxisMax ?? "");
   const [onThreshold, setOnThreshold] = useState<NumOrBlank>(widget?.config.onThreshold ?? 0);
   const [dailyTarget, setDailyTarget] = useState<NumOrBlank>(widget?.config.dailyTarget ?? "");
+  const [decimals, setDecimals] = useState<NumOrBlank>(widget?.config.decimals ?? 1);
 
   const buildConfig = (): WidgetConfig =>
     type === "MultiSensorComparison"
@@ -103,7 +105,12 @@ export function WidgetFormModal({
               onThreshold: toConfigNumber(onThreshold),
               dailyTarget: toConfigNumber(dailyTarget),
             }
-          : {};
+          : type === "StatValue"
+            ? {
+                timeRangeHours,
+                decimals: toConfigNumber(decimals) ?? 1,
+              }
+            : {};
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -130,7 +137,8 @@ export function WidgetFormModal({
     },
   });
 
-  const needsSingleSensor = type === "SensorGraph" || type === "ProductionStatus";
+  const needsSingleSensor =
+    type === "SensorGraph" || type === "ProductionStatus" || type === "StatValue";
   const needsMultiSensor = type === "MultiSensorComparison";
   const needsAxisConfig = type === "SensorGraph" || type === "MultiSensorComparison";
 
@@ -357,6 +365,41 @@ export function WidgetFormModal({
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
             </label>
+          </>
+        )}
+
+        {type === "StatValue" && (
+          <>
+            <label className="mb-2 block text-sm">
+              スパークライン表示: 直近
+              <span className="mx-1 inline-flex items-center">
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.5}
+                  value={timeRangeHours}
+                  onChange={(e) => setTimeRangeHours(Number(e.target.value))}
+                  className="w-20 rounded border border-gray-300 px-2 py-1"
+                />
+              </span>
+              時間
+            </label>
+            <label className="mb-2 block text-sm">
+              小数桁数
+              <input
+                type="number"
+                min={0}
+                max={6}
+                value={decimals}
+                onChange={(e) =>
+                  setDecimals(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className="mt-1 w-20 rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+            <p className="mb-2 text-xs text-gray-400">
+              色はセンサーの軽故障/重故障しきい値（設定 &gt; センサー管理）に応じて自動で変わります。
+            </p>
           </>
         )}
 
