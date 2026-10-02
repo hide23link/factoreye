@@ -11,7 +11,7 @@ DetachedInstanceErrorになる（セッションが閉じた後にSensor/Alarm�
 """
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -53,11 +53,15 @@ async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) 
     emoji, severity_label = _SEVERITY_LABEL[notification.severity]
     repeat_suffix = "（再通知・未解決）" if notification.is_repeat else ""
     direction = _DIRECTION_LABEL[notification.threshold_breached]
+    # 再通知時は発生時刻と送信時刻がずれる（triggered_atは最初の発生時刻のまま）ため、
+    # どれだけ未解決のまま継続しているかが分かるよう両方を併記する
+    sent_at = datetime.now(UTC)
 
     content = (
         f"{emoji} **{severity_label}: {notification.sensor_name}**{repeat_suffix}\n"
         f"{notification.value}{notification.sensor_unit}（{direction}）\n"
-        f"{_format_jst(notification.triggered_at)}"
+        f"発生: {_format_jst(notification.triggered_at)}\n"
+        f"送信: {_format_jst(sent_at)}"
     )
 
     body: dict[str, object] = {"content": content}
