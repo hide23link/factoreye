@@ -1,4 +1,5 @@
 import { useQueries } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -11,7 +12,9 @@ import {
 } from "recharts";
 
 import { useSensors } from "../../hooks/queries";
+import { useNow } from "../../hooks/useNow";
 import { fetchSensorReadings } from "../../lib/api";
+import { formatChartTime } from "../../lib/time";
 import type { Widget } from "../../types";
 
 const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
@@ -20,8 +23,11 @@ const POLL_INTERVAL_MS = 5000;
 export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const sensorIds = widget.config.sensorIds ?? [];
+  // 「横軸: 直近 N 時間」（WidgetFormModalで設定）がそのまま表示ウィンドウの幅になる
   const hours = widget.config.timeRangeHours ?? 1;
   const from = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  // 新しいデータが来ていなくても横軸（表示ウィンドウ）を時間経過で動かし続けるための現在時刻
+  const now = useNow();
 
   const results = useQueries({
     queries: sensorIds.map((sensorId) => ({
@@ -35,22 +41,21 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">比較対象のセンサーが設定されていません</p>;
   }
 
-  const formatTime = (iso: string) =>
-    hours > 24
-      ? new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
-      : new Date(iso).toLocaleTimeString("ja-JP");
+  const windowMs = hours * 60 * 60 * 1000;
+  const domain: [number, number] = [now - windowMs, now];
+  const formatTime = (ms: number) => formatChartTime(ms, hours);
 
-  const seriesByTime = new Map<string, Record<string, number | string>>();
+  const seriesByTime = new Map<number, Record<string, number>>();
   sensorIds.forEach((sensorId, i) => {
     const readings = results[i]?.data?.readings ?? [];
     for (const r of [...readings].reverse()) {
-      const time = formatTime(r.recordedAt);
+      const time = new Date(r.recordedAt).getTime();
       const row = seriesByTime.get(time) ?? { time };
       row[sensorId] = r.value;
       seriesByTime.set(time, row);
     }
   });
-  const chartData = Array.from(seriesByTime.values());
+  const chartData = Array.from(seriesByTime.values()).sort((a, b) => a.time - b.time);
   const yDomain: [number | "auto", number | "auto"] = [
     widget.config.yAxisMin ?? "auto",
     widget.config.yAxisMax ?? "auto",
@@ -63,9 +68,15 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" tick={{ fontSize: 10 }} />
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={domain}
+              tickFormatter={formatTime}
+              tick={{ fontSize: 10 }}
+            />
             <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
-            <Tooltip />
+            <Tooltip labelFormatter={(label: ReactNode) => formatTime(Number(label))} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             {sensorIds.map((sensorId, i) => (
               <Line
