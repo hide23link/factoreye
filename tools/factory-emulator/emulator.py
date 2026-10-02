@@ -27,6 +27,7 @@ backendやclients/配下の公式クライアントとは別物。動作確認�
 from __future__ import annotations
 
 import json
+import os
 import random
 import sys
 import time
@@ -46,10 +47,14 @@ FACTOREYE_HOST = "http://localhost:8000"
 INGEST_API_KEY = "change-this-in-production"
 SEND_INTERVAL_SECONDS = 5.0
 
-MACHINE_NAME = "テスト機械1号機"
-SENSOR_PRODUCTION = "machine1-production"
-SENSOR_TEMPERATURE = "machine1-temperature"
-SENSOR_POWER = "machine1-power"
+# センサーのname/ingestKeyは一意制約（論理削除された行にも及ぶ、db/models.py参照）のため、
+# 以前のセンサーを削除せずに別名で動かしたい時はEMULATOR_SUFFIXで識別子をずらせる
+# （例: EMULATOR_SUFFIX=2 python3 emulator.py）
+_SUFFIX = os.environ.get("EMULATOR_SUFFIX", "")
+MACHINE_NAME = f"テスト機械1号機{_SUFFIX}"
+SENSOR_PRODUCTION = f"machine1-production{_SUFFIX}"
+SENSOR_TEMPERATURE = f"machine1-temperature{_SUFFIX}"
+SENSOR_POWER = f"machine1-power{_SUFFIX}"
 
 AMBIENT_TEMPERATURE = 22.0
 IDLE_POWER_KW = 0.4
