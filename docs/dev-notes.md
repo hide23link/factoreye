@@ -74,3 +74,19 @@
 **検証方法**: `tsc --noEmit`・`eslint .`は両方エラーなし。さらにDocker Desktopで`docker compose up -d --build`し、実際にChromeでウィザードを最初から最後まで実行（センサー作成→curlでテストデータ送信→自動遷移→ダッシュボード自動作成→グラフ表示まで確認）。設定画面でセンサーの上限閾値を50に変更後、値55のテストデータを送ったところ実際にアラームが発生→確認（ack）まで動作。プラグインの有効化トグルも実際にbackendの`PATCH .../enable`を呼び出し、有効化後は`on_reading`フックでstatsがカウントアップすることをcurlで確認済み。
 
 **ハマりどころ（今回の作業中に発覧、プラグインシステムとは無関係）**: ローカルのpostgresボリュームが`alembic_version`テーブルだけ残り実データテーブルが無い不整合な状態だった（過去のテストセッションの後始末漏れとみられる）。`DROP TABLE alembic_version`してから`alembic upgrade head`で復旧。今後同じ現象が出たら同じ手順で直せる。
+
+---
+
+### 2026-10-02: 【事故】pytestが開発用DBの全テーブルをdropしていた問題と再発防止
+
+**何が起きたか**: 上記「ハマりどころ」として何度も発生していた「`alembic_version`だけ残り実データテーブルが無い」現象の真因が判明。`backend/tests/conftest.py`の`_schema`フィクスチャ（session-scoped, autouse）はテストセッション終了時に`SQLModel.metadata.drop_all`で全テーブルを削除する。これ自体はテスト用DBに対しては正しい挙動だが、本セッション中は`docker run ... pytest ...`の`DATABASE_URL`を**開発者がdocker-composeで起動している本物のpostgresコンテナ（factoreye-postgres-1）** にそのまま向けてしまっていたため、pytest実行の度に**社長が実際にブラウザで作成していたセンサー・ダッシュボードのデータが丸ごと消えていた**。alembic_versionテーブルだけが生き残っていたのは、それがSQLModelのmetadata管理下になく`drop_all`の対象外だったため。
+
+**影響**: 社長が手動で作成したセンサー・ダッシュボードのデータが複数回失われた（バックアップなし、復元不可）。実害があったことをお詫びし、ここに記録する。
+
+**再発防止**:
+- postgresコンテナ内に`factoreye_test`データベースを作成（`docker compose exec postgres psql -U factoreye -d factoreye -c "CREATE DATABASE factoreye_test OWNER factoreye;"`）
+- 以後、backendのテストをdocker経由で実行する際は、必ず`DATABASE_URL`のDB名を`factoreye`ではなく`factoreye_test`に向けること
+  ```
+  -e DATABASE_URL=postgresql+asyncpg://factoreye:password@factoreye-postgres-1:5432/factoreye_test
+  ```
+- CI（GitHub Actions）は専用のpostgres serviceコンテナを都度起動しており本番/開発データと無関係なため、この問題は起きない（ローカルでdocker-composeの開発用DBに相乗りする時だけ要注意）。
