@@ -1,10 +1,29 @@
-import { useSensorReadings, useSensors } from "../../hooks/queries";
+import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
 import type { Widget } from "../../types";
+
+// queryKeyが毎レンダー変わって無駄に再フェッチされないよう、分単位に丸めた境界を使う
+// （「直近1時間」「本日累計」は数十秒のズレが出ても実用上問題にならない）
+function startOfCurrentMinute(offsetMs = 0): string {
+  const d = new Date(Date.now() - offsetMs);
+  d.setSeconds(0, 0);
+  return d.toISOString();
+}
+
+function startOfTodayLocal(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
 
 export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const { data, isLoading } = useSensorReadings(widget.sensorId, 1);
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
+
+  const lastHourFrom = startOfCurrentMinute(60 * 60 * 1000);
+  const todayFrom = startOfTodayLocal();
+  const { data: lastHour } = useSensorReadingsAggregate(widget.sensorId, lastHourFrom);
+  const { data: today } = useSensorReadingsAggregate(widget.sensorId, todayFrom);
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
@@ -16,6 +35,9 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const latest = data.readings[0];
   const threshold = widget.config.onThreshold ?? 0;
   const isRunning = latest !== undefined && latest.value > threshold;
+  const dailyTarget = widget.config.dailyTarget;
+  const achievementRate =
+    dailyTarget && dailyTarget > 0 && today ? (today.sum / dailyTarget) * 100 : null;
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2">
@@ -27,9 +49,26 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
       >
         {isRunning ? "稼働中" : "停止中"}
       </span>
-      {latest && (
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-center text-xs text-gray-500">
+        <div>
+          <p className="text-base font-semibold text-gray-800">
+            {lastHour ? Math.round(lastHour.sum) : "—"}
+          </p>
+          <p>直近1時間 {sensor?.unit}</p>
+        </div>
+        <div>
+          <p className="text-base font-semibold text-gray-800">
+            {today ? Math.round(today.sum) : "—"}
+          </p>
+          <p>本日累計 {sensor?.unit}</p>
+        </div>
+      </div>
+
+      {achievementRate !== null && (
         <p className="text-xs text-gray-400">
-          最終値: {latest.value} {sensor?.unit}
+          目標達成率: {achievementRate.toFixed(0)}%（目標 {dailyTarget}
+          {sensor?.unit}）
         </p>
       )}
     </div>

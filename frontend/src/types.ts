@@ -17,6 +17,11 @@ export interface Reading {
   recordedAt: string;
 }
 
+export interface ReadingAggregate {
+  sum: number;
+  count: number;
+}
+
 export type AlarmStatus = "active" | "acknowledged" | "resolved";
 export type ThresholdBreached = "min" | "max";
 
@@ -44,6 +49,8 @@ export interface WidgetConfig {
   timeRangeHours?: number;
   sensorIds?: string[];
   onThreshold?: number;
+  // ProductionStatusWidget用: 本日の生産目標数（未指定なら達成率は表示しない）
+  dailyTarget?: number;
 }
 
 export interface Widget {

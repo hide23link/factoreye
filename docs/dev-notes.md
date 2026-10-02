@@ -149,3 +149,24 @@
 2. **`setup-wizard.spec.ts`がダッシュボード0件時にボタン名の部分一致で2件ヒットしていた**: `DashboardListPage`はダッシュボードが1件も無いと「セットアップガイドを始める」というCTAボタンを表示する。ヘッダーnavの「セットアップガイド」ボタンをPlaywrightのデフォルト（部分一致）の`getByRole`で探すと、このCTAボタンにも同時にヒットしてstrict mode violationになる。ローカル検証時はdev DBに既存ダッシュボードがあったため0件状態に一度も遭遇せず見逃していた。`page.locator("nav").getByRole(...)`でヘッダーnav内に絞って解決。
 
 **教訓**: 今回のSprint 7実装・レビュー・CI検証を通じて、「ローカルの使い回しdev DB」と「フレッシュな環境（CI・新規セットアップするユーザー）」で挙動が変わる箇所が3つ（マイグレーション未適用・ヘルスチェックの競合状態・ダッシュボード0件時のUI分岐）も見つかった。E2E/統合テストは可能な限りフレッシュな状態（ボリューム未作成）で一度は通しておくべき、というのが今回最大の学び。最終的に`e2e-test.yml`はGitHub Actions上のフレッシュなrunnerで3シナリオ連続グリーンを確認済み（commit `67ff51b`）。
+
+---
+
+### 2026-10-02: 生産数指標の拡充（分あたり→時間/日/目標達成率）
+
+**背景**: 社長から「生産数が分あたりではなく、時間あたりとか、日にちあたりとか、その日の予定数とか、もっと製造現場で必要な一般的な生産数に拡充してほしい」との要望。strategy-agentが市場調査（中小製造業の生産性指標・OEE等）を行い、Phase 0の非目標（複雑な生産管理システム化はしない）と整合する範囲として「時間あたり生産数・日次累計・日次目標達成率」をA案として採用（OEEは停止理由記録・シフトカレンダー等の新規データモデルが要るため見送り、将来追加を妨げない設計であることは確認済み）。
+
+**実装内容**:
+- **backend集計API新設**: `GET /api/sensors/{id}/readings/aggregate?from=<ISO>&to=<ISO任意>` を追加（`app/api/sensors.py`・`app/schemas.py`の`ReadingAggregate`）。SQLの`SUM`+`COUNT(1)`で集計し、生データ全件をフロントに返さない設計。pytestを6件追加（正常系・範囲外・空データ・センサー不在・from必須）、既存分と合わせて52件全通過、mypy/ruff/pip-auditも確認
+- **WidgetConfigにdailyTarget追加**: `frontend/src/types.ts`に`dailyTarget?: number`を追加。`WidgetFormModal.tsx`のProductionStatusタイプに「稼働中とみなす閾値」「本日の生産目標数」の入力欄を新設（`onThreshold`は既にconfig型にはあったが入力UIが無く設定不可能だった抜け漏れも合わせて解消）
+- **ProductionStatusWidget拡張**: 「稼働中/停止中」表示に加え、「直近1時間」「本日累計」の集計値と、`dailyTarget`設定時のみ「目標達成率」を表示
+- **emulator変更**: 「生産数」センサーの送信値を、瞬間的な0〜100の抽象指標から「直近5秒間で実際に生産した個数」という実カウント値（整数、単位「個」）に変更。内部の生産負荷指標（0〜100、温度・電力の計算にのみ使用）から導出し、通常運転中は生産数が0個に張り付かない（＝稼働中判定がチラつかない）よう平均値とノイズ幅を調整済み（`tools/factory-emulator/README.md`にも反映。旧バージョンで単位「個/分」のまま登録済みのセンサーは自動更新されないため、手動変更が必要な旨を明記）
+
+**検証方法**: backend（pytest 52件・mypy・ruff・pip-audit）、frontend（Vitest 30件・tsc --noEmit・ESLint）を全てエラーなしで確認。さらに実際にdocker-compose環境（Docker Desktop、フレッシュ寄りの状態）でbackend/frontendを再ビルド・起動し、emulatorを新コードで再起動してcurlで実データ（整数カウント値）を確認、`/readings/aggregate`エンドポイントを実際に叩いて集計結果を確認。E2E（Playwright、2シナリオ）も実行し、全通過を確認（下記「ハマりどころ」参照）。
+
+**ハマりどころ**:
+- `func.count(Reading.id)`はSQLModelのクラス属性がmypyには素のPython型（`int | None`）に見えてしまい弾かれる（このファイルで既出の別の箇所と同種の誤検知）。`func.count(1)`（`COUNT(1)`、行数を数えるだけなのでカラム指定は不要）に変更して解決
+- `session.execute()`で素朴に書いたところ、SQLModelから「`session.exec()`を使うべき」というDeprecationWarningが出た。多カラムselect（`func.sum`+`func.count`のタプル）でも`session.exec()`が問題なく`Row`タプルを返すことを確認し、そちらに統一
+- E2E実行時、直前のLANアクセス設定用`.env`（`VITE_API_URL=http://192.168.0.25:8000`等）が残ったままだったため、Playwrightが`localhost:3001`で開いたページのOriginとbackendのCORS許可Origin（`192.168.0.25:3001`）が食い違い、全シナリオが「backend未接続」「Failed to fetch」で失敗した。自分の実装のリグレッションではなく環境設定の残留が原因と確認（`.env`を一時的に外して再ビルド→E2E全通過を確認→LAN設定を復元して再ビルドし直した）。**教訓**: 同じdocker-composeスタックを「社長が他のPCから見る用」と「E2E検証用」で同時に使い回すと、ベースURL前提（localhost vs LAN IP）の食い違いで混乱しやすい。本来は分離すべきだが、Phase 0のソロ運用では都度一時的に戻す運用で許容する
+
+**次フェーズ**: OEEに着手する場合は、停止時間＋理由の記録（新規DowntimeEventテーブル相当）とシフトカレンダー（負荷時間の定義）が新規で必要（strategy-agentの分析参照）。

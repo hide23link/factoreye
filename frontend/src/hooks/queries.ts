@@ -6,6 +6,7 @@ import {
   fetchDashboards,
   fetchPlugins,
   fetchSensorReadings,
+  fetchSensorReadingsAggregate,
   fetchSensors,
 } from "../lib/api";
 
@@ -42,6 +43,21 @@ export const useSensorReadings = (sensorId: string | null, hours = 1) =>
       const from = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
       return fetchSensorReadings(sensorId as string, from);
     },
+    enabled: sensorId !== null,
+    refetchInterval: POLL_INTERVAL_MS,
+  });
+
+// from/toは呼び出し側（ウィジェット）が計算して渡す（例: 「直近1時間」「本日0時から」）。
+// pollごとに境界がわずかにズレてもキャッシュが無駄に増えないよう、分単位に丸めたISO文字列を
+// queryKeyにそのまま使う想定
+export const useSensorReadingsAggregate = (
+  sensorId: string | null,
+  from: string,
+  to?: string,
+) =>
+  useQuery({
+    queryKey: ["readings-aggregate", sensorId, from, to ?? null],
+    queryFn: () => fetchSensorReadingsAggregate(sensorId as string, from, to),
     enabled: sensorId !== null,
     refetchInterval: POLL_INTERVAL_MS,
   });

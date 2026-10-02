@@ -4,6 +4,7 @@ import type {
   DashboardDetail,
   Plugin,
   Reading,
+  ReadingAggregate,
   Sensor,
   Widget,
   WidgetConfig,
@@ -66,6 +67,16 @@ export const fetchSensorReadings = (sensorId: string, from?: string) => {
   if (from) params.set("from", from);
   return request<{ readings: Reading[]; total: number }>(
     `/api/sensors/${sensorId}/readings?${params.toString()}`,
+  );
+};
+
+// 時間/日単位の合計値（例: 直近1時間の生産数、本日累計）。生データを全件取得して
+// フロントで合算するのではなく、backend側でSUMしたものを受け取る
+export const fetchSensorReadingsAggregate = (sensorId: string, from: string, to?: string) => {
+  const params = new URLSearchParams({ from });
+  if (to) params.set("to", to);
+  return request<ReadingAggregate>(
+    `/api/sensors/${sensorId}/readings/aggregate?${params.toString()}`,
   );
 };
 

@@ -99,6 +99,11 @@ class ReadingListResponse(CamelModel):
     total: int
 
 
+class ReadingAggregate(CamelModel):
+    sum: float
+    count: int
+
+
 # ──────────────────────────────────────────────────────────────
 # Alarm
 # ──────────────────────────────────────────────────────────────

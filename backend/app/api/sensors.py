@@ -3,12 +3,20 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
-from app.schemas import ReadingListResponse, ReadingRead, SensorCreate, SensorRead, SensorUpdate
+from app.schemas import (
+    ReadingAggregate,
+    ReadingListResponse,
+    ReadingRead,
+    SensorCreate,
+    SensorRead,
+    SensorUpdate,
+)
 
 router = APIRouter(prefix="/api/sensors", tags=["sensors"])
 
@@ -109,3 +117,28 @@ async def get_sensor_readings(
     return ReadingListResponse(
         readings=[ReadingRead.model_validate(r) for r in readings], total=len(readings)
     )
+
+
+@router.get("/{sensor_id}/readings/aggregate", response_model=ReadingAggregate)
+async def get_sensor_readings_aggregate(
+    sensor_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    from_: datetime = Query(..., alias="from"),
+    to: datetime | None = Query(default=None),
+) -> ReadingAggregate:
+    """指定区間のReading合計値・件数。生産数センサーの「直近1時間」「本日累計」等、
+    時間/日単位の集計をフロントで生データ全件集計せずに済ませるためのエンドポイント。
+    """
+    await _get_active_sensor(session, sensor_id)
+
+    # func.count(Reading.id)はSQLModelのクラス属性がmypyには素のPython型(int | None)に
+    # 見えてしまい弾かれるため、カラムを渡さずCOUNT(1)として行数を数える
+    query = select(func.sum(Reading.value), func.count(1)).where(
+        Reading.sensor_id == sensor_id, Reading.recorded_at >= from_
+    )
+    if to is not None:
+        query = query.where(Reading.recorded_at <= to)
+
+    result = await session.exec(query)
+    total, count = result.one()
+    return ReadingAggregate(sum=float(total or 0.0), count=count)

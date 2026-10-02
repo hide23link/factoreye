@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { acknowledgeAlarm, createSensor, deleteSensor, fetchSensors } from "./api";
+import {
+  acknowledgeAlarm,
+  createSensor,
+  deleteSensor,
+  fetchSensorReadingsAggregate,
+  fetchSensors,
+} from "./api";
 
 function mockFetchOnce(status: number, body: unknown) {
   vi.stubGlobal(
@@ -58,5 +64,29 @@ describe("api client", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toMatch(/\/api\/alarms\/a1\/ack$/);
     expect(init?.method).toBe("PATCH");
+  });
+
+  it("readings/aggregateはfromのみ指定時はtoを付けずに呼ぶ", async () => {
+    mockFetchOnce(200, { sum: 12, count: 3 });
+    const result = await fetchSensorReadingsAggregate("s1", "2024-01-01T00:00:00.000Z");
+
+    expect(result).toEqual({ sum: 12, count: 3 });
+    const fetchMock = vi.mocked(fetch);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/sensors/s1/readings/aggregate?from=");
+    expect(url).not.toContain("to=");
+  });
+
+  it("readings/aggregateはtoを指定するとクエリに含める", async () => {
+    mockFetchOnce(200, { sum: 0, count: 0 });
+    await fetchSensorReadingsAggregate(
+      "s1",
+      "2024-01-01T00:00:00.000Z",
+      "2024-01-01T01:00:00.000Z",
+    );
+
+    const fetchMock = vi.mocked(fetch);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain("to=");
   });
 });

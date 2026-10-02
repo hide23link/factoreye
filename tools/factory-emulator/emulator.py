@@ -6,10 +6,13 @@ backendやclients/配下の公式クライアントとは別物。動作確認�
 本体とは別プロセスとして動かす想定（別ターミナルで `python3 emulator.py` するだけ）。
 
 挙動:
-  - 通常運転中は生産数（個/分 相当の指標、0〜100）がゆるやかにランダムウォーク
-  - 温度・電力は生産数に連動して変化する（高負荷ほど高温・高消費電力、ノイズと
-    若干の熱慣性付き。実機のように値がカクカク飛ばず滑らかに動く）
-  - 一定確率で「一時停止」に入り、生産数は即座に0、電力は待機電力へ、温度は
+  - 内部的には「生産負荷」指標（0〜100、タクトタイムの逆数のようなもの）がゆるやかに
+    ランダムウォークし、これに連動して温度・電力が滑らかに変化する（高負荷ほど高温・
+    高消費電力、ノイズと若干の熱慣性付き）
+  - 「生産数」センサーに送る値は、その負荷から導いた「直近送信インターバル(5秒)で
+    実際に生産した個数」という実カウント値（個。FactorEye側のダッシュボードで
+    「直近1時間」「本日累計」のような集計・目標達成率表示に使う前提）
+  - 一定確率で「一時停止」に入り、生産数は即座に0個、電力は待機電力へ、温度は
     ゆっくり室温へ戻る。数十秒〜数分でランダムに終わり、通常運転へ復帰する
 
 使い方:
@@ -55,6 +58,12 @@ IDLE_POWER_KW = 0.4
 PAUSE_CHANCE_PER_TICK = 0.02
 PAUSE_DURATION_RANGE_SECONDS = (15.0, 90.0)
 
+# 生産負荷100%の時、1tick(5秒)あたりに生産する個数の目安。ノイズ幅を±0.5に抑えることで、
+# 通常運転中（負荷は最低でも30%）は生産数が0個に張り付かず（＝稼働中判定がチラつかず）、
+# それでいて毎回同じ値にならない程度のばらつきが出るようにしている
+MAX_UNITS_PER_TICK = 5.0
+UNITS_NOISE_RANGE = (-0.5, 0.5)
+
 
 def _register_sensor_if_missing(name: str, ingest_key: str, unit: str) -> None:
     body = json.dumps({"name": name, "ingestKey": ingest_key, "unit": unit}).encode("utf-8")
@@ -76,7 +85,7 @@ def _register_sensor_if_missing(name: str, ingest_key: str, unit: str) -> None:
 
 @dataclass
 class MachineState:
-    production_rate: float = 70.0  # 現在の生産負荷の指標（0〜100、個/分相当）
+    production_rate: float = 70.0  # 現在の生産負荷の指標（0〜100。温度・電力の計算にのみ使う内部値）
     temperature: float = AMBIENT_TEMPERATURE
     power: float = IDLE_POWER_KW
     paused_until: float | None = None  # time.monotonic()での再開予定時刻（稼働中はNone）
@@ -84,6 +93,14 @@ class MachineState:
     @property
     def is_paused(self) -> bool:
         return self.paused_until is not None
+
+    def units_this_tick(self) -> int:
+        """このtick(5秒)で実際に生産した個数。負荷指標から導く実カウント値。"""
+        if self.is_paused:
+            return 0
+        expected = self.production_rate / 100.0 * MAX_UNITS_PER_TICK
+        noisy = expected + random.uniform(*UNITS_NOISE_RANGE)
+        return max(0, round(noisy))
 
     def tick(self, now: float) -> None:
         if self.paused_until is not None:
@@ -124,7 +141,7 @@ def main() -> None:
         f"（{SEND_INTERVAL_SECONDS:.0f}秒ごとに送信、Ctrl+Cで終了）"
     )
 
-    _register_sensor_if_missing(f"{MACHINE_NAME} 生産数", SENSOR_PRODUCTION, "個/分")
+    _register_sensor_if_missing(f"{MACHINE_NAME} 生産数", SENSOR_PRODUCTION, "個")
     _register_sensor_if_missing(f"{MACHINE_NAME} 温度", SENSOR_TEMPERATURE, "°C")
     _register_sensor_if_missing(f"{MACHINE_NAME} 電力", SENSOR_POWER, "kW")
 
@@ -133,14 +150,15 @@ def main() -> None:
 
     while True:
         state.tick(time.monotonic())
+        produced = state.units_this_tick()
 
-        client.send(SENSOR_PRODUCTION, round(state.production_rate, 1))
+        client.send(SENSOR_PRODUCTION, produced)
         client.send(SENSOR_TEMPERATURE, round(state.temperature, 2))
         client.send(SENSOR_POWER, round(state.power, 3))
 
         status = "一時停止中" if state.is_paused else "稼働中  "
         print(
-            f"[{status}] 生産数={state.production_rate:5.1f}個/分  "
+            f"[{status}] 生産数={produced:2d}個  "
             f"温度={state.temperature:5.1f}°C  電力={state.power:4.2f}kW  "
             f"(未送信バッファ: {client.pending_count}件)"
         )

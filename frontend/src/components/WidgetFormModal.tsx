@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 import { useSensors } from "../hooks/queries";
 import { addWidget, updateWidget } from "../lib/api";
@@ -78,6 +79,8 @@ export function WidgetFormModal({
   );
   const [yAxisMin, setYAxisMin] = useState<NumOrBlank>(widget?.config.yAxisMin ?? "");
   const [yAxisMax, setYAxisMax] = useState<NumOrBlank>(widget?.config.yAxisMax ?? "");
+  const [onThreshold, setOnThreshold] = useState<NumOrBlank>(widget?.config.onThreshold ?? 0);
+  const [dailyTarget, setDailyTarget] = useState<NumOrBlank>(widget?.config.dailyTarget ?? "");
 
   const buildConfig = (): WidgetConfig =>
     type === "MultiSensorComparison"
@@ -95,7 +98,12 @@ export function WidgetFormModal({
             yAxisMin: toConfigNumber(yAxisMin),
             yAxisMax: toConfigNumber(yAxisMax),
           }
-        : {};
+        : type === "ProductionStatus"
+          ? {
+              onThreshold: toConfigNumber(onThreshold),
+              dailyTarget: toConfigNumber(dailyTarget),
+            }
+          : {};
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -126,7 +134,12 @@ export function WidgetFormModal({
   const needsMultiSensor = type === "MultiSensorComparison";
   const needsAxisConfig = type === "SensorGraph" || type === "MultiSensorComparison";
 
-  return (
+  // WidgetCard経由（編集時）はreact-grid-layoutのグリッドアイテム（transform指定あり）の
+  // 子孫として描画されるため、ここをポータル無しで`position: fixed`にしてもそのtransformが
+  // containing blockになってしまい、画面全体ではなくそのウィジェットの範囲内に閉じ込められた
+  // 上に他のウィジェット（別のstacking context）の背面に回ってしまう。document.bodyへ
+  // portalすることでグリッドのstacking contextから抜け出し、本来のfixedモーダルとして機能させる
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-lg bg-white p-4 shadow-xl">
         <h2 className="mb-3 text-lg font-bold">
@@ -318,6 +331,35 @@ export function WidgetFormModal({
           </>
         )}
 
+        {type === "ProductionStatus" && (
+          <>
+            <label className="mb-2 block text-sm">
+              稼働中とみなす閾値（この値を超えたら「稼働中」表示）
+              <input
+                type="number"
+                value={onThreshold}
+                onChange={(e) =>
+                  setOnThreshold(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+            <label className="mb-2 block text-sm">
+              本日の生産目標数
+              <input
+                type="number"
+                placeholder="未設定（達成率を表示しない）"
+                min={0}
+                value={dailyTarget}
+                onChange={(e) =>
+                  setDailyTarget(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+          </>
+        )}
+
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
@@ -336,6 +378,7 @@ export function WidgetFormModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
