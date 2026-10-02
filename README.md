@@ -30,6 +30,7 @@ frontend/   ダッシュボードUI（React / TypeScript / Vite）
 e2e/        E2Eテスト（Playwright、docker-compose起動済みスタックに対して実行）
 clients/    センサーデバイス向け公式クライアント（Arduino/M5Stack・Raspberry Pi）
 tools/      開発補助ツール（テスト用工場エミュレータ等）
+infra/      運用スクリプト（DBバックアップ・リストア）
 docs/       開発ノート・運用メモ
 ```
 
@@ -74,6 +75,15 @@ docker-composeでスタックを起動した状態で実行する。手順は [`
 ```bash
 docker compose up -d --build
 cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
+```
+
+## バックアップ・リストア
+
+本番/自宅運用時は`infra/backup.sh`を日次cronで実行する。手順は [`infra/README.md`](infra/README.md) を参照。
+
+```bash
+./infra/backup.sh            # 手動実行・動作確認
+./infra/restore.sh <file>    # 空のDBへ復元
 ```
 
 ## CI

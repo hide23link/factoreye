@@ -25,6 +25,9 @@ id_rsa.pub
 ras.txt
 *.pem
 
+# DBバックアップ（infra/backup.sh出力先。本物のデータなのでコミットしない）
+/backups/
+
 # OS
 .DS_Store
 
