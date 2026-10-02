@@ -11,6 +11,14 @@ function toThreshold(v: NumOrBlank): number | null {
   return v === "" ? null : v;
 }
 
+// よく使う単位のプリセット。<datalist>なので一覧から選ぶことも自由入力することもできる
+const UNIT_PRESETS = ["°C", "%", "MPa", "kPa", "Pa", "V", "A", "W", "kWh", "rpm", "Hz", "mm", "L", "kg"];
+
+// 新規センサー作成フォームのIngest Key初期値（空欄のままにしないための仮の提案値、編集も削除も自由）
+function generateIngestKey(): string {
+  return `sensor-${Date.now().toString(36)}`;
+}
+
 function SensorRow({ sensor }: { sensor: Sensor }) {
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
@@ -81,6 +89,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
             <input
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
+              list="unit-presets"
               className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
             />
           </td>
@@ -181,8 +190,8 @@ export function SensorSettingsPanel() {
   const queryClient = useQueryClient();
 
   const [name, setName] = useState("");
-  const [ingestKey, setIngestKey] = useState("");
-  const [unit, setUnit] = useState("");
+  const [ingestKey, setIngestKey] = useState(generateIngestKey);
+  const [unit, setUnit] = useState("°C");
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -190,8 +199,9 @@ export function SensorSettingsPanel() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sensors"] });
       setName("");
-      setIngestKey("");
-      setUnit("");
+      // 空欄に戻すと次の入力がまた手探りになるため、次回分の仮キーを提案し直す
+      setIngestKey(generateIngestKey());
+      setUnit("°C");
       setError(null);
     },
     onError: (e: Error) => setError(e.message),
@@ -222,7 +232,6 @@ export function SensorSettingsPanel() {
           <input
             value={ingestKey}
             onChange={(e) => setIngestKey(e.target.value)}
-            placeholder="pressure-a1"
             className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
           />
         </label>
@@ -231,7 +240,7 @@ export function SensorSettingsPanel() {
           <input
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
-            placeholder="MPa"
+            list="unit-presets"
             className="mt-1 block w-20 rounded border border-gray-300 px-2 py-1 text-sm"
           />
         </label>
@@ -243,6 +252,11 @@ export function SensorSettingsPanel() {
           追加
         </button>
       </form>
+      <datalist id="unit-presets">
+        {UNIT_PRESETS.map((u) => (
+          <option key={u} value={u} />
+        ))}
+      </datalist>
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}

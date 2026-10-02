@@ -6,6 +6,13 @@ import { addWidget, createDashboard, createSensor } from "../lib/api";
 import { useUiStore } from "../store/useUiStore";
 
 type Step = 1 | 2 | 3 | 4;
+type CodeTab = "curl" | "arduino" | "python";
+
+const CODE_TABS: { value: CodeTab; label: string }[] = [
+  { value: "curl", label: "curl" },
+  { value: "arduino", label: "Arduino (M5Stack)" },
+  { value: "python", label: "Python (Raspberry Pi)" },
+];
 
 function StepHeader({ step }: { step: Step }) {
   const labels = ["センサー登録", "データ送信", "ダッシュボード作成", "完了"];
@@ -48,6 +55,7 @@ export function SetupWizard() {
   const [sensorId, setSensorId] = useState<string | null>(null);
   const [dashboardId, setDashboardId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [codeTab, setCodeTab] = useState<CodeTab>("curl");
   const queryClient = useQueryClient();
   const setView = useUiStore((s) => s.setView);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
@@ -100,9 +108,11 @@ export function SetupWizard() {
     onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
-  const curlCommand = sensorId
-    ? `curl -X POST http://localhost:8000/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`
-    : "";
+  const codeSnippets: Record<CodeTab, string> = {
+    curl: `curl -X POST http://localhost:8000/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`,
+    arduino: `// clients/arduino-m5stack/ のFactorEyeClientライブラリを使用\n#include <FactorEyeClient.h>\n#include <WiFi.h>\n\nFactorEyeClient factoreye;\n\nvoid setup() {\n  WiFi.begin("your-wifi-ssid", "your-wifi-password");\n  while (WiFi.status() != WL_CONNECTED) delay(500);\n\n  factoreye.begin(\n    "http://localhost:8000",\n    "<.envのINGEST_API_KEY>"\n  );\n}\n\nvoid loop() {\n  factoreye.send("${ingestKey}", 42.0);\n  delay(10000);\n}`,
+    python: `# clients/raspberry-pi/factoreye_client.py を使用（追加ライブラリ不要）\nfrom factoreye_client import FactorEyeClient\n\nclient = FactorEyeClient(\n    "http://localhost:8000",\n    "<.envのINGEST_API_KEY>",\n)\nclient.send("${ingestKey}", 42.0)`,
+  };
 
   return (
     <div className="mx-auto max-w-xl p-4">
@@ -171,12 +181,40 @@ export function SetupWizard() {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-3 font-semibold text-gray-900">2. テストデータを送ってみましょう</h2>
           <p className="mb-3 text-sm text-gray-500">
-            下のコマンドをターミナルで実行してください（<code>INGEST_API_KEY</code>
+            お使いの環境に合わせて下のコードを実行してください（<code>INGEST_API_KEY</code>
             はbackendの<code>.env</code>に設定した値に置き換えます）。受信すると自動で次へ進みます。
           </p>
+
+          <div className="mb-2 flex gap-1 border-b border-gray-200">
+            {CODE_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setCodeTab(tab.value)}
+                className={
+                  codeTab === tab.value
+                    ? "border-b-2 border-blue-600 px-2 py-1.5 text-xs font-medium text-blue-600"
+                    : "px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+                }
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <pre className="mb-3 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">
-            {curlCommand}
+            {codeSnippets[codeTab]}
           </pre>
+          {codeTab === "arduino" && (
+            <p className="mb-3 text-xs text-gray-400">
+              ライブラリの入手方法・詳細は <code>clients/arduino-m5stack/README.md</code> を参照してください。
+            </p>
+          )}
+          {codeTab === "python" && (
+            <p className="mb-3 text-xs text-gray-400">
+              入手方法・詳細は <code>clients/raspberry-pi/README.md</code> を参照してください。
+            </p>
+          )}
           <p className="text-xs text-gray-400">データの到着を待っています...（5秒ごとに自動確認）</p>
         </div>
       )}

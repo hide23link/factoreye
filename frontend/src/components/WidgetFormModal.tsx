@@ -12,6 +12,28 @@ const WIDGET_TYPES: { value: WidgetType; label: string }[] = [
   { value: "MultiSensorComparison", label: "複数センサー比較" },
 ];
 
+// グラフ色のプリセット。普段はここから選ぶだけでよく、細かく指定したい時だけRGB入力に切り替える
+const COLOR_PRESETS = [
+  { label: "青", value: "#2563eb" },
+  { label: "赤", value: "#dc2626" },
+  { label: "緑", value: "#16a34a" },
+  { label: "オレンジ", value: "#ea580c" },
+  { label: "紫", value: "#9333ea" },
+  { label: "ティール", value: "#0d9488" },
+  { label: "ピンク", value: "#db2777" },
+  { label: "グレー", value: "#4b5563" },
+];
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = Number.parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v) || 0));
+  return `#${[r, g, b].map((v) => clamp(v).toString(16).padStart(2, "0")).join("")}`;
+}
+
 function nextGridPosition(dashboard: DashboardDetail): { gridColumn: number; gridRow: number } {
   if (dashboard.widgets.length === 0) return { gridColumn: 1, gridRow: 1 };
   const maxRow = Math.max(...dashboard.widgets.map((w) => w.gridRow + w.gridHeight - 1));
@@ -42,7 +64,12 @@ export function WidgetFormModal({
   const [type, setType] = useState<WidgetType>(widget?.type ?? "SensorGraph");
   const [sensorId, setSensorId] = useState(widget?.sensorId ?? "");
   const [sensorIds, setSensorIds] = useState<string[]>(widget?.config.sensorIds ?? []);
-  const [color, setColor] = useState(widget?.config.color ?? "#2563eb");
+  const initialColor = widget?.config.color ?? "#2563eb";
+  const [color, setColor] = useState(initialColor);
+  const [colorMode, setColorMode] = useState<"preset" | "custom">(
+    COLOR_PRESETS.some((p) => p.value === initialColor) ? "preset" : "custom",
+  );
+  const [rgb, setRgb] = useState<[number, number, number]>(() => hexToRgb(initialColor));
   const [graphType, setGraphType] = useState<NonNullable<WidgetConfig["graphType"]>>(
     widget?.config.graphType ?? "line",
   );
@@ -178,15 +205,70 @@ export function WidgetFormModal({
                 <option value="area">面</option>
               </select>
             </label>
-            <label className="mb-2 block text-sm">
-              色
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="mt-1 block h-8 w-16"
-              />
-            </label>
+            <div className="mb-2">
+              <span className="block text-sm">色</span>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {COLOR_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    title={preset.label}
+                    aria-label={preset.label}
+                    onClick={() => {
+                      setColor(preset.value);
+                      setColorMode("preset");
+                    }}
+                    className={
+                      color === preset.value && colorMode === "preset"
+                        ? "h-6 w-6 rounded-full border-2 border-gray-900"
+                        : "h-6 w-6 rounded-full border-2 border-transparent"
+                    }
+                    style={{ backgroundColor: preset.value }}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRgb(hexToRgb(color));
+                    setColorMode("custom");
+                  }}
+                  className={
+                    colorMode === "custom"
+                      ? "rounded bg-gray-900 px-2 py-1 text-xs text-white"
+                      : "rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200"
+                  }
+                >
+                  詳細...
+                </button>
+              </div>
+
+              {colorMode === "custom" && (
+                <div className="mt-2 flex items-end gap-2">
+                  {(["R", "G", "B"] as const).map((channel, i) => (
+                    <label key={channel} className="text-xs text-gray-500">
+                      {channel}
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        value={rgb[i]}
+                        onChange={(e) => {
+                          const next: [number, number, number] = [...rgb];
+                          next[i] = Number(e.target.value);
+                          setRgb(next);
+                          setColor(rgbToHex(...next));
+                        }}
+                        className="mt-0.5 block w-14 rounded border border-gray-300 px-1 py-0.5"
+                      />
+                    </label>
+                  ))}
+                  <span
+                    className="mb-0.5 h-6 w-6 rounded border border-gray-300"
+                    style={{ backgroundColor: color }}
+                  />
+                </div>
+              )}
+            </div>
           </>
         )}
 
