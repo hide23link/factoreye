@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { useSensorReadings } from "../hooks/queries";
 import { addWidget, createDashboard, createSensor } from "../lib/api";
+import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../lib/freeTier";
 import { useUiStore } from "../store/useUiStore";
 
 type Step = 1 | 2 | 3 | 4;
@@ -68,10 +69,12 @@ export function SetupWizard() {
     }
   }, [step, readingsData]);
 
-  const describeError = (e: Error): string =>
-    e.message.includes("409")
-      ? "その名前またはIngest Keyは既に使われています。別の値に変更して再試行してください。"
-      : `エラーが発生しました: ${e.message}`;
+  const describeError = (e: Error): string => {
+    if (isFreeTierLimitError(e)) return FREE_TIER_LIMIT_MESSAGE;
+    if (e.message.includes("409"))
+      return "その名前またはIngest Keyは既に使われています。別の値に変更して再試行してください。";
+    return `エラーが発生しました: ${e.message}`;
+  };
 
   const createSensorMutation = useMutation({
     mutationFn: () => createSensor({ name, ingestKey, unit }),

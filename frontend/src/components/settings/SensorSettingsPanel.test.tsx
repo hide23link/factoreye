@@ -66,6 +66,21 @@ describe("SensorSettingsPanel", () => {
     );
   });
 
+  it("Free Tier 上限（402）に達すると上限の案内を表示する", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createSensor).mockRejectedValue(
+      new Error('POST /api/sensors failed: 402 {"detail":"free tier limit reached (10 sensors)"}'),
+    );
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await user.type(screen.getByLabelText("名前"), "圧力計A-1");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    expect(await screen.findByText(/センサー上限（10個）に達しました/)).toBeInTheDocument();
+  });
+
   it("有効/無効トグルをクリックするとupdateSensorが呼ばれる", async () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);

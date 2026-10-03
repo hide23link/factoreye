@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
 import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
+import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
 import type { Sensor } from "../../types";
 
 type NumOrBlank = number | "";
@@ -239,7 +240,7 @@ export function SensorSettingsPanel() {
       setUnit("°C");
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(isFreeTierLimitError(e) ? FREE_TIER_LIMIT_MESSAGE : e.message),
   });
 
   return (
