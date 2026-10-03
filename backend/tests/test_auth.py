@@ -1,15 +1,16 @@
 """認証API テスト（AUTH_MODE=multi_tenant）。"""
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport
 
 from app.config import AuthMode, settings
 
 
-# このモジュール全体で AUTH_MODE=multi_tenant に切り替え、auth ルーターが登録されたアプリを使う
+# このモジュール全体で AUTH_MODE=multi_tenant に切り替え
 # monkeypatch は function-scope のため module-scope フィクスチャでは使えない → 直接書き換えて戻す
 @pytest.fixture(scope="module", autouse=True)
 def _set_multi_tenant() -> Generator[None, None, None]:
@@ -20,20 +21,18 @@ def _set_multi_tenant() -> Generator[None, None, None]:
 
 
 @pytest_asyncio.fixture
-async def auth_client() -> httpx.AsyncClient:
-    # auth ルーターは AUTH_MODE=multi_tenant 時のみ main.py でマウントされるため、
-    # 設定変更後に app を再インポートして動的にルーターを追加したアプリを使う
-    from app.api import auth as auth_router
-    from app.main import app
+async def auth_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    # main.py の app は AUTH_MODE=disabled でモジュールキャッシュ済みのため、
+    # auth ルーター専用のスタンドアロン app を使う
+    from app.api import auth as auth_module
 
-    # 未追加なら追加（モジュールスコープで1回だけ）
-    # _IncludedRouter 等 path を持たないオブジェクトを除外する
-    routes = [r.path for r in app.routes if hasattr(r, "path")]  # type: ignore[attr-defined]
-    if "/api/auth/register" not in routes:
-        app.include_router(auth_router.router)
+    test_app = FastAPI()
+    test_app.include_router(auth_module.router)
 
-    transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=test_app),
+        base_url="http://test",
+    ) as c:
         yield c
 
 

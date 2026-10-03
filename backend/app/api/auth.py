@@ -14,7 +14,7 @@ from uuid import UUID
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import EmailStr, Field
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -22,6 +22,7 @@ from app import auth as auth_utils
 from app.config import AuthMode, settings
 from app.db.models import RefreshToken, User, Workspace
 from app.db.session import get_session
+from app.schemas import CamelModel
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -31,28 +32,28 @@ _bearer = HTTPBearer()
 # ── スキーマ ──────────────────────────────────────────────────
 
 
-class RegisterRequest(BaseModel):
+class RegisterRequest(CamelModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=100)
     workspace_name: str = Field(min_length=1, max_length=100)
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(CamelModel):
     email: EmailStr
     password: str
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(CamelModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
-class RefreshRequest(BaseModel):
+class RefreshRequest(CamelModel):
     refresh_token: str
 
 
-class MeResponse(BaseModel):
+class MeResponse(CamelModel):
     user_id: UUID
     email: str
     workspace_id: UUID
