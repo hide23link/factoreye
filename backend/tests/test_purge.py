@@ -2,7 +2,6 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import pytest
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -33,8 +32,12 @@ async def _create_reading(session: AsyncSession, sensor_id, recorded_at: datetim
 
 async def test_purge_deletes_old_multi_tenant_readings() -> None:
     """multi-tenant の 90日超えデータを削除する。"""
+    from app.auth import hash_password
     async with AsyncSession(engine) as session:
-        ws = Workspace(name="purge-ws", owner_id=uuid4())
+        user = User(email=f"purge-{uuid4().hex[:6]}@example.com", password_hash=hash_password("pw"))
+        session.add(user)
+        await session.flush()
+        ws = Workspace(name="purge-ws", owner_id=user.id)
         session.add(ws)
         await session.flush()
 
@@ -45,12 +48,13 @@ async def test_purge_deletes_old_multi_tenant_readings() -> None:
         await _create_reading(session, sensor.id, old)
         await _create_reading(session, sensor.id, recent)
         await session.commit()
+        sensor_id = sensor.id  # セッション外参照用
 
     deleted = await purge_old_readings()
     assert deleted == 1
 
     async with AsyncSession(engine) as session:
-        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor.id))
+        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor_id))
         remaining = result.all()
     assert len(remaining) == 1
     assert remaining[0].recorded_at.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(days=30)
@@ -63,12 +67,13 @@ async def test_purge_skips_self_hosted_readings() -> None:
         old = datetime.now(UTC) - timedelta(days=100)
         await _create_reading(session, sensor.id, old)
         await session.commit()
+        sensor_id = sensor.id  # セッション外参照用
 
     deleted = await purge_old_readings()
     assert deleted == 0
 
     async with AsyncSession(engine) as session:
-        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor.id))
+        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor_id))
         assert len(result.all()) == 1
 
 
