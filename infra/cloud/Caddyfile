@@ -1,0 +1,19 @@
+# FactorEye Cloud — Caddy リバースプロキシ設定
+# TLS は Cloudflare Tunnel が処理するため、ここでは :80 で HTTP のみ受け付ける
+
+:80 {
+    # REST API + Ingest（FastAPI）
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # ヘルスチェック
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # React フロントエンド（それ以外の全パス）
+    handle {
+        reverse_proxy frontend:3001
+    }
+}

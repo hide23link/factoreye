@@ -1,0 +1,29 @@
+name: deploy-cloud
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "infra/cloud/**"
+      - "alembic/**"
+      - "docker-compose.cloud.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Proxmox LXC102
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: factoreye
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/factoreye
+            git pull origin main
+            docker compose -f docker-compose.cloud.yml up -d --build
+            echo "Deploy complete: $(date)"

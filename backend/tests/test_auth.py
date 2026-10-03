@@ -1,4 +1,6 @@
 """認証API テスト（AUTH_MODE=multi_tenant）。"""
+from collections.abc import Generator
+
 import httpx
 import pytest
 import pytest_asyncio
@@ -8,9 +10,13 @@ from app.config import AuthMode, settings
 
 
 # このモジュール全体で AUTH_MODE=multi_tenant に切り替え、auth ルーターが登録されたアプリを使う
+# monkeypatch は function-scope のため module-scope フィクスチャでは使えない → 直接書き換えて戻す
 @pytest.fixture(scope="module", autouse=True)
-def _set_multi_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+def _set_multi_tenant() -> Generator[None, None, None]:
+    original = settings.auth_mode
+    settings.auth_mode = AuthMode.MULTI_TENANT
+    yield
+    settings.auth_mode = original
 
 
 @pytest_asyncio.fixture

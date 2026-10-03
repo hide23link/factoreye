@@ -1,0 +1,64 @@
+# FactorEye Cloud — Proxmox LXC102 本番用 Docker Compose
+# TLS は Cloudflare Tunnel が処理。Caddy は :80 のみ。
+# 使い方: docker compose -f docker-compose.cloud.yml up -d --build
+# .env に DOMAIN / POSTGRES_PASSWORD / INGEST_API_KEY / JWT_SECRET を設定すること（infra/cloud/.env.cloud.example 参照）
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+      - frontend
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://factoreye:${POSTGRES_PASSWORD}@postgres:5432/factoreye
+      - INGEST_API_KEY=${INGEST_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENVIRONMENT=production
+      # CORS 許可オリジン。Cloudflare Tunnel のドメインを設定する
+      - FRONTEND_URL=https://${DOMAIN}
+      - AUTH_MODE=multi_tenant
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Vite はビルド時に API URL を静的ファイルへ焼き込む
+        # /api/* は Caddy が backend:8000 へルーティングするため同一ドメインを指定
+        VITE_API_URL: https://${DOMAIN}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=factoreye
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=factoreye
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factoreye"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+
+networks:
+  default:
+    name: factoreye-cloud
