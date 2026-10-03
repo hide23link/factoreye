@@ -6,8 +6,11 @@ self-hosted（workspace_id IS NULL のセンサー）は対象外。
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
+from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models import Reading, Sensor
@@ -22,19 +25,19 @@ async def purge_old_readings() -> int:
     cutoff = datetime.now(UTC) - timedelta(days=_RETENTION_DAYS)
 
     # multi-tenant ワークスペースのセンサー ID サブクエリ
-    multi_tenant_sensor_ids = select(Sensor.id).where(Sensor.workspace_id.isnot(None))  # type: ignore[attr-defined]
+    multi_tenant_sensor_ids = select(col(Sensor.id)).where(col(Sensor.workspace_id).is_not(None))
 
     stmt = (
         delete(Reading)
         .where(
-            Reading.recorded_at < cutoff,
-            Reading.sensor_id.in_(multi_tenant_sensor_ids),  # type: ignore[attr-defined]
+            col(Reading.recorded_at) < cutoff,
+            col(Reading.sensor_id).in_(multi_tenant_sensor_ids),
         )
         .execution_options(synchronize_session=False)
     )
 
     async with AsyncSession(engine) as session:
-        result = await session.execute(stmt)
+        result = cast(CursorResult[Any], await session.execute(stmt))
         await session.commit()
 
     deleted = result.rowcount

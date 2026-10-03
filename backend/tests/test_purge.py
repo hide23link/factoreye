@@ -1,6 +1,6 @@
 """90日データ削除バッチ + Free Tier センサー上限のテスト。"""
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -10,7 +10,7 @@ from app.db.session import engine
 from app.purge import purge_old_readings
 
 
-async def _create_sensor(session: AsyncSession, workspace_id=None) -> Sensor:
+async def _create_sensor(session: AsyncSession, workspace_id: UUID | None = None) -> Sensor:
     sensor = Sensor(
         workspace_id=workspace_id,
         name=f"sensor-{uuid4().hex[:8]}",
@@ -22,7 +22,7 @@ async def _create_sensor(session: AsyncSession, workspace_id=None) -> Sensor:
     return sensor
 
 
-async def _create_reading(session: AsyncSession, sensor_id, recorded_at: datetime) -> Reading:
+async def _create_reading(session: AsyncSession, sensor_id: UUID, recorded_at: datetime) -> Reading:
     r = Reading(sensor_id=sensor_id, value=1.0, recorded_at=recorded_at)
     session.add(r)
     return r
@@ -87,11 +87,12 @@ async def test_purge_returns_zero_when_nothing_to_delete() -> None:
 
 async def test_sensor_limit_enforced(client) -> None:  # type: ignore[no-untyped-def]
     """multi-tenant で 10個超えは 402 を返す。"""
-    from app.config import AuthMode, settings
-    from app.api import auth as auth_module
     import httpx
     from fastapi import FastAPI
     from httpx import ASGITransport
+
+    from app.api import auth as auth_module
+    from app.config import AuthMode, settings
 
     original_mode = settings.auth_mode
     settings.auth_mode = AuthMode.MULTI_TENANT
