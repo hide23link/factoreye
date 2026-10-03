@@ -33,7 +33,7 @@ async def _get_notification_settings(
         # multi-tenant: workspace_id 別の行を取得または作成
         result = await session.exec(
             select(NotificationSettings).where(
-                NotificationSettings.workspace_id == workspace_id  # type: ignore[arg-type]
+                NotificationSettings.workspace_id == workspace_id
             )
         )
         settings_row = result.first()

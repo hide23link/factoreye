@@ -29,7 +29,7 @@ def create_access_token(user_id: UUID, workspace_id: UUID) -> str:
 
 def decode_access_token(token: str) -> dict[str, str]:
     """デコードして payload を返す。無効/期限切れは jwt.PyJWTError を送出。"""
-    return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])  # type: ignore[no-any-return]
+    return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])  # type: ignore[return-value]
 
 
 def create_refresh_token() -> tuple[str, str]:

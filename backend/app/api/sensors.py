@@ -59,7 +59,7 @@ async def create_sensor(
     # Free Tier 上限チェック（multi-tenant のみ）
     if workspace_id is not None:
         count_result = await session.exec(
-            select(func.count()).where(Sensor.workspace_id == workspace_id)  # type: ignore[arg-type]
+            select(func.count()).where(Sensor.workspace_id == workspace_id)
         )
         if (count_result.one() or 0) >= _FREE_TIER_SENSOR_LIMIT:
             raise HTTPException(

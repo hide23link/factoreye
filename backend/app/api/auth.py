@@ -195,7 +195,7 @@ async def refresh(
     result = await session.exec(
         select(RefreshToken).where(
             RefreshToken.token_hash == token_hash,
-            RefreshToken.revoked.is_(False),  # type: ignore[union-attr]
+            RefreshToken.revoked.is_(False),  # type: ignore[attr-defined]
         )
     )
     stored = result.first()
