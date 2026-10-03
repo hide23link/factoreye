@@ -61,6 +61,7 @@ describe("DashboardListPage", () => {
       ...dashboards[0],
       id: "d-new",
       name: "新ダッシュボード",
+      widgets: [],
     });
 
     renderWithQueryClient(<DashboardListPage />);
