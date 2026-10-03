@@ -1,3 +1,21 @@
+// ---- Auth (Phase 0.5) ----
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+}
+
+export interface MeResponse {
+  userId: string;
+  email: string;
+  workspaceId: string;
+  workspaceName: string;
+  plan: "free" | "pro";
+}
+
+// ---- Domain ----
+
 export interface Sensor {
   id: string;
   name: string;
