@@ -9,5 +9,6 @@ export default defineConfig({
   preview: {
     port: 3001,
     host: true,
+    allowedHosts: ["factoreye.hide23.link"],
   },
 });
