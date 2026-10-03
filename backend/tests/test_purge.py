@@ -45,10 +45,10 @@ async def test_purge_deletes_old_multi_tenant_readings() -> None:
         old = datetime.now(UTC) - timedelta(days=91)
         recent = datetime.now(UTC) - timedelta(days=10)
 
-        await _create_reading(session, sensor.id, old)
-        await _create_reading(session, sensor.id, recent)
+        sensor_id = sensor.id  # commit で expire される前に取得
+        await _create_reading(session, sensor_id, old)
+        await _create_reading(session, sensor_id, recent)
         await session.commit()
-        sensor_id = sensor.id  # セッション外参照用
 
     deleted = await purge_old_readings()
     assert deleted == 1
@@ -64,10 +64,10 @@ async def test_purge_skips_self_hosted_readings() -> None:
     """self-hosted（workspace_id=None）のデータは削除しない。"""
     async with AsyncSession(engine) as session:
         sensor = await _create_sensor(session, workspace_id=None)
+        sensor_id = sensor.id  # commit で expire される前に取得
         old = datetime.now(UTC) - timedelta(days=100)
-        await _create_reading(session, sensor.id, old)
+        await _create_reading(session, sensor_id, old)
         await session.commit()
-        sensor_id = sensor.id  # セッション外参照用
 
     deleted = await purge_old_readings()
     assert deleted == 0
