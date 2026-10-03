@@ -26,6 +26,10 @@ services:
       # CORS 許可オリジン。Cloudflare Tunnel のドメインを設定する
       - FRONTEND_URL=https://${DOMAIN}
       - AUTH_MODE=multi_tenant
+    volumes:
+      # 管理者アカウント（ID:bcryptハッシュ）をホストに置く。DBには入れない。
+      # 初回は ./admin/admins.txt を作成し、app.admin_cli set-admin で管理者を追加する
+      - ./admin:/app/admin
     depends_on:
       postgres:
         condition: service_healthy

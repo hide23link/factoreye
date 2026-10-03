@@ -35,3 +35,7 @@ ras.txt
 # Editors
 .vscode/
 .idea/
+
+# 管理者アカウント（ハッシュ入り。Git にコミットしない）
+/admin/admins.txt
+/admin/*.tmp

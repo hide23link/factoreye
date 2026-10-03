@@ -33,6 +33,20 @@ def decode_access_token(token: str) -> dict[str, str]:
     return payload
 
 
+ADMIN_ROLE = "admin"
+
+
+def create_admin_access_token(admin_id: str) -> str:
+    """管理者用トークン。wid を持たないので通常APIでは使えず、role=admin で管理者APIだけ通す。
+    sub は管理者ID（admin_accounts のファイル上のID）。DB のユーザーではない。"""
+    expire = datetime.now(UTC) + timedelta(minutes=settings.admin_access_expire_minutes)
+    return jwt.encode(
+        {"sub": admin_id, "role": ADMIN_ROLE, "exp": expire},
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+
+
 def create_refresh_token() -> tuple[str, str]:
     """(raw_token, sha256_hex) を返す。DBにはハッシュのみ保存。"""
     raw = secrets.token_urlsafe(64)

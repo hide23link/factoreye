@@ -18,7 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api import alarms, auth, dashboards, ingest, plugins, readings, sensors, widgets
+from app.api import admin, alarms, auth, dashboards, ingest, plugins, readings, sensors, widgets
 from app.api import settings as settings_api
 from app.config import AuthMode, settings
 from app.db.session import engine
@@ -75,6 +75,8 @@ app.include_router(settings_api.router)
 # Phase 0.5: AUTH_MODE=multi_tenant 時のみ認証エンドポイントを公開
 if settings.auth_mode == AuthMode.MULTI_TENANT:
     app.include_router(auth.router)
+    # 管理者API（管理者はテキストファイルで管理。app/admin_accounts.py 参照）
+    app.include_router(admin.router)
 
 
 @app.get("/health")

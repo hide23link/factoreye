@@ -7,6 +7,7 @@ from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app import admin_accounts
 from app import auth as auth_utils
 from app.config import AuthMode, settings
 from app.db.session import get_session
@@ -53,3 +54,29 @@ async def get_current_workspace_id(
             detail="invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+
+
+async def require_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> str:
+    """管理者APIの認可。管理者トークン（role=admin）で、かつ管理者ファイルにそのIDが
+    まだ存在する場合だけ通す。ファイルから削除された管理者は、トークンが有効期限内でも即座に拒否される。
+    戻り値は管理者ID。"""
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="admin authentication required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if credentials is None:
+        raise unauthorized
+    try:
+        payload = auth_utils.decode_access_token(credentials.credentials)
+        if payload.get("role") != auth_utils.ADMIN_ROLE:
+            raise unauthorized
+        admin_id = payload["sub"]
+    except (jwt.PyJWTError, KeyError):
+        raise unauthorized from None
+
+    if not admin_accounts.admin_exists(admin_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not an administrator")
+    return admin_id

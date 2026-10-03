@@ -15,7 +15,7 @@ import type {
 } from "../types";
 import { getStoredRefreshToken, useAuthStore } from "../store/useAuthStore";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 // ── 内部: 生リクエスト（認証なし、リトライなし）────────────────
 async function rawFetch<T>(path: string, init?: RequestInit): Promise<T> {

@@ -1,0 +1,5 @@
+# FactorEye 管理者アカウント（1行1件: <ID>:<bcryptハッシュ>）
+# このファイルを admins.txt という名前でコピーして使う（admin/admins.txt は Git 管理外）。
+# 追加・パスワード変更（推奨）: docker compose -f docker-compose.cloud.yml exec backend python -m app.admin_cli set-admin <ID>
+# 削除: docker compose -f docker-compose.cloud.yml exec backend python -m app.admin_cli remove-admin <ID>
+# 平文のパスワードは書かないこと。ハッシュは app.admin_cli で生成する。
