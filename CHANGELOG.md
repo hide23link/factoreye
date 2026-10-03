@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0] - 2026-10-03
+## [0.1.0] - 2026-10-04
 
-Phase 0 MVP — 初回リリース。既存PCと安価なセンサーだけで使えるself-hosted工場監視OSS。
+Phase 0 + Phase 0.5 — self-hosted工場監視OSSのMVPと、SaaS Free Tierの認証基盤を同梱した初回リリース。
+
+### Added (Phase 0.5 — SaaS Free Tier)
+
+#### 認証基盤（AUTH_MODE=multi_tenant）
+- ユーザー登録・ログイン・ログアウト（JWT アクセストークン 15分 + リフレッシュトークン 30日）
+- リフレッシュトークンローテーション（旧トークンは即時失効）
+- Workspace 分離（マルチテナント: センサー・ダッシュボード・通知設定を workspace 単位で隔離）
+- Free Tier 制限: 1ワークスペースあたりセンサー最大10個（超過時 HTTP 402）
+- フロントエンド認証 UI（新規登録・ログイン切り替え、「センサー10個まで永続無料」表示）
+
+#### 本番デプロイ基盤
+- `docker-compose.cloud.yml`: Caddy リバースプロキシ + backend + frontend + PostgreSQL
+- Cloudflare Tunnel 経由で HTTPS 公開（TLS 証明書管理不要）
+- GitHub Actions セルフホストランナーによる `main` push 自動デプロイ（約24秒）
+- `infra/cloud/setup-server.sh`: Ubuntu 24.04 への Docker + Cloudflare Tunnel 初期設定スクリプト
+
+### Added (Phase 0 MVP — self-hosted工場監視OSS)
 
 ### Added
 
