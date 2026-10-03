@@ -24,6 +24,7 @@ from app.config import AuthMode, settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
 from app.plugins.manager import load_plugins
+from app.purge import purge_loop
 from app.rate_limit import limiter
 
 
@@ -32,8 +33,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncSession(engine) as session:
         await load_plugins(app, session)
     flush_task = asyncio.create_task(flush_loop())
+    purge_task = asyncio.create_task(purge_loop())
     yield
     flush_task.cancel()
+    purge_task.cancel()
     await engine.dispose()
 
 
