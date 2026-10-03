@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # 管理者アカウントのテキストファイル（ID:bcryptハッシュ）。
     # 本番は docker-compose の volumes でホストの ./admin を差し込む
     admin_credentials_file: str = "admin/admins.txt"
+    # 取り込み API のIP別レート制限。負荷テスト（1台から多数センサーを送る）でのみ緩める
+    ingest_rate_limit: str = "100/minute"
 
     @property
     def debug(self) -> bool:

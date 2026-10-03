@@ -8,6 +8,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import verify_ingest_api_key
+from app.config import settings
 from app.db.models import Sensor
 from app.db.session import get_session
 from app.ingest_buffer import PendingReading, buffer
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_ingest_api_key)],
 )
-@limiter.limit("100/minute")
+@limiter.limit(settings.ingest_rate_limit)
 async def ingest_readings(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> IngestAccepted:
