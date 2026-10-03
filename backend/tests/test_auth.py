@@ -27,7 +27,8 @@ async def auth_client() -> httpx.AsyncClient:
     from app.main import app
 
     # 未追加なら追加（モジュールスコープで1回だけ）
-    routes = [r.path for r in app.routes]  # type: ignore[attr-defined]
+    # _IncludedRouter 等 path を持たないオブジェクトを除外する
+    routes = [r.path for r in app.routes if hasattr(r, "path")]  # type: ignore[attr-defined]
     if "/api/auth/register" not in routes:
         app.include_router(auth_router.router)
 
