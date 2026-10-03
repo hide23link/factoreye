@@ -4,20 +4,18 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import bcrypt as _bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from app.config import settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
+    return _bcrypt.hashpw(plain.encode("utf-8"), _bcrypt.gensalt()).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
 
 
 def create_access_token(user_id: UUID, workspace_id: UUID) -> str:

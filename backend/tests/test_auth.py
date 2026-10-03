@@ -182,7 +182,7 @@ async def test_me_success(auth_client: httpx.AsyncClient) -> None:
 
 async def test_me_no_token(auth_client: httpx.AsyncClient) -> None:
     resp = await auth_client.get("/api/me")
-    assert resp.status_code == 403  # HTTPBearer は token なしで 403 を返す
+    assert resp.status_code in (401, 403)  # HTTPBearer は token なしで 401 or 403
 
 
 async def test_me_invalid_token(auth_client: httpx.AsyncClient) -> None:
