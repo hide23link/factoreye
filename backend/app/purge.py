@@ -30,6 +30,7 @@ async def purge_old_readings() -> int:
             Reading.recorded_at < cutoff,
             Reading.sensor_id.in_(multi_tenant_sensor_ids),  # type: ignore[attr-defined]
         )
+        .execution_options(synchronize_session=False)
     )
 
     async with AsyncSession(engine) as session:
