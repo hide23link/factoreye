@@ -37,6 +37,7 @@ services:
         # Vite はビルド時に API URL を静的ファイルへ焼き込む
         # /api/* は Caddy が backend:8000 へルーティングするため同一ドメインを指定
         VITE_API_URL: https://${DOMAIN}
+        VITE_AUTH_MODE: multi_tenant
     restart: unless-stopped
     depends_on:
       - backend
