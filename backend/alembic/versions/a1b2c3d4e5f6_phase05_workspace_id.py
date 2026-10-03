@@ -90,8 +90,9 @@ def upgrade() -> None:
     op.create_index("ix_notification_settings_workspace_id", "notification_settings", ["workspace_id"])
 
     # notification_settings.id に SERIAL を付与（既存の id=1 行を保持しつつ新規行を自動採番）
+    # IF NOT EXISTS: テーブル作成時に PostgreSQL が自動生成済みの場合はスキップ
     op.execute(sa.text(
-        "CREATE SEQUENCE notification_settings_id_seq START WITH 2 OWNED BY notification_settings.id"
+        "CREATE SEQUENCE IF NOT EXISTS notification_settings_id_seq START WITH 2 OWNED BY notification_settings.id"
     ))
     op.execute(sa.text(
         "ALTER TABLE notification_settings ALTER COLUMN id SET DEFAULT nextval('notification_settings_id_seq')"
