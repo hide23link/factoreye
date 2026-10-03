@@ -123,11 +123,13 @@ async def register(
     session.add(workspace)
     await session.flush()
 
+    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
+    user_id, workspace_id = user.id, workspace.id
     raw, token_hash = auth_utils.create_refresh_token()
     session.add(
         RefreshToken(
-            user_id=user.id,
-            workspace_id=workspace.id,
+            user_id=user_id,
+            workspace_id=workspace_id,
             token_hash=token_hash,
             expires_at=auth_utils.refresh_token_expiry(),
         )
@@ -135,7 +137,7 @@ async def register(
     await session.commit()
 
     return TokenResponse(
-        access_token=auth_utils.create_access_token(user.id, workspace.id),
+        access_token=auth_utils.create_access_token(user_id, workspace_id),
         refresh_token=raw,
     )
 
@@ -163,11 +165,13 @@ async def login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="no workspace found"
         )
 
+    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
+    user_id, workspace_id = user.id, workspace.id
     raw, token_hash = auth_utils.create_refresh_token()
     session.add(
         RefreshToken(
-            user_id=user.id,
-            workspace_id=workspace.id,
+            user_id=user_id,
+            workspace_id=workspace_id,
             token_hash=token_hash,
             expires_at=auth_utils.refresh_token_expiry(),
         )
@@ -175,7 +179,7 @@ async def login(
     await session.commit()
 
     return TokenResponse(
-        access_token=auth_utils.create_access_token(user.id, workspace.id),
+        access_token=auth_utils.create_access_token(user_id, workspace_id),
         refresh_token=raw,
     )
 
@@ -202,6 +206,9 @@ async def refresh(
             detail="invalid or expired refresh token",
         )
 
+    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
+    user_id, workspace_id = stored.user_id, stored.workspace_id
+
     # ローテーション: 古いトークンを失効させ新しいトークンを発行
     stored.revoked = True
     session.add(stored)
@@ -209,8 +216,8 @@ async def refresh(
     raw, new_hash = auth_utils.create_refresh_token()
     session.add(
         RefreshToken(
-            user_id=stored.user_id,
-            workspace_id=stored.workspace_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
             token_hash=new_hash,
             expires_at=auth_utils.refresh_token_expiry(),
         )
@@ -218,7 +225,7 @@ async def refresh(
     await session.commit()
 
     return TokenResponse(
-        access_token=auth_utils.create_access_token(stored.user_id, stored.workspace_id),
+        access_token=auth_utils.create_access_token(user_id, workspace_id),
         refresh_token=raw,
     )
 
