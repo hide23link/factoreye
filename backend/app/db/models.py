@@ -1,10 +1,11 @@
 """
-FactorEye データモデル（Phase 0 MVP）
+FactorEye データモデル
 
 仕様: docs/factoreye-architecture.md の Data Model セクション参照
 (ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
 
-エンティティ: Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig / Plugin / PluginConfig
+Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig / Plugin / PluginConfig
+Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
 """
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -204,6 +205,49 @@ class PluginConfig(SQLModel, table=True):
     data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     plugin: Plugin = Relationship(back_populates="plugin_configs")
+
+
+# ──────────────────────────────────────────────────────────────
+# Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
+# ──────────────────────────────────────────────────────────────
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(unique=True, max_length=254, index=True)
+    password_hash: str = Field(max_length=200)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    workspaces: list["Workspace"] = Relationship(back_populates="owner")
+    refresh_tokens: list["RefreshToken"] = Relationship(back_populates="user")
+
+
+class Workspace(SQLModel, table=True):
+    __tablename__ = "workspaces"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(max_length=100)
+    owner_id: UUID = Field(foreign_key="users.id", index=True)
+    # "free" | "pro"
+    plan: str = Field(default="free", max_length=20)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    owner: User = Relationship(back_populates="workspaces")
+
+
+class RefreshToken(SQLModel, table=True):
+    __tablename__ = "refresh_tokens"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    workspace_id: UUID
+    # 生トークンは返さずSHA-256ハッシュのみ保存
+    token_hash: str = Field(max_length=64, index=True)
+    expires_at: datetime
+    revoked: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    user: User = Relationship(back_populates="refresh_tokens")
 
 
 # ──────────────────────────────────────────────────────────────
