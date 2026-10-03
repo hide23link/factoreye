@@ -46,6 +46,10 @@ class Sensor(SQLModel, table=True):
     __tablename__ = "sensors"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # Phase 0.5: NULL = self-hosted（ワークスペースなし）、UUID = multi-tenant のワークスペース
+    workspace_id: UUID | None = Field(
+        default=None, foreign_key="workspaces.id", index=True, ondelete="CASCADE"
+    )
     name: str = Field(unique=True, max_length=100)
     # REST ingest 識別子（旧 mqttTopic）
     # デバイス側は POST /api/ingest/readings にこの値を含めて送信する
@@ -132,6 +136,9 @@ class Dashboard(SQLModel, table=True):
     __tablename__ = "dashboards"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID | None = Field(
+        default=None, foreign_key="workspaces.id", index=True, ondelete="CASCADE"
+    )
     name: str = Field(max_length=100)
     description: str | None = Field(default=None, max_length=500)
     # グリッドレイアウト設定（3列 x N行）
@@ -256,7 +263,10 @@ class RefreshToken(SQLModel, table=True):
 class NotificationSettings(SQLModel, table=True):
     __tablename__ = "notification_settings"
 
-    id: int = Field(default=1, primary_key=True)
+    # Phase 0.5: id=1（NULL workspace）が self-hosted 用のシングルトン行
+    # multi-tenant では workspace ごとに新規行（マイグレーションで SERIAL 付与済み）
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: UUID | None = Field(default=None, index=True)
     # 重故障・軽故障で別々のDiscord Webhookに送り分けられるよう、それぞれ専用のURLを持つ
     # （例: 重故障は緊急対応チャンネル、軽故障はログ用チャンネルに分ける運用を想定）
     discord_webhook_url_critical: str = Field(default="", max_length=500)

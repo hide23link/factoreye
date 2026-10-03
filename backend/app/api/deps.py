@@ -14,12 +14,14 @@ from app.db.session import get_session
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def verify_ingest_api_key(x_api_key: str = Header(...)) -> None:
-    """Self-hosted: .env の共有シークレット（INGEST_API_KEY）と比較。
-
-    SaaS向けのワークスペース別write鍵（Phase 0.5）は対象外。
+async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Ingest エンドポイント認証。
+    - AUTH_MODE=disabled (self-hosted): X-API-Key ヘッダーと .env の共有シークレットを比較
+    - AUTH_MODE=multi_tenant (SaaS): センサーの ingest_key が body にあるのでヘッダー認証は不要
     """
-    if x_api_key != settings.ingest_api_key:
+    if settings.auth_mode == AuthMode.MULTI_TENANT:
+        return  # multi-tenant: body の ingest_key がセンサー単位の認証になる
+    if x_api_key is None or x_api_key != settings.ingest_api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API key")
 
 
