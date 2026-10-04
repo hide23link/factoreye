@@ -34,7 +34,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlmodel import SQLModel
 
@@ -353,7 +353,16 @@ async def _import_lines(
 
     async def flush() -> None:
         if current is not None and pending:
-            await _insert_batch(conn, tables[current], pending)
+            try:
+                await _insert_batch(conn, tables[current], pending)
+            except IntegrityError:
+                raise  # 制約違反（同じ ID など）は呼び出し側で 409 として扱う
+            except DBAPIError as exc:
+                # 型が合わない値（例: 数値の列に文字列）などは、利用者が直せる理由として返す
+                raise MigrationError(
+                    f"書き出しファイルの値が移行先の形式と合いません（{current}）: "
+                    f"{getattr(exc, 'orig', exc)}"
+                ) from None
             counts[current] += len(pending)
             pending.clear()
 
@@ -379,7 +388,10 @@ async def _import_lines(
             unknown = set(entry["r"]) - set(tables[name].c.keys())
             if unknown:
                 raise MigrationError(f"未知の列です（{name}）: {', '.join(sorted(unknown))}")
-            row = _prepare_row(name, tables[name], entry["r"], with_notifications)
+            try:
+                row = _prepare_row(name, tables[name], entry["r"], with_notifications)
+            except (ValueError, TypeError):
+                raise MigrationError(f"書き出しファイルの値の形式が違います（{name}）") from None
             if row is not None:
                 pending.append(row)
         if len(pending) >= BATCH_SIZE:
