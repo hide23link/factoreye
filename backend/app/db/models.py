@@ -258,6 +258,30 @@ class RefreshToken(SQLModel, table=True):
 
 
 # ──────────────────────────────────────────────────────────────
+# WebhookSubscription（Phase 1: ノーコード連携。Zapier/Make/n8n等が
+# 受け口を用意するだけで、利用者はコードを一切書かずに外部連携できる）
+# ──────────────────────────────────────────────────────────────
+class WebhookEventType(StrEnum):
+    READING_RECEIVED = "reading.received"
+    ALARM_TRIGGERED = "alarm.triggered"
+
+
+class WebhookSubscription(SQLModel, table=True):
+    __tablename__ = "webhook_subscriptions"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # Sensor/Dashboardと同じ規約: NULL = self-hosted、UUID = multi-tenantのワークスペース
+    workspace_id: UUID | None = Field(
+        default=None, foreign_key="workspaces.id", index=True, ondelete="CASCADE"
+    )
+    event_type: WebhookEventType
+    url: str = Field(max_length=500)
+    enabled: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ──────────────────────────────────────────────────────────────
 # NotificationSettings（シングルトン、常にid=1の1行のみ）
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):

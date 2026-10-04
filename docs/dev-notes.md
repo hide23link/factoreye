@@ -229,3 +229,20 @@
 - メインループとHTTPサーバースレッド間の状態共有は`threading.Lock`で保護
 
 **確認方法**: `python3 -m py_compile`で構文確認後、ネットワークを介さないユニットレベルの動作確認（手動target設定→収束→OFFで自動復帰）をスクリプトで実行。さらに実際にエミュレータを起動し、`POST /control`で温度を手動50°Cに設定→backendのReadingに反映されることをcurlで確認済み。
+
+---
+
+### 2026-10-04: Webhook連携機能の新設（Phase 1、PythonプラグインからWebhookへの移行の第一歩）
+
+**背景**: 「初心者でも簡単に使える」という製品コンセプトと、既存のPythonプラグインシステム（サードパーティ拡張にPythonコードを書かせる方式）が根本的に矛盾するという指摘を受けた。加えてPluginテーブルが`workspace_id`を持たずテナント非依存になっている点が、SaaS→OSS移行機能の設計上の課題にもなっていた。これらを解決する方向として、拡張の主軸をPythonプラグインから「Webhook設定」+「ルールベース設定」に寄せる方針に転換した。本変更はその第一歩（Webhook機能の新設）。Pluginシステム自体の廃止は別途Phase 2で対応する。
+
+**実装内容**:
+- `WebhookSubscription`テーブルを新設（`workspace_id` / `event_type` / `url` / `enabled`）。Sensor/Dashboardと同じ規約で`workspace_id IS NULL`がself-hosted、UUIDがmulti-tenantのワークスペースを表す
+- イベント種別は`reading.received`（センサー値受信ごと）と`alarm.triggered`（アラーム発生ごと）の2種類
+- `app/webhooks.py`: 任意のURLへ素のJSONをPOSTする汎用送信関数（Discord専用の`send_alarm_discord`とは別物。Zapier/Make/n8n等のノーコード自動化サービスへの連携を想定し、利用者はコードを書かずに外部連携できる）
+- `app/ingest_buffer.py`のflush時に、該当workspaceの購読設定を引いて配信する処理を追加。`AlarmNotification`に`sensor_id`/`workspace_id`を追加し、アラーム発生時の配信先を特定できるようにした
+- 設定API（`/api/settings/webhooks`、一覧・作成・更新・削除）と、設定画面に「Webhook連携」タブを追加
+
+**確認方法**: ローカルにPostgreSQL 16を用意し、マイグレーション（upgrade/downgrade往復）・pytest（新規`test_webhooks.py`含め117件）・mypy（strict）・ruffを確認。マイグレーション実装時、`op.create_table`に Enum型カラムを含めると自動でEnum型を作成するため、事前の明示的な`.create()`呼び出しが「型が既に存在する」エラーで重複することを実機確認して修正した（`add_column`の場合は事前create が必要という既存migrationの前例と挙動が異なる点、今後の注意点として記録）。frontendはnpm run test（92件）・typecheck・lintを確認。docker-compose起動後の実ブラウザでの確認はまだ未実施（次回Mac側で実施予定）。
+
+**次フェーズ**: Phase 2（Pluginシステム廃止）、Phase 3（ルールベース設定の具体化）、Phase 4（`export-workspace`/`import-workspace`移行ツール、Phase 1完了後に着手）。

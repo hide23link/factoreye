@@ -19,7 +19,18 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api import admin, alarms, auth, dashboards, ingest, plugins, readings, sensors, widgets
+from app.api import (
+    admin,
+    alarms,
+    auth,
+    dashboards,
+    ingest,
+    plugins,
+    readings,
+    sensors,
+    webhooks,
+    widgets,
+)
 from app.api import settings as settings_api
 from app.config import AuthMode, settings
 from app.db.session import engine
@@ -76,6 +87,7 @@ app.include_router(dashboards.router)
 app.include_router(widgets.router)
 app.include_router(plugins.router)
 app.include_router(settings_api.router)
+app.include_router(webhooks.router)
 
 # Phase 0.5: AUTH_MODE=multi_tenant 時のみ認証エンドポイントを公開
 if settings.auth_mode == AuthMode.MULTI_TENANT:

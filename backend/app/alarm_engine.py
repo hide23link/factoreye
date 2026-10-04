@@ -123,6 +123,8 @@ async def evaluate_alarms(
                         threshold_breached=breached,
                         severity=severity,
                         triggered_at=p.recorded_at,
+                        sensor_id=sensor.id,
+                        workspace_id=sensor.workspace_id,
                     )
                 )
             elif existing.severity != severity:
@@ -141,6 +143,8 @@ async def evaluate_alarms(
                         threshold_breached=breached,
                         severity=severity,
                         triggered_at=p.recorded_at,
+                        sensor_id=sensor.id,
+                        workspace_id=sensor.workspace_id,
                     )
                 )
             elif (
@@ -165,6 +169,8 @@ async def evaluate_alarms(
                         severity=severity,
                         triggered_at=existing.triggered_at,
                         is_repeat=True,
+                        sensor_id=sensor.id,
+                        workspace_id=sensor.workspace_id,
                     )
                 )
             # それ以外（重要度不変・再通知条件も満たさない）は何もしない（dedupe）

@@ -9,6 +9,7 @@ import {
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
   fetchSensors,
+  fetchWebhookSubscriptions,
 } from "../lib/api";
 
 const POLL_INTERVAL_MS = 5000;
@@ -39,6 +40,9 @@ export const usePlugins = () =>
 
 export const useNotificationSettings = () =>
   useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });
+
+export const useWebhookSubscriptions = () =>
+  useQuery({ queryKey: ["webhook-subscriptions"], queryFn: fetchWebhookSubscriptions });
 
 export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({

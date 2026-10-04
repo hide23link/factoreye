@@ -11,14 +11,24 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import or_
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.alarm_engine import evaluate_alarms
-from app.db.models import AlarmSeverity, NotificationSettings, Reading
+from app.db.models import (
+    AlarmSeverity,
+    NotificationSettings,
+    Reading,
+    Sensor,
+    WebhookEventType,
+    WebhookSubscription,
+)
 from app.db.session import engine
-from app.notifications import send_alarm_discord
+from app.notifications import AlarmNotification, send_alarm_discord
 from app.plugins.base import SensorReadingEvent
 from app.plugins.manager import dispatch_reading
+from app.webhooks import send_webhook
 
 FLUSH_INTERVAL_SECONDS = 1.0
 
@@ -60,6 +70,95 @@ def _fire_and_forget(coro: Coroutine[Any, Any, None]) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
+async def _load_webhook_subscriptions(
+    session: AsyncSession, event_type: WebhookEventType, workspace_ids: set[UUID | None]
+) -> dict[UUID | None, list[WebhookSubscription]]:
+    """指定イベント種別・有効なものだけを、workspace_id別にまとめて返す。
+
+    workspace_idはNULL（self-hosted）を含みうるため、`IN`だけでは拾えないNULLを
+    `IS NULL`で別途補う（SQLの`IN (NULL, ...)`はNULL自身にはマッチしない）。
+    """
+    conditions = []
+    non_null_ids = {w for w in workspace_ids if w is not None}
+    if non_null_ids:
+        conditions.append(col(WebhookSubscription.workspace_id).in_(non_null_ids))
+    if None in workspace_ids:
+        conditions.append(col(WebhookSubscription.workspace_id).is_(None))
+    if not conditions:
+        return {}
+
+    result = await session.exec(
+        select(WebhookSubscription).where(
+            WebhookSubscription.event_type == event_type,
+            col(WebhookSubscription.enabled).is_(True),
+            or_(*conditions),
+        )
+    )
+    subs_by_workspace: dict[UUID | None, list[WebhookSubscription]] = {}
+    for sub in result.all():
+        subs_by_workspace.setdefault(sub.workspace_id, []).append(sub)
+    return subs_by_workspace
+
+
+async def _dispatch_reading_webhooks(
+    session: AsyncSession, pending: list[PendingReading]
+) -> None:
+    sensor_ids = {p.sensor_id for p in pending}
+    sensors_result = await session.exec(
+        select(Sensor.id, Sensor.workspace_id).where(col(Sensor.id).in_(sensor_ids))
+    )
+    workspace_by_sensor: dict[UUID, UUID | None] = dict(sensors_result.all())
+
+    subs_by_workspace = await _load_webhook_subscriptions(
+        session, WebhookEventType.READING_RECEIVED, set(workspace_by_sensor.values())
+    )
+    if not subs_by_workspace:
+        return
+
+    for p in pending:
+        for sub in subs_by_workspace.get(workspace_by_sensor.get(p.sensor_id), []):
+            _fire_and_forget(
+                send_webhook(
+                    sub.url,
+                    {
+                        "event": WebhookEventType.READING_RECEIVED.value,
+                        "sensorId": str(p.sensor_id),
+                        "value": p.value,
+                        "recordedAt": p.recorded_at.isoformat(),
+                    },
+                )
+            )
+
+
+async def _dispatch_alarm_webhooks(
+    session: AsyncSession, notifications: list[AlarmNotification]
+) -> None:
+    workspace_ids = {n.workspace_id for n in notifications}
+    subs_by_workspace = await _load_webhook_subscriptions(
+        session, WebhookEventType.ALARM_TRIGGERED, workspace_ids
+    )
+    if not subs_by_workspace:
+        return
+
+    for notification in notifications:
+        for sub in subs_by_workspace.get(notification.workspace_id, []):
+            _fire_and_forget(
+                send_webhook(
+                    sub.url,
+                    {
+                        "event": WebhookEventType.ALARM_TRIGGERED.value,
+                        "sensorId": str(notification.sensor_id) if notification.sensor_id else None,
+                        "sensorName": notification.sensor_name,
+                        "value": notification.value,
+                        "severity": notification.severity.value,
+                        "thresholdBreached": notification.threshold_breached.value,
+                        "triggeredAt": notification.triggered_at.isoformat(),
+                        "isRepeat": notification.is_repeat,
+                    },
+                )
+            )
+
+
 async def flush_once() -> int:
     """バッファの内容を1回だけDBへbatch INSERTする。戻り値は書き込んだ件数。"""
     pending = await buffer.drain()
@@ -89,6 +188,12 @@ async def flush_once() -> int:
         }
         notify_enabled = notif_settings.enabled if notif_settings else False
         await session.commit()
+
+        # 汎用Webhook配信はDiscord専用通知の有効/無効フラグとは独立に動く
+        # （セッションがまだ開いているうちに購読先を引いておく）
+        await _dispatch_reading_webhooks(session, pending)
+        if notifications:
+            await _dispatch_alarm_webhooks(session, notifications)
 
     if notify_enabled:
         for notification in notifications:

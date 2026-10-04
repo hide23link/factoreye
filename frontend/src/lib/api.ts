@@ -9,6 +9,8 @@ import type {
   Reading,
   ReadingAggregate,
   Sensor,
+  WebhookEventType,
+  WebhookSubscription,
   Widget,
   WidgetConfig,
   WidgetType,
@@ -276,3 +278,26 @@ export const updateNotificationSettings = (data: Partial<NotificationSettings>) 
     method: "PUT",
     body: JSON.stringify(data),
   });
+
+// ── Webhook Subscriptions（Phase 1: ノーコード連携）─────────────
+
+export const fetchWebhookSubscriptions = () =>
+  request<WebhookSubscription[]>("/api/settings/webhooks");
+
+export const createWebhookSubscription = (data: { eventType: WebhookEventType; url: string }) =>
+  request<WebhookSubscription>("/api/settings/webhooks", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const updateWebhookSubscription = (
+  id: string,
+  data: Partial<{ url: string; enabled: boolean }>,
+) =>
+  request<WebhookSubscription>(`/api/settings/webhooks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+export const deleteWebhookSubscription = (id: string) =>
+  request<void>(`/api/settings/webhooks/${id}`, { method: "DELETE" });
