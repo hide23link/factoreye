@@ -1,7 +1,7 @@
 """通知設定API（Discord Webhook URL・有効/無効）。
 
-self-hosted: workspace_id IS NULL のシングルトン行（id=1）
-multi-tenant: workspace_id 別の行を自動作成
+self-hosted: workspace_id IS NULL の行（id=1）
+multi-tenant: ワークスペースごとの行を自動作成
 """
 from typing import Annotated
 from uuid import UUID
@@ -22,7 +22,7 @@ async def _get_notification_settings(
     session: AsyncSession, workspace_id: UUID | None
 ) -> NotificationSettings:
     if workspace_id is None:
-        # self-hosted: id=1 のシングルトン行（マイグレーションで投入済み、なければ初期作成）
+        # self-hosted: workspace_id IS NULL の行（id=1。なければ初期作成）
         settings_row = await session.get(NotificationSettings, 1)
         if settings_row is None:
             settings_row = NotificationSettings(id=1, workspace_id=None)
