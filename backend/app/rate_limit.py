@@ -1,4 +1,4 @@
-"""レート制限（slowapi、インメモリストア。単一LXCインスタンス前提でRedis不要）。"""
+"""レート制限（slowapi、インメモリストア。単一インスタンス前提のため Redis は不要）。"""
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 

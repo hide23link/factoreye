@@ -5,7 +5,7 @@ M5Stack向けArduinoライブラリ（clients/arduino-m5stack/）と同じ設計
   - 指数バックオフ（1, 2, 4, 8, 16秒、上限30秒、±10%ジッター）
   - 送信失敗分はリングバッファ（最大100件）に一時保持し、次回成功時にまとめて再送
 
-仕様の根拠: docs/factoreye-architecture.md §Sensor Data Ingest（デバイス側リトライ）。
+仕様の根拠: docs/architecture.md §9 デバイス連携。
 依存ライブラリなし（標準ライブラリのみ）。Raspberry Pi OS標準のPython 3で追加インストール不要。
 
 使い方:
@@ -111,7 +111,7 @@ class FactorEyeClient:
             self._next_attempt_at = 0.0
             return
 
-        # 1, 2, 4, 8, 16, 30(上限)秒... docs/factoreye-architecture.md §デバイス側リトライ
+        # 1, 2, 4, 8, 16, 30(上限)秒... docs/architecture.md §9 デバイス連携
         self._consecutive_failures = min(self._consecutive_failures + 1, 6)
         backoff = min(2.0 ** (self._consecutive_failures - 1), _BACKOFF_CAP_SECONDS)
         jitter = backoff * 0.1

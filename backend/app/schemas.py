@@ -1,6 +1,6 @@
 """API リクエスト/レスポンス用 Pydantic スキーマ（Phase 0: Sensor / Ingest / Alarm）。
 
-JSON配線フォーマットはcamelCase（docs/factoreye-architecture.md のAPI例に合わせる）。
+JSON配線フォーマットはcamelCase（docs/architecture.md §4 REST API の例に合わせる）。
 Python/DB側はsnake_case（PEP 8）のまま、alias_generatorで変換する。
 """
 from datetime import datetime

@@ -65,7 +65,7 @@ app.state.limiter = limiter
 # slowapiのハンドラ型はStarletteの例外ハンドラ型と厳密には一致しない（ライブラリ側のstub起因）
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
-# CORS: 明示的にFRONTEND_URLのみ許可（`*`禁止、docs/factoreye-architecture.md §Security参照）
+# CORS: 明示的にFRONTEND_URLのみ許可（`*`禁止、docs/architecture.md §11 運用）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],

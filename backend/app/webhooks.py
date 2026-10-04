@@ -3,7 +3,7 @@
 app.notifications.send_alarm_discordはDiscord専用の固定フォーマットだが、こちらは
 任意のURLへ素のJSONをPOSTするだけの汎用版。Zapier/Make/n8n等のノーコード自動化
 サービスに繋ぐことを想定しており、利用者はコードを一切書かずに外部連携できる
-（docs/factoreye-architecture.md §Webhook通知 参照）。
+（docs/architecture.md §7 通知 参照）。
 
 SSRF対策: 利用者が指定したURLへサーバー側から送信するため、内部ネットワーク
 （ループバック・プライベートIP・メタデータ用アドレス等）を叩けないように検証する。

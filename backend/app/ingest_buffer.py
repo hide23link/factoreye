@@ -1,6 +1,6 @@
 """Ingestバッファ: POST /api/ingest/readings 受信毎にメモリへ追加、1秒毎にbatch flush。
 
-docs/factoreye-architecture.md §Ingest バッファ & バッチ書き込み 参照。
+docs/architecture.md §5 センサーの取り込み 参照。
 トレードオフ: 最大1秒分のデータがクラッシュで喪失される可能性（Phase 0 では許容）。
 """
 import asyncio

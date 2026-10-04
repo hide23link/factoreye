@@ -1,7 +1,7 @@
 #!/bin/bash
-# FactorEye Proxmox LXC102 初期セットアップ
+# FactorEye クラウド版サーバーの初期セットアップ
 # 前提: Ubuntu 24.04 LTS、Step 1（apt/UFW）・Step 2（Cloudflare Tunnel）完了済み
-# 使い方: ssh root@100.70.133.58 'bash -s' < infra/cloud/setup-server.sh
+# 使い方: ssh root@<サーバーのアドレス> 'bash -s' < infra/cloud/setup-server.sh
 
 set -euo pipefail
 

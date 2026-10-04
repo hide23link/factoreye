@@ -1,6 +1,6 @@
 # FactorEyeClient（M5Stack / ESP32 用 Arduinoライブラリ）
 
-M5Stack Atom などのESP32系デバイスから、FactorEyeの[センサーIngest API](../../docs/factoreye-architecture.md)
+M5Stack Atom などのESP32系デバイスから、FactorEyeの[センサーIngest API](../../docs/architecture.md)
 (`POST /api/ingest/readings`) へ値を送るための最小クライアントです。
 [Ambient](https://ambidata.io/)のライブラリと同じ感覚で、`begin()` と `send()` の2行で使えます。
 
@@ -57,7 +57,7 @@ APIキーはPhase 0.5以降の対象で、本ライブラリは未対応）。
   （`loop()`をブロックしない）
 - バッファが満杯のときは最も古い値から捨てられる
 
-この挙動は `docs/factoreye-architecture.md` §Sensor Data Ingest の
+この挙動は `docs/architecture.md` §5 センサーの取り込み の
 「デバイス側リトライ（指数バックオフ）」の仕様に準拠しています。
 
 `pendingCount()` で現在バッファに溜まっている未送信件数を取得できます（Serial出力等の
@@ -69,11 +69,10 @@ APIキーはPhase 0.5以降の対象で、本ライブラリは未対応）。
   生成のため、エスケープ処理は行っていません）。センサー名は通常 `pressure-a1` のような
   単純な識別子にするため、実運用上は問題になりません。
 - タイムスタンプは送信しません。FactorEyeバックエンドは受信時刻を採用し、デバイス側の
-  時刻は信頼しない設計のためです（`docs/factoreye-architecture.md` 参照）。
+  時刻は信頼しない設計のためです（`docs/architecture.md` 参照）。
 - 1回の`send()`につき対象にできる`ingestKey`は1つです（複数センサーを送る場合はそれぞれ
   別の`ingestKey`で`send()`を呼んでください）。
 
 ## ライセンス
 
-MIT（`LICENSE`参照）。`m5stack-rest-client` として
-`docs/factoreye-architecture.md` §センサーデバイス対応 に記載の公式プラグイン方針に沿います。
+MIT（`LICENSE`参照）。REST（JSON）でデータを送るため、Webhook 連携とも併用できます（`docs/architecture.md` §9）。

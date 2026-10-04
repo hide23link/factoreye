@@ -79,7 +79,7 @@ void FactorEyeClient::_onSendResult(bool success) {
   if (_consecutiveFailures < 255) {
     _consecutiveFailures++;
   }
-  // 1s, 2s, 4s, 8s, 16s, 30s(上限)... docs/factoreye-architecture.md §デバイス側リトライ
+  // 1s, 2s, 4s, 8s, 16s, 30s(上限)... docs/architecture.md §9 デバイス連携
   uint8_t shiftAmount = _consecutiveFailures - 1;
   if (shiftAmount > 5) shiftAmount = 5;
   unsigned long backoff = 1000UL << shiftAmount;

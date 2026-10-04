@@ -1,6 +1,6 @@
 """POST /api/ingest/readings のテスト。
 
-docs/factoreye-architecture.md §Testing Strategy のシナリオ（認証・不正ペイロード・
+docs/architecture.md §12 テスト のシナリオ（認証・不正ペイロード・
 高頻度バッチ）を実装に合わせて踏襲。Alarm評価・dedupeはSprint 4で追加。
 """
 import time

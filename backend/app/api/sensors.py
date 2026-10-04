@@ -129,7 +129,7 @@ async def delete_sensor(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> None:
-    """物理削除。測定値・アラーム履歴もCASCADEで一緒に消える（2026-10-02、社長の明示的な
+    """物理削除。測定値・アラーム履歴もCASCADEで一緒に消える（2026-10-02、運用者の明示的な
     判断）。ウィジェットは消さず、紐付け（sensor_id）だけがNULLになる。"""
     sensor = await _get_active_sensor(session, sensor_id, workspace_id)
     await session.delete(sensor)

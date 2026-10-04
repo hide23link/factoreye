@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { sendReading } from "./helpers";
 
 // 設定画面でセンサーの閾値を設定 → 閾値超過データを送信 → アラームが発生し確認(ack)できる、
-// という一連の流れを確認する（dev-notes.md 2026-10-02のSprint 6後半 手動検証を固定化）。
+// という一連の流れを確認する。
 test("閾値超過でアラームが発生し、設定画面から確認できる", async ({ page, request }) => {
   const sensorName = `E2Eセンサー-${Date.now()}`;
   const ingestKey = `e2e-${Date.now()}`;

@@ -68,7 +68,7 @@ async def ingest_readings(
     if not sensor.enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="sensor disabled")
 
-    # ingest時刻を採用（デバイス側timestampは信頼しない、docs §Reading参照）
+    # ingest時刻を採用（デバイス側timestampは信頼しない、docs/architecture.md §3 データモデル参照）
     received_at = datetime.now(UTC)
     for reading in readings:
         await buffer.add(

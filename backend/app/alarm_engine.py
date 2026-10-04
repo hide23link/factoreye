@@ -1,6 +1,6 @@
 """アラーム評価エンジン: batch flush内でReading INSERT直後に閾値比較・dedupe・解除判定。
 
-docs/factoreye-architecture.md §アラーム評価 & デデュープ 参照。
+docs/architecture.md §6 アラーム評価 参照。
 """
 from datetime import timedelta
 from typing import TYPE_CHECKING

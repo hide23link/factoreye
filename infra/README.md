@@ -1,6 +1,6 @@
 # バックアップ・リストア
 
-`docs/factoreye-architecture.md` §バックアップ の実装。PostgreSQLを`pg_dump`で日次バックアップし、
+`docs/architecture.md` §11 運用（バックアップ） の実装。PostgreSQLを`pg_dump`で日次バックアップし、
 7日より古いファイルは自動削除する。
 
 ## セットアップ（本番運用者向け）
@@ -42,6 +42,6 @@ DBに丸ごと復元したい場合は、先にそのDB/ボリュームを作り
 ## 注意
 
 - このスクリプトはcompose project名に依存しない（`docker compose exec <service名>`を使うため、
-  ディレクトリ名や自宅LXC self-hosted runner移行後も変更不要）
+  ディレクトリ名やランナーの構成に依存しない）
 - バックアップファイル自体の保護（暗号化・オフサイト保管等）は運用者の責任範囲。`backups/`は
   `.gitignore`済みでリポジトリにはコミットされない
