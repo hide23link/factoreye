@@ -20,7 +20,7 @@ test("データ移行: 書き出しファイルの件数を確認できる（取
   const lines = [
     {
       format: "factoreye-workspace-export",
-      version: 1,
+      version: 2,
       workspace_id: workspaceId,
       exported_at: now,
       alembic_version: "d4e5f6a7b8c9",
