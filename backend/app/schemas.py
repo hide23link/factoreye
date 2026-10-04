@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached
+from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached, WebhookEventType
 
 
 class CamelModel(BaseModel):
@@ -218,26 +218,6 @@ class DashboardDetail(DashboardRead):
 
 
 # ──────────────────────────────────────────────────────────────
-# Plugin
-# ──────────────────────────────────────────────────────────────
-
-
-class PluginRead(CamelModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
-
-    id: UUID
-    name: str
-    version: str
-    enabled: bool
-    installed_at: datetime
-    config: dict[str, Any]
-
-
-class PluginConfigUpdate(CamelModel):
-    config: dict[str, Any]
-
-
-# ──────────────────────────────────────────────────────────────
 # NotificationSettings
 # ──────────────────────────────────────────────────────────────
 
@@ -258,3 +238,30 @@ class NotificationSettingsUpdate(CamelModel):
     enabled: bool | None = None
     critical_repeat_enabled: bool | None = None
     critical_repeat_interval_minutes: int | None = Field(default=None, ge=1)
+
+
+# ──────────────────────────────────────────────────────────────
+# WebhookSubscription（Phase 1: ノーコード連携）
+# ──────────────────────────────────────────────────────────────
+
+
+class WebhookSubscriptionCreate(CamelModel):
+    event_type: WebhookEventType
+    url: str = Field(min_length=1, max_length=500)
+    enabled: bool = True
+
+
+class WebhookSubscriptionUpdate(CamelModel):
+    url: str | None = Field(default=None, min_length=1, max_length=500)
+    enabled: bool | None = None
+
+
+class WebhookSubscriptionRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    id: UUID
+    event_type: WebhookEventType
+    url: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime

@@ -229,3 +229,54 @@
 - メインループとHTTPサーバースレッド間の状態共有は`threading.Lock`で保護
 
 **確認方法**: `python3 -m py_compile`で構文確認後、ネットワークを介さないユニットレベルの動作確認（手動target設定→収束→OFFで自動復帰）をスクリプトで実行。さらに実際にエミュレータを起動し、`POST /control`で温度を手動50°Cに設定→backendのReadingに反映されることをcurlで確認済み。
+
+---
+
+### 2026-10-04: Webhook連携機能の新設（Phase 1、PythonプラグインからWebhookへの移行の第一歩）
+
+**背景**: 「初心者でも簡単に使える」という製品コンセプトと、既存のPythonプラグインシステム（サードパーティ拡張にPythonコードを書かせる方式）が根本的に矛盾するという指摘を受けた。加えてPluginテーブルが`workspace_id`を持たずテナント非依存になっている点が、SaaS→OSS移行機能の設計上の課題にもなっていた。これらを解決する方向として、拡張の主軸をPythonプラグインから「Webhook設定」+「ルールベース設定」に寄せる方針に転換した。本変更はその第一歩（Webhook機能の新設）。Pluginシステム自体の廃止は別途Phase 2で対応する。
+
+**実装内容**:
+- `WebhookSubscription`テーブルを新設（`workspace_id` / `event_type` / `url` / `enabled`）。Sensor/Dashboardと同じ規約で`workspace_id IS NULL`がself-hosted、UUIDがmulti-tenantのワークスペースを表す
+- イベント種別は`reading.received`（センサー値受信ごと）と`alarm.triggered`（アラーム発生ごと）の2種類
+- `app/webhooks.py`: 任意のURLへ素のJSONをPOSTする汎用送信関数（Discord専用の`send_alarm_discord`とは別物。Zapier/Make/n8n等のノーコード自動化サービスへの連携を想定し、利用者はコードを書かずに外部連携できる）
+- `app/ingest_buffer.py`のflush時に、該当workspaceの購読設定を引いて配信する処理を追加。`AlarmNotification`に`sensor_id`/`workspace_id`を追加し、アラーム発生時の配信先を特定できるようにした
+- 設定API（`/api/settings/webhooks`、一覧・作成・更新・削除）と、設定画面に「Webhook連携」タブを追加
+
+**確認方法**: ローカルにPostgreSQL 16を用意し、マイグレーション（upgrade/downgrade往復）・pytest（新規`test_webhooks.py`含め117件）・mypy（strict）・ruffを確認。マイグレーション実装時、`op.create_table`に Enum型カラムを含めると自動でEnum型を作成するため、事前の明示的な`.create()`呼び出しが「型が既に存在する」エラーで重複することを実機確認して修正した（`add_column`の場合は事前create が必要という既存migrationの前例と挙動が異なる点、今後の注意点として記録）。frontendはnpm run test（92件）・typecheck・lintを確認。docker-compose起動後の実ブラウザでの確認はまだ未実施（次回Mac側で実施予定）。
+
+**次フェーズ**: Phase 2（Pluginシステム廃止）、Phase 3（ルールベース設定の具体化）、Phase 4（`export-workspace`/`import-workspace`移行ツール、Phase 1完了後に着手）。
+
+### 2026-10-04: Webhook送信先のSSRF対策（Phase 1 の修正）
+
+**背景**: Webhookは利用者が指定したURLへサーバー側から送信するため、そのままではサーバーの内部ネットワーク（ループバック・社内IP・クラウドのメタデータ用アドレス等）を叩けてしまう。SaaS（multi-tenant）では他テナントの利用者にも開く機能になるため、Phase 2 の前に対策した。
+
+**方針**:
+- 送信先は `https` のみ、かつ名前解決した全アドレスが公開IP（`ipaddress.is_global`）の場合だけ許可。IPv4射影アドレス（`::ffff:127.0.0.1`）は中身のIPv4で判定し、共有アドレス（100.64/10）も拒否する
+- 登録・変更時（API、422で理由を返す）と送信直前の両方で検証する。送信時の検証は、登録後にDNSが内部を指すよう変わった場合に備えるため
+- リダイレクトは追わない（httpxの既定どおり）。公開URLから内部へ転送されるのを防ぐ
+- 例外スイッチ `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`: 社内LANの自動化基盤へ送る自己ホスト利用者だけ使う。http とプライベートIPを許可する。既定は `false`（本番を含む）
+
+**既知の残リスク**: 検証（DNS解決）と実際の接続の間に、DNSの応答が変わる（DNS rebinding）隙間は残る。接続先IPを固定して送る実装にすれば塞げるが、今回は見送った。
+
+**確認方法**: `backend/tests/test_webhook_url_guard.py`（宛先IPごとの判定、例外スイッチ、登録API、送信時の再検証）。pytest 全141件、ruff、mypy（strict）が通過。ローカル稼働スタックでは、既定（false）で内部宛て・http宛ての登録が422になること、既存のhttp購読が送信時に止まること、スイッチ true で配信が再開することを確認した。
+
+**注意（事故の記録）**: pytestの `conftest.py` は接続先DBの全テーブルを `drop_all` するため、開発用のcompose DBに向けて実行すると開発データが消える。テストは `DATABASE_URL` を専用DB（`factoreye_test`）に向けて実行すること。
+
+---
+
+### 2026-10-04: Pluginシステムの廃止（Phase 2）
+
+**背景**: Phase 1でWebhook連携機能を新設したことを受け、当初の計画通りPythonプラグインシステムを廃止する。背景は2026-10-04のWebhook新設の記載を参照（「初心者でも簡単に使える」という製品コンセプトとPythonコードを書かせる拡張方式が矛盾する、Pluginテーブルがworkspace_idを持たずテナント分離できていなかった、の2点）。
+
+**実装内容**:
+- `backend/app/plugins/`一式（`base.py`・`registry.py`・`manager.py`・サンプルプラグイン`reading_logger`）を削除
+- `Plugin`/`PluginConfig`テーブルをモデルから削除し、マイグレーションでDROP（`plugin_configs`→`plugins`の順。ダウングレードで元の定義に戻せることを確認済み）
+- `backend/app/api/plugins.py`とそのAPI登録、`app/schemas.py`の`PluginRead`/`PluginConfigUpdate`を削除
+- `app/main.py`の起動時`load_plugins`呼び出し、`app/ingest_buffer.py`のflush時`dispatch_reading`呼び出しを削除（Webhook配信は既にPhase 1で同じ場所に追加済みのため、代替先は既にある）
+- frontend: 設定画面の「プラグイン」タブ・`PluginSettingsPanel`・関連API関数（`fetchPlugins`等）・`Plugin`型を削除
+- `README.md`・`CHANGELOG.md`の記載をプラグインシステムからWebhook連携に差し替え
+
+**確認方法**: ローカルDBを一度空にしてマイグレーションを最初から最後まで適用（`f25e16a44003`→新規`c3d4e5f6a7b8`まで）、ダウングレード/アップグレード往復で`plugins`/`plugin_configs`テーブルが元通り復元されることを確認。pytest 135件（旧141件からPlugin関連6件減）・mypy（strict）・ruff・pip-auditすべて通過。frontend vitest 86件（旧92件からPluginSettingsPanel関連6件減）・typecheck・lintすべて通過。docker-compose起動後の実ブラウザでの確認はまだ未実施（次回Mac側で実施予定）。
+
+**次フェーズ**: Phase 3（ルールベース設定の具体化）、Phase 4（`export-workspace`/`import-workspace`移行ツール。Plugin廃止によりテーブル台帳からPlugin関連の除外ロジックを考えずに済むようになった）。

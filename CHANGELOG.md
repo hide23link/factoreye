@@ -55,9 +55,10 @@ Phase 0 + Phase 0.5 — self-hosted工場監視OSSのMVPと、SaaS Free Tierの�
 - **MultiSensorComparison** ウィジェット: 複数センサーを重ね合わせた比較グラフ
 - **StatValue** ウィジェット: Grafana Stat 風の最新値大表示＋スパークライン、しきい値に応じた色分け
 
-#### プラグインシステム
-- プラグイン一覧・有効/無効切り替え・config JSON 編集 UI
-- `on_reading` フックで新規センサー値受信時にカスタム処理を実行可能
+#### Webhook連携
+- センサー値受信・アラーム発生をきっかけに、任意のURLへJSONをPOSTする汎用Webhook
+- Zapier/Make/n8n等のノーコード自動化サービスとの連携を想定し、コード不要で外部連携可能
+- 送信先のSSRF対策（公開IP・httpsのみ許可、社内ネットワーク向け例外スイッチあり）
 
 #### セットアップ & 運用
 - 5分セットアップガイド（SetupWizard）: センサー登録→テスト送信→ダッシュボード自動作成

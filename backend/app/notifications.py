@@ -12,6 +12,7 @@ DetachedInstanceErrorになる（セッションが閉じた後にSensor/Alarm�
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -47,6 +48,9 @@ class AlarmNotification:
     # triggered_atは元の発生時刻のまま（再通知のたびに更新はしない）
     triggered_at: datetime
     is_repeat: bool = False
+    # 汎用Webhook（app.webhooks）配信先の絞り込みに使う。Discord送信には使わない
+    sensor_id: UUID | None = None
+    workspace_id: UUID | None = None
 
 
 async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) -> None:

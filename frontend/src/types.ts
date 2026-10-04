@@ -71,6 +71,18 @@ export interface NotificationSettings {
   criticalRepeatIntervalMinutes: number;
 }
 
+// Zapier/Make/n8n等のノーコード自動化サービスへ繋ぐための汎用Webhook（Phase 1）
+export type WebhookEventType = "reading.received" | "alarm.triggered";
+
+export interface WebhookSubscription {
+  id: string;
+  eventType: WebhookEventType;
+  url: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type WidgetType =
   | "SensorGraph"
   | "ProductionStatus"
@@ -120,13 +132,4 @@ export interface Dashboard {
 
 export interface DashboardDetail extends Dashboard {
   widgets: Widget[];
-}
-
-export interface Plugin {
-  id: string;
-  name: string;
-  version: string;
-  enabled: boolean;
-  installedAt: string;
-  config: Record<string, unknown>;
 }

@@ -5,10 +5,11 @@ import type {
   DashboardDetail,
   MeResponse,
   NotificationSettings,
-  Plugin,
   Reading,
   ReadingAggregate,
   Sensor,
+  WebhookEventType,
+  WebhookSubscription,
   Widget,
   WidgetConfig,
   WidgetType,
@@ -250,22 +251,6 @@ export const updateWidget = (
 export const deleteWidget = (widgetId: string) =>
   request<void>(`/api/widgets/${widgetId}`, { method: "DELETE" });
 
-// ── Plugins ───────────────────────────────────────────────────
-
-export const fetchPlugins = () => request<Plugin[]>("/api/plugins");
-
-export const enablePlugin = (name: string) =>
-  request<Plugin>(`/api/plugins/${name}/enable`, { method: "PATCH" });
-
-export const disablePlugin = (name: string) =>
-  request<Plugin>(`/api/plugins/${name}/disable`, { method: "PATCH" });
-
-export const updatePluginConfig = (name: string, config: Record<string, unknown>) =>
-  request<Plugin>(`/api/plugins/${name}/config`, {
-    method: "PUT",
-    body: JSON.stringify({ config }),
-  });
-
 // ── Notification Settings ─────────────────────────────────────
 
 export const fetchNotificationSettings = () =>
@@ -276,3 +261,26 @@ export const updateNotificationSettings = (data: Partial<NotificationSettings>) 
     method: "PUT",
     body: JSON.stringify(data),
   });
+
+// ── Webhook Subscriptions（Phase 1: ノーコード連携）─────────────
+
+export const fetchWebhookSubscriptions = () =>
+  request<WebhookSubscription[]>("/api/settings/webhooks");
+
+export const createWebhookSubscription = (data: { eventType: WebhookEventType; url: string }) =>
+  request<WebhookSubscription>("/api/settings/webhooks", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const updateWebhookSubscription = (
+  id: string,
+  data: Partial<{ url: string; enabled: boolean }>,
+) =>
+  request<WebhookSubscription>(`/api/settings/webhooks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+export const deleteWebhookSubscription = (id: string) =>
+  request<void>(`/api/settings/webhooks/${id}`, { method: "DELETE" });

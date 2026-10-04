@@ -5,10 +5,10 @@ import {
   fetchDashboard,
   fetchDashboards,
   fetchNotificationSettings,
-  fetchPlugins,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
   fetchSensors,
+  fetchWebhookSubscriptions,
 } from "../lib/api";
 
 const POLL_INTERVAL_MS = 5000;
@@ -34,11 +34,11 @@ export const useAlarms = (status?: string) =>
     refetchInterval: POLL_INTERVAL_MS,
   });
 
-export const usePlugins = () =>
-  useQuery({ queryKey: ["plugins"], queryFn: fetchPlugins, refetchInterval: POLL_INTERVAL_MS });
-
 export const useNotificationSettings = () =>
   useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });
+
+export const useWebhookSubscriptions = () =>
+  useQuery({ queryKey: ["webhook-subscriptions"], queryFn: fetchWebhookSubscriptions });
 
 export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({

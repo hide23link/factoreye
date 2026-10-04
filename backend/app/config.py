@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     admin_credentials_file: str = "admin/admins.txt"
     # 取り込みのIP別レート制限（例: 100/minute）。"off" で解除（実機・負荷テスト用）
     ingest_rate_limit: str = "100/minute"
+    # Webhook送信先に社内ネットワーク（プライベートIP・http）を許可する。既定は禁止（SSRF対策）。
+    # 社内LANの自動化基盤（n8n等）へ送る自己ホスト利用者だけ true にする
+    webhook_allow_private_networks: bool = False
 
     @property
     def debug(self) -> bool:

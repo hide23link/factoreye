@@ -8,7 +8,7 @@ vi.mock("../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchAlarms: vi.fn(),
   fetchNotificationSettings: vi.fn(),
-  fetchPlugins: vi.fn(),
+  fetchWebhookSubscriptions: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -26,7 +26,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "センサー" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "アラーム" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "プラグイン" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Webhook連携" })).toBeInTheDocument();
   });
 
   it("アラームタブに切り替えられる", async () => {
@@ -58,5 +58,18 @@ describe("SettingsPage", () => {
 
     // NotificationSettingsPanelが描画されていれば静的テキストが表示される
     expect(await screen.findByText("通知", { selector: "h2" })).toBeInTheDocument();
+  });
+
+  it("Webhook連携タブに切り替えられる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchWebhookSubscriptions).mockResolvedValue([]);
+
+    renderWithQueryClient(<SettingsPage />);
+
+    await user.click(screen.getByRole("button", { name: "Webhook連携" }));
+
+    // WebhookSettingsPanelが描画されていれば静的見出しが表示される
+    expect(await screen.findByText("Webhook連携", { selector: "h2" })).toBeInTheDocument();
   });
 });

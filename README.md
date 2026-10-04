@@ -4,7 +4,7 @@
 
 - センサー値を集めて（REST Ingest API）、閾値監視・アラーム評価を行い、ダッシュボードで可視化する
 - self-hosted前提（Docker Composeで自社PC/Proxmoxに展開、データは社内に残る）
-- プラグインシステムで業種別にカスタマイズ可能
+- Webhook連携でZapier/Make/n8n等のノーコード自動化サービスと接続可能（コード不要）
 - MIT License
 
 詳細な設計は（別リポジトリの）コマンドセンターの `docs/factoreye-architecture.md` を参照。本リポジトリ内の運用メモは [`docs/dev-notes.md`](docs/dev-notes.md)。

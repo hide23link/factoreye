@@ -9,6 +9,8 @@ services:
       # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで
       # FRONTEND_URL=http://<このホストのIP>:3001 を指定する（CORSの許可オリジンに使われる）
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
+      # Webhookの送信先に社内ネットワーク（http・プライベートIP）を許可する。既定は禁止（SSRF対策）
+      - WEBHOOK_ALLOW_PRIVATE_NETWORKS=${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
     ports:
       - "8000:8000"
     depends_on:
