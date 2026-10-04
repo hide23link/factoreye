@@ -1,4 +1,4 @@
-# FactorEye Cloud — Proxmox LXC102 本番用 Docker Compose
+# FactorEye Cloud — 本番（クラウド版）用 Docker Compose
 # TLS は Cloudflare Tunnel が処理。Caddy は :80 のみ。
 # 使い方: docker compose -f docker-compose.cloud.yml up -d --build
 # .env に DOMAIN / POSTGRES_PASSWORD / INGEST_API_KEY / JWT_SECRET を設定すること（infra/cloud/.env.cloud.example 参照）

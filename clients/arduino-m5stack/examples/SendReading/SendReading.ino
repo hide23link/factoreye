@@ -16,7 +16,7 @@
 const char* kWifiSsid = "your-wifi-ssid";
 const char* kWifiPassword = "your-wifi-password";
 
-// 例: "http://192.168.1.50:8000"（自宅LAN内のFactorEyeバックエンドのアドレス）
+// 例: "http://192.168.1.50:8000"（LAN 内の FactorEye バックエンドのアドレス）
 const char* kFactorEyeHost = "http://192.168.1.50:8000";
 const char* kIngestApiKey = "change-this-in-production";
 const char* kIngestKey = "atom-chip-temp-1";

@@ -12,7 +12,7 @@ defaults:
 
 jobs:
   build:
-    # 自宅LXC 102 self-hosted runner登録後は `runs-on: self-hosted` に切替（docs/factoreye-architecture.md §Infrastructure参照）
+    # セルフホストランナー登録後は `runs-on: self-hosted` に切替（docs/architecture.md §11 運用）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

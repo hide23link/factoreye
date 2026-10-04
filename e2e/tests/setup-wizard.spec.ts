@@ -3,8 +3,7 @@ import { expect, test } from "@playwright/test";
 import { sendReading } from "./helpers";
 
 // Quick Setup Wizardを実際にブラウザで最初から最後まで通し、センサー登録→データ受信→
-// ダッシュボード自動作成→グラフ表示までが壊れていないことを確認する（dev-notes.md記載の
-// 手動検証手順をE2Eとして固定化したもの）。
+// ダッシュボード自動作成→グラフ表示までが壊れていないことを確認する。
 test("セットアップウィザードでセンサー登録からダッシュボード表示まで完了する", async ({
   page,
   request,

@@ -1,7 +1,7 @@
 # raspberry-pi-rest-adapter（Raspberry Pi 用 Pythonクライアント）
 
 Raspberry PiのGPIO/1-Wire/I2Cセンサーの値を、FactorEyeの
-[センサーIngest API](../../docs/factoreye-architecture.md)（`POST /api/ingest/readings`）へ
+[センサーIngest API](../../docs/architecture.md)（`POST /api/ingest/readings`）へ
 送るための最小クライアントです。[M5Stack向けArduinoライブラリ](../arduino-m5stack/)と
 同じ設計方針（Ambientライブラリ風のシンプルな呼び出し、指数バックオフ、オフラインバッファ）
 を採用しています。
@@ -53,7 +53,7 @@ raspberry-pi/
   （呼び出し元のループをブロックしない）
 - バッファが満杯のときは最も古い値から捨てられる
 
-この挙動は `docs/factoreye-architecture.md` §Sensor Data Ingest の
+この挙動は `docs/architecture.md` §5 センサーの取り込み の
 「デバイス側リトライ（指数バックオフ）」の仕様に準拠しており、M5Stack向けArduinoライブラリ
 と同じ挙動です。
 
@@ -81,12 +81,11 @@ pytestやモックサーバー用の追加ライブラリは不要（`http.serve
 ## 制限事項（Phase 0）
 
 - タイムスタンプは送信しません。FactorEyeバックエンドは受信時刻を採用し、デバイス側の
-  時刻は信頼しない設計のためです（`docs/factoreye-architecture.md` 参照）。
+  時刻は信頼しない設計のためです（`docs/architecture.md` 参照）。
 - 1回の`send()`につき対象にできる`ingest_key`は1つです（複数センサーを送る場合は
   それぞれ別の`ingest_key`で`send()`を呼んでください）。
 - 動作確認はPython 3.8〜で実施（Raspberry Pi OS Bookworm標準のPython 3.11でも動作想定）。
 
 ## ライセンス
 
-MIT（`LICENSE`参照）。`docs/factoreye-architecture.md` §センサーデバイス対応に記載の
-`raspberry-pi-rest-adapter`（公式プラグイン方針）に沿います。
+MIT（`LICENSE`参照）。REST（JSON）でデータを送るため、Webhook 連携とも併用できます（`docs/architecture.md` §9）。

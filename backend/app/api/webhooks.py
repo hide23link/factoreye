@@ -1,6 +1,6 @@
 """Webhook連携設定API（一覧・作成・更新・削除）。
 
-docs/factoreye-architecture.md §Webhook通知 参照。配信本体（app.webhooks.send_webhook）の
+docs/architecture.md §7 通知 参照。配信本体（app.webhooks.send_webhook）の
 呼び出しはapp.ingest_buffer側の責務であり、ここは設定のCRUDのみを扱う。
 """
 

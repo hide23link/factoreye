@@ -5,7 +5,7 @@
 //   factoreye.begin("http://192.168.1.50:8000", "your-ingest-api-key");
 //   factoreye.send("atom-temp-1", 25.3);
 //
-// 仕様の根拠: docs/factoreye-architecture.md §Sensor Data Ingest（デバイス側リトライ）
+// 仕様の根拠: docs/architecture.md §9 デバイス連携
 //   - 指数バックオフ: 1s, 2s, 4s, ... 上限30s（ジッター ±10%）
 //   - 送信失敗分はリングバッファ（最大100件）に一時保持し、次回成功時にまとめて送信
 //

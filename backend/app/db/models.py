@@ -1,7 +1,7 @@
 """
 FactorEye データモデル
 
-仕様: docs/factoreye-architecture.md の Data Model セクション参照
+仕様: docs/architecture.md §3 データモデル 参照
 (ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
 
 Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig
@@ -90,12 +90,12 @@ class Sensor(SQLModel, table=True):
 class Reading(SQLModel, table=True):
     __tablename__ = "readings"
     # 複合インデックス: 時系列範囲検索 `WHERE sensor_id = ? AND recorded_at BETWEEN ? AND ?` 用
-    # （TimescaleDB代替、docs/factoreye-architecture.md §TimescaleDB参照）
+    # （TimescaleDB代替、docs/decisions.md（TimescaleDB は見送り）参照）
     __table_args__ = (Index("ix_reading_sensor_recorded", "sensor_id", "recorded_at"),)
 
     # BigSerial: 時系列データの大量蓄積を想定しBIGINT必須
     id: int | None = Field(default=None, primary_key=True)
-    # センサー削除時に測定値も一緒に物理削除する（2026-10-02、社長の明示的な判断。
+    # センサー削除時に測定値も一緒に物理削除する（2026-10-02、運用者の判断。
     # 旧soft-delete方式は削除済みセンサーと同名・同ingestKeyで再登録できない問題があったため撤廃）
     sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE")
     value: float
@@ -107,7 +107,7 @@ class Reading(SQLModel, table=True):
 
 # ──────────────────────────────────────────────────────────────
 # Alarm（基本は追記専用の監査ログだが、センサー削除時はCASCADEで追従削除される。
-# 2026-10-02、社長の明示的な判断: センサー削除＝関連データ全削除を優先）
+# 2026-10-02、運用者の判断: センサー削除＝関連データ全削除を優先）
 # ──────────────────────────────────────────────────────────────
 class Alarm(SQLModel, table=True):
     __tablename__ = "alarms"
@@ -146,7 +146,7 @@ class Dashboard(SQLModel, table=True):
     layout_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
-    # soft-delete（Sensorと同じ方針、§Data Model参照）
+    # soft-delete（Sensorと同じ方針、docs/architecture.md §3 データモデル参照）
     deleted_at: datetime | None = Field(default=None, index=True)
 
     widgets: list["Widget"] = Relationship(back_populates="dashboard")

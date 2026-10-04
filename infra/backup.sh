@@ -1,5 +1,5 @@
 #!/bin/bash
-# PostgreSQLの日次バックアップ（docs/factoreye-architecture.md §バックアップ 準拠）。
+# PostgreSQLの日次バックアップ（docs/architecture.md §11 運用（バックアップ） に準拠）。
 # 本番運用者がcronで `0 3 * * * /path/to/factoreye/infra/backup.sh` のように毎日3時に実行する想定。
 # コンテナ名を直接指定せず `docker compose exec <service名>` を使うことで、
 # compose project名（ディレクトリ名）がホストによって変わっても動作する。
