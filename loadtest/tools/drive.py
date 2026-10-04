@@ -12,7 +12,7 @@ import httpx
 
 
 def _patch_from_args(args: argparse.Namespace) -> dict[str, object]:
-    patch: dict[str, object] = {"target_url": args.target}
+    patch: dict[str, object] = {"target_url": args.target, "allow_production": args.allow_production}
     for key, value in [
         ("users", args.users),
         ("sensors_per_user", args.sensors),
@@ -35,6 +35,8 @@ def main() -> None:
     p.add_argument("--viewers", type=int)
     p.add_argument("--profile", choices=["sine", "random", "spiky"])
     p.add_argument("--duration", type=int, default=60)
+    p.add_argument("--allow-production", action="store_true",
+                   help="本番ホストへの実行を明示的に許可する")
     p.add_argument("--report-every", type=int, default=10)
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="実行中に変更する項目（例: users=50）。--set-at 秒後に適用")
