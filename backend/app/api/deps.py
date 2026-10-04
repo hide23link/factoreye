@@ -1,4 +1,10 @@
-"""共通API依存関係。"""
+"""共通API依存関係。
+
+FastAPI の Depends（依存関係）として、各 API から使い回す認証・DB の部品をまとめる:
+- verify_ingest_api_key: 取り込み API の認証（self-hosted の X-API-Key）
+- get_current_workspace_id: SaaS の利用者のワークスペース（JWT から取り出す）
+- require_admin: 管理者 API の認可（管理者トークン＋管理者ファイルの存在確認）
+"""
 from typing import Annotated
 from uuid import UUID
 
@@ -12,6 +18,8 @@ from app import auth as auth_utils
 from app.config import AuthMode, settings
 from app.db.session import get_session
 
+# Authorization: Bearer <トークン> を読む。auto_error=False にして、無いときは None を受け取り、
+# 自分でエラー（401）を返す（エラーの文言を揃えるため）
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -19,6 +27,8 @@ async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) ->
     """Ingest エンドポイント認証。
     - AUTH_MODE=disabled (self-hosted): X-API-Key ヘッダーと .env の共有シークレットを比較
     - AUTH_MODE=multi_tenant (SaaS): センサーの ingest_key が body にあるのでヘッダー認証は不要
+
+    比較が違えば 401。SaaS では、認証は本文の ingest_key（センサーごとの鍵）で行う。
     """
     if settings.auth_mode == AuthMode.MULTI_TENANT:
         return  # multi-tenant: body の ingest_key がセンサー単位の認証になる
@@ -32,6 +42,9 @@ async def get_current_workspace_id(
 ) -> UUID | None:
     """AUTH_MODE=multi_tenant 時: JWTを検証しworkspace_idを返す。
     AUTH_MODE=disabled 時: None を返す（Sprint 2でAPIのスコープフィルタに使用）。
+
+    None が返るとき、API は「ワークスペースで絞らない」＝ self-hosted の全データを扱う。
+    トークンが無い・期限切れ・壊れている場合は 401。
     """
     if settings.auth_mode != AuthMode.MULTI_TENANT:
         return None
@@ -61,7 +74,10 @@ async def require_admin(
 ) -> str:
     """管理者APIの認可。管理者トークン（role=admin）で、かつ管理者ファイルにそのIDが
     まだ存在する場合だけ通す。ファイルから削除された管理者は、トークンが有効期限内でも即座に拒否される。
-    戻り値は管理者ID。"""
+    戻り値は管理者ID。
+
+    判定の順: トークンがある → 壊れていない → 管理者のトークンである → ファイルに存在する。
+    """
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="admin authentication required",

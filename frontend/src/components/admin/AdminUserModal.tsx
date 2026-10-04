@@ -1,3 +1,7 @@
+/**
+ * 利用者の詳細と編集の小窓（管理者用）。
+ * メール・プラン・パスワードを変えられる。削除は、確認用のメールを入力したときだけ実行できる（誤操作の防止）。
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -9,6 +13,7 @@ import {
 } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
 
+// 親から受け取る値: 管理者トークン、対象の利用者 ID、閉じる・変更した・認証失効の時の関数
 interface Props {
   token: string;
   userId: string;
@@ -17,13 +22,16 @@ interface Props {
   onAuthError: () => void;
 }
 
+/** 日時を、日本語の表記にする。無ければ「—」。 */
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("ja-JP");
 }
 
+/** 利用者の詳細と編集の小窓。 */
 export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError }: Props) {
   const queryClient = useQueryClient();
+  // 利用者の詳細（センサーごとの状況を含む）を取得する
   const detail = useQuery({
     queryKey: ["admin", "user", userId],
     queryFn: () => fetchAdminUser(token, userId),
@@ -50,11 +58,13 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
     if (authFailed) onAuthError();
   }, [authFailed, onAuthError]);
 
+  // 変更のあと、管理者の画面全体（一覧と概要）を取り直す
   const refreshAll = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin"] });
     onChanged();
   };
 
+  // 保存: 変えた項目だけを送る（変えていない項目は送らない）。パスワードは、入力があるときだけ送る
   const saveMutation = useMutation({
     mutationFn: () => {
       const data: { email?: string; plan?: "free" | "pro"; password?: string } = {};

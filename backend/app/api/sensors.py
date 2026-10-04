@@ -1,4 +1,8 @@
-"""センサー管理 API（一覧/作成/詳細/更新/削除）と測定値履歴。"""
+"""センサー管理 API（一覧/作成/詳細/更新/削除）と測定値履歴。
+
+SaaS（multi_tenant）では、各 API が「自分のワークスペースのセンサーだけ」を扱うように絞る。
+他人のセンサーは 404 で返す（存在そのものを知らせないため）。
+"""
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -23,13 +27,14 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/sensors", tags=["sensors"])
 
-# Free Tier: 1ワークスペースあたりのセンサー上限
+# Free Tier（SaaS の無料枠）: 1ワークスペースあたりのセンサー上限。self-hosted は制限なし
 _FREE_TIER_SENSOR_LIMIT = 10
 
 
 async def _get_active_sensor(
     session: AsyncSession, sensor_id: UUID, workspace_id: UUID | None = None
 ) -> Sensor:
+    """ID でセンサーを1件取り出す。無い・他のワークスペースのものは、どちらも 404。"""
     sensor = await session.get(Sensor, sensor_id)
     if sensor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="sensor not found")
@@ -57,7 +62,7 @@ async def create_sensor(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> Sensor:
-    # Free Tier 上限チェック（multi-tenant のみ）
+    # Free Tier 上限チェック（multi-tenant のみ）。上限に達していたら 402（支払いが必要）
     if workspace_id is not None:
         count_result = await session.exec(
             select(func.count()).where(Sensor.workspace_id == workspace_id)
@@ -69,7 +74,7 @@ async def create_sensor(
             )
 
     # 重複チェック: 名前はワークスペース内で一意、ingestKey は全体で一意
-    # （取り込みAPIがキーだけでセンサーを特定するため）
+    # （取り込みAPIがキーだけでセンサーを特定するため）。事前に調べ、同時作成は DB の制約で弾く
     dup_query = select(Sensor.id).where(
         or_(
             _name_in_scope(workspace_id, payload.name),
@@ -81,6 +86,7 @@ async def create_sensor(
             status_code=status.HTTP_409_CONFLICT, detail="name or ingestKey already in use"
         )
 
+    # 利用者の入力（payload）と、所有者（workspace_id）を合わせて作る
     sensor = Sensor(workspace_id=workspace_id, **payload.model_dump())
     session.add(sensor)
     try:
@@ -121,6 +127,7 @@ async def update_sensor(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> Sensor:
+    """センサーの更新。送られた項目だけを変える（exclude_unset）。名前の変更は、重複を確かめる。"""
     sensor = await _get_active_sensor(session, sensor_id, workspace_id)
 
     if payload.name is not None and payload.name != sensor.name:
@@ -130,6 +137,7 @@ async def update_sensor(
         if (await session.exec(dup_query)).first() is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already in use")
 
+    # exclude_unset=True: 利用者が送った項目だけを使う（送っていない項目は、今の値のまま）
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(sensor, field, value)
     sensor.updated_at = datetime.now(UTC)
@@ -169,6 +177,7 @@ async def get_sensor_readings(
 ) -> ReadingListResponse:
     await _get_active_sensor(session, sensor_id, workspace_id)
 
+    # 新しい順に、limit 件まで返す（グラフ用）。期間は from / to で絞る
     query = select(Reading).where(Reading.sensor_id == sensor_id)
     if from_ is not None:
         query = query.where(Reading.recorded_at >= from_)

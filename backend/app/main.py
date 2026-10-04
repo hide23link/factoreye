@@ -1,6 +1,12 @@
 """
 FactorEye バックエンド エントリポイント
 
+このファイルは「アプリの組み立て」だけを担当する。処理の中身は、各モジュールにある:
+- app/api/*.py: HTTP の API（ルーター）。ここでは include_router で登録するだけ
+- app/ingest_buffer.py: センサー値の受信バッファと、1秒ごとの DB への書き込み（flush_loop）
+- app/purge.py: SaaS の古い測定値の定期削除（purge_loop）
+- app/alarm_engine.py: 測定値を見てアラームを発生・解除する処理
+
 起動方法:
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 開発
     uvicorn app.main:app --host 0.0.0.0 --port 8000             # 本番（docker-compose経由）
@@ -41,6 +47,12 @@ from app.rate_limit import limiter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """アプリの起動から終了までの処理。
+
+    起動時: 取り込みのレート制限の状態を警告し、常駐タスク
+    （バッファ書き込み・古いデータの削除）を開始する。
+    終了時: 常駐タスクを止め、DB への接続プールを閉じる。
+    """
     if settings.ingest_rate_limit.strip().lower() == "off":
         logging.getLogger(__name__).warning(
             "INGEST_RATE_LIMIT=off: 取り込みのレート制限を解除しています（実機テスト用）"
@@ -53,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
+# FastAPI のアプリ本体。API の仕様書（/docs など）は、開発時（debug）だけ公開する
 app = FastAPI(
     title="FactorEye API",
     version="0.1.0",
@@ -63,6 +76,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.debug else None,
 )
 
+# 取り込み API のレート制限（slowapi）。制限を超えたリクエストは 429 を返す
 app.state.limiter = limiter
 # slowapiのハンドラ型はStarletteの例外ハンドラ型と厳密には一致しない（ライブラリ側のstub起因）
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
@@ -86,7 +100,8 @@ app.include_router(settings_api.router)
 app.include_router(migration.router)
 app.include_router(webhooks.router)
 
-# Phase 0.5: AUTH_MODE=multi_tenant 時のみ認証エンドポイントを公開
+# Phase 0.5: AUTH_MODE=multi_tenant（SaaS）のときだけ、ログイン・ユーザー・管理者の API を公開する。
+# self-hosted（OSS）では、これらの API は登録されず、404 になる
 if settings.auth_mode == AuthMode.MULTI_TENANT:
     app.include_router(auth.router)
     # 管理者API（管理者はテキストファイルで管理。app/admin_accounts.py 参照）
@@ -95,6 +110,10 @@ if settings.auth_mode == AuthMode.MULTI_TENANT:
 
 @app.get("/health")
 async def health_check() -> dict[str, Any]:
+    """死活監視用。DB に SELECT 1 を投げて、接続できるかを確かめる。
+
+    DB に接続できなくても HTTP 200 のまま、status を "degraded" で返す（監視側で判定する）。
+    """
     db_status = "connected"
     try:
         async with engine.connect() as conn:

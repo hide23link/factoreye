@@ -26,6 +26,8 @@ from app.schemas import CamelModel
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
+# Authorization: Bearer の読み取り。
+# 無ければ自動で 403 になる（ここでは利用者のトークンを必須にする）
 _bearer = HTTPBearer()
 
 
@@ -33,27 +35,40 @@ _bearer = HTTPBearer()
 
 
 class RegisterRequest(CamelModel):
+    """新規登録の入力。メール・パスワード（8 文字以上）・ワークスペースの名前。"""
+
     email: EmailStr
     password: str = Field(min_length=8, max_length=100)
     workspace_name: str = Field(min_length=1, max_length=100)
 
 
 class LoginRequest(CamelModel):
+    """ログインの入力。"""
+
     email: EmailStr
     password: str
 
 
 class TokenResponse(CamelModel):
+    """トークンの応答。
+
+    access_token は API に使う。refresh_token は再発行にだけ使う（保存は利用者側）。
+    """
+
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
 class RefreshRequest(CamelModel):
+    """トークン再発行・ログアウトの入力（リフレッシュトークン）。"""
+
     refresh_token: str
 
 
 class MeResponse(CamelModel):
+    """ログイン中の利用者と、そのワークスペースの情報。"""
+
     user_id: UUID
     email: str
     workspace_id: UUID
@@ -65,6 +80,7 @@ class MeResponse(CamelModel):
 
 
 def _require_multi_tenant() -> None:
+    """SaaS モードでないなら 501。self-hosted では、認証の API は使えない。"""
     if settings.auth_mode != AuthMode.MULTI_TENANT:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -76,6 +92,7 @@ async def _get_current_user_workspace(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> tuple[User, Workspace]:
+    """アクセストークンから、利用者とワークスペースを取り出す。無効なら 401。"""
     _require_multi_tenant()
     exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -108,6 +125,7 @@ async def register(
     body: RegisterRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TokenResponse:
+    """新規登録: 利用者とワークスペースを作り、トークンを返す（1つのトランザクションで）。"""
     _require_multi_tenant()
 
     # 重複チェック
@@ -147,6 +165,11 @@ async def login(
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TokenResponse:
+    """ログイン: メールとパスワードを確かめて、トークンを返す。
+
+    メールが無い場合と、パスワードが違う場合は、同じ文言（同じ 401）で返す。
+    利用者の存在を推測させないため。
+    """
     _require_multi_tenant()
 
     result = await session.exec(select(User).where(User.email == body.email))
@@ -189,6 +212,10 @@ async def refresh(
     body: RefreshRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TokenResponse:
+    """リフレッシュトークンで、新しいアクセストークンと、新しいリフレッシュトークンを返す。
+
+    使ったリフレッシュトークンは、その場で無効にする（ローテーション。盗まれても一度きり）。
+    """
     _require_multi_tenant()
 
     token_hash = auth_utils.hash_refresh_token(body.refresh_token)
@@ -235,6 +262,7 @@ async def logout(
     body: RefreshRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    """ログアウト: リフレッシュトークンを無効にする。既に無効・存在しなくても、エラーにはしない。"""
     _require_multi_tenant()
 
     token_hash = auth_utils.hash_refresh_token(body.refresh_token)

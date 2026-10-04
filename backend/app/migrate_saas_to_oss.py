@@ -41,6 +41,8 @@ from sqlmodel import SQLModel
 # テーブル定義（SQLModel.metadata）を登録するため。CLI は単独で起動されるので、ここで読み込む
 import app.db.models  # noqa: F401
 
+# 書き出しファイルの識別子と版。取り込み側は、この2つが一致しないファイルを拒否する。
+# 形式を変えたら VERSION を上げる（版 1 は未リリースのため、互換性は持たない）
 FORMAT = "factoreye-workspace-export"
 VERSION = 2
 # 書き出し・取り込みの順序。外部キーの参照先が先に来る（取り込みはこの順で流す）
@@ -54,9 +56,11 @@ TABLES = [
     "webhook_subscriptions",
     "notification_settings",
 ]
+# 一度に読み書きする件数。DB へのまとめ書き込みや、書き出しの読み出しの単位
 BATCH_SIZE = 5000
 # 測定値は1行に最大この件数まで（1行 = 1センサー・1塊）
 READINGS_PER_LINE = 5000
+# 測定値の時刻は、この日時からの経過マイクロ秒（整数）で書く
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 # SaaS 側の workspace_id を持つが、移行先では NULL（self-hosted）にする列を持つテーブル
 _WORKSPACE_SCOPED = {"sensors", "dashboards", "webhook_subscriptions", "notification_settings"}
@@ -70,7 +74,14 @@ class _DryRunDone(Exception):
     """--dry-run で取り込みを最後まで流したあと、わざとロールバックするための例外。"""
 
 
+# ──────────────────────────────────────────────────────────────
+# 型の変換: JSON で書ける形（文字列・数値）と、DB の型（UUID・日時）を行き来させる
+# ──────────────────────────────────────────────────────────────
 def _encode(value: Any) -> Any:
+    """書き出し時: DB の値を、JSON に書ける形にする。
+
+    UUID は文字列、日時は ISO 形式の文字列にする。
+    """
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, datetime):
@@ -79,6 +90,11 @@ def _encode(value: Any) -> Any:
 
 
 def _decode(table: sa.Table, name: str, value: Any) -> Any:
+    """取り込み時: JSON の文字列を、列の型（UUID・日時）に戻す。
+
+    列の型は、テーブル定義（table.c[name]）から判定する。型が合わない文字列は ValueError になり、
+    呼び出し側（_import_lines）で MigrationError に変換される。
+    """
     if value is None:
         return None
     column_type = table.c[name].type
@@ -99,10 +115,12 @@ def integrity_message(exc: IntegrityError) -> str:
 
 
 def _masked(url: str) -> str:
+    """表示用に、接続先 URL のパスワードを *** に置き換える（ログや画面に出しても安全なように）。"""
     return make_url(url).render_as_string(hide_password=True)
 
 
 async def _alembic_version(conn: AsyncConnection) -> str | None:
+    """移行先・移行元のスキーマ版（alembic_version の値）を返す。テーブルが無ければ None。"""
     exists = await conn.scalar(sa.text("SELECT to_regclass('public.alembic_version') IS NOT NULL"))
     if not exists:
         return None
@@ -111,6 +129,7 @@ async def _alembic_version(conn: AsyncConnection) -> str | None:
 
 
 def _tables() -> dict[str, sa.Table]:
+    """移行対象のテーブル定義を、TABLES の順に辞書で返す（モデルの定義から取り出す）。"""
     return {name: SQLModel.metadata.tables[name] for name in TABLES}
 
 
@@ -129,6 +148,11 @@ async def export_workspace(
     )
     widget_ids = sa.select(widgets.c.id).where(widgets.c.dashboard_id.in_(dashboard_ids))
 
+    # 移すものの判断:
+    # - ダッシュボードは「削除済み（deleted_at あり）」を除く。
+    #   ウィジェットも、移すダッシュボードのものだけ
+    # - 測定値（readings）は _export_readings で別に書く（件数が多く、形式を圧縮するため）
+    # - ユーザーやリフレッシュトークンは、OSS には不要なので対象外
     queries: dict[str, sa.Select[Any]] = {
         "sensors": sa.select(sensors).where(sensors.c.workspace_id == workspace_id),
         "dashboards": sa.select(dashboards).where(
@@ -182,6 +206,7 @@ def _to_us(at: datetime) -> int:
 
 
 def _from_us(us: int) -> datetime:
+    """_to_us の逆。マイクロ秒の整数から、UTC の日時に戻す。"""
     return EPOCH + timedelta(microseconds=us)
 
 
@@ -252,6 +277,14 @@ def _expand_readings(entry: dict[str, Any]) -> list[dict[str, Any]]:
 def _prepare_row(
     name: str, table: sa.Table, raw: dict[str, Any], with_notifications: bool
 ) -> dict[str, Any] | None:
+    """取り込む1行を、移行先に入れられる形に整える。
+
+    - 型を戻す（_decode）
+    - SaaS のワークスペース列（workspace_id）は NULL にする
+      （OSS には、ワークスペースの概念がないため）
+    - 通知設定は、--with-notifications のときだけ id=1 の行として入れる
+      （それ以外は None を返し、読み飛ばす）
+    """
     row = {k: _decode(table, k, v) for k, v in raw.items()}
     if name in _WORKSPACE_SCOPED and "workspace_id" in row:
         row["workspace_id"] = None
@@ -334,6 +367,7 @@ def _read_line(f: TextIO) -> str:
 
 
 def _parse_line(line: str) -> Any:
+    """1行を JSON として読む。壊れていれば、利用者向けの MigrationError にする。"""
     try:
         return json.loads(line)
     except ValueError:
@@ -347,6 +381,12 @@ async def _import_lines(
     counts: dict[str, int],
     with_notifications: bool,
 ) -> None:
+    """ファイルの行を順に読み、テーブルごとにまとめて DB に入れる。
+
+    行は TABLES の順に並んでいる前提（外部キーの参照先が先に入るように）。
+    順序が逆になっていたら、壊れたファイルとして止める。
+    同じテーブルの行は BATCH_SIZE 件ずつまとめて書く。テーブルが変わったら、それまでの分を先に書く。
+    """
     current: str | None = None
     pending: list[dict[str, Any]] = []
     last_index = -1
@@ -400,6 +440,7 @@ async def _import_lines(
 
 
 async def _run_export(args: argparse.Namespace) -> int:
+    """CLI の export: SaaS の DB に接続してワークスペースを書き出し、件数を表示する。"""
     engine = create_async_engine(args.source_url)
     try:
         print(f"読み取り元: {_masked(args.source_url)}")
@@ -413,6 +454,10 @@ async def _run_export(args: argparse.Namespace) -> int:
 
 
 async def _run_import(args: argparse.Namespace) -> int:
+    """CLI の import: 移行先の DB に接続して取り込む。
+
+    制約違反は、何も残さず終了コード 1 で止める。
+    """
     engine = create_async_engine(args.target_url)
     print(f"取り込み先: {_masked(args.target_url)}")
     if args.dry_run:
@@ -439,6 +484,10 @@ async def _run_import(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI の入口（python -m app.migrate_saas_to_oss）。
+
+    export と import の2つの副コマンドを持つ。
+    """
     parser = argparse.ArgumentParser(prog="python -m app.migrate_saas_to_oss", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

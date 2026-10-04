@@ -25,9 +25,12 @@ logger = logging.getLogger(__name__)
 # 表示されるが受信者への通知音・プッシュ通知は出ない（軽故障をサイレントにするために使う）
 _DISCORD_FLAG_SUPPRESS_NOTIFICATIONS = 1 << 12
 
+# 通知の時刻は日本時間で表示する（利用者は日本の工場にいるため）
 _JST = ZoneInfo("Asia/Tokyo")
 
+# 重要度ごとの表示（絵文字と日本語の名前）
 _SEVERITY_LABEL = {AlarmSeverity.CRITICAL: ("🚨", "重故障"), AlarmSeverity.WARNING: ("⚠️", "軽故障")}
+# しきい値のどちら側を超えたかの表示
 _DIRECTION_LABEL = {ThresholdBreached.MAX: "上限超過", ThresholdBreached.MIN: "下限未達"}
 
 
@@ -39,6 +42,8 @@ def _format_jst(dt: datetime) -> str:
 
 @dataclass
 class AlarmNotification:
+    """1件のアラーム通知の内容（プレーンな値だけを持つ。DB のオブジェクトは持たない）。"""
+
     sensor_name: str
     sensor_unit: str
     value: float
@@ -54,6 +59,10 @@ class AlarmNotification:
 
 
 async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) -> None:
+    """アラーム内容を、Discord の Webhook URL へ送る。
+
+    送信に失敗しても、例外は外へ出さずログに残すだけにする（測定値の受信を止めないため）。
+    """
     emoji, severity_label = _SEVERITY_LABEL[notification.severity]
     repeat_suffix = "（再通知・未解決）" if notification.is_repeat else ""
     direction = _DIRECTION_LABEL[notification.threshold_breached]

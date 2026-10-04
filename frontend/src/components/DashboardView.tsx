@@ -1,3 +1,9 @@
+/**
+ * ダッシュボードの表示画面。
+ * ウィジェットを、ドラッグ・リサイズで並べ替えられる格子（react-grid-layout）に置く。
+ * 動かし終えたら、位置とサイズの変化だけをサーバーへ保存する。
+ * 上部には、名前と説明の編集（設定）、ウィジェットの追加、ダッシュボードの削除を置く。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
@@ -12,12 +18,14 @@ import { useUiStore } from "../store/useUiStore";
 import { WidgetCard } from "./WidgetCard";
 import { WidgetFormModal } from "./WidgetFormModal";
 
+// 幅に応じて列数を変える（画面が狭いほど列が少なくなる）。lg は 12 列で、WidgetFormModal の列数と一致させる
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 // react-grid-layout は0始まりのx/y、backendは1始まりのgridColumn/gridRow
 const GRID_COLS = { lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 };
 const ROW_HEIGHT = 36;
 
+/** ウィジェットを、格子のレイアウト項目に変換する（列・行は 0 始まりに直す）。最小サイズは 1 列・2 行。 */
 function toLayoutItem(widget: Widget): Layout[number] {
   return {
     i: widget.id,
@@ -30,6 +38,7 @@ function toLayoutItem(widget: Widget): Layout[number] {
   };
 }
 
+/** ダッシュボードの表示本体。dashboardId のダッシュボードを、取得して描く。 */
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading } = useDashboard(dashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
@@ -40,6 +49,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  // 削除: 一覧を取り直し、表示中の選択を外して一覧へ戻る
   const deleteDashboardMutation = useMutation({
     mutationFn: () => deleteDashboard(dashboardId),
     onSuccess: () => {
@@ -48,6 +58,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     },
   });
 
+  // 名前と説明の保存。成功したら、設定の小窓を閉じる
   const updateDashboardMutation = useMutation({
     mutationFn: () => updateDashboard(dashboardId, { name: editName, description: editDescription }),
     onSuccess: () => {
@@ -59,6 +70,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     onError: (e: Error) => setSettingsError(e.message),
   });
 
+  // 設定の小窓を開く。今の名前と説明を入力欄に入れてから開く
   const openSettings = () => {
     if (!dashboard) return;
     setEditName(dashboard.name);
@@ -67,6 +79,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     setSettingsOpen(true);
   };
 
+  // 格子を動かした結果を保存する。変わったウィジェットだけを、並行して更新する（無駄な通信を減らす）
   const persistLayoutMutation = useMutation({
     mutationFn: async (layout: Layout) => {
       if (!dashboard) return;
@@ -92,6 +105,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
   }
 
+  // 同じレイアウトを、全ての幅（lg〜xxs）に使う
   const layout = dashboard.widgets.map(toLayoutItem);
 
   return (

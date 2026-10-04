@@ -28,6 +28,7 @@ router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
 async def _get_active_dashboard(
     session: AsyncSession, dashboard_id: UUID, workspace_id: UUID | None = None
 ) -> Dashboard:
+    """ダッシュボードを1件取り出す。削除済み（論理削除）・他のワークスペースのものは 404。"""
     dashboard = await session.get(Dashboard, dashboard_id)
     if dashboard is None or dashboard.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="dashboard not found")
@@ -37,11 +38,13 @@ async def _get_active_dashboard(
 
 
 async def _list_widgets(session: AsyncSession, dashboard_id: UUID) -> list[Widget]:
+    """ダッシュボードに属するウィジェットの一覧。"""
     result = await session.exec(select(Widget).where(Widget.dashboard_id == dashboard_id))
     return list(result.all())
 
 
 def _to_detail(dashboard: Dashboard, widgets: list[Widget]) -> DashboardDetail:
+    """ダッシュボードとウィジェットから、応答用の詳細の形を組み立てる。"""
     # dashboard.widgets（リレーション）には触れない: asyncセッション終了後のlazy-load回避のため、
     # 別途明示的にクエリしたwidgetsを渡して組み立てる
     return DashboardDetail(
@@ -60,6 +63,7 @@ async def list_dashboards(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> list[Dashboard]:
+    """ダッシュボードの一覧（削除済みを除く）。"""
     # SQLModelのクラス属性はmypyには素のPython型に見えるため.is_()はunion-attrで誤検知される
     query = select(Dashboard).where(Dashboard.deleted_at.is_(None))  # type: ignore[union-attr]
     if workspace_id is not None:
@@ -74,6 +78,7 @@ async def create_dashboard(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> DashboardDetail:
+    """ダッシュボードを作る（ウィジェットは、後から追加する）。"""
     dashboard = Dashboard(workspace_id=workspace_id, **payload.model_dump())
     session.add(dashboard)
     await session.commit()
@@ -99,6 +104,7 @@ async def update_dashboard(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> DashboardDetail:
+    """ダッシュボードの更新。送られた項目だけを変える。"""
     dashboard = await _get_active_dashboard(session, dashboard_id, workspace_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(dashboard, field, value)
@@ -117,6 +123,10 @@ async def delete_dashboard(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> None:
+    """ダッシュボードを論理削除する（deleted_at を入れるだけ。行は残る）。
+
+    論理削除にするのは、ID の衝突を避けて、同じワークスペースの取り込み直しの扱いを単純にするため。
+    """
     dashboard = await _get_active_dashboard(session, dashboard_id, workspace_id)
     dashboard.deleted_at = datetime.now(UTC)
     session.add(dashboard)
@@ -132,6 +142,7 @@ async def add_widget(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> Widget:
+    """ダッシュボードにウィジェットを1つ追加する。"""
     await _get_active_dashboard(session, dashboard_id, workspace_id)
     widget = Widget(dashboard_id=dashboard_id, **payload.model_dump())
     session.add(widget)

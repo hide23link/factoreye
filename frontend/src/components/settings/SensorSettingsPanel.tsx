@@ -1,3 +1,8 @@
+/**
+ * センサーの管理パネル。一覧（編集・有効/無効・削除）と、新規登録のフォームを持つ。
+ *
+ * 閾値（しきい値）は空欄なら「なし」（判定しない）。Free Tier の上限に達すると、案内を出す。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -6,12 +11,15 @@ import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
 import type { Sensor } from "../../types";
 
+// 入力欄の値。数値、または空欄（""）。空欄は「しきい値なし」を表す
 type NumOrBlank = number | "";
 
+/** 入力欄の値を、API に送る形（空欄は null）にする。 */
 function toThreshold(v: NumOrBlank): number | null {
   return v === "" ? null : v;
 }
 
+/** しきい値の数値入力欄（空欄可）。 */
 function thresholdInput(
   value: NumOrBlank,
   onChange: (v: NumOrBlank) => void,
@@ -32,10 +40,15 @@ function thresholdInput(
 const UNIT_PRESETS = ["°C", "%", "MPa", "kPa", "Pa", "V", "A", "W", "kWh", "rpm", "Hz", "mm", "L", "kg"];
 
 // 新規センサー作成フォームのIngest Key初期値（空欄のままにしないための仮の提案値、編集も削除も自由）
+/** 取り込みキーの仮の値（sensor-＋現在時刻の36進）。重複しにくいように時刻を使う。 */
 function generateIngestKey(): string {
   return `sensor-${Date.now().toString(36)}`;
 }
 
+/**
+ * センサー1件の行。表示と編集を切り替える（編集中は、名前・単位・閾値を入力欄にする）。
+ * 保存・有効/無効・削除の操作ごとに、一覧を取り直す。
+ */
 function SensorRow({ sensor }: { sensor: Sensor }) {
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
@@ -221,15 +234,18 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
   );
 }
 
+/** センサー設定パネル（新規登録フォームと、センサー一覧）。 */
 export function SensorSettingsPanel() {
   const { data: sensors, isLoading } = useSensors();
   const queryClient = useQueryClient();
 
+  // 新規登録フォームの入力値（登録に成功すると、次の入力のために初期値へ戻す）
   const [name, setName] = useState("");
   const [ingestKey, setIngestKey] = useState(generateIngestKey);
   const [unit, setUnit] = useState("°C");
   const [error, setError] = useState<string | null>(null);
 
+  // 新規登録。上限（Free Tier）に達した場合は、案内の文言を出す
   const createMutation = useMutation({
     mutationFn: () => createSensor({ name, ingestKey, unit }),
     onSuccess: () => {

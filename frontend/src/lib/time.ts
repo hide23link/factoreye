@@ -1,5 +1,12 @@
-// グラフ横軸（時間）表示用のフォーマッタ。24時間を超える範囲では日付が無いと
-// 時刻表示が曖昧になるため、timeRangeHoursに応じて出し分ける。
+/**
+ * グラフの横軸（時刻）の表示文字列を作る。
+ *
+ * - 表示範囲が 24 時間以下: 時刻だけ（例: 14:05:00）
+ * - 24 時間を超える: 日付と時刻（例: 10/4 14:05）。日付が無いと、何日の時刻か分からないため
+ *
+ * @param ms 表示する時刻（ミリ秒の Unix 時刻）
+ * @param timeRangeHours グラフの表示範囲（時間）
+ */
 export function formatChartTime(ms: number, timeRangeHours: number): string {
   return timeRangeHours > 24
     ? new Date(ms).toLocaleString("ja-JP", {
