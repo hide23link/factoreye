@@ -4,6 +4,7 @@
 取り込み、中身（件数・ID・取り込みキー・参照関係）が保たれることを確かめる。
 """
 
+import gzip
 import subprocess
 import sys
 from collections.abc import AsyncGenerator
@@ -352,3 +353,59 @@ async def test_readings_roundtrip_is_exact_across_line_boundaries(
         ).all()
     got = [(r[0], r[1], r[2]) for r in rows]
     assert sorted(got) == sorted(expected)
+
+
+def _write_bundle(
+    path: Path, lines: list[dict[str, object]], alembic_version: str = "testrev"
+) -> None:
+    """テスト用に、書き出し形式（ヘッダー + 行）のファイルを直接作る。"""
+    import json
+
+    header = {
+        "format": "factoreye-workspace-export",
+        "version": 2,
+        "workspace_id": "00000000-0000-4000-8000-000000000001",
+        "exported_at": "2026-10-04T00:00:00+00:00",
+        "alembic_version": alembic_version,
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(header) + "\n")
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+
+
+_SENSOR_ROW = {
+    "id": "00000000-0000-4000-8000-0000000000aa",
+    "workspace_id": None,
+    "name": "bad-value",
+    "ingest_key": "bad-key-1",
+    "unit": "℃",
+    "threshold_min_warning": None,
+    "threshold_min_critical": None,
+    "threshold_max_warning": None,
+    "threshold_max_critical": None,
+    "threshold_dead_band": 0.0,
+    "enabled": True,
+    "created_at": "2026-10-04T00:00:00+00:00",
+    "updated_at": "2026-10-04T00:00:00+00:00",
+}
+
+
+@pytest.mark.asyncio
+async def test_malformed_uuid_is_a_migration_error(tmp_path: Path, alembic_table: None) -> None:
+    path = tmp_path / "bad-uuid.jsonl.gz"
+    _write_bundle(path, [{"t": "sensors", "r": {**_SENSOR_ROW, "id": "not-a-uuid"}}])
+    with pytest.raises(MigrationError):
+        await import_bundle(engine, path)
+
+
+@pytest.mark.asyncio
+async def test_value_of_wrong_type_is_a_migration_error(
+    tmp_path: Path, alembic_table: None
+) -> None:
+    path = tmp_path / "bad-type.jsonl.gz"
+    row = {**_SENSOR_ROW, "threshold_max_critical": "たくさん"}
+    _write_bundle(path, [{"t": "sensors", "r": row}])
+    with pytest.raises(MigrationError, match="形式と合いません"):
+        await import_bundle(engine, path)
+    assert await _count("SELECT COUNT(*) FROM sensors") == 0

@@ -31,6 +31,7 @@ backendやclients/配下の公式クライアントとは別物。動作確認�
 """
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import random
@@ -51,8 +52,19 @@ sys.path.insert(
 )
 from factoreye_client import FactorEyeClient  # noqa: E402
 
-FACTOREYE_HOST = "http://localhost:8000"
-INGEST_API_KEY = "change-this-in-production"
+# 本番の前段は既定の User-Agent（Python-urllib）を拒否するため、このプロセスの全 urllib 通信に名前を付ける
+# （共有クライアントの側は変えない）
+_opener = urllib.request.build_opener()
+_opener.addheaders = [("User-Agent", "factoreye-emulator/1.0")]
+urllib.request.install_opener(_opener)
+
+# 既定は手元の self-hosted（ローカル）。SaaS 版へ送る場合は FACTOREYE_HOST と FACTOREYE_TOKEN を
+# 環境変数で指定する（トークンはコードに書かない）
+FACTOREYE_HOST = os.environ.get("FACTOREYE_HOST", "http://localhost:8000")
+FACTOREYE_TOKEN = os.environ.get("FACTOREYE_TOKEN", "")
+INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "change-this-in-production")
+# 0 以下（既定）なら止めるまで送り続ける。デモ用に時間を区切る場合は秒数を指定する
+RUN_SECONDS = float(os.environ.get("EMULATOR_RUN_SECONDS", "0"))
 SEND_INTERVAL_SECONDS = 5.0
 
 # センサーのname/ingestKeyは一意制約（論理削除された行にも及ぶ、db/models.py参照）のため、
@@ -78,12 +90,47 @@ MAX_UNITS_PER_TICK = 5.0
 UNITS_NOISE_RANGE = (-0.5, 0.5)
 
 
+def _login_for_token() -> str:
+    """FACTOREYE_EMAIL が指定されていれば、パスワードを画面に出さずに聞いてログインし、トークンを返す。
+
+    パスワードもトークンも、ファイルには書かない（メモリ上だけで使う）。
+    """
+    email = os.environ.get("FACTOREYE_EMAIL", "")
+    if not email:
+        return ""
+    password = getpass.getpass(f"{email} のパスワード（入力は表示されません）: ")
+    body = json.dumps({"email": email, "password": password}).encode("utf-8")
+    del password
+    request = urllib.request.Request(
+        f"{FACTOREYE_HOST}/api/auth/login",
+        data=body,
+        headers={"Content-Type": "application/json", **_USER_AGENT},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10.0) as response:
+            return str(json.loads(response.read())["accessToken"])
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(f"ログインに失敗しました（HTTP {exc.code}）。メールとパスワードを確認してください") from None
+
+
+# 既定の User-Agent（Python-urllib）は本番の前段で拒否されるため、名前を付けて送る
+_USER_AGENT = {"User-Agent": "factoreye-emulator/1.0"}
+
+
+def _auth_headers() -> dict[str, str]:
+    headers = dict(_USER_AGENT)
+    if FACTOREYE_TOKEN:
+        headers["Authorization"] = f"Bearer {FACTOREYE_TOKEN}"
+    return headers
+
+
 def _register_sensor_if_missing(name: str, ingest_key: str, unit: str) -> None:
     body = json.dumps({"name": name, "ingestKey": ingest_key, "unit": unit}).encode("utf-8")
     request = urllib.request.Request(
         f"{FACTOREYE_HOST}/api/sensors",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     try:
@@ -94,6 +141,21 @@ def _register_sensor_if_missing(name: str, ingest_key: str, unit: str) -> None:
             print(f"センサーは登録済みです: {name} ({ingest_key})")
         else:
             raise
+
+
+def _verify_own_sensors(ingest_keys: list[str]) -> None:
+    """SaaS 版のとき: 送信先のキーが、ログイン中のワークスペースのセンサーであることを確かめる。
+
+    取り込みキーは全体で一意なので、別のワークスペースのセンサーに送ってしまう事故を防ぐ。
+    """
+    request = urllib.request.Request(
+        f"{FACTOREYE_HOST}/api/sensors", headers=_auth_headers(), method="GET"
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        own = {sensor["ingestKey"] for sensor in json.loads(response.read())}
+    missing = [key for key in ingest_keys if key not in own]
+    if missing:
+        raise SystemExit(f"このワークスペースに無いセンサーです（送信を中止）: {missing}")
 
 
 @dataclass
@@ -219,6 +281,9 @@ class MachineState:
 
 
 def main() -> None:
+    global FACTOREYE_TOKEN
+    if not FACTOREYE_TOKEN:
+        FACTOREYE_TOKEN = _login_for_token()
     print(
         f"テスト工場エミュレータ起動: {MACHINE_NAME}"
         f"（{SEND_INTERVAL_SECONDS:.0f}秒ごとに送信、Ctrl+Cで終了）"
@@ -227,13 +292,19 @@ def main() -> None:
     _register_sensor_if_missing(f"{MACHINE_NAME} 生産数", SENSOR_PRODUCTION, "個")
     _register_sensor_if_missing(f"{MACHINE_NAME} 温度", SENSOR_TEMPERATURE, "°C")
     _register_sensor_if_missing(f"{MACHINE_NAME} 電力", SENSOR_POWER, "kW")
+    if FACTOREYE_TOKEN:
+        _verify_own_sensors([SENSOR_PRODUCTION, SENSOR_TEMPERATURE, SENSOR_POWER])
 
     client = FactorEyeClient(FACTOREYE_HOST, INGEST_API_KEY)
     state = MachineState()
     state_lock = threading.Lock()
     control_server.start(state, state_lock)
+    started = time.monotonic()
 
     while True:
+        if RUN_SECONDS > 0 and time.monotonic() - started >= RUN_SECONDS:
+            print("指定時間が経過したので終了します。")
+            break
         with state_lock:
             state.tick(time.monotonic())
             produced = state.units_this_tick()

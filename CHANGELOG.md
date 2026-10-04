@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SaaS → OSS の移行**: SaaS のワークスペースを書き出し（設定画面「データ移行」）、OSS の DB に取り込む（同じ画面・CLI）。ID と取り込みキーを保つ。測定値は差分の配列で圧縮（形式の版 2）。取り込みは1トランザクション、`dry_run` で件数を確認可能
 - **Webhook 連携**: センサー値の受信（`reading.received`）とアラーム発生（`alarm.triggered`）を、任意の URL へ JSON で送信。設定は設定画面の「Webhook連携」タブ
 - **送信先の制限（SSRF 対策）**: Webhook の送信先は `https` かつ公開 IP のみ。登録時と送信時に検証する。社内ネットワーク向けの例外は `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`（既定 `false`）
 - **管理者画面**（`/admin`、SaaS 版の運用者向け）: 件数の確認、ユーザーの閲覧・修正・削除

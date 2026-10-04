@@ -90,7 +90,24 @@ http://localhost:8765
 （個/5秒、最大5個）を直接指定するものではない点に注意。温度・電力は個別にスライダーで
 直接値を指定できる。
 
+## SaaS 版（本番）へ送る
+
+環境変数で送信先とログインを指定します。トークンはファイルに書かず、パスワードは画面に出さずに聞きます。
+
+```bash
+cd tools/factory-emulator
+FACTOREYE_EMAIL=<メール> FACTOREYE_HOST=https://factoreye.hide23.link \
+  EMULATOR_SUFFIX=-demo EMULATOR_RUN_SECONDS=300 python3 emulator.py
+```
+
+- `FACTOREYE_EMAIL` を指定すると、起動時にパスワードを聞いてログインします（トークンはメモリ上だけ）。`FACTOREYE_TOKEN` を直接渡すこともできます。
+- 起動時に、送信先のセンサーが自分のワークスペースにあるかを確かめてから送ります（取り込みキーは全体で一意のため）。
+- `EMULATOR_RUN_SECONDS`（秒）で、指定時間だけ送って終了します。未指定なら止めるまで送り続けます。
+- `EMULATOR_SUFFIX` で、センサーの名前と取り込みキーを区別できます（既存のセンサーと衝突させないため）。
+- Python の既定の User-Agent は、本番の前段で拒否されるため、エミュレータは名前を付けて送ります。
+- macOS の python.org 版 Python で証明書のエラーが出るときは、`SSL_CERT_FILE=/etc/ssl/cert.pem` を付けるか、「Install Certificates.command」を実行してください。
+
 ## 設定変更
 
-`emulator.py` 冒頭の定数を直接書き換えてください（`FACTOREYE_HOST` / `INGEST_API_KEY` /
-`SEND_INTERVAL_SECONDS` / 一時停止の発生確率・長さ等）。
+`emulator.py` 冒頭の定数を直接書き換えてください（`SEND_INTERVAL_SECONDS` / 一時停止の発生確率・長さ等）。
+送信先と認証は、上の環境変数で指定します。

@@ -42,7 +42,8 @@ function ExportSection() {
       link.href = url;
       link.download = EXPORT_FILE_NAME;
       link.click();
-      URL.revokeObjectURL(url);
+      // Safari はクリック直後に解放するとダウンロードが止まるため、少し遅らせる
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setError(null);
     },
     onError: (e: Error) => setError(e.message),
