@@ -26,8 +26,6 @@ from app.db.models import (
 )
 from app.db.session import engine
 from app.notifications import AlarmNotification, send_alarm_discord
-from app.plugins.base import SensorReadingEvent
-from app.plugins.manager import dispatch_reading
 from app.webhooks import send_webhook
 
 FLUSH_INTERVAL_SECONDS = 1.0
@@ -200,15 +198,6 @@ async def flush_once() -> int:
             webhook_url = webhook_urls[notification.severity]
             if webhook_url:
                 _fire_and_forget(send_alarm_discord(webhook_url, notification))
-
-    for p in pending:
-        await dispatch_reading(
-            SensorReadingEvent(
-                sensor_id=str(p.sensor_id),
-                value=p.value,
-                timestamp=p.recorded_at.isoformat(),
-            )
-        )
 
     return len(pending)
 

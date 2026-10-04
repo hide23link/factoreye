@@ -5,7 +5,6 @@ import {
   fetchDashboard,
   fetchDashboards,
   fetchNotificationSettings,
-  fetchPlugins,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
   fetchSensors,
@@ -34,9 +33,6 @@ export const useAlarms = (status?: string) =>
     queryFn: () => fetchAlarms(status),
     refetchInterval: POLL_INTERVAL_MS,
   });
-
-export const usePlugins = () =>
-  useQuery({ queryKey: ["plugins"], queryFn: fetchPlugins, refetchInterval: POLL_INTERVAL_MS });
 
 export const useNotificationSettings = () =>
   useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });

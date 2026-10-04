@@ -9,7 +9,6 @@ vi.mock("../lib/api", () => ({
   fetchAlarms: vi.fn(),
   fetchNotificationSettings: vi.fn(),
   fetchWebhookSubscriptions: vi.fn(),
-  fetchPlugins: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -28,7 +27,6 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "アラーム" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Webhook連携" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "プラグイン" })).toBeInTheDocument();
   });
 
   it("アラームタブに切り替えられる", async () => {

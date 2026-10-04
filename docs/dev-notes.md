@@ -262,3 +262,21 @@
 **確認方法**: `backend/tests/test_webhook_url_guard.py`（宛先IPごとの判定、例外スイッチ、登録API、送信時の再検証）。pytest 全141件、ruff、mypy（strict）が通過。ローカル稼働スタックでは、既定（false）で内部宛て・http宛ての登録が422になること、既存のhttp購読が送信時に止まること、スイッチ true で配信が再開することを確認した。
 
 **注意（事故の記録）**: pytestの `conftest.py` は接続先DBの全テーブルを `drop_all` するため、開発用のcompose DBに向けて実行すると開発データが消える。テストは `DATABASE_URL` を専用DB（`factoreye_test`）に向けて実行すること。
+
+---
+
+### 2026-10-04: Pluginシステムの廃止（Phase 2）
+
+**背景**: Phase 1でWebhook連携機能を新設したことを受け、当初の計画通りPythonプラグインシステムを廃止する。背景は2026-10-04のWebhook新設の記載を参照（「初心者でも簡単に使える」という製品コンセプトとPythonコードを書かせる拡張方式が矛盾する、Pluginテーブルがworkspace_idを持たずテナント分離できていなかった、の2点）。
+
+**実装内容**:
+- `backend/app/plugins/`一式（`base.py`・`registry.py`・`manager.py`・サンプルプラグイン`reading_logger`）を削除
+- `Plugin`/`PluginConfig`テーブルをモデルから削除し、マイグレーションでDROP（`plugin_configs`→`plugins`の順。ダウングレードで元の定義に戻せることを確認済み）
+- `backend/app/api/plugins.py`とそのAPI登録、`app/schemas.py`の`PluginRead`/`PluginConfigUpdate`を削除
+- `app/main.py`の起動時`load_plugins`呼び出し、`app/ingest_buffer.py`のflush時`dispatch_reading`呼び出しを削除（Webhook配信は既にPhase 1で同じ場所に追加済みのため、代替先は既にある）
+- frontend: 設定画面の「プラグイン」タブ・`PluginSettingsPanel`・関連API関数（`fetchPlugins`等）・`Plugin`型を削除
+- `README.md`・`CHANGELOG.md`の記載をプラグインシステムからWebhook連携に差し替え
+
+**確認方法**: ローカルDBを一度空にしてマイグレーションを最初から最後まで適用（`f25e16a44003`→新規`c3d4e5f6a7b8`まで）、ダウングレード/アップグレード往復で`plugins`/`plugin_configs`テーブルが元通り復元されることを確認。pytest 135件（旧141件からPlugin関連6件減）・mypy（strict）・ruff・pip-auditすべて通過。frontend vitest 86件（旧92件からPluginSettingsPanel関連6件減）・typecheck・lintすべて通過。docker-compose起動後の実ブラウザでの確認はまだ未実施（次回Mac側で実施予定）。
+
+**次フェーズ**: Phase 3（ルールベース設定の具体化）、Phase 4（`export-workspace`/`import-workspace`移行ツール。Plugin廃止によりテーブル台帳からPlugin関連の除外ロジックを考えずに済むようになった）。

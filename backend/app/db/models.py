@@ -4,8 +4,9 @@ FactorEye データモデル
 仕様: docs/factoreye-architecture.md の Data Model セクション参照
 (ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
 
-Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig / Plugin / PluginConfig
+Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig
 Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
+Phase 1: WebhookSubscription（Pluginシステムを廃止し、拡張はWebhookに統一。Phase 2参照）
 """
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -185,33 +186,6 @@ class WidgetConfig(SQLModel, table=True):
     settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
 
     widget: Widget = Relationship(back_populates="widget_configs")
-
-
-# ──────────────────────────────────────────────────────────────
-# Plugin / PluginConfig
-# ──────────────────────────────────────────────────────────────
-class Plugin(SQLModel, table=True):
-    __tablename__ = "plugins"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    # フォルダ名と一致（例: "slack-notifier"）
-    name: str = Field(unique=True, max_length=100)
-    version: str = Field(max_length=20)
-    enabled: bool = Field(default=False)
-    installed_at: datetime = Field(default_factory=_utcnow)
-    config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
-
-    plugin_configs: list["PluginConfig"] = Relationship(back_populates="plugin")
-
-
-class PluginConfig(SQLModel, table=True):
-    __tablename__ = "plugin_configs"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    plugin_id: UUID = Field(foreign_key="plugins.id", index=True)
-    data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
-
-    plugin: Plugin = Relationship(back_populates="plugin_configs")
 
 
 # ──────────────────────────────────────────────────────────────

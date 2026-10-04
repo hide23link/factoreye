@@ -218,26 +218,6 @@ class DashboardDetail(DashboardRead):
 
 
 # ──────────────────────────────────────────────────────────────
-# Plugin
-# ──────────────────────────────────────────────────────────────
-
-
-class PluginRead(CamelModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
-
-    id: UUID
-    name: str
-    version: str
-    enabled: bool
-    installed_at: datetime
-    config: dict[str, Any]
-
-
-class PluginConfigUpdate(CamelModel):
-    config: dict[str, Any]
-
-
-# ──────────────────────────────────────────────────────────────
 # NotificationSettings
 # ──────────────────────────────────────────────────────────────
 

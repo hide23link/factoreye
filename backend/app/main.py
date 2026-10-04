@@ -17,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api import (
     admin,
@@ -25,7 +24,6 @@ from app.api import (
     auth,
     dashboards,
     ingest,
-    plugins,
     readings,
     sensors,
     webhooks,
@@ -35,7 +33,6 @@ from app.api import settings as settings_api
 from app.config import AuthMode, settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
-from app.plugins.manager import load_plugins
 from app.purge import purge_loop
 from app.rate_limit import limiter
 
@@ -46,8 +43,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.getLogger(__name__).warning(
             "INGEST_RATE_LIMIT=off: 取り込みのレート制限を解除しています（実機テスト用）"
         )
-    async with AsyncSession(engine) as session:
-        await load_plugins(app, session)
     flush_task = asyncio.create_task(flush_loop())
     purge_task = asyncio.create_task(purge_loop())
     yield
@@ -85,7 +80,6 @@ app.include_router(readings.router)
 app.include_router(alarms.router)
 app.include_router(dashboards.router)
 app.include_router(widgets.router)
-app.include_router(plugins.router)
 app.include_router(settings_api.router)
 app.include_router(webhooks.router)
 
