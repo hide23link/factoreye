@@ -21,16 +21,20 @@ const char* kFactorEyeHost = "http://192.168.1.50:8000";
 const char* kIngestApiKey = "change-this-in-production";
 const char* kIngestKey = "atom-chip-temp-1";
 
+// 送信の間隔（ミリ秒）。10 秒ごとに1件送る
 const unsigned long kSendIntervalMs = 10000;
 
+// ライブラリの本体と、最後に送った時刻（間隔を測るため）
 FactorEyeClient factoreye;
 unsigned long lastSendAt = 0;
 
+// 送る値を読む（デモ用）。実センサーに変えるなら、この関数の中身を置き換える。
 float readDemoSensorValue() {
   // ESP32内蔵温度センサー（配線不要のデモ用）。実センサーに置き換える場合はここを変更する。
   return temperatureRead();
 }
 
+// 起動時の1回だけ: シリアル（PC への表示）を開き、WiFi につなぎ、ライブラリの接続先を設定する
 void setup() {
   Serial.begin(115200);
 
@@ -45,6 +49,8 @@ void setup() {
   factoreye.begin(kFactorEyeHost, kIngestApiKey);
 }
 
+// 繰り返し: 間隔が来たら、値を読んで送る。結果と未送信の件数をシリアルに表示する。
+// send() は失敗しても待たないので、loop() は止まらない
 void loop() {
   if (millis() - lastSendAt >= kSendIntervalMs) {
     lastSendAt = millis();

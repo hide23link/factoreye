@@ -18,8 +18,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from emulator import MachineState
 
+# 手動操作画面の待ち受けポート（ブラウザで http://localhost:8765 を開く）
 CONTROL_PORT = 8765
 
+# 操作画面の HTML（CSS と JavaScript を含む1枚の文字列）。ブラウザで表示され、
+# 1秒ごとに /state を読んで表示を更新し、スライダーの変化を /control へ送る。
 _PAGE = """<!doctype html>
 <html lang="ja">
 <head>
@@ -118,10 +121,16 @@ poll();
 def _make_handler(
     state: "MachineState", lock: threading.Lock
 ) -> type[BaseHTTPRequestHandler]:
+    """状態（state）と、その排他ロック（lock）を閉じ込めた HTTP の処理クラスを作る。
+
+    ロックを使うのは、エミュレータ本体（別のスレッド）と、この画面が同じ状態を読み書きするため。
+    """
     class Handler(BaseHTTPRequestHandler):
+        # 標準のアクセスログ（1リクエストごとの表示）を止める。/state を毎秒読むため、うるさくなるのを防ぐ
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             pass  # /stateを1秒ごとにpollするため、標準の毎リクエストアクセスログは出さない
 
+        # GET: "/" は操作画面、"/state" は今の状態（JSON）を返す。それ以外は 404
         def do_GET(self) -> None:
             if self.path == "/":
                 self._send_html(_PAGE)
@@ -132,6 +141,8 @@ def _make_handler(
             else:
                 self.send_error(404)
 
+        # POST /control: 操作（手動の ON/OFF と目標値）を受け取り、状態に反映する。
+        # 不正な JSON は 400。ロックの中で反映するので、エミュレータの送信とぶつからない
         def do_POST(self) -> None:
             if self.path != "/control":
                 self.send_error(404)
@@ -147,6 +158,7 @@ def _make_handler(
                 state.apply_control(payload)
             self._send_json(b'{"ok":true}')
 
+        # HTML を、UTF-8 で 200 として返す
         def _send_html(self, html: str) -> None:
             body = html.encode("utf-8")
             self.send_response(200)
@@ -155,6 +167,7 @@ def _make_handler(
             self.end_headers()
             self.wfile.write(body)
 
+        # JSON（バイト列）を 200 として返す
         def _send_json(self, body: bytes) -> None:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -166,7 +179,11 @@ def _make_handler(
 
 
 def start(state: "MachineState", lock: threading.Lock) -> None:
-    """バックグラウンドスレッドで操作画面を起動する（呼び出し元をブロックしない）。"""
+    """バックグラウンドスレッドで操作画面を起動する（呼び出し元をブロックしない）。
+
+    注意: 0.0.0.0 で待ち受けるため、同じ LAN の機器からも操作できる。認証は無い。
+    開発・デモの PC で使い、外部に公開しないこと。
+    """
     handler = _make_handler(state, lock)
     httpd = ThreadingHTTPServer(("0.0.0.0", CONTROL_PORT), handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
