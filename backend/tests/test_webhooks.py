@@ -4,14 +4,22 @@
 それぞれ検証する。実際のHTTP送信は行わず、app.ingest_buffer.send_webhookをモックする
 （test_notifications.pyがsend_alarm_discordをモックするのと同方針）。
 """
+
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 
 from app.config import settings
 from app.ingest_buffer import flush_once
 
 VALID_HEADERS = {"X-API-Key": settings.ingest_api_key}
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    # SSRF検証（app.webhooks）はDNS解決が要るため、公開IPに固定する（実DNSに依存しない）
+    monkeypatch.setattr("app.webhooks._addresses_for_host", lambda host: ["93.184.216.34"])
 
 
 async def _create_sensor(client: httpx.AsyncClient, ingest_key: str, **thresholds: float) -> str:
@@ -122,9 +130,7 @@ async def test_disabled_reading_webhook_does_not_fire(client: httpx.AsyncClient)
         "/api/settings/webhooks",
         json={"eventType": "reading.received", "url": "https://hooks.example.com/reading"},
     )
-    await client.put(
-        f"/api/settings/webhooks/{created.json()['id']}", json={"enabled": False}
-    )
+    await client.put(f"/api/settings/webhooks/{created.json()['id']}", json={"enabled": False})
 
     with patch("app.ingest_buffer.send_webhook", new_callable=AsyncMock) as mock_send:
         await client.post(

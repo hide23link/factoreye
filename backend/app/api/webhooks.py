@@ -3,6 +3,7 @@
 docs/factoreye-architecture.md §Webhook通知 参照。配信本体（app.webhooks.send_webhook）の
 呼び出しはapp.ingest_buffer側の責務であり、ここは設定のCRUDのみを扱う。
 """
+
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -19,8 +20,19 @@ from app.schemas import (
     WebhookSubscriptionRead,
     WebhookSubscriptionUpdate,
 )
+from app.webhooks import UnsafeWebhookUrl, assert_webhook_url_allowed
 
 router = APIRouter(prefix="/api/settings/webhooks", tags=["webhooks"])
+
+
+async def _ensure_safe_url(url: str) -> None:
+    """登録・変更時点でSSRF対策の検証を行い、NGなら422で理由を返す（送信時にも再検証する）。"""
+    try:
+        await assert_webhook_url_allowed(url)
+    except UnsafeWebhookUrl as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 async def _get_owned_subscription(
@@ -48,6 +60,7 @@ async def create_webhook_subscription(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> WebhookSubscription:
+    await _ensure_safe_url(payload.url)
     subscription = WebhookSubscription(workspace_id=workspace_id, **payload.model_dump())
     session.add(subscription)
     await session.commit()
@@ -63,6 +76,8 @@ async def update_webhook_subscription(
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> WebhookSubscription:
     subscription = await _get_owned_subscription(session, subscription_id, workspace_id)
+    if payload.url is not None:
+        await _ensure_safe_url(payload.url)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(subscription, field, value)
     subscription.updated_at = datetime.now(UTC)

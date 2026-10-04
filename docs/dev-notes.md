@@ -246,3 +246,19 @@
 **確認方法**: ローカルにPostgreSQL 16を用意し、マイグレーション（upgrade/downgrade往復）・pytest（新規`test_webhooks.py`含め117件）・mypy（strict）・ruffを確認。マイグレーション実装時、`op.create_table`に Enum型カラムを含めると自動でEnum型を作成するため、事前の明示的な`.create()`呼び出しが「型が既に存在する」エラーで重複することを実機確認して修正した（`add_column`の場合は事前create が必要という既存migrationの前例と挙動が異なる点、今後の注意点として記録）。frontendはnpm run test（92件）・typecheck・lintを確認。docker-compose起動後の実ブラウザでの確認はまだ未実施（次回Mac側で実施予定）。
 
 **次フェーズ**: Phase 2（Pluginシステム廃止）、Phase 3（ルールベース設定の具体化）、Phase 4（`export-workspace`/`import-workspace`移行ツール、Phase 1完了後に着手）。
+
+### 2026-10-04: Webhook送信先のSSRF対策（Phase 1 の修正）
+
+**背景**: Webhookは利用者が指定したURLへサーバー側から送信するため、そのままではサーバーの内部ネットワーク（ループバック・社内IP・クラウドのメタデータ用アドレス等）を叩けてしまう。SaaS（multi-tenant）では他テナントの利用者にも開く機能になるため、Phase 2 の前に対策した。
+
+**方針**:
+- 送信先は `https` のみ、かつ名前解決した全アドレスが公開IP（`ipaddress.is_global`）の場合だけ許可。IPv4射影アドレス（`::ffff:127.0.0.1`）は中身のIPv4で判定し、共有アドレス（100.64/10）も拒否する
+- 登録・変更時（API、422で理由を返す）と送信直前の両方で検証する。送信時の検証は、登録後にDNSが内部を指すよう変わった場合に備えるため
+- リダイレクトは追わない（httpxの既定どおり）。公開URLから内部へ転送されるのを防ぐ
+- 例外スイッチ `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`: 社内LANの自動化基盤へ送る自己ホスト利用者だけ使う。http とプライベートIPを許可する。既定は `false`（本番を含む）
+
+**既知の残リスク**: 検証（DNS解決）と実際の接続の間に、DNSの応答が変わる（DNS rebinding）隙間は残る。接続先IPを固定して送る実装にすれば塞げるが、今回は見送った。
+
+**確認方法**: `backend/tests/test_webhook_url_guard.py`（宛先IPごとの判定、例外スイッチ、登録API、送信時の再検証）。pytest 全141件、ruff、mypy（strict）が通過。ローカル稼働スタックでは、既定（false）で内部宛て・http宛ての登録が422になること、既存のhttp購読が送信時に止まること、スイッチ true で配信が再開することを確認した。
+
+**注意（事故の記録）**: pytestの `conftest.py` は接続先DBの全テーブルを `drop_all` するため、開発用のcompose DBに向けて実行すると開発データが消える。テストは `DATABASE_URL` を専用DB（`factoreye_test`）に向けて実行すること。
