@@ -14,6 +14,21 @@ export interface MeResponse {
   plan: "free" | "pro";
 }
 
+// ---- Migration (SaaS → OSS) ----
+
+export interface MigrationStatus {
+  mode: "multi_tenant" | "self_hosted";
+  // SaaS（multi_tenant）だけ書き出せる。self-hosted だけ取り込める
+  canExport: boolean;
+  canImport: boolean;
+}
+
+export interface MigrationImportResult {
+  dryRun: boolean;
+  // テーブル名 → 件数（dry-run のときは「取り込めるはずの件数」）
+  counts: Record<string, number>;
+}
+
 // ---- Domain ----
 
 export interface Sensor {

@@ -1,17 +1,19 @@
 import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
+import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
-type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks";
+type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration";
 
 const TABS: { value: SettingsTab; label: string }[] = [
   { value: "sensors", label: "センサー" },
   { value: "alarms", label: "アラーム" },
   { value: "notifications", label: "通知" },
   { value: "webhooks", label: "Webhook連携" },
+  { value: "migration", label: "データ移行" },
 ];
 
 export function SettingsPage() {
@@ -43,6 +45,7 @@ export function SettingsPage() {
         {tab === "alarms" && <AlarmSettingsPanel />}
         {tab === "notifications" && <NotificationSettingsPanel />}
         {tab === "webhooks" && <WebhookSettingsPanel />}
+        {tab === "migration" && <MigrationSettingsPanel />}
       </div>
     </div>
   );
