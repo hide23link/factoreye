@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, Index
+from sqlalchemy import Column, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -45,13 +45,31 @@ class AlarmSeverity(StrEnum):
 # ──────────────────────────────────────────────────────────────
 class Sensor(SQLModel, table=True):
     __tablename__ = "sensors"
+    # センサー名はワークスペース内で一意（別のワークスペースには同じ名前を許す）。
+    # NULL（self-hosted）は部分インデックスで扱う（PostgreSQL は NULL 同士を別物として扱うため）
+    __table_args__ = (
+        Index(
+            "uq_sensors_name_self_hosted",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        Index(
+            "uq_sensors_workspace_name",
+            "workspace_id",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NOT NULL"),
+        ),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # Phase 0.5: NULL = self-hosted（ワークスペースなし）、UUID = multi-tenant のワークスペース
     workspace_id: UUID | None = Field(
         default=None, foreign_key="workspaces.id", index=True, ondelete="CASCADE"
     )
-    name: str = Field(unique=True, max_length=100)
+    name: str = Field(max_length=100)
+    # ingest_key は取り込みAPIがキーだけでセンサーを特定するため、ワークスペースをまたいでも一意
     # REST ingest 識別子（旧 mqttTopic）
     # デバイス側は POST /api/ingest/readings にこの値を含めて送信する
     ingest_key: str = Field(unique=True, max_length=100, index=True)
@@ -260,6 +278,15 @@ class WebhookSubscription(SQLModel, table=True):
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):
     __tablename__ = "notification_settings"
+    # ワークスペースごとに1行まで（NULL = self-hosted の行は id=1 の1行）
+    __table_args__ = (
+        Index(
+            "uq_notification_settings_workspace",
+            "workspace_id",
+            unique=True,
+            postgresql_where=text("workspace_id IS NOT NULL"),
+        ),
+    )
 
     # Phase 0.5: id=1（NULL workspace）が self-hosted 用のシングルトン行
     # multi-tenant では workspace ごとに新規行（マイグレーションで SERIAL 付与済み）

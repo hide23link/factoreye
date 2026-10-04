@@ -1,11 +1,12 @@
 """センサー管理 API（一覧/作成/詳細/更新/削除）と測定値履歴。"""
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
-from sqlmodel import select
+from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
@@ -67,23 +68,41 @@ async def create_sensor(
                 detail=f"free tier limit reached ({_FREE_TIER_SENSOR_LIMIT} sensors)",
             )
 
-    # name / ingest_key の重複チェック（同ワークスペース内）
-    dup_query = select(Sensor).where(
-        (Sensor.name == payload.name) | (Sensor.ingest_key == payload.ingest_key)
+    # 重複チェック: 名前はワークスペース内で一意、ingestKey は全体で一意
+    # （取り込みAPIがキーだけでセンサーを特定するため）
+    dup_query = select(Sensor.id).where(
+        or_(
+            _name_in_scope(workspace_id, payload.name),
+            col(Sensor.ingest_key) == payload.ingest_key,
+        )
     )
-    if workspace_id is not None:
-        dup_query = dup_query.where(Sensor.workspace_id == workspace_id)
-    existing = await session.exec(dup_query)
-    if existing.first() is not None:
+    if (await session.exec(dup_query)).first() is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="name or ingestKey already in use"
         )
 
     sensor = Sensor(workspace_id=workspace_id, **payload.model_dump())
     session.add(sensor)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # 同時に作成された場合は DB の一意制約で弾かれる（500 にせず 409 を返す）
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="name or ingestKey already in use"
+        ) from exc
     await session.refresh(sensor)
     return sensor
+
+
+def _name_in_scope(workspace_id: UUID | None, name: str) -> Any:
+    """同じワークスペース（self-hosted は NULL）の中で、同名のセンサーを表す条件。"""
+    scope = (
+        col(Sensor.workspace_id).is_(None)
+        if workspace_id is None
+        else col(Sensor.workspace_id) == workspace_id
+    )
+    return and_(scope, col(Sensor.name) == name)
 
 
 @router.get("/{sensor_id}", response_model=SensorRead)
@@ -105,20 +124,23 @@ async def update_sensor(
     sensor = await _get_active_sensor(session, sensor_id, workspace_id)
 
     if payload.name is not None and payload.name != sensor.name:
-        dup_query = select(Sensor).where(Sensor.name == payload.name, Sensor.id != sensor_id)
-        if workspace_id is not None:
-            dup_query = dup_query.where(Sensor.workspace_id == workspace_id)
-        existing = await session.exec(dup_query)
-        if existing.first() is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="name already in use"
-            )
+        dup_query = select(Sensor.id).where(
+            _name_in_scope(workspace_id, payload.name), Sensor.id != sensor_id
+        )
+        if (await session.exec(dup_query)).first() is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already in use")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(sensor, field, value)
     sensor.updated_at = datetime.now(UTC)
     session.add(sensor)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="name already in use"
+        ) from exc
     await session.refresh(sensor)
     return sensor
 

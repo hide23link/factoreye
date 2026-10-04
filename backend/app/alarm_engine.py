@@ -2,8 +2,10 @@
 
 docs/architecture.md §6 アラーム評価 参照。
 """
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -71,9 +73,12 @@ def _still_breached_with_dead_band(
 async def evaluate_alarms(
     session: AsyncSession,
     pending: "list[PendingReading]",
-    notif_settings: NotificationSettings | None,
+    notif_settings_by_workspace: Mapping[UUID | None, NotificationSettings],
 ) -> list[AlarmNotification]:
-    """新規に発火したAlarmの通知用データを返す（ORMオブジェクトはセッション終了後に参照できないため）。"""
+    """新規に発火したAlarmの通知用データを返す（ORMオブジェクトはセッション終了後に参照できないため）。
+
+    再通知の間隔は、センサーのワークスペースの通知設定に従う（設定が無いワークスペースは再通知しない）。
+    """
     sensor_ids = {p.sensor_id for p in pending}
     if not sensor_ids:
         return []
@@ -97,6 +102,7 @@ async def evaluate_alarms(
         sensor = sensors_by_id.get(p.sensor_id)
         if sensor is None:
             continue
+        notif_settings = notif_settings_by_workspace.get(sensor.workspace_id)
 
         breach = _check_threshold(sensor, p.value)
         existing = open_alarms.get(p.sensor_id)
