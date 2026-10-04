@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた
+- センサー名の一意性を、ワークスペース内に変更（従来は DB 全体で一意）
+- 通知設定をワークスペースごとに持つように変更（従来は ID=1 の1行に固定）
+
+### Fixed
+- マルチテナントで、別のワークスペースが同じセンサー名を使えない問題を修正
+- マルチテナントで、アラームの Discord 通知が、そのワークスペースの設定でなく ID=1 の設定で送られる問題を修正
+- 取り込みキーが別のワークスペースと衝突したとき、500 ではなく 409 を返すように修正
 
 ### Removed
 - **【破壊的変更】Python プラグインシステムを廃止**: `/api/plugins` API、設定画面の「プラグイン」タブ、`plugins` / `plugin_configs` テーブルを削除（マイグレーション `c3d4e5f6a7b8`）。プラグインの設定値は失われる。拡張は Webhook で行う

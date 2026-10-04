@@ -274,7 +274,7 @@ class WebhookSubscription(SQLModel, table=True):
 
 
 # ──────────────────────────────────────────────────────────────
-# NotificationSettings（シングルトン、常にid=1の1行のみ）
+# NotificationSettings（self-hosted は id=1 の1行、SaaS はワークスペースごとに1行）
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):
     __tablename__ = "notification_settings"
@@ -288,8 +288,7 @@ class NotificationSettings(SQLModel, table=True):
         ),
     )
 
-    # Phase 0.5: id=1（NULL workspace）が self-hosted 用のシングルトン行
-    # multi-tenant では workspace ごとに新規行（マイグレーションで SERIAL 付与済み）
+    # self-hosted は id=1（workspace_id NULL）の1行。SaaS はワークスペースごとに1行
     id: int | None = Field(default=None, primary_key=True)
     workspace_id: UUID | None = Field(default=None, index=True)
     # 重故障・軽故障で別々のDiscord Webhookに送り分けられるよう、それぞれ専用のURLを持つ
