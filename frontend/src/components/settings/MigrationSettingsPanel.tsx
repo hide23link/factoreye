@@ -1,3 +1,11 @@
+/**
+ * データ移行のパネル（設定画面「データ移行」）。
+ *
+ * - SaaS 版: 書き出し（ログイン中のワークスペースを、gzip のファイルとして保存する）
+ * - OSS 版: 取り込み（書き出しファイルを選び、確認（dry-run）→ 取り込む、の2段階）
+ *
+ * どちらが使えるかは、バックエンドの状態（/api/settings/migration/status）で決まる。
+ */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -5,6 +13,7 @@ import { useMigrationStatus } from "../../hooks/queries";
 import { downloadWorkspaceExport, importWorkspaceFile } from "../../lib/api";
 import type { MigrationImportResult } from "../../types";
 
+// テーブル名を、画面に出す日本語の名前にする（一覧に出す件数の見出し）
 const TABLE_LABELS: Record<string, string> = {
   sensors: "センサー",
   readings: "測定値",
@@ -16,8 +25,10 @@ const TABLE_LABELS: Record<string, string> = {
   notification_settings: "通知設定",
 };
 
+// 書き出しのダウンロード時のファイル名
 const EXPORT_FILE_NAME = "factoreye-workspace.jsonl.gz";
 
+/** テーブルごとの件数を、見出し付きの一覧で表示する。 */
 function CountList({ counts }: { counts: Record<string, number> }) {
   return (
     <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
@@ -30,6 +41,7 @@ function CountList({ counts }: { counts: Record<string, number> }) {
   );
 }
 
+/** 書き出しの節（SaaS 版）。押すと、ワークスペースのファイルをダウンロードさせる。 */
 function ExportSection() {
   const [error, setError] = useState<string | null>(null);
 
@@ -68,6 +80,11 @@ function ExportSection() {
   );
 }
 
+/**
+ * 取り込みの節（OSS 版）。
+ * 1. ファイルを選ぶ 2. 「内容を確認」で件数を見る（DB は変えない）3. 「この内容で取り込む」で実際に入れる
+ * ファイルや通知の設定を変えると、確認の結果は消す（古い結果で取り込まないため）。
+ */
 function ImportSection() {
   const [file, setFile] = useState<File | null>(null);
   const [withNotifications, setWithNotifications] = useState(false);
@@ -176,6 +193,7 @@ function ImportSection() {
   );
 }
 
+/** データ移行パネルの本体。状態を取得し、使える節だけを表示する。 */
 export function MigrationSettingsPanel() {
   const { data: status, isLoading, isError } = useMigrationStatus();
 

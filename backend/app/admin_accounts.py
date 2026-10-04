@@ -1,5 +1,8 @@
 """管理者アカウントの保管（DBではなくローカルのテキストファイル）。
 
+DB ではなくファイルに置く理由: 管理者は少数で、DB の障害とは切り離して操作できるようにするため。
+利用者（SaaS の users）とは別の仕組み。
+
 ファイル形式（1行1件、`#` で始まる行と空行は無視）:
     <ID>:<bcryptハッシュ>
 
@@ -18,9 +21,10 @@ from app.config import settings
 
 _logger = logging.getLogger(__name__)
 
-# ID は英数字と . _ - のみ（コロンを含めない＝区切り文字と衝突させない）
+# 管理者 ID の形式: 英数字と . _ - のみ（コロンを含めない＝ファイルの区切り文字と衝突させない）
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,50}$")
 
+# ファイルの先頭に付ける説明（書き込みのたびに付け直す。利用者が足したコメントは残す）
 _HEADER = (
     "# FactorEye 管理者アカウント（1行1件: <ID>:<bcryptハッシュ>）\n"
     "# 追加・パスワード変更: python -m app.admin_cli set-admin <ID>\n"
@@ -31,6 +35,7 @@ _HEADER_LINES = tuple(_HEADER.splitlines())
 
 
 def is_valid_admin_id(admin_id: str) -> bool:
+    """管理者 ID の形式が正しいか（英数字と . _ -、1〜50 文字）。"""
     return _ID_PATTERN.fullmatch(admin_id) is not None
 
 
@@ -39,6 +44,7 @@ def _path() -> Path:
 
 
 def _read_lines() -> list[str]:
+    """ファイルの全行を読む。ファイルが無ければ空のリスト。"""
     path = _path()
     if not path.exists():
         return []
@@ -46,6 +52,7 @@ def _read_lines() -> list[str]:
 
 
 def _parse(line: str) -> tuple[str, str] | None:
+    """1行を (ID, ハッシュ) に分ける。コメント・空行・形式が違う行は None（無視する）。"""
     stripped = line.strip()
     if not stripped or stripped.startswith("#") or ":" not in stripped:
         return None
@@ -69,6 +76,10 @@ def load_admins() -> dict[str, str]:
 
 
 def admin_exists(admin_id: str) -> bool:
+    """この ID の管理者が、今もファイルに存在するか。
+
+    削除された管理者を、トークンの期限内でも締め出すために使う。
+    """
     return admin_id in load_admins()
 
 
@@ -83,6 +94,7 @@ def verify_admin(admin_id: str, password: str) -> bool:
 
 
 def list_admin_ids() -> list[str]:
+    """管理者 ID の一覧（並べ替え済み）。パスワードのハッシュは含めない。"""
     return sorted(load_admins())
 
 
@@ -108,7 +120,7 @@ def set_admin(admin_id: str, plain_password: str) -> None:
 
 
 def remove_admin(admin_id: str) -> bool:
-    """管理者を削除する。存在しなければ False。"""
+    """管理者を削除する。存在しなければ False。削除した行だけを取り除き、ほかの行は変えない。"""
     lines = _read_lines()
     out: list[str] = []
     removed = False
@@ -124,6 +136,11 @@ def remove_admin(admin_id: str) -> bool:
 
 
 def _write(body_lines: list[str]) -> None:
+    """ファイルを書き直す。
+
+    一時ファイルに書いてから置き換える（書きかけで壊れないように）。
+    権限は 600（所有者だけが読み書きできる）。
+    """
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # 既存のヘッダーは除いてから付け直す（書き込みのたびに重複させない）。

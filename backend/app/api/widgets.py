@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/widgets", tags=["widgets"])
 async def _get_widget(
     session: AsyncSession, widget_id: UUID, workspace_id: UUID | None = None
 ) -> Widget:
+    """ウィジェットを1件取り出す。無い・他のワークスペースのものは 404。"""
     widget = await session.get(Widget, widget_id)
     if widget is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="widget not found")
@@ -34,6 +35,7 @@ async def update_widget(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> Widget:
+    """ウィジェットの更新（位置・サイズ・設定など）。送られた項目だけを変える。"""
     widget = await _get_widget(session, widget_id, workspace_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(widget, field, value)
@@ -49,6 +51,7 @@ async def delete_widget(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> None:
+    """ウィジェットの削除（物理削除）。"""
     widget = await _get_widget(session, widget_id, workspace_id)
     await session.delete(widget)
     await session.commit()

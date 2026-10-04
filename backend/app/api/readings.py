@@ -1,4 +1,8 @@
-"""GET /api/readings — ダッシュボードpolling用の直近測定値一覧。"""
+"""GET /api/readings — ダッシュボードpolling用の直近測定値一覧。
+
+画面は数秒ごとにこの API を呼んで、新しい測定値を取り直す。
+件数は limit で制限する（既定 1000、最大 10000）。
+"""
 from typing import Annotated
 from uuid import UUID
 
@@ -21,6 +25,7 @@ async def list_readings(
     sensor_id: UUID | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=10000),
 ) -> ReadingListResponse:
+    """直近の測定値（新しい順）。sensor_id で1センサーに絞れる。"""
     # SQLModelのクラス属性はmypyには素のPython型に見えるため.desc()はattr-definedで誤検知される
     query = select(Reading).order_by(Reading.recorded_at.desc()).limit(limit)  # type: ignore[attr-defined]
 

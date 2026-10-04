@@ -1,11 +1,18 @@
+/**
+ * 管理者画面（/admin）の土台。
+ * 管理者トークンが無ければログイン画面を、あれば利用者の一覧画面を表示する。
+ * 通常画面（App.tsx）とは、ログインも状態も別々。
+ */
 import { useCallback } from "react";
 
 import { useAdminStore } from "../../store/useAdminStore";
 import { AdminLoginPage } from "./AdminLoginPage";
 import { AdminUsersPage } from "./AdminUsersPage";
 
-// /admin 配下の画面。通常画面（App.tsx）とは別の認証（管理者ID + パスワード）を使う。
+/** 管理者画面の本体。 */
 export function AdminApp() {
+  // 認証の失効（401）が起きたら、トークンを消してログイン画面へ戻す
+
   const token = useAdminStore((s) => s.token);
   const clearToken = useAdminStore((s) => s.clearToken);
   const onAuthError = useCallback(() => clearToken(), [clearToken]);

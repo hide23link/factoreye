@@ -2,6 +2,7 @@
 // トークンは呼び出し側（管理者ストア）が持ち、ここでは保存しない。
 import { API_BASE_URL } from "./api";
 
+/** 管理者 API の失敗（HTTP の状態コードを持つ）。画面は status で、失効（401）などを判断する。 */
 export class AdminApiError extends Error {
   readonly status: number;
 
@@ -12,11 +13,13 @@ export class AdminApiError extends Error {
   }
 }
 
+/** 管理者ログインの応答（トークン）。 */
 export interface AdminLoginResult {
   accessToken: string;
   tokenType: string;
 }
 
+/** 全体の件数と DB の使用量（管理者の概要）。 */
 export interface AdminOverview {
   userCount: number;
   workspaceCount: number;
@@ -25,6 +28,7 @@ export interface AdminOverview {
   databaseSizeBytes: number;
 }
 
+/** 利用者の一覧1行分（ワークスペースと集計）。 */
 export interface AdminUserSummary {
   id: string;
   email: string;
@@ -37,6 +41,7 @@ export interface AdminUserSummary {
   lastReadingAt: string | null;
 }
 
+/** 利用者の詳細に出す、センサー1件分の集計。 */
 export interface AdminSensorSummary {
   id: string;
   name: string;
@@ -47,16 +52,22 @@ export interface AdminSensorSummary {
   activeAlarmCount: number;
 }
 
+/** 利用者の詳細（一覧の項目に、センサーごとの状況を加える）。 */
 export interface AdminUserDetail extends AdminUserSummary {
   sensors: AdminSensorSummary[];
 }
 
+/** 利用者の修正の入力。送る項目だけ変わる（省略は変えない）。password を送ると、ログインは全て無効になる。 */
 export interface AdminUserUpdate {
   email?: string;
   plan?: "free" | "pro";
   password?: string;
 }
 
+/**
+ * 管理者 API を呼ぶ共通の関数。token があれば Authorization に付ける。
+ * 失敗（HTTP エラー）は AdminApiError にする。204（内容なし）は undefined を返す。
+ */
 async function send<T>(path: string, init: RequestInit, token?: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -76,12 +87,14 @@ async function send<T>(path: string, init: RequestInit, token?: string): Promise
   return (await response.json()) as T;
 }
 
+// 管理者ログイン（トークンを取る）。トークンはまだ無いので、Authorization は付けない
 export const adminLogin = (adminId: string, password: string) =>
   send<AdminLoginResult>("/api/admin/login", {
     method: "POST",
     body: JSON.stringify({ adminId, password }),
   });
 
+// 以下は、すべて管理者トークンが必要な API
 export const fetchAdminOverview = (token: string) =>
   send<AdminOverview>("/api/admin/overview", { method: "GET" }, token);
 

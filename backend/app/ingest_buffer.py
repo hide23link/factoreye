@@ -2,6 +2,11 @@
 
 docs/architecture.md §5 センサーの取り込み 参照。
 トレードオフ: 最大1秒分のデータがクラッシュで喪失される可能性（Phase 0 では許容）。
+
+流れ:
+1. 受信（API）: 測定値をメモリ上のバッファに入れて、すぐ応答する（DB は待たない）
+2. flush（1秒ごと）: バッファを空にして、まとめて DB に書く
+3. 同じ flush の中で、アラームの評価（alarm_engine）、Discord 通知、Webhook 配信を行う
 """
 import asyncio
 import logging
@@ -35,26 +40,39 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PendingReading:
+    """バッファに入っている1件の測定値（まだ DB に書いていないもの）。"""
+
     sensor_id: UUID
     value: float
     recorded_at: datetime
 
 
 class IngestBuffer:
+    """受信した測定値を一時的に溜めるバッファ。
+
+    複数の受信処理（リクエスト）が同時に add しても、順番が壊れないように lock で守る。
+    """
+
     def __init__(self) -> None:
         self._pending: list[PendingReading] = []
         self._lock = asyncio.Lock()
 
     async def add(self, reading: PendingReading) -> None:
+        """測定値を1件、バッファの末尾に追加する。"""
         async with self._lock:
             self._pending.append(reading)
 
     async def drain(self) -> list[PendingReading]:
+        """バッファの中身をすべて取り出し、バッファを空にする。
+
+        取り出す（入れ替える）作業だけを lock の中で行い、DB への書き込みは lock の外で行う。
+        """
         async with self._lock:
             pending, self._pending = self._pending, []
         return pending
 
 
+# アプリ全体で1つのバッファ（API の受信処理と、flush_loop の両方から使う）
 buffer = IngestBuffer()
 
 # fire-and-forgetタスクへの強参照を保持（asyncio.create_task結果を即座に手放すと
@@ -63,6 +81,10 @@ _background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _fire_and_forget(coro: Coroutine[Any, Any, None]) -> None:
+    """結果を待たずに、バックグラウンドで実行する（Webhook や Discord の送信に使う）。
+
+    送信が遅くても、DB への書き込みや API の応答を待たせない。
+    """
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -101,6 +123,10 @@ async def _load_webhook_subscriptions(
 async def _dispatch_reading_webhooks(
     session: AsyncSession, pending: list[PendingReading]
 ) -> None:
+    """測定値を受信したとき（reading.received）の Webhook を、購読者へ送る。
+
+    送信先は、センサーのワークスペースの購読に従う（ワークスペースごとに分ける）。
+    """
     sensor_ids = {p.sensor_id for p in pending}
     sensors_result = await session.exec(
         select(Sensor.id, Sensor.workspace_id).where(col(Sensor.id).in_(sensor_ids))
@@ -131,6 +157,7 @@ async def _dispatch_reading_webhooks(
 async def _dispatch_alarm_webhooks(
     session: AsyncSession, notifications: list[AlarmNotification]
 ) -> None:
+    """アラームが発生したとき（alarm.triggered）の Webhook を、購読者へ送る。"""
     workspace_ids = {n.workspace_id for n in notifications}
     subs_by_workspace = await _load_webhook_subscriptions(
         session, WebhookEventType.ALARM_TRIGGERED, workspace_ids
@@ -189,7 +216,12 @@ async def _load_notification_settings(
 
 
 async def flush_once() -> int:
-    """バッファの内容を1回だけDBへbatch INSERTする。戻り値は書き込んだ件数。"""
+    """バッファの内容を1回だけDBへbatch INSERTする。戻り値は書き込んだ件数。
+
+    処理の順序（ここが重要）:
+    1. 測定値を DB に書く → 2. アラームを評価する → 3. commit する（ここで初めて確定）
+    4. commit の後で、Webhook と Discord 通知を送る（送信に失敗しても、DB は確定済み）
+    """
     pending = await buffer.drain()
     if not pending:
         return 0
@@ -226,6 +258,7 @@ async def flush_once() -> int:
                 url = settings_row.discord_webhook_url_warning
             if url:
                 discord_jobs.append((url, notification))
+        # ここで初めて確定する。これより前に失敗した場合、測定値もアラームも残らない
         await session.commit()
 
         # 汎用Webhook配信はDiscord専用通知の有効/無効フラグとは独立に動く
@@ -241,7 +274,10 @@ async def flush_once() -> int:
 
 
 async def flush_loop() -> None:
-    """バックグラウンドタスク: FLUSH_INTERVAL_SECONDS毎にバッファをDBへ書き込み続ける。"""
+    """常駐タスク（app/main.py の lifespan で起動する）。
+
+    FLUSH_INTERVAL_SECONDS 毎にバッファを DB へ書き込み続ける。
+    """
     while True:
         await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
         try:

@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/alarms", tags=["alarms"])
 async def _get_alarm(
     session: AsyncSession, alarm_id: UUID, workspace_id: UUID | None = None
 ) -> Alarm:
+    """アラームを1件取り出す。無い・他のワークスペースのものは 404。"""
     alarm = await session.get(Alarm, alarm_id)
     if alarm is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alarm not found")
@@ -39,6 +40,7 @@ async def list_alarms(
     status_filter: AlarmStatus | None = Query(default=None, alias="status"),
     sensor_id: UUID | None = Query(default=None),
 ) -> AlarmListResponse:
+    """アラームの一覧（新しい順）。状態・センサーで絞り込める。"""
     # SQLModelのクラス属性はmypyには素のPython型に見えるため.desc()はattr-definedで誤検知される
     query = select(Alarm).order_by(Alarm.triggered_at.desc())  # type: ignore[attr-defined]
 
@@ -75,6 +77,10 @@ async def acknowledge_alarm(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> Alarm:
+    """アラームを確認済み（acknowledged）にする。発生中（active）のものだけ確認できる。
+
+    既に確認済み・解除済みのものは 409。誰が確認したか（acknowledged_by）も記録する。
+    """
     alarm = await _get_alarm(session, alarm_id, workspace_id)
     if alarm.status != AlarmStatus.ACTIVE:
         raise HTTPException(

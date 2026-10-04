@@ -3,9 +3,11 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 
+// 初期値: バッファは空、失敗は0回、すぐ送ってよい（待ち時間なし）
 FactorEyeClient::FactorEyeClient()
     : _bufferCount(0), _consecutiveFailures(0), _nextAttemptAtMs(0) {}
 
+// 接続先と認証キーを設定する。送信の前に一度だけ呼ぶ。
 void FactorEyeClient::begin(const String& host, const String& apiKey) {
   _host = host;
   _apiKey = apiKey;
@@ -13,8 +15,11 @@ void FactorEyeClient::begin(const String& host, const String& apiKey) {
   randomSeed(micros());
 }
 
+// 未送信の件数（画面のデバッグ表示用）
 size_t FactorEyeClient::pendingCount() const { return _bufferCount; }
 
+// 値を送る。流れ: バックオフ中ならバッファへ入れて戻る。そうでなければ、同じセンサーの溜まった値と今回の値を
+// まとめて1回の POST で送る。成功なら送った分をバッファから消す。失敗なら今回の値をバッファに残す。
 bool FactorEyeClient::send(const String& ingestKey, float value) {
   unsigned long now = millis();
   // バックオフ期間中は通信を試みず、黙ってバッファに積んで即return
@@ -46,6 +51,7 @@ bool FactorEyeClient::send(const String& ingestKey, float value) {
   return false;
 }
 
+// バッファの末尾に1件追加する。満杯なら、一番古い1件を捨ててから追加する。
 void FactorEyeClient::_pushToBuffer(const String& ingestKey, float value) {
   if (_bufferCount >= kBufferCapacity) {
     // 容量超過: 最古の1件を捨てて詰める（直近100件程度を保持するリングバッファ）
@@ -59,6 +65,7 @@ void FactorEyeClient::_pushToBuffer(const String& ingestKey, float value) {
   _bufferCount++;
 }
 
+// 指定したセンサーの未送信分を、バッファから消す（送信に成功したあとに使う）。残りの順序は保つ。
 void FactorEyeClient::_removeBufferedFor(const String& ingestKey) {
   size_t writeIdx = 0;
   for (size_t readIdx = 0; readIdx < _bufferCount; readIdx++) {
@@ -69,6 +76,8 @@ void FactorEyeClient::_removeBufferedFor(const String& ingestKey) {
   _bufferCount = writeIdx;
 }
 
+// 送信の結果に応じて、次に送ってよい時刻を決める。
+// 成功: 失敗の回数と待ち時間をリセット。失敗: 待ち時間を 1, 2, 4, 8, 16, 30 秒と倍にし、±10% のゆらぎを付ける。
 void FactorEyeClient::_onSendResult(bool success) {
   if (success) {
     _consecutiveFailures = 0;
@@ -93,11 +102,14 @@ void FactorEyeClient::_onSendResult(bool success) {
   _nextAttemptAtMs = millis() + delay;
 }
 
+// 値を、取り込み API へ1回だけ POST する。成功（202）なら true。
+// WiFi につながっていない、または値が無いときは、通信せずに false を返す。
 bool FactorEyeClient::_postReadings(const String& ingestKey, const float* values, size_t count) {
   if (WiFi.status() != WL_CONNECTED || count == 0) {
     return false;
   }
 
+  // 本文の JSON を組み立てる（1件なら value、複数件なら readings の配列）
   String body;
   if (count == 1) {
     body = "{\"ingestKey\":\"" + ingestKey + "\",\"value\":" + String(values[0], 6) + "}";

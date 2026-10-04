@@ -23,17 +23,23 @@ def _utcnow() -> datetime:
 
 
 class AlarmStatus(StrEnum):
+    """アラームの状態。発生中（active）→ 確認済み（acknowledged）→ 解除（resolved）と進む。"""
+
     ACTIVE = "active"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
 
 
 class ThresholdBreached(StrEnum):
+    """どちら側のしきい値を超えたか。下限（min）か上限（max）。"""
+
     MIN = "min"
     MAX = "max"
 
 
 class AlarmSeverity(StrEnum):
+    """アラームの重要度（2段階）。通知の送り先や通知音を分けるために使う。"""
+
     # 軽故障: Discordではサイレント送信（通知音・プッシュ無し、チャンネルには表示）
     WARNING = "warning"
     # 重故障: Discordで通常送信（通知音・プッシュあり）
@@ -210,6 +216,11 @@ class WidgetConfig(SQLModel, table=True):
 # Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
 # ──────────────────────────────────────────────────────────────
 class User(SQLModel, table=True):
+    """利用者（SaaS 版のみ）。
+
+    パスワードは、bcrypt のハッシュだけを保存する（平文は保存しない）。
+    """
+
     __tablename__ = "users"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -222,6 +233,8 @@ class User(SQLModel, table=True):
 
 
 class Workspace(SQLModel, table=True):
+    """ワークスペース（SaaS 版のテナント）。データの分け方の単位で、利用者が所有する。"""
+
     __tablename__ = "workspaces"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -235,6 +248,12 @@ class Workspace(SQLModel, table=True):
 
 
 class RefreshToken(SQLModel, table=True):
+    """リフレッシュトークン（SaaS 版のみ）。アクセストークンを再発行するための長期のトークン。
+
+    生のトークンは保存せず、SHA-256 のハッシュだけを保存する。
+    使うたびに新しいものに替える（ローテーション）。
+    """
+
     __tablename__ = "refresh_tokens"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -254,6 +273,8 @@ class RefreshToken(SQLModel, table=True):
 # 受け口を用意するだけで、利用者はコードを一切書かずに外部連携できる）
 # ──────────────────────────────────────────────────────────────
 class WebhookEventType(StrEnum):
+    """Webhook で送るイベントの種類。"""
+
     READING_RECEIVED = "reading.received"
     ALARM_TRIGGERED = "alarm.triggered"
 

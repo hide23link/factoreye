@@ -1,3 +1,8 @@
+/**
+ * Webhook 連携の設定パネル。
+ * 購読（イベントの種類と送信先 URL）の一覧・追加・有効/無効の切り替え・削除を行う。
+ * 送信先の URL は、バックエンドで安全性（https・公開アドレス）を検査される。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -9,11 +14,13 @@ import {
 } from "../../lib/api";
 import type { WebhookEventType, WebhookSubscription } from "../../types";
 
+// イベントの種類ごとの、画面に出す説明
 const EVENT_LABELS: Record<WebhookEventType, string> = {
   "reading.received": "センサー値を受信するたび",
   "alarm.triggered": "アラームが発生するたび",
 };
 
+/** 購読1件の行（有効/無効の切り替えと、削除）。 */
 function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +82,7 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
   );
 }
 
+/** 購読を追加するフォーム（タイミングと URL を入力する）。 */
 function AddWebhookForm() {
   const queryClient = useQueryClient();
   const [eventType, setEventType] = useState<WebhookEventType>("reading.received");
@@ -139,6 +147,7 @@ function AddWebhookForm() {
   );
 }
 
+/** Webhook 連携の設定パネル（一覧と、追加フォーム）。 */
 export function WebhookSettingsPanel() {
   const { data: webhooks, isLoading } = useWebhookSubscriptions();
 

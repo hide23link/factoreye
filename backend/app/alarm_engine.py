@@ -1,6 +1,13 @@
 """アラーム評価エンジン: batch flush内でReading INSERT直後に閾値比較・dedupe・解除判定。
 
 docs/architecture.md §6 アラーム評価 参照。
+
+全体の流れ（1回の flush で、受信した測定値を1件ずつ見る）:
+1. 測定値がしきい値を超えたか（_check_threshold）
+2. 超えていて、まだ発生中のアラームがなければ、新規に作る（通知もする）
+3. 超えていて、発生中のアラームがあれば、重要度の変化や再通知の条件だけを見る（dedupe）
+4. 超えていなくても、不感帯の範囲内なら解除しない（_still_breached_with_dead_band）
+5. それ以外は、発生中のアラームを解除する
 """
 from collections.abc import Mapping
 from datetime import timedelta
@@ -25,6 +32,11 @@ if TYPE_CHECKING:
     from app.ingest_buffer import PendingReading
 
 
+# ──────────────────────────────────────────────────────────────
+# しきい値の判定（純粋な関数。DB を使わない）
+# ──────────────────────────────────────────────────────────────
+
+
 def _check_threshold(
     sensor: Sensor, value: float
 ) -> tuple[ThresholdBreached, AlarmSeverity] | None:
@@ -43,6 +55,7 @@ def _check_threshold(
 def _threshold_value(
     sensor: Sensor, breached: ThresholdBreached, severity: AlarmSeverity
 ) -> float | None:
+    """発生時に超えたしきい値の数値を返す（解除の判定に使う）。設定が無ければ None。"""
     if breached == ThresholdBreached.MAX:
         return (
             sensor.threshold_max_critical
@@ -70,6 +83,11 @@ def _still_breached_with_dead_band(
     return value < threshold + band
 
 
+# ──────────────────────────────────────────────────────────────
+# 評価の本体（DB を使う。ingest_buffer の flush から呼ばれる）
+# ──────────────────────────────────────────────────────────────
+
+
 async def evaluate_alarms(
     session: AsyncSession,
     pending: "list[PendingReading]",
@@ -78,6 +96,8 @@ async def evaluate_alarms(
     """新規に発火したAlarmの通知用データを返す（ORMオブジェクトはセッション終了後に参照できないため）。
 
     再通知の間隔は、センサーのワークスペースの通知設定に従う（設定が無いワークスペースは再通知しない）。
+    処理に必要なデータは、最初にまとめて読む（センサーと、発生中のアラーム）。
+    1件ずつ DB を読みに行かないようにして、受信の多い時もまとめて処理できるようにする。
     """
     sensor_ids = {p.sensor_id for p in pending}
     if not sensor_ids:
@@ -88,6 +108,8 @@ async def evaluate_alarms(
     )
     sensors_by_id = {s.id: s for s in sensors_result.all()}
 
+    # 発生中（解決していない）のアラームを、センサーごとに1件だけ持つ辞書にする。
+    # 同じセンサーに発生中のアラームは同時に1件だけ、という前提で扱う
     open_result = await session.exec(
         select(Alarm).where(
             Alarm.sensor_id.in_(sensor_ids),  # type: ignore[attr-defined]
@@ -99,6 +121,7 @@ async def evaluate_alarms(
     notifications: list[AlarmNotification] = []
 
     for p in pending:
+        # 測定値の順に、判定する。センサーが削除されていれば、何もしない
         sensor = sensors_by_id.get(p.sensor_id)
         if sensor is None:
             continue

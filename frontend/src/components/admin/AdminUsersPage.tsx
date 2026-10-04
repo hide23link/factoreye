@@ -1,3 +1,7 @@
+/**
+ * 管理者の一覧画面。上部に全体の件数と DB の使用量、下に利用者の一覧（検索つき）を出す。
+ * 行を選ぶと、利用者の詳細（AdminUserModal）を開く。
+ */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -6,11 +10,13 @@ import type { AdminUserSummary } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
 import { AdminUserModal } from "./AdminUserModal";
 
+// 親（AdminApp）から受け取る値: 管理者トークンと、認証の失効を知らせる関数
 interface Props {
   token: string;
   onAuthError: () => void;
 }
 
+/** バイト数を、読みやすい単位（B / KB / MB / GB）にする。 */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -18,15 +24,18 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
+/** 日時を、日本語の表記にする。無ければ「—」。 */
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("ja-JP");
 }
 
+/** 管理者の一覧画面の本体。 */
 export function AdminUsersPage({ token, onAuthError }: Props) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // 概要（件数と DB の使用量）と、利用者の一覧を、それぞれ取得する
   const overview = useQuery({
     queryKey: ["admin", "overview"],
     queryFn: () => fetchAdminOverview(token),
@@ -36,7 +45,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
     queryFn: () => fetchAdminUsers(token),
   });
 
-  // 期限切れ・権限剥奪（401/403）は再ログインへ戻す
+  // 期限切れ・権限剥奪（401/403）は、再ログインへ戻す（ほかのエラーは、そのまま表示する）
   const authFailed = [overview.error, users.error].some(
     (e) => e instanceof AdminApiError && (e.status === 401 || e.status === 403),
   );
@@ -155,6 +164,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
   );
 }
 
+/** 数字の小さな見出し（ラベルと値）。概要の件数に使う。 */
 function Stat({ label, value }: { label: string; value: number | string | undefined }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3">

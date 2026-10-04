@@ -1,3 +1,9 @@
+/**
+ * セットアップガイド（5 分で体験する画面）。次の4段階で進む:
+ * 1. センサーを登録する 2. テストデータを送る（デバイスの代わりに、コードを実行する）
+ * 3. データを受信したことを確かめる 4. ダッシュボードを作って、グラフを表示する
+ * 2 のデータを受信すると、自動で次の段階へ進む（画面を取り直して確かめる）。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -6,6 +12,7 @@ import { addWidget, createDashboard, createSensor } from "../lib/api";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../lib/freeTier";
 import { useUiStore } from "../store/useUiStore";
 
+// 段階の番号（1〜4）と、送信例のコードの種類（curl・Arduino・Python）
 type Step = 1 | 2 | 3 | 4;
 type CodeTab = "curl" | "arduino" | "python";
 
@@ -15,6 +22,7 @@ const CODE_TABS: { value: CodeTab; label: string }[] = [
   { value: "python", label: "Python (Raspberry Pi)" },
 ];
 
+/** 画面上部の進み具合（4 段階）。今の段階を強調し、済んだ段階には ✓ を付ける。 */
 function StepHeader({ step }: { step: Step }) {
   const labels = ["センサー登録", "データ送信", "ダッシュボード作成", "完了"];
   return (
@@ -45,6 +53,7 @@ function StepHeader({ step }: { step: Step }) {
   );
 }
 
+/** セットアップガイドの本体。段階ごとの状態（センサー・ダッシュボードの ID など）を持つ。 */
 export function SetupWizard() {
   const [step, setStep] = useState<Step>(1);
   // マウントの度に末尾をユニーク化する（ガイドを2回目以降実行しても
@@ -63,12 +72,14 @@ export function SetupWizard() {
 
   const { data: readingsData } = useSensorReadings(step === 2 ? sensorId : null, 24);
 
+  // 段階2でデータが1件でも届いたら、段階3へ自動で進める
   useEffect(() => {
     if (step === 2 && readingsData && readingsData.total > 0) {
       setStep(3);
     }
   }, [step, readingsData]);
 
+  // エラーの種類を、利用者に分かる文言にする（上限・名前の重複・その他）
   const describeError = (e: Error): string => {
     if (isFreeTierLimitError(e)) return FREE_TIER_LIMIT_MESSAGE;
     if (e.message.includes("409"))
@@ -76,6 +87,7 @@ export function SetupWizard() {
     return `エラーが発生しました: ${e.message}`;
   };
 
+  // 段階1: センサーを作る（成功したら、そのセンサーの ID を覚えて段階2へ進む）
   const createSensorMutation = useMutation({
     mutationFn: () => createSensor({ name, ingestKey, unit }),
     onSuccess: (sensor) => {
@@ -87,6 +99,7 @@ export function SetupWizard() {
     onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
+  // 段階4: ダッシュボードを作り、そこへ、送られたセンサーのグラフを1つ置く
   const createDashboardMutation = useMutation({
     mutationFn: async () => {
       if (!sensorId) throw new Error("センサーが未登録です");
@@ -111,6 +124,8 @@ export function SetupWizard() {
     onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
+  // 送信例のコード。ingestKey とセンサーの値（42.0）を埋め込んで、そのまま実行できる形にする。
+  // API キーは、利用者が自分の .env の値に置き換える（ここには書かない）
   const codeSnippets: Record<CodeTab, string> = {
     curl: `curl -X POST http://localhost:8000/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`,
     arduino: `// clients/arduino-m5stack/ のFactorEyeClientライブラリを使用\n#include <FactorEyeClient.h>\n#include <WiFi.h>\n\nFactorEyeClient factoreye;\n\nvoid setup() {\n  WiFi.begin("your-wifi-ssid", "your-wifi-password");\n  while (WiFi.status() != WL_CONNECTED) delay(500);\n\n  factoreye.begin(\n    "http://localhost:8000",\n    "<.envのINGEST_API_KEY>"\n  );\n}\n\nvoid loop() {\n  factoreye.send("${ingestKey}", 42.0);\n  delay(10000);\n}`,

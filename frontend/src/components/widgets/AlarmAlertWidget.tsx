@@ -1,8 +1,13 @@
+/**
+ * 発生中のアラームを一覧にして、確認（既読）できるウィジェット。
+ * 発生中（active）と、確認済み（acknowledged）を並べて出す。解決すると自然に一覧から消える。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 
+/** アラームの一覧ウィジェット。センサーの設定は必要ない（全体のアラームを出す）。 */
 export function AlarmAlertWidget() {
   // 確認済み（acknowledged）は「対応中」なだけで解決はしていないため、active と
   // 合わせて表示する。しきい値内に戻って status=resolved になったら自然に消える
@@ -22,6 +27,7 @@ export function AlarmAlertWidget() {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
+  // 発生中を先に、確認済みを後に並べる
   const alarms = [...activeData.alarms, ...ackedData.alarms];
 
   if (alarms.length === 0) {

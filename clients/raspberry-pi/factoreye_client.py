@@ -24,20 +24,35 @@ import urllib.request
 from collections import deque
 from dataclasses import dataclass
 
+# 送信失敗が続いたときの待ち時間の上限（秒）。これより長くは待たない
 _BACKOFF_CAP_SECONDS = 30.0
+# 未送信の値を溜めておく最大件数。満杯になると、一番古いものから捨てる（deque の maxlen）
 _BUFFER_CAPACITY = 100
 
 
 @dataclass
 class _BufferedReading:
+    """未送信の1件（どのセンサーの、どの値か）。"""
+
     ingest_key: str
     value: float
 
 
 class FactorEyeClient:
-    """1つのFactorEyeバックエンド（self-hosted、共有APIキー）向けのクライアント。"""
+    """1つのFactorEyeバックエンド（self-hosted、共有APIキー）向けのクライアント。
+
+    状態（持っているもの）:
+    - 未送信のリングバッファ（最大 100 件）
+    - 連続の失敗回数と、次に送ってよい時刻（バックオフ用）
+    送信は呼び出し元のスレッドで同期的に行うが、失敗しても待たない（ブロックしない）。
+    """
 
     def __init__(self, host: str, api_key: str, timeout: float = 5.0) -> None:
+        """接続先と、認証キーを設定する。送信はまだ行わない。
+
+        host は例 "http://192.168.1.50:8000"、api_key は backend の .env の INGEST_API_KEY。
+        timeout は1回の送信の待ち時間（秒）。
+        """
         # host: 例 "http://192.168.1.50:8000"（末尾スラッシュは有無どちらでも可）
         # api_key: backend の .env に設定した INGEST_API_KEY と同じ値
         self._host = host.rstrip("/")
@@ -57,6 +72,10 @@ class FactorEyeClient:
 
     def send(self, ingest_key: str, value: float) -> bool:
         """ingest_key に対応するセンサーへ value を送信する。
+
+        流れ: バックオフ中なら、送らずにバッファへ入れる。そうでなければ、バッファに溜まった同じセンサーの値と
+        今回の値をまとめて送る。成功したら、送った分をバッファから消す。失敗したら、今回の値をバッファに残す。
+
 
         戻り値: 新しい値が（バッファ分も含め）実際に送信できた場合は True。
         バックオフ中・送信失敗の場合は False（内部でバッファに保持済み）。
@@ -85,6 +104,10 @@ class FactorEyeClient:
         return False
 
     def _post_readings(self, ingest_key: str, values: list[float]) -> bool:
+        """値を、取り込み API へ1回だけ POST する。成功（202）なら True。通信の失敗は False（例外は出さない）。
+
+        1件なら {"ingestKey", "value"}、複数件なら {"ingestKey", "readings"} の形で送る（backend の受け口の形式）。
+        """
         body: dict[str, object]
         if len(values) == 1:
             body = {"ingestKey": ingest_key, "value": values[0]}
@@ -106,6 +129,12 @@ class FactorEyeClient:
             return False
 
     def _on_result(self, success: bool) -> None:
+        """送信の結果に応じて、次に送ってよい時刻（バックオフ）を決める。
+
+        成功: 失敗の回数と待ち時間をリセットする。
+        失敗: 待ち時間を 1, 2, 4, 8, 16, 30 秒と倍にしていき（上限 30 秒）、±10% のゆらぎを付ける。
+        ゆらぎは、多くの機器が同時に再送して、サーバーに負荷が集中するのを防ぐため。
+        """
         if success:
             self._consecutive_failures = 0
             self._next_attempt_at = 0.0
