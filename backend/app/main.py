@@ -6,6 +6,7 @@ FactorEye バックエンド エントリポイント
     uvicorn app.main:app --host 0.0.0.0 --port 8000             # 本番（docker-compose経由）
 """
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -30,6 +31,10 @@ from app.rate_limit import limiter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    if settings.ingest_rate_limit.strip().lower() == "off":
+        logging.getLogger(__name__).warning(
+            "INGEST_RATE_LIMIT=off: 取り込みのレート制限を解除しています（実機テスト用）"
+        )
     async with AsyncSession(engine) as session:
         await load_plugins(app, session)
     flush_task = asyncio.create_task(flush_loop())

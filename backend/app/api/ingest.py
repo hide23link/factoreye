@@ -1,6 +1,8 @@
 """POST /api/ingest/readings — センサー値の取り込み（単発 or バッチ）。"""
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import ValidationError
@@ -17,13 +19,24 @@ from app.schemas import IngestAccepted, IngestRequest
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
+# INGEST_RATE_LIMIT=off のときは制限を付けない（実機テスト用の解除モード）。
+# 既定値（100/minute）は本番と同じ。解除中は起動時にログで警告する。
+RATE_LIMIT_OFF = "off"
+
+
+def _ingest_rate_limit(handler: Callable[..., Any]) -> Callable[..., Any]:
+    if settings.ingest_rate_limit.strip().lower() == RATE_LIMIT_OFF:
+        return handler
+    limited: Callable[..., Any] = limiter.limit(settings.ingest_rate_limit)(handler)
+    return limited
+
 
 @router.post(
     "/readings",
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_ingest_api_key)],
 )
-@limiter.limit(settings.ingest_rate_limit)
+@_ingest_rate_limit
 async def ingest_readings(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> IngestAccepted:
