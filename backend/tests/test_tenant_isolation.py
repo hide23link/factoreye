@@ -35,14 +35,19 @@ async def _make_workspace(session: AsyncSession) -> UUID:
 
 
 async def _make_sensor(
-    session: AsyncSession, workspace_id: UUID | None, name: str, **thresholds: float
+    session: AsyncSession,
+    workspace_id: UUID | None,
+    name: str,
+    threshold_max_warning: float | None = None,
+    threshold_max_critical: float | None = None,
 ) -> Sensor:
     sensor = Sensor(
         workspace_id=workspace_id,
         name=name,
         ingest_key=f"key-{uuid4()}",
         unit="C",
-        **thresholds,
+        threshold_max_warning=threshold_max_warning,
+        threshold_max_critical=threshold_max_critical,
     )
     session.add(sensor)
     await session.commit()
