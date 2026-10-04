@@ -4,6 +4,7 @@ import {
   fetchAlarms,
   fetchDashboard,
   fetchDashboards,
+  fetchMigrationStatus,
   fetchNotificationSettings,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
@@ -39,6 +40,9 @@ export const useNotificationSettings = () =>
 
 export const useWebhookSubscriptions = () =>
   useQuery({ queryKey: ["webhook-subscriptions"], queryFn: fetchWebhookSubscriptions });
+
+export const useMigrationStatus = () =>
+  useQuery({ queryKey: ["migration-status"], queryFn: fetchMigrationStatus, staleTime: Infinity });
 
 export const useSensorReadings = (sensorId: string | null, hours = 1) =>
   useQuery({

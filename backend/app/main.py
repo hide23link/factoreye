@@ -5,6 +5,7 @@ FactorEye バックエンド エントリポイント
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 開発
     uvicorn app.main:app --host 0.0.0.0 --port 8000             # 本番（docker-compose経由）
 """
+
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -24,6 +25,7 @@ from app.api import (
     auth,
     dashboards,
     ingest,
+    migration,
     readings,
     sensors,
     webhooks,
@@ -81,6 +83,7 @@ app.include_router(alarms.router)
 app.include_router(dashboards.router)
 app.include_router(widgets.router)
 app.include_router(settings_api.router)
+app.include_router(migration.router)
 app.include_router(webhooks.router)
 
 # Phase 0.5: AUTH_MODE=multi_tenant 時のみ認証エンドポイントを公開

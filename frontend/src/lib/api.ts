@@ -4,6 +4,8 @@ import type {
   Dashboard,
   DashboardDetail,
   MeResponse,
+  MigrationImportResult,
+  MigrationStatus,
   NotificationSettings,
   Reading,
   ReadingAggregate,
@@ -284,3 +286,47 @@ export const updateWebhookSubscription = (
 
 export const deleteWebhookSubscription = (id: string) =>
   request<void>(`/api/settings/webhooks/${id}`, { method: "DELETE" });
+
+// ── Migration（SaaS → OSS。設定画面「データ移行」から使う）──────
+
+export const fetchMigrationStatus = () => request<MigrationStatus>("/api/settings/migration/status");
+
+// SaaS: ログイン中のワークスペースを書き出す（gzip のバイナリなので request() を通さない）
+export async function downloadWorkspaceExport(): Promise<Blob> {
+  const { accessToken } = useAuthStore.getState();
+  const response = await fetch(`${API_BASE_URL}/api/settings/migration/export`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!response.ok) throw new Error(await migrationErrorMessage(response, "書き出し"));
+  return response.blob();
+}
+
+// self-hosted: 書き出したファイルを取り込む（dryRun のときは件数の確認だけ）
+export async function importWorkspaceFile(
+  file: Blob,
+  options: { dryRun: boolean; withNotifications: boolean },
+): Promise<MigrationImportResult> {
+  const params = new URLSearchParams({
+    dry_run: String(options.dryRun),
+    with_notifications: String(options.withNotifications),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/settings/migration/import?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/gzip" },
+    body: file,
+  });
+  if (!response.ok) throw new Error(await migrationErrorMessage(response, "取り込み"));
+  return response.json() as Promise<MigrationImportResult>;
+}
+
+// サーバーの detail（日本語の理由）があれば、それをそのまま表示する
+async function migrationErrorMessage(response: Response, action: string): Promise<string> {
+  const text = await response.text();
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+  } catch {
+    // JSON でなければ下の汎用メッセージにする
+  }
+  return `${action}に失敗しました（${response.status}）`;
+}

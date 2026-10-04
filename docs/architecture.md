@@ -91,6 +91,9 @@ flowchart LR
 | GET / PUT | `/api/settings/notifications` | Discord 通知設定 | なし |
 | GET / POST | `/api/settings/webhooks` | Webhook 購読の一覧・作成 | なし |
 | PUT / DELETE | `/api/settings/webhooks/{id}` | Webhook 購読の更新・削除 | なし |
+| GET | `/api/settings/migration/status` | 移行機能の状態（書き出し・取り込みのどちらが使えるか） | なし |
+| GET | `/api/settings/migration/export` | ワークスペースを書き出す（SaaS のみ。404 は self-hosted） | JWT |
+| POST | `/api/settings/migration/import?dry_run=&with_notifications=` | 書き出しファイル（gzip の本文）を取り込む（self-hosted のみ。404 は SaaS） | なし |
 | POST | `/api/auth/register` `/login` `/refresh` `/logout` | 認証（SaaS のみ） | なし |
 | GET | `/api/me` | 自分のユーザーとワークスペース（SaaS のみ） | JWT |
 | `/api/admin/*` | 管理者 API（SaaS のみ、§10） | 管理者トークン | 管理者 |
@@ -288,4 +291,5 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - Webhook: 再試行なし、同時送信数の制限なし、DNS rebinding 未対応（§7）
 - 測定値の保持期間は、self-hosted では無期限（削除ポリシーなし）
 - 管理画面: ユーザーのページング、管理者の画面からの追加・削除は未対応
-- 次の段階の候補: ルールベースの設定、ワークスペースのエクスポート・インポート（移行ツール）
+- 次の段階の候補: ルールベースの設定
+- SaaS → OSS の移行: `backend/app/migrate_saas_to_oss.py`（`export` で1ワークスペースを書き出し、`import` で移行先の self-hosted DB へ取り込む）。ID と取り込みキーは保つ。ユーザー・認証情報は移さない。取り込みは1トランザクションで、`--dry-run` で件数だけ確認できる。移行後はデバイスの送信に `X-API-Key` ヘッダーが必要になる点に注意
