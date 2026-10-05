@@ -11,6 +11,9 @@ interface Props {
 
 const QUERY_KEY = ["admin", "ingest-limit"] as const;
 
+// 解除の時間の選択肢（分）。上限は 240 分（バックエンドの MAX_BYPASS_MINUTES と一致させる）
+const UNLOCK_CHOICES = [60, 240] as const;
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("ja-JP");
@@ -36,7 +39,8 @@ export function IngestLimitCard({ token, onAuthError }: Props) {
     refetchInterval: 30_000,
   });
   const mutation = useMutation({
-    mutationFn: (enabled: boolean) => setIngestLimit(token, enabled),
+    mutationFn: ({ enabled, minutes }: { enabled: boolean; minutes?: number }) =>
+      setIngestLimit(token, enabled, minutes),
     onSuccess: (data) => queryClient.setQueryData(QUERY_KEY, data),
     onError: (error) => {
       if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
@@ -73,25 +77,30 @@ export function IngestLimitCard({ token, onAuthError }: Props) {
               <button
                 type="button"
                 disabled={locked || busy}
-                onClick={() => mutation.mutate(false)}
+                onClick={() => mutation.mutate({ enabled: false })}
                 className="rounded bg-gray-800 px-3 py-1.5 text-sm text-white disabled:opacity-50"
               >
                 今すぐ制限を戻す
               </button>
             ) : (
-              <button
-                type="button"
-                disabled={locked || busy}
-                onClick={() => {
-                  // 解除は本番の取り込みを止めないための制限を外す操作なので、確認を挟む
-                  if (window.confirm("取り込みの制限を 60 分だけ解除します。よろしいですか？")) {
-                    mutation.mutate(true);
-                  }
-                }}
-                className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50"
-              >
-                60 分だけ解除
-              </button>
+              <>
+                {UNLOCK_CHOICES.map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    disabled={locked || busy}
+                    onClick={() => {
+                      // 解除は本番の取り込みを止めないための制限を外す操作なので、確認を挟む
+                      if (window.confirm(`取り込みの制限を ${minutes} 分だけ解除します。よろしいですか？`)) {
+                        mutation.mutate({ enabled: true, minutes });
+                      }
+                    }}
+                    className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 disabled:opacity-50"
+                  >
+                    {minutes} 分だけ解除
+                  </button>
+                ))}
+              </>
             )}
           </div>
         </>
