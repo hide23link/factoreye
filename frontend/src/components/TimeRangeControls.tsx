@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 
-import { POLL_INTERVAL_MS } from "../hooks/queries";
+import { LIVE_CHART_INTERVAL_MS } from "../hooks/queries";
 import { useNow } from "../hooks/useNow";
 import {
   absoluteRange,
@@ -42,8 +42,8 @@ function presetKeyOf(range: TimeRange): string | null {
 export function TimeRangeControls() {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
-  // 取り直す間隔に合わせて更新する（毎秒更新すると、操作部品ごとグラフの周りが毎秒描き直される）
-  const now = useNow(POLL_INTERVAL_MS);
+  // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
+  const now = useNow(LIVE_CHART_INTERVAL_MS);
   const maxMs = maxRangeMs(IS_MULTI_TENANT);
   const bounds = resolveRange(range, now);
   const [customFrom, setCustomFrom] = useState("");
@@ -84,6 +84,17 @@ export function TimeRangeControls() {
       >
         今
       </button>
+      {range.mode === "relative" && (
+        <button
+          type="button"
+          aria-label="一時停止"
+          // 今の表示範囲を固定して、動きを止める（再開は「今」で、直近モードに戻す）
+          onClick={() => setRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
+          className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        >
+          一時停止
+        </button>
+      )}
       <button
         type="button"
         aria-label="後ろへ"

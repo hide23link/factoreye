@@ -23,6 +23,10 @@ import {
 // 画面を更新する間隔（ミリ秒）。ポーリング（一定間隔で取り直す）の周期
 export const POLL_INTERVAL_MS = 5000;
 
+// グラフの直近モードで、表示の範囲とデータを動かす間隔（ミリ秒）。
+// 5 秒ごとに全グラフを描き直すと見にくいため、30 秒ごとにまとめて動かす
+export const LIVE_CHART_INTERVAL_MS = 30000;
+
 /** センサーの一覧（5 秒ごとに取り直す）。 */
 export const useSensors = () =>
   useQuery({ queryKey: ["sensors"], queryFn: fetchSensors, refetchInterval: POLL_INTERVAL_MS });
@@ -119,7 +123,7 @@ export const useDownsampledReadings = (
         buckets,
       ),
     enabled: sensorId !== null,
-    refetchInterval: live ? POLL_INTERVAL_MS : false,
+    refetchInterval: live ? LIVE_CHART_INTERVAL_MS : false,
     // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（グラフが消えて描き直されるのを防ぐ）
     placeholderData: keepPreviousData,
   });

@@ -19,7 +19,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { POLL_INTERVAL_MS, useSensors } from "../../hooks/queries";
+import { LIVE_CHART_INTERVAL_MS, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -45,7 +45,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
   // 直近モードでは、横軸（表示範囲）を取り直す間隔（5 秒）ごとに動かす（毎秒にすると描き直しが毎秒起きる）
-  const now = useNow(POLL_INTERVAL_MS);
+  const now = useNow(LIVE_CHART_INTERVAL_MS);
   const bounds = resolveRange(range, now);
   const live = range.mode === "relative";
   const drag = useDragSelect((from, to) => {
@@ -74,7 +74,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
           new Date(bounds.to).toISOString(),
           GRAPH_BUCKETS,
         ),
-      refetchInterval: live ? POLL_INTERVAL_MS : false,
+      refetchInterval: live ? LIVE_CHART_INTERVAL_MS : false,
       // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（線が消えて描き直されるのを防ぐ）
       placeholderData: keepPreviousData,
     })),
