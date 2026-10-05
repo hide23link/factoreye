@@ -247,8 +247,11 @@ export const fetchSensorReadingsDownsampled = (
 // ── Alarms ────────────────────────────────────────────────────
 // アラームの一覧と、確認（既読）の操作
 
-export const fetchAlarms = (status?: string) => {
-  const params = status ? `?status=${status}` : "";
+export const fetchAlarms = (status?: string, limit?: number) => {
+  const query = new URLSearchParams();
+  if (status) query.set("status", status);
+  if (limit !== undefined) query.set("limit", String(limit));
+  const params = query.toString() ? `?${query.toString()}` : "";
   return request<{ alarms: Alarm[]; total: number }>(`/api/alarms${params}`);
 };
 
