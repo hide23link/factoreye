@@ -48,7 +48,12 @@ class Runner:
         self.metrics.reset()
         self.run_id = uuid.uuid4().hex[:8]
         self.started_at = datetime.now(UTC)
-        self._client = ApiClient(scenario.target_url, self.metrics, self._transport)
+        self._client = ApiClient(
+            scenario.target_url,
+            self.metrics,
+            self._transport,
+            api_key=scenario.ingest_api_key if scenario.oss_mode else None,
+        )
         self._setup_sem = asyncio.Semaphore(_SETUP_CONCURRENCY)
         self.state = "running"
         for i in range(scenario.users):
@@ -76,7 +81,13 @@ class Runner:
             self._scenario = new
             return "saved"
 
-        if new.target_url != self._scenario.target_url:
+        # 接続先・認証に関わる項目は、クライアントを作り直すため再起動が必要
+        old = self._scenario
+        if (new.target_url, new.oss_mode, new.ingest_api_key) != (
+            old.target_url,
+            old.oss_mode,
+            old.ingest_api_key,
+        ):
             await self.stop()
             await self.start(new)
             return "restarted"

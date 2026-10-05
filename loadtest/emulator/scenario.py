@@ -45,6 +45,9 @@ class Scenario:
     # 既存の負荷テストユーザーを区別するメールの接頭辞
     email_prefix: str = "lt"
     allow_production: bool = False
+    # OSS 版（認証なし）向け: 登録・ログインを省き、取り込みを X-API-Key で送る
+    oss_mode: bool = False
+    ingest_api_key: str = ""
 
     def validate(self) -> None:
         for name, (low, high) in LIMITS.items():
@@ -63,9 +66,14 @@ class Scenario:
             )
         if not self.email_prefix.isalnum() or len(self.email_prefix) > 10:
             raise ValueError("email_prefix は英数字10文字以内にしてください")
+        if self.oss_mode and not self.ingest_api_key:
+            raise ValueError("oss_mode のときは ingest_api_key が必要です")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        # APIキーは画面やステータスに出さない
+        data = asdict(self)
+        data.pop("ingest_api_key")
+        return data
 
     def with_patch(self, patch: dict[str, object]) -> "Scenario":
         """部分更新。未知のキーは拒否し、結果を検証して新しいシナリオを返す。"""
@@ -97,7 +105,7 @@ def _coerce(patch: dict[str, object]) -> dict[str, object]:
             out[key] = int(float(str(raw)))
         elif key in _NUMERIC_FLOAT:
             out[key] = float(str(raw))
-        elif key == "allow_production":
+        elif key in ("allow_production", "oss_mode"):
             out[key] = raw in (True, "true", "1", 1)
         else:
             out[key] = str(raw) if not isinstance(raw, str) else raw

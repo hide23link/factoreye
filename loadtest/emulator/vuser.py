@@ -46,6 +46,8 @@ class VirtualUser:
         self._run_id = run_id
         self.email = f"{prefix}-{run_id}-{index:03d}@example.com"
         self._token: str | None = None
+        # センサー一覧の版（ETag）。画面と同じく、次回の取得で送る
+        self._sensors_etag: str | None = None
         self.sensors: list[SensorHandle] = []
         self._sender_tasks: dict[int, asyncio.Task[None]] = {}
         self._viewer_tasks: list[asyncio.Task[None]] = []
@@ -55,8 +57,14 @@ class VirtualUser:
     # ── セットアップ ───────────────────────────────────────
 
     async def setup(self) -> bool:
-        """登録（既存なら省略）→ ログイン → ダッシュボード作成。成功なら True。"""
+        """登録（既存なら省略）→ ログイン → ダッシュボード作成。成功なら True。
+
+        OSS 版（oss_mode）は認証がないため、登録・ログイン・ダッシュボードを省く。
+        """
         sc = self._source.scenario
+        if sc.oss_mode:
+            self._t0 = asyncio.get_running_loop().time()
+            return True
         reg = await self._client.call(
             "register",
             "POST",
@@ -184,7 +192,7 @@ class VirtualUser:
             if roll < _THRESHOLD_WRITE_PROBABILITY and self.sensors:
                 await self._update_threshold()
             elif roll < 0.4:
-                await self._get("view_sensors", "/api/sensors")
+                await self._view_sensors()
             elif roll < 0.7 and self.sensors:
                 sensor = self._rng.choice(self.sensors)
                 await self._get(
@@ -193,7 +201,11 @@ class VirtualUser:
                     params={"limit": "50"},
                 )
             elif roll < 0.85:
-                await self._get("view_alarms", "/api/alarms")
+                # 画面（AlarmAlertWidget）と同じ形: 発生中・確認済みを、それぞれ新しい順 100 件まで
+                await self._get("view_alarms", "/api/alarms", params={"status": "active", "limit": "100"})
+                await self._get(
+                    "view_alarms", "/api/alarms", params={"status": "acknowledged", "limit": "100"}
+                )
             else:
                 await self._get("view_dashboards", "/api/dashboards")
 
@@ -203,6 +215,19 @@ class VirtualUser:
             # アクセストークンの期限切れ（15分）。再ログインして1回だけ再試行する
             if await self._login():
                 await self._client.call(name, "GET", path, params=params, token=self._token)
+
+    async def _view_sensors(self) -> None:
+        """センサー一覧。画面と同じく、前に受け取った版（ETag）を送る。変わっていなければ 304。"""
+        extra = {"If-None-Match": self._sensors_etag} if self._sensors_etag else None
+        resp = await self._client.call(
+            "view_sensors", "GET", "/api/sensors", token=self._token, extra_headers=extra
+        )
+        if resp is not None and resp.status_code == 401 and await self._login():
+            resp = await self._client.call(
+                "view_sensors", "GET", "/api/sensors", token=self._token, extra_headers=extra
+            )
+        if resp is not None and resp.status_code == 200:
+            self._sensors_etag = resp.headers.get("etag")
 
     async def _update_threshold(self) -> None:
         sensor = self._rng.choice(self.sensors)
