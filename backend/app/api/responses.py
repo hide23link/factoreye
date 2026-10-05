@@ -19,9 +19,15 @@ def json_response(model: BaseModel, headers: Mapping[str, str] | None = None) ->
     )
 
 
+def json_array_body(items: Sequence[BaseModel]) -> str:
+    """モデルの配列を、1 回だけ JSON の配列の文字列にする。"""
+    return "[" + ",".join(item.model_dump_json(by_alias=True) for item in items) + "]"
+
+
 def json_array_response(
     items: Sequence[BaseModel], headers: Mapping[str, str] | None = None
 ) -> Response:
     """モデルの配列を、1 回だけ JSON の配列にして返す（json_response の配列版）。"""
-    body = "[" + ",".join(item.model_dump_json(by_alias=True) for item in items) + "]"
-    return Response(content=body, media_type="application/json", headers=dict(headers or {}))
+    return Response(
+        content=json_array_body(items), media_type="application/json", headers=dict(headers or {})
+    )

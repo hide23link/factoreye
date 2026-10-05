@@ -4,6 +4,7 @@ SaaS（multi_tenant）では、各 API が「自分のワークスペースの�
 他人のセンサーは 404 で返す（存在そのものを知らせないため）。
 """
 import hashlib
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -15,7 +16,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
-from app.api.responses import json_array_response, json_response
+from app.api.responses import json_array_body, json_response
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -47,6 +48,11 @@ async def _get_active_sensor(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="sensor not found")
     return sensor
 
+
+# 完成したセンサー一覧の JSON を、版（ETag）ごとに持つ（件数の多い一覧で、変換をやり直さないため）。
+# 版（件数と最終更新時刻）が変われば、キーが変わって新しく作る。古いものは件数の上限で捨てる。
+_SENSOR_LIST_CACHE_SIZE = 32
+_sensor_list_cache: OrderedDict[tuple[UUID | None, str], str] = OrderedDict()
 
 # 一覧で使う列（ORM のオブジェクトを作らないため。SensorRead の項目と同じ）
 _SENSOR_LIST_COLUMNS = (
@@ -88,18 +94,26 @@ async def list_sensors(
 
     画面は数秒ごとに一覧を取り直すため、変わらないときの CPU と通信を減らす。
     """
+    # 版（ETag）を先に作る。読み出しは後で行うため、キャッシュの中身が版より古くなることはない
     etag = await _sensors_etag(session, workspace_id)
     # Cache-Control: no-cache は、使う前に必ず再確認させる（ETag で 304 を返せるように）
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
 
-    query = select(*_SENSOR_LIST_COLUMNS)  # type: ignore[call-overload]
-    if workspace_id is not None:
-        query = query.where(Sensor.workspace_id == workspace_id)
-    result = await session.exec(query)
-    sensors = [SensorRead.model_validate(row) for row in result.all()]
-    return json_array_response(sensors, headers=headers)
+    key = (workspace_id, etag)
+    body = _sensor_list_cache.get(key)
+    if body is None:
+        query = select(*_SENSOR_LIST_COLUMNS)  # type: ignore[call-overload]
+        if workspace_id is not None:
+            query = query.where(Sensor.workspace_id == workspace_id)
+        result = await session.exec(query)
+        sensors = [SensorRead.model_validate(row) for row in result.all()]
+        body = json_array_body(sensors)
+        _sensor_list_cache[key] = body
+        if len(_sensor_list_cache) > _SENSOR_LIST_CACHE_SIZE:
+            _sensor_list_cache.popitem(last=False)
+    return Response(content=body, media_type="application/json", headers=headers)
 
 
 @router.post("", response_model=SensorRead, status_code=status.HTTP_201_CREATED)
