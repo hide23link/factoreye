@@ -5,7 +5,7 @@
  * 上部には、名前と説明の編集（設定）、ウィジェットの追加、ダッシュボードの削除を置く。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import type { Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -14,7 +14,9 @@ import "react-resizable/css/styles.css";
 import { useDashboard } from "../hooks/queries";
 import { deleteDashboard, updateDashboard, updateWidget } from "../lib/api";
 import type { Widget } from "../types";
+import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
+import { TimeRangeControls } from "./TimeRangeControls";
 import { WidgetCard } from "./WidgetCard";
 import { WidgetFormModal } from "./WidgetFormModal";
 
@@ -48,6 +50,12 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [editDescription, setEditDescription] = useState("");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  // 表示時間範囲: 開いたとき URL（あれば）から読み、閉じたら既定に戻して URL からも消す
+  useEffect(() => {
+    initTimeRangeFromUrl();
+    return () => resetTimeRange();
+  }, []);
 
   // 削除: 一覧を取り直し、表示中の選択を外して一覧へ戻る
   const deleteDashboardMutation = useMutation({
@@ -155,6 +163,8 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           </button>
         </div>
       </div>
+
+      <TimeRangeControls />
 
       {dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-400">

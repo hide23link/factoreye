@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../../test/test-utils";
 import type { Sensor, Widget } from "../../types";
+import { useTimeRangeStore } from "../../store/useTimeRangeStore";
+import { DEFAULT_RANGE } from "../../lib/timeRange";
 import { SensorGraphWidget } from "./SensorGraphWidget";
 
 vi.mock("../../lib/api", () => ({
   fetchSensors: vi.fn(),
-  fetchSensorReadings: vi.fn(),
+  fetchSensorReadingsDownsampled: vi.fn(),
 }));
 
 vi.mock("../../hooks/useNow", () => ({
@@ -49,12 +51,16 @@ function makeWidget(overrides: Partial<Widget> = {}): Widget {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  useTimeRangeStore.setState({ range: DEFAULT_RANGE });
 });
 
 describe("SensorGraphWidget", () => {
   it("sensorIdがnullのときメッセージを表示する", () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
-    vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 1,
+      buckets: [],
+    });
 
     renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ sensorId: null })} />);
 
@@ -63,7 +69,7 @@ describe("SensorGraphWidget", () => {
 
   it("ローディング中はローディングメッセージを表示する", () => {
     vi.mocked(api.fetchSensors).mockReturnValue(new Promise(() => {}));
-    vi.mocked(api.fetchSensorReadings).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockReturnValue(new Promise(() => {}));
 
     renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
 
@@ -72,16 +78,41 @@ describe("SensorGraphWidget", () => {
 
   it("データ取得後にセンサー名を表示する", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
-    vi.mocked(api.fetchSensorReadings).mockResolvedValue({
-      readings: [
-        { id: 1, sensorId: "s1", value: 25.0, recordedAt: "2024-01-01T00:30:00.000Z" },
-        { id: 2, sensorId: "s1", value: 26.0, recordedAt: "2024-01-01T00:00:00.000Z" },
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [
+        { start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 },
       ],
-      total: 2,
     });
 
     renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
 
     expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
+  });
+
+  it("表示範囲は、ダッシュボードの範囲（時間範囲の状態）に従って取得する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [],
+    });
+    // 固定期間（2024-01-01 00:00〜00:30 UTC）に切り替えておく
+    useTimeRangeStore.setState({
+      range: {
+        mode: "absolute",
+        from: Date.parse("2024-01-01T00:00:00.000Z"),
+        to: Date.parse("2024-01-01T00:30:00.000Z"),
+      },
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
+
+    await screen.findByText(/ライン温度/);
+    expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalledWith(
+      "s1",
+      "2024-01-01T00:00:00.000Z",
+      "2024-01-01T00:30:00.000Z",
+      500,
+    );
   });
 });

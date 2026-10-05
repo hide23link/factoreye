@@ -310,20 +310,9 @@ export function WidgetFormModal({
 
         {needsAxisConfig && (
           <>
-            <label className="mb-2 block text-sm">
-              横軸: 直近
-              <span className="mx-1 inline-flex items-center">
-                <input
-                  type="number"
-                  min={0.1}
-                  step={0.5}
-                  value={timeRangeHours}
-                  onChange={(e) => setTimeRangeHours(Number(e.target.value))}
-                  className="w-20 rounded border border-gray-300 px-2 py-1"
-                />
-              </span>
-              時間
-            </label>
+            <p className="mb-2 text-xs text-gray-500">
+              横軸の表示期間は、ダッシュボード上部の時間の操作で変えます（ダッシュボード全体で共通）
+            </p>
 
             <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
               <label>

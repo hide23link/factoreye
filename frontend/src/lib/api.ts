@@ -212,6 +212,32 @@ export const fetchSensorReadingsAggregate = (sensorId: string, from: string, to?
   );
 };
 
+// グラフ用の間引き（from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数）
+export interface DownsampledBucket {
+  start: string;
+  min: number;
+  avg: number;
+  max: number;
+  count: number;
+}
+
+export interface DownsampledReadings {
+  bucketSeconds: number;
+  buckets: DownsampledBucket[];
+}
+
+export const fetchSensorReadingsDownsampled = (
+  sensorId: string,
+  from: string,
+  to: string,
+  buckets: number,
+) => {
+  const params = new URLSearchParams({ from, to, buckets: String(buckets) });
+  return request<DownsampledReadings>(
+    `/api/sensors/${sensorId}/readings/downsampled?${params.toString()}`,
+  );
+};
+
 // ── Alarms ────────────────────────────────────────────────────
 // アラームの一覧と、確認（既読）の操作
 

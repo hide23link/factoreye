@@ -1,0 +1,75 @@
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { renderWithQueryClient, screen } from "../test/test-utils";
+import { DEFAULT_RANGE } from "../lib/timeRange";
+import { useTimeRangeStore } from "../store/useTimeRangeStore";
+import { TimeRangeControls } from "./TimeRangeControls";
+
+vi.mock("../hooks/useNow", () => ({
+  useNow: () => new Date("2024-01-01T01:00:00.000Z").getTime(),
+}));
+
+afterEach(() => {
+  useTimeRangeStore.setState({ range: DEFAULT_RANGE });
+});
+
+describe("TimeRangeControls", () => {
+  it("既定は「自動で更新」の直近 1 時間", () => {
+    renderWithQueryClient(<TimeRangeControls />);
+
+    expect(screen.getByTestId("time-range-label")).toHaveTextContent("自動で更新：直近 1 時間");
+  });
+
+  it("前へを押すと、幅の分だけ過去の固定期間になる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByRole("button", { name: "前へ" }));
+
+    // 現在（01:00 UTC）の 1 時間前の 1 時間（23:00〜00:00 UTC）
+    expect(useTimeRangeStore.getState().range).toEqual({
+      mode: "absolute",
+      from: Date.parse("2024-01-01T00:00:00.000Z") - 60 * 60 * 1000,
+      to: Date.parse("2024-01-01T00:00:00.000Z"),
+    });
+    expect(screen.getByTestId("time-range-label")).toHaveTextContent("固定");
+  });
+
+  it("今に戻るを押すと、直近モードに戻る（幅はそのまま）", async () => {
+    const user = userEvent.setup();
+    useTimeRangeStore.setState({
+      range: {
+        mode: "absolute",
+        from: Date.parse("2023-12-31T20:00:00.000Z"),
+        to: Date.parse("2023-12-31T21:00:00.000Z"),
+      },
+    });
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByRole("button", { name: "今に戻る" }));
+
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 60 * 60 * 1000 });
+  });
+
+  it("プリセットを選ぶと、その幅の直近モードになる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "表示期間" }), "24h");
+
+    expect(useTimeRangeStore.getState().range).toEqual({
+      mode: "relative",
+      durationMs: 24 * 60 * 60 * 1000,
+    });
+  });
+
+  it("拡大を押すと、直近モードの幅が半分になる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByRole("button", { name: "拡大" }));
+
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 30 * 60 * 1000 });
+  });
+});

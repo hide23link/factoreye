@@ -1,6 +1,9 @@
 /**
  * 1センサーの測定値を、折れ線・棒・面グラフで表示するウィジェット。
- * 横軸は「今」から直近 N 時間（timeRangeHours）の窓で、時間が経つと窓が動く（新しいデータが無くても動く）。
+ *
+ * 表示する時間範囲は、ダッシュボードで 1 つだけ持つ（useTimeRangeStore）。
+ * 範囲が長くても重くならないよう、生データではなく間引いたデータ（区間ごとの平均）を描く。
+ * グラフ上でドラッグすると、その期間に拡大する。
  */
 import type { ReactNode } from "react";
 import {
@@ -11,26 +14,43 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-import { useSensorReadings, useSensors } from "../../hooks/queries";
+import { useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { formatChartTime } from "../../lib/time";
+import { absoluteRange, resolveRange, spanHours } from "../../lib/timeRange";
+import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
+
+/** グラフの区間数（表示の横幅に合わせた本数の目安。API の上限は 1000） */
+export const GRAPH_BUCKETS = 500;
 
 /** センサーのグラフ。設定（色・グラフの種類・Y 軸の範囲）は widget.config に入っている。 */
 export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  // 「横軸: 直近 N 時間」（WidgetFormModalで設定）がそのまま表示ウィンドウの幅になる
-  const hours = widget.config.timeRangeHours ?? 1;
-  const { data, isLoading } = useSensorReadings(widget.sensorId, hours);
-  const sensor = sensors?.find((s) => s.id === widget.sensorId);
-  // 新しいデータが来ていなくても横軸（表示ウィンドウ）を時間経過で動かし続けるための現在時刻
+  const range = useTimeRangeStore((s) => s.range);
+  const setRange = useTimeRangeStore((s) => s.setRange);
+  // 直近モードでは、データが来なくても横軸（表示範囲）を時間経過で動かし続ける
   const now = useNow();
+  const bounds = resolveRange(range, now);
+  const { data, isLoading } = useDownsampledReadings(
+    widget.sensorId,
+    bounds,
+    GRAPH_BUCKETS,
+    range.mode === "relative",
+  );
+  const drag = useDragSelect((from, to) => {
+    const next = absoluteRange(from, to);
+    if (next) setRange(next);
+  });
+  const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
@@ -39,14 +59,15 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
-  const windowMs = hours * 60 * 60 * 1000;
-  const domain: [number, number] = [now - windowMs, now];
+  const hours = spanHours(range, now);
   const formatTime = (ms: number) => formatChartTime(ms, hours);
 
-  // 測定値は新しい順で届くので、反転して古い順にしてからグラフに渡す
-  const chartData = [...data.readings]
-    .reverse()
-    .map((r) => ({ time: new Date(r.recordedAt).getTime(), value: r.value }));
+  // 区間の中央の時刻に、区間の平均を置く（区間の幅の半分ずらす）
+  const halfBucketMs = (data.bucketSeconds * 1000) / 2;
+  const chartData = data.buckets.map((b) => ({
+    time: new Date(b.start).getTime() + halfBucketMs,
+    value: b.avg,
+  }));
 
   const color = widget.config.color ?? "#2563eb";
   const graphType = widget.config.graphType ?? "line";
@@ -59,11 +80,12 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const xAxisProps = {
     dataKey: "time",
     type: "number" as const,
-    domain,
+    domain: [bounds.from, bounds.to] as [number, number],
     tickFormatter: formatTime,
     tick: { fontSize: 10 },
   };
   const tooltipLabelFormatter = (label: ReactNode) => formatTime(Number(label));
+  const selection = drag.selection;
 
   return (
     <div className="flex h-full flex-col">
@@ -71,31 +93,34 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
         {sensor?.name ?? "センサー"}
         {sensor ? ` (${sensor.unit})` : ""}
       </p>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData}>
+            <BarChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Bar dataKey="value" fill={color} />
+              {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData}>
+            <AreaChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Area dataKey="value" stroke={color} fill={color} fillOpacity={0.2} />
+              {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </AreaChart>
           ) : (
-            <LineChart data={chartData}>
+            <LineChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Line type="monotone" dataKey="value" stroke={color} dot={false} />
+              {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </LineChart>
           )}
         </ResponsiveContainer>

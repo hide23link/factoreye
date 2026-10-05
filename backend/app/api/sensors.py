@@ -17,6 +17,8 @@ from app.api.deps import get_current_workspace_id
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
+    DownsampledBucket,
+    DownsampledReadings,
     ReadingAggregate,
     ReadingListResponse,
     ReadingRead,
@@ -216,3 +218,68 @@ async def get_sensor_readings_aggregate(
     result = await session.exec(query)
     total, count = result.one()
     return ReadingAggregate(sum=float(total or 0.0), count=count)
+
+
+@router.get("/{sensor_id}/readings/downsampled", response_model=DownsampledReadings)
+async def get_sensor_readings_downsampled(
+    sensor_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+    from_: datetime = Query(..., alias="from"),
+    to: datetime = Query(...),
+    buckets: int = Query(default=500, ge=1, le=1000),
+) -> DownsampledReadings:
+    """グラフ用。from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数を返す。
+
+    生データを返すと、長い期間では点が多すぎて重い。区間は表示の幅（ピクセル数）に合わせて
+    取る想定。区間の幅は (to - from) / buckets で、区間の境界は from から等間隔。
+    """
+    if to <= from_:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="to must be after from"
+        )
+    await _get_active_sensor(session, sensor_id, workspace_id)
+
+    width = (to - from_).total_seconds() / buckets
+    start_epoch = from_.timestamp()
+    # 区間の番号（0 始まり）。to ちょうどの測定値は最後の区間に入れる
+    index = func.least(
+        func.floor(
+            (func.extract("epoch", Reading.recorded_at) - start_epoch) / width  # type: ignore[arg-type]
+        ),
+        buckets - 1,
+    )
+    # 列は 5 つ（区間・最小・平均・最大・件数）。SQLModel の select は 4 つまでの型のため一覧で渡す
+    columns = [
+        index,
+        func.min(Reading.value),
+        func.avg(Reading.value),
+        func.max(Reading.value),
+        func.count(1),
+    ]
+    query = (
+        select(*columns)
+        .where(
+            Reading.sensor_id == sensor_id,
+            Reading.recorded_at >= from_,
+            Reading.recorded_at <= to,
+        )
+        .group_by(index)
+        .order_by(index)
+    )
+
+    result = await session.exec(query)
+    rows = result.all()
+    return DownsampledReadings(
+        bucket_seconds=width,
+        buckets=[
+            DownsampledBucket(
+                start=datetime.fromtimestamp(from_.timestamp() + int(i) * width, tz=UTC),
+                min=float(mn),
+                avg=float(avg),
+                max=float(mx),
+                count=count,
+            )
+            for i, mn, avg, mx, count in rows
+        ],
+    )
