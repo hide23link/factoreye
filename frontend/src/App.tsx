@@ -154,12 +154,12 @@ function AppShell() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <ImpersonationBanner />
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-bold">FactorEye</span>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-2">
+        <div className="flex min-w-0 items-center gap-4 overflow-x-auto">
+          <span className="shrink-0 text-lg font-bold">FactorEye</span>
           <Nav />
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-4">
           <UserBadge />
           <HealthBadge />
         </div>

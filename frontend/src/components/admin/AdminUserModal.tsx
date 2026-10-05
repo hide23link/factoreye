@@ -156,6 +156,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
               {detail.data.sensors.length === 0 ? (
                 <p className="text-sm text-gray-400">センサーは未登録です</p>
               ) : (
+                <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
@@ -180,6 +181,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </section>
 

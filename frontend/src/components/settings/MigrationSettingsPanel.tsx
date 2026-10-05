@@ -31,7 +31,7 @@ const EXPORT_FILE_NAME = "factoreye-workspace.jsonl.gz";
 /** テーブルごとの件数を、見出し付きの一覧で表示する。 */
 function CountList({ counts }: { counts: Record<string, number> }) {
   return (
-    <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
+    <ul className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm text-gray-700 sm:grid-cols-2">
       {Object.entries(counts).map(([table, count]) => (
         <li key={table}>
           {TABLE_LABELS[table] ?? table}: {count.toLocaleString("ja-JP")} 件
