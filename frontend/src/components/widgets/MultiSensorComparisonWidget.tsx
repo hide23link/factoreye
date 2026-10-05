@@ -44,10 +44,9 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const sensorIds = widget.config.sensorIds ?? [];
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
-  // 直近モードでは、横軸（表示範囲）を取り直す間隔（5 秒）ごとに動かす（毎秒にすると描き直しが毎秒起きる）
-  // 再描画の合図（30 秒ごと）。表示の範囲は、描画の時点の現在時刻で計算する（範囲の変更がすぐ反映されるように）
-  useNow(LIVE_CHART_INTERVAL_MS);
-  const now = Date.now();
+  // 直近モードでは、横軸（表示範囲）を 30 秒ごと（LIVE_CHART_INTERVAL_MS）に動かす
+  // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
+  const now = useNow(LIVE_CHART_INTERVAL_MS);
   const bounds = resolveRange(range, now);
   const live = range.mode === "relative";
   const drag = useDragSelect((from, to) => {
