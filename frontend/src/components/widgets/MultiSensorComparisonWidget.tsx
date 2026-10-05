@@ -130,6 +130,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
                 name={sensors?.find((s) => s.id === sensorId)?.name ?? sensorId}
                 stroke={PALETTE[i % PALETTE.length]}
                 dot={false}
+                // 5 秒ごとの更新のたびに線が描き直されて見えないよう、アニメーションを止める
+                isAnimationActive={false}
                 // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
                 // connectNulls が無いと線が途切れてしまう。常に true にして、自分の点だけを繋ぐ
                 connectNulls
