@@ -21,7 +21,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { POLL_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -44,10 +44,11 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
-  // 直近モードでは、データが来なくても横軸（表示範囲）を時間経過で動かし続ける
-  const now = useNow();
+  // 直近モードでは、横軸（表示範囲）を時間経過で動かす。毎秒ではなく、取り直す間隔（5 秒）ごとに動かす
+  // （毎秒動かすと、取得のキーが毎秒変わり、グラフが毎秒描き直されて点滅するため）
+  const now = useNow(POLL_INTERVAL_MS);
   const bounds = resolveRange(range, now);
-  const { data, isLoading } = useDownsampledReadings(
+  const { data } = useDownsampledReadings(
     widget.sensorId,
     bounds,
     GRAPH_BUCKETS,
@@ -66,7 +67,8 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
   }
-  if (isLoading || !data) {
+  // 最初の 1 回だけ「読み込み中」を出す（以後は前のデータを残して、取り直す）
+  if (!data) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
