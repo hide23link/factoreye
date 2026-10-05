@@ -5,6 +5,7 @@ import { AdminApiError, fetchAdminOverview, fetchAdminUsers } from "../../lib/ad
 import type { AdminUserSummary } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
 import { AdminUserModal } from "./AdminUserModal";
+import { IngestLimitCard } from "./IngestLimitCard";
 
 interface Props {
   token: string;
@@ -57,6 +58,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
 
   return (
     <div>
+      <IngestLimitCard token={token} onAuthError={onAuthError} />
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="ユーザー数" value={overview.data?.userCount} />
         <Stat label="ワークスペース数" value={overview.data?.workspaceCount} />
