@@ -9,9 +9,11 @@ import {
   AdminApiError,
   deleteAdminUser,
   fetchAdminUser,
+  impersonateAdminUser,
   updateAdminUser,
 } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
+import { clearImpersonation, saveImpersonation } from "../../lib/impersonation";
 
 // 親から受け取る値: 管理者トークン、対象の利用者 ID、閉じる・変更した・認証失効の時の関数
 interface Props {
@@ -94,6 +96,26 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
     onError: (e: Error) => setError(`削除に失敗しました: ${e.message}`),
   });
 
+  // 利用者として開く: 利用者のトークンを受け取り、新しいタブで利用者の画面を開く（期限付き・記録される）
+  const [viewError, setViewError] = useState<string | null>(null);
+  const viewMutation = useMutation({
+    mutationFn: () => impersonateAdminUser(token, userId),
+    onSuccess: (result) => {
+      saveImpersonation({
+        accessToken: result.accessToken,
+        email: result.email,
+        workspaceName: result.workspaceName,
+        expiresAt: Date.parse(result.expiresAt),
+      });
+      // 新しいタブは、開いた時点の sessionStorage の写しを受け取る（noopener は付けない）
+      window.open(`${window.location.origin}/`, "_blank");
+      // 受け取ったあと、この（管理者の）タブからは閲覧の情報を消す
+      setTimeout(() => clearImpersonation(), 2000);
+      setViewError(null);
+    },
+    onError: (e: Error) => setViewError(`開けませんでした: ${e.message}`),
+  });
+
   const canDelete = !!detail.data && confirmEmail === detail.data.email;
   const passwordTooShort = password.length > 0 && password.length < 8;
 
@@ -159,6 +181,25 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                   </tbody>
                 </table>
               )}
+            </section>
+
+            <section className="mb-6 rounded border border-blue-200 bg-blue-50 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-blue-800">利用者として開く</h3>
+              <p className="mb-3 text-xs text-blue-800">
+                この利用者の画面を、新しいタブで利用者と同じ操作で開きます（ダッシュボード・センサー・設定を変更できます）。
+                閲覧は 15 分で自動的に終わります。書き込みの操作は、管理者 ID とともに記録されます。
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={viewMutation.isPending}
+                  onClick={() => viewMutation.mutate()}
+                  className="rounded bg-blue-700 px-3 py-1.5 text-sm text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  この利用者として開く
+                </button>
+                {viewError && <span className="text-sm text-red-600">{viewError}</span>}
+              </div>
             </section>
 
             <section className="mb-6 rounded border border-gray-200 p-4">

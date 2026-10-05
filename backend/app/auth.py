@@ -38,6 +38,21 @@ def create_access_token(user_id: UUID, workspace_id: UUID) -> str:
     )
 
 
+def create_impersonation_token(
+    user_id: UUID, workspace_id: UUID, admin_id: str
+) -> tuple[str, datetime]:
+    """管理者が利用者として閲覧するためのトークン。通常の利用者のトークンと同じ形だが、
+    imp（操作した管理者の ID）を持ち、有効期限は短い。リフレッシュは発行しない。
+    戻り値は（トークン, 期限）。"""
+    expire = datetime.now(UTC) + timedelta(minutes=settings.impersonation_expire_minutes)
+    token = jwt.encode(
+        {"sub": str(user_id), "wid": str(workspace_id), "imp": admin_id, "exp": expire},
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    return token, expire
+
+
 def decode_access_token(token: str) -> dict[str, str]:
     """デコードして payload を返す。無効/期限切れは jwt.PyJWTError を送出。"""
     payload: dict[str, str] = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])

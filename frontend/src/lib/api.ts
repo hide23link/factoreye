@@ -53,6 +53,12 @@ let _isRefreshing = false;
  */
 async function attemptTokenRefresh(): Promise<boolean> {
   if (_isRefreshing) return false;
+  // 管理者が利用者として閲覧中は、再発行しない（期限が切れたら閲覧を終える。
+  // 別の利用者のリフレッシュトークンで続けることにならないように）
+  if (useAuthStore.getState().impersonation) {
+    useAuthStore.getState().clearAuth();
+    return false;
+  }
   const refreshToken = getStoredRefreshToken();
   if (!refreshToken) return false;
   _isRefreshing = true;

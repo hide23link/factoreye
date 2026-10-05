@@ -14,16 +14,18 @@ FactorEye バックエンド エントリポイント
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import FastAPI
+import jwt
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
+from starlette.responses import Response
 
 from app.api import (
     admin,
@@ -38,6 +40,7 @@ from app.api import (
     widgets,
 )
 from app.api import settings as settings_api
+from app.auth import decode_access_token
 from app.config import AuthMode, settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop
@@ -75,6 +78,32 @@ app = FastAPI(
     redoc_url="/redoc" if settings.debug else None,
     openapi_url="/openapi.json" if settings.debug else None,
 )
+
+# 管理者が利用者として閲覧中（imp を持つトークン）の書き込みを、誰が・どこに行ったかをログに残す
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@app.middleware("http")
+async def log_impersonated_writes(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    if request.method not in _READ_METHODS:
+        header = request.headers.get("authorization", "")
+        if header.lower().startswith("bearer "):
+            try:
+                payload = decode_access_token(header[len("bearer ") :])
+            except jwt.PyJWTError:
+                payload = {}
+            if "imp" in payload:
+                logging.getLogger(__name__).warning(
+                    "admin %s changed data as user %s: %s %s",
+                    payload["imp"],
+                    payload.get("sub"),
+                    request.method,
+                    request.url.path,
+                )
+    return await call_next(request)
+
 
 # 取り込み API のレート制限（slowapi）。制限を超えたリクエストは 429 を返す
 app.state.limiter = limiter
