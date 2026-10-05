@@ -103,6 +103,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
       )}
 
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <div className="overflow-x-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500">
             <tr>
@@ -148,6 +149,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {selectedId && (

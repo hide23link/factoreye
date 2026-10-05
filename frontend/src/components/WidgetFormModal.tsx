@@ -314,7 +314,7 @@ export function WidgetFormModal({
               横軸の表示期間は、ダッシュボード上部の時間の操作で変えます（ダッシュボード全体で共通）
             </p>
 
-            <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
+            <div className="mb-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
               <label>
                 縦軸 最小値
                 <input

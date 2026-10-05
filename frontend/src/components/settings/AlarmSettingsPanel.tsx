@@ -58,6 +58,7 @@ export function AlarmSettingsPanel() {
       )}
 
       {!isLoading && data && data.alarms.length > 0 && (
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-gray-200 text-xs text-gray-500">
@@ -130,6 +131,7 @@ export function AlarmSettingsPanel() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

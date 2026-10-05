@@ -317,6 +317,7 @@ export function SensorSettingsPanel() {
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 
       {!isLoading && sensors && sensors.length > 0 && (
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-gray-200 text-xs text-gray-500">
@@ -336,6 +337,7 @@ export function SensorSettingsPanel() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {!isLoading && sensors?.length === 0 && (

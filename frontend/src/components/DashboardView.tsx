@@ -57,6 +57,18 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return () => resetTimeRange();
   }, []);
 
+  // 狭い画面（スマホ）では、ウィジェットの並べ替えとサイズ変更を止める（画面のスクロールと干渉するため）
+  const [isNarrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.("(max-width: 575px)").matches === true,
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.("(max-width: 575px)");
+    if (!query) return;
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
   // 削除: 一覧を取り直し、表示中の選択を外して一覧へ戻る
   const deleteDashboardMutation = useMutation({
     mutationFn: () => deleteDashboard(dashboardId),
@@ -171,6 +183,16 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           まだウィジェットがありません。「+ ウィジェット追加」から追加してください。
         </p>
       ) : (
+        isNarrow ? (
+          // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
+          <div className="flex flex-col gap-3">
+            {dashboard.widgets.map((widget) => (
+              <div key={widget.id} className="h-80 rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                <WidgetCard widget={widget} dashboard={dashboard} />
+              </div>
+            ))}
+          </div>
+        ) : (
         <ResponsiveGridLayout
           className="layout"
           layouts={{ lg: layout, md: layout, sm: layout, xs: layout, xxs: layout }}
@@ -178,6 +200,8 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           cols={GRID_COLS}
           rowHeight={ROW_HEIGHT}
           margin={[12, 12]}
+          isDraggable={!isNarrow}
+          isResizable={!isNarrow}
           draggableHandle=".widget-drag-handle"
           onDragStop={(l) => persistLayoutMutation.mutate(l)}
           onResizeStop={(l) => persistLayoutMutation.mutate(l)}
@@ -188,6 +212,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             </div>
           ))}
         </ResponsiveGridLayout>
+        )
       )}
 
       {isModalOpen && (
