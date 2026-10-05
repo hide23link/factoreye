@@ -22,10 +22,17 @@ import {
 } from "recharts";
 
 import { useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { formatChartTime } from "../../lib/time";
-import { absoluteRange, resolveRange, spanHours } from "../../lib/timeRange";
+import {
+  absoluteRange,
+  maxRangeForBuild,
+  resolveRange,
+  spanHours,
+  zoomAround,
+} from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 
@@ -50,6 +57,10 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
     const next = absoluteRange(from, to);
     if (next) setRange(next);
   });
+  // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
+  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) =>
+    setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild())),
+  );
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
@@ -93,7 +104,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
         {sensor?.name ?? "センサー"}
         {sensor ? ` (${sensor.unit})` : ""}
       </p>
-      <div className="min-h-0 flex-1 select-none">
+      <div ref={chartRef} className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
             <BarChart data={chartData} {...drag.handlers}>

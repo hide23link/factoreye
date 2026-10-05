@@ -20,11 +20,18 @@ import {
 } from "recharts";
 
 import { useSensors } from "../../hooks/queries";
+import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
 import { formatChartTime } from "../../lib/time";
-import { absoluteRange, resolveRange, spanHours } from "../../lib/timeRange";
+import {
+  absoluteRange,
+  maxRangeForBuild,
+  resolveRange,
+  spanHours,
+  zoomAround,
+} from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { GRAPH_BUCKETS } from "./SensorGraphWidget";
@@ -48,6 +55,10 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     const next = absoluteRange(from, to);
     if (next) setRange(next);
   });
+  // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
+  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) =>
+    setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild())),
+  );
 
   // 範囲・区間数は、ウィジェットの取得と同じ queryKey の形にする（グラフ用の取得を共有する）
   const results = useQueries({
@@ -98,7 +109,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   return (
     <div className="flex h-full flex-col">
       <p className="mb-1 text-sm font-medium text-gray-700">複数センサー比較</p>
-      <div className="min-h-0 flex-1 select-none">
+      <div ref={chartRef} className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} {...drag.handlers}>
             <CartesianGrid strokeDasharray="3 3" />
