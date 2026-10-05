@@ -76,13 +76,13 @@ flowchart LR
 |---|---|---|---|
 | GET | `/health` | 稼働確認。DB 接続状態を返す（`ok` / `degraded`） | なし |
 | POST | `/api/ingest/readings` | センサー値の取り込み（単発・バッチ） | APIキー（self-hosted） |
-| GET / POST | `/api/sensors` | センサー一覧・作成 | なし |
+| GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成 | なし |
 | GET / PUT / DELETE | `/api/sensors/{id}` | 詳細・更新・削除（物理削除） | なし |
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`） | なし |
 | GET | `/api/sensors/{id}/readings/downsampled` | グラフ用の間引き。`from` / `to` の範囲を `buckets` 区間（既定 500・上限 1000）に分け、区間ごとの最小・平均・最大・件数を返す | なし |
 | GET | `/api/sensors/{id}/readings/aggregate` | 期間の合計と件数（`from` 必須） | なし |
 | GET | `/api/readings` | 全センサーの直近測定値（`sensor_id` / `limit`） | なし |
-| GET | `/api/alarms` | アラーム一覧（`status` / `sensor_id`） | なし |
+| GET | `/api/alarms` | アラーム一覧（`status` / `sensor_id` / `limit` / `offset`）。新しい順。`limit` は 1〜500（省略時は条件に合う全件） | なし |
 | GET | `/api/alarms/{id}` | アラーム詳細 | なし |
 | PATCH | `/api/alarms/{id}/ack` | アラームの確認（`acknowledgedBy` を記録） | なし |
 | GET / POST | `/api/dashboards` | ダッシュボード一覧・作成 | なし |
@@ -101,6 +101,14 @@ flowchart LR
 
 - API の詳細は `DEBUG` 時（`ENVIRONMENT != production`）に `/docs` で確認できる
 - JSON のキーは camelCase
+
+### 4.1 一覧 API の応答（性能）
+
+- **アラーム一覧のページング**: `limit` と `offset` で区切る。並びは `triggered_at` の新しい順で、同時刻は `id` の降順（ページの境界で重複・抜けを出さないため）。`total` は、ページで区切る前の、条件に合う件数
+- **センサー一覧の版（ETag）**: 版は、件数と最終更新時刻（`updated_at` の最大）から作る。応答に `ETag` と `Cache-Control: no-cache` を付ける。`If-None-Match` が一致すれば、本体を送らずに 304 を返す
+- **版ごとの JSON のキャッシュ**: 完成した一覧の JSON を、版ごとにプロセス内に保持する（上限 32 件）。版は、読み出しの前に作るため、キャッシュの内容が版より古くなることはない
+- **応答の作り方**: 一覧は ORM のオブジェクトを作らず、必要な列だけを読む。Pydantic のモデルから JSON を 1 回だけ作る（`app/api/responses.py`）。OpenAPI の定義は `response_model` で残す。応答の形（camelCase の項目）は変えない
+- **注意**: 版とキャッシュはプロセスごとに持つ。ワーカーを増やすと、ワーカーごとに持つ（内容は一致する）。センサーの作成・更新・削除は、必ず件数か `updated_at` を変えること（版の判定に使うため）
 
 ---
 
@@ -232,6 +240,11 @@ Grafana と同じように、グラフの表示する時間範囲を操作でき
 **比較グラフ**
 - `MultiSensorComparison` は、全センサーを同じ範囲・同じ区間数で取得し、時間軸を揃えて重ねる
 
+**アラーム表示（`AlarmAlertWidget`）**
+- 発生中（active）と確認済み（acknowledged）を、それぞれ新しい順 100 件まで取得し、5 秒ごとに取り直す
+- 設定画面のアラーム一覧は、従来どおり全件を取得する
+- 確認済みが 100 件を超えると、古いものはこの表示には出ない（設定画面では見られる）
+
 **制限と注意**
 - SaaS（Free Tier）は測定値の保持が 90 日（§10）のため、選べる範囲は 90 日までとする。self-hosted は保持期間の制限なし
 - 範囲が長いと点が多すぎるため、グラフは `readings/downsampled` で取得する。生データ（`readings`）は、表示の詳細確認のためだけに使う
@@ -341,3 +354,5 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - 次の段階の候補: ルールベースの設定
 - 移行の制限: 同じワークスペースを、同じ DB に取り込み直すと失敗する（ID が重なるため。削除済みの行も残っているため同様）。取り込みファイルのサイズに上限はない
 - 移行後のデバイス: OSS 版ではデバイスの送信に `X-API-Key` ヘッダー（`INGEST_API_KEY`）が必要。SaaS 版の `ingestKey` だけの送信とは異なる（§10.1）
+- 一覧の件数が増えると、`total` の集計（件数を数える処理）と、ページの読み出しの両方のコストが増える。数十万件規模では見直す
+- 測定値の一覧（`readings`）は、列だけを読むようにしたが、読み出す件数（`limit`）そのものは減らしていない。グラフは `downsampled` を使う（§8）
