@@ -43,7 +43,9 @@ export function TimeRangeControls() {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
   // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  // 再描画の合図（30 秒ごと）。計算に使う時刻は、操作の時点の現在時刻にする
+  useNow(LIVE_CHART_INTERVAL_MS);
+  const now = Date.now();
   const maxMs = maxRangeMs(IS_MULTI_TENANT);
   const bounds = resolveRange(range, now);
   const [customFrom, setCustomFrom] = useState("");
@@ -103,7 +105,7 @@ export function TimeRangeControls() {
       >
         ▶
       </button>
-      <span className="hidden gap-2 sm:flex">
+      <span className="flex gap-2">
       <button
         type="button"
         aria-label="縮小"
@@ -122,7 +124,7 @@ export function TimeRangeControls() {
       </button>
       </span>
 
-      <span className="hidden sm:inline-block">
+      <span className="inline-block">
       <select
         aria-label="表示期間"
         value={presetKeyOf(range) ?? "custom"}
