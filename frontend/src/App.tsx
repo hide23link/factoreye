@@ -19,6 +19,10 @@ import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
+import { LegalPage, type LegalKind } from "./components/LegalPage";
+
+// ログイン無しで読める公開の文書（パスと画面の対応）
+const LEGAL_PATHS: Record<string, LegalKind> = { "/privacy": "privacy", "/terms": "terms" };
 
 // ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。true なら SaaS 版
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
@@ -221,6 +225,12 @@ function App() {
       }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 公開の文書（プライバシーポリシー・利用規約）は、ログインの状態に関係なく表示する
+  const legalKind = LEGAL_PATHS[window.location.pathname];
+  if (legalKind) {
+    return <LegalPage kind={legalKind} />;
+  }
 
   // multi-tenant かつセッション復元中
   if (IS_MULTI_TENANT && isInitializing) {
