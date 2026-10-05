@@ -137,6 +137,16 @@ class IngestLimitUpdate(CamelModel):
     minutes: int = Field(default=60, ge=1, le=ingest_limit_toggle.MAX_BYPASS_MINUTES)
 
 
+class ImpersonationResponse(CamelModel):
+    """利用者として閲覧するためのトークン。画面は、このトークンだけで利用者の画面を開く。"""
+
+    access_token: str
+    token_type: str = "bearer"
+    email: str
+    workspace_name: str
+    expires_at: datetime
+
+
 # ── 内部ヘルパー ──────────────────────────────────────────────
 
 
@@ -303,6 +313,35 @@ async def set_ingest_limit(
         ingest_limit_toggle.disable()
         _logger.warning("admin %s re-enabled ingest rate limit", admin_id)
     return _ingest_limit_status()
+
+
+@router.post("/users/{user_id}/impersonate", response_model=ImpersonationResponse)
+async def impersonate_user(
+    user_id: UUID,
+    admin_id: Annotated[str, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ImpersonationResponse:
+    """利用者として閲覧するためのトークンを発行する（短い期限・リフレッシュなし）。
+    開始は必ずログに残す。画面の操作（書き込み）は main.py のミドルウェアがログに残す。"""
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    workspace = (
+        await session.exec(select(Workspace).where(col(Workspace.owner_id) == user.id))
+    ).first()
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="user has no workspace")
+
+    token, expires_at = auth_utils.create_impersonation_token(user.id, workspace.id, admin_id)
+    _logger.warning(
+        "admin %s started viewing as user %s until %s", admin_id, user_id, expires_at.isoformat()
+    )
+    return ImpersonationResponse(
+        access_token=token,
+        email=user.email,
+        workspace_name=workspace.name,
+        expires_at=expires_at,
+    )
 
 
 @router.get("/users", response_model=list[AdminUserSummary])

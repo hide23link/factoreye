@@ -57,6 +57,15 @@ export interface AdminUserDetail extends AdminUserSummary {
   sensors: AdminSensorSummary[];
 }
 
+/** 利用者として閲覧するためのトークン（短い期限・リフレッシュなし）。 */
+export interface ImpersonationResult {
+  accessToken: string;
+  email: string;
+  workspaceName: string;
+  /** 期限（ISO の時刻文字列） */
+  expiresAt: string;
+}
+
 /** 利用者の修正の入力。送る項目だけ変わる（省略は変えない）。password を送ると、ログインは全て無効になる。 */
 export interface AdminUserUpdate {
   email?: string;
@@ -113,6 +122,10 @@ export const updateAdminUser = (token: string, userId: string, data: AdminUserUp
 
 export const deleteAdminUser = (token: string, userId: string) =>
   send<void>(`/api/admin/users/${userId}`, { method: "DELETE" }, token);
+
+/** 利用者として閲覧するためのトークンを発行する（開始は記録される）。 */
+export const impersonateAdminUser = (token: string, userId: string) =>
+  send<ImpersonationResult>(`/api/admin/users/${userId}/impersonate`, { method: "POST" }, token);
 
 export interface IngestLimitStatus {
   // 既定の制限（例: 100/minute）と、環境変数で解除されているか（変更できない）

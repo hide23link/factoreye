@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 30
     # 管理者トークンはリフレッシュ不可（期限切れ後は再ログイン）。通常ユーザーより短く保つ
     admin_access_expire_minutes: int = 60
+    # 管理者が利用者として閲覧するときのトークンの有効期限（分）。リフレッシュ不可。短く保つ
+    impersonation_expire_minutes: int = 15
     # 管理者アカウントのテキストファイル（ID:bcryptハッシュ）。
     # 本番は docker-compose の volumes でホストの ./admin を差し込む
     admin_credentials_file: str = "admin/admins.txt"

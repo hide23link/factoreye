@@ -14,6 +14,7 @@ import { DashboardView } from "./components/DashboardView";
 import { SettingsPage } from "./components/SettingsPage";
 import { SetupWizard } from "./components/SetupWizard";
 import { fetchMe, refreshTokens } from "./lib/api";
+import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
 import { useUiStore } from "./store/useUiStore";
@@ -98,6 +99,49 @@ function Nav() {
   );
 }
 
+/**
+ * 管理者が利用者として閲覧中であることを示す。期限（短い）が過ぎたら、閲覧を終える。
+ * 書き込みは記録されることも、ここで伝える。
+ */
+function ImpersonationBanner() {
+  const impersonation = useAuthStore((s) => s.impersonation);
+  const clearAuth = useAuthStore((s) => s.clearAuth);
+
+  // 期限が過ぎたら、操作がなくても閲覧を終える
+  useEffect(() => {
+    if (!impersonation) return;
+    const check = () => {
+      if (Date.now() >= impersonation.expiresAt) clearAuth();
+    };
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
+  }, [impersonation, clearAuth]);
+
+  if (!impersonation) return null;
+
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-2 bg-amber-100 px-4 py-2 text-sm text-amber-900"
+    >
+      <span>
+        管理者として閲覧中: {impersonation.email}（{impersonation.workspaceName}）。
+        {new Date(impersonation.expiresAt).toLocaleTimeString("ja-JP")} まで。書き込みは記録されます
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          clearAuth();
+          window.close();
+        }}
+        className="rounded border border-amber-400 px-2 py-0.5 hover:bg-amber-200"
+      >
+        閲覧を終える
+      </button>
+    </div>
+  );
+}
+
 /** ログイン後（または self-hosted）の画面の枠。ヘッダーと、選ばれた画面の本体を並べる。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
@@ -105,6 +149,7 @@ function AppShell() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
+      <ImpersonationBanner />
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
         <div className="flex items-center gap-4">
           <span className="text-lg font-bold">FactorEye</span>
@@ -133,13 +178,30 @@ function AppShell() {
  * 画面の最上位。認証の状態に応じて、読み込み中・ログイン画面・本体のいずれかを出す。
  */
 function App() {
-  const { accessToken, isInitializing, setInitializing, setAuth, clearAuth } = useAuthStore();
+  const { accessToken, isInitializing, setInitializing, setAuth, setImpersonated, clearAuth } =
+    useAuthStore();
 
   // multi-tenant: ページ読み込み時に、保存されたリフレッシュトークンでセッションを復元する。
   // 成功すれば、アクセストークンと利用者の情報を入れる。失敗（期限切れなど）なら、ログイン状態を消す
   useEffect(() => {
     if (!IS_MULTI_TENANT) {
       setInitializing(false);
+      return;
+    }
+
+    // 管理者が利用者として閲覧中のタブ: その閲覧のトークンだけを使う（利用者本人のログインには触れない）
+    const viewing = readImpersonation();
+    if (viewing) {
+      void (async () => {
+        try {
+          const me = await fetchMe(viewing.accessToken);
+          setImpersonated(viewing, me);
+        } catch {
+          // 閲覧を始められなければ、閲覧の情報を消してログイン画面へ（利用者本人のログインは残す）
+          clearImpersonation();
+          setInitializing(false);
+        }
+      })();
       return;
     }
 
