@@ -119,7 +119,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
               tickFormatter={formatTime}
               tick={{ fontSize: 10 }}
             />
-            <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
+            <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
             <Tooltip labelFormatter={(label: ReactNode) => formatTime(Number(label))} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             {sensorIds.map((sensorId, i) => (

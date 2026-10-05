@@ -112,7 +112,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
             <BarChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Bar dataKey="value" fill={color} isAnimationActive={false} />
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
@@ -121,7 +121,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
             <AreaChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Area dataKey="value" stroke={color} fill={color} fillOpacity={0.2} isAnimationActive={false} />
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
@@ -130,7 +130,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
             <LineChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Line type="monotone" dataKey="value" stroke={color} dot={false} isAnimationActive={false} />
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
