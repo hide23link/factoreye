@@ -5,7 +5,7 @@
  * センサーごとに間引いたデータを取り（useQueries）、区間の開始時刻をそろえて1本の表にしてから描く。
  * 同じ範囲・同じ区間数で取るので、時間軸はすべてのセンサーで一致する。
  */
-import { useQueries } from "@tanstack/react-query";
+import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
   CartesianGrid,
@@ -19,7 +19,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { useSensors } from "../../hooks/queries";
+import { POLL_INTERVAL_MS, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -38,17 +38,14 @@ import { GRAPH_BUCKETS } from "./SensorGraphWidget";
 
 // センサーごとの線の色（順番に使う。足りなくなったら最初から繰り返す）
 const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
-// 直近モードで取り直す間隔（ミリ秒）
-const POLL_INTERVAL_MS = 5000;
-
 /** 複数センサーの比較グラフ。比較するセンサーは widget.config.sensorIds で決まる。 */
 export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const sensorIds = widget.config.sensorIds ?? [];
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
-  // 直近モードでは、データが来なくても横軸（表示範囲）を時間経過で動かし続ける
-  const now = useNow();
+  // 直近モードでは、横軸（表示範囲）を取り直す間隔（5 秒）ごとに動かす（毎秒にすると描き直しが毎秒起きる）
+  const now = useNow(POLL_INTERVAL_MS);
   const bounds = resolveRange(range, now);
   const live = range.mode === "relative";
   const drag = useDragSelect((from, to) => {
@@ -78,6 +75,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
           GRAPH_BUCKETS,
         ),
       refetchInterval: live ? POLL_INTERVAL_MS : false,
+      // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（線が消えて描き直されるのを防ぐ）
+      placeholderData: keepPreviousData,
     })),
   });
 

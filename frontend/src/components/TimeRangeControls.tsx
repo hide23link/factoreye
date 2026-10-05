@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 
+import { POLL_INTERVAL_MS } from "../hooks/queries";
 import { useNow } from "../hooks/useNow";
 import {
   absoluteRange,
@@ -41,7 +42,8 @@ function presetKeyOf(range: TimeRange): string | null {
 export function TimeRangeControls() {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
-  const now = useNow();
+  // 取り直す間隔に合わせて更新する（毎秒更新すると、操作部品ごとグラフの周りが毎秒描き直される）
+  const now = useNow(POLL_INTERVAL_MS);
   const maxMs = maxRangeMs(IS_MULTI_TENANT);
   const bounds = resolveRange(range, now);
   const [customFrom, setCustomFrom] = useState("");

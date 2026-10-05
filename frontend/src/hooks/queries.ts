@@ -5,7 +5,7 @@
  * - 変化が速いデータ（センサー値、アラーム、ダッシュボードの中身）は、POLL_INTERVAL_MS（5 秒）ごとに取り直す
  * - 変化の少ないデータ（通知設定、移行の状態など）は、取り直さない
  */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
   fetchAlarms,
@@ -21,7 +21,7 @@ import {
 } from "../lib/api";
 
 // 画面を更新する間隔（ミリ秒）。ポーリング（一定間隔で取り直す）の周期
-const POLL_INTERVAL_MS = 5000;
+export const POLL_INTERVAL_MS = 5000;
 
 /** センサーの一覧（5 秒ごとに取り直す）。 */
 export const useSensors = () =>
@@ -120,4 +120,6 @@ export const useDownsampledReadings = (
       ),
     enabled: sensorId !== null,
     refetchInterval: live ? POLL_INTERVAL_MS : false,
+    // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（グラフが消えて描き直されるのを防ぐ）
+    placeholderData: keepPreviousData,
   });
