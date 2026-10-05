@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.responses import json_response
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -176,11 +177,14 @@ async def get_sensor_readings(
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=10000),
-) -> ReadingListResponse:
+) -> Response:
     await _get_active_sensor(session, sensor_id, workspace_id)
 
     # 新しい順に、limit 件まで返す（グラフ用）。期間は from / to で絞る
-    query = select(Reading).where(Reading.sensor_id == sensor_id)
+    # 使う列だけを読む（ORM のオブジェクトを作らないため、CPU を使わない）
+    query = select(Reading.id, Reading.sensor_id, Reading.value, Reading.recorded_at).where(
+        Reading.sensor_id == sensor_id
+    )
     if from_ is not None:
         query = query.where(Reading.recorded_at >= from_)
     if to is not None:
@@ -188,10 +192,8 @@ async def get_sensor_readings(
     query = query.order_by(Reading.recorded_at.desc()).limit(limit)  # type: ignore[attr-defined]
 
     result = await session.exec(query)
-    readings = list(result.all())
-    return ReadingListResponse(
-        readings=[ReadingRead.model_validate(r) for r in readings], total=len(readings)
-    )
+    readings = [ReadingRead.model_validate(row) for row in result.all()]
+    return json_response(ReadingListResponse(readings=readings, total=len(readings)))
 
 
 @router.get("/{sensor_id}/readings/aggregate", response_model=ReadingAggregate)

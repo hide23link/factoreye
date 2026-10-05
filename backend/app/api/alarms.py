@@ -6,17 +6,32 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.responses import json_response
 from app.db.models import Alarm, AlarmStatus, Sensor
 from app.db.session import get_session
 from app.schemas import AlarmAck, AlarmListResponse, AlarmRead
 
 router = APIRouter(prefix="/api/alarms", tags=["alarms"])
+
+# 一覧で使う列だけを読む（ORM のオブジェクトを作らないため、CPU を使わない）
+_LIST_COLUMNS = (
+    Alarm.id,
+    Alarm.sensor_id,
+    Alarm.triggered_at,
+    Alarm.resolved_at,
+    Alarm.acknowledged_at,
+    Alarm.acknowledged_by,
+    Alarm.value,
+    Alarm.status,
+    Alarm.threshold_breached,
+    Alarm.severity,
+)
 
 
 async def _get_alarm(
@@ -44,17 +59,18 @@ async def list_alarms(
         default=None, ge=1, le=500, description="返す件数（省略時は条件に合うすべて）"
     ),
     offset: int = Query(default=0, ge=0, description="先頭から飛ばす件数"),
-) -> AlarmListResponse:
+) -> Response:
     """アラームの一覧（新しい順）。状態・センサーで絞り込める。limit / offset でページを取れる。
 
     total は、ページで区切る前の、条件に合う件数。
     """
     # 絞り込みの条件（ページで区切る前）
-    query = select(Alarm)
+    # 列を並べた select の型は、mypy では素直に推論できないため
+    query = select(*_LIST_COLUMNS)  # type: ignore[call-overload]
 
     if workspace_id is not None:
         # センサーJOINでワークスペース絞り込み
-        query = query.join(Sensor, Alarm.sensor_id == Sensor.id).where(  # type: ignore[arg-type]
+        query = query.join(Sensor, Alarm.sensor_id == Sensor.id).where(
             Sensor.workspace_id == workspace_id
         )
     if status_filter is not None:
@@ -71,10 +87,8 @@ async def list_alarms(
         page = page.limit(limit)
 
     result = await session.exec(page)
-    alarms = list(result.all())
-    return AlarmListResponse(
-        alarms=[AlarmRead.model_validate(a) for a in alarms], total=total
-    )
+    alarms = [AlarmRead.model_validate(row) for row in result.all()]
+    return json_response(AlarmListResponse(alarms=alarms, total=total))
 
 
 @router.get("/{alarm_id}", response_model=AlarmRead)
