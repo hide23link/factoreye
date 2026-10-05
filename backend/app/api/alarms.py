@@ -7,6 +7,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -39,10 +40,17 @@ async def list_alarms(
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
     status_filter: AlarmStatus | None = Query(default=None, alias="status"),
     sensor_id: UUID | None = Query(default=None),
+    limit: int | None = Query(
+        default=None, ge=1, le=500, description="返す件数（省略時は条件に合うすべて）"
+    ),
+    offset: int = Query(default=0, ge=0, description="先頭から飛ばす件数"),
 ) -> AlarmListResponse:
-    """アラームの一覧（新しい順）。状態・センサーで絞り込める。"""
-    # SQLModelのクラス属性はmypyには素のPython型に見えるため.desc()はattr-definedで誤検知される
-    query = select(Alarm).order_by(Alarm.triggered_at.desc())  # type: ignore[attr-defined]
+    """アラームの一覧（新しい順）。状態・センサーで絞り込める。limit / offset でページを取れる。
+
+    total は、ページで区切る前の、条件に合う件数。
+    """
+    # 絞り込みの条件（ページで区切る前）
+    query = select(Alarm)
 
     if workspace_id is not None:
         # センサーJOINでワークスペース絞り込み
@@ -54,10 +62,18 @@ async def list_alarms(
     if sensor_id is not None:
         query = query.where(Alarm.sensor_id == sensor_id)
 
-    result = await session.exec(query)
+    total = (await session.exec(select(func.count()).select_from(query.subquery()))).one()
+
+    # 並びは新しい順。同時刻のものが並び替わって、ページの境界で重複・抜けが出ないように id も並べる
+    # SQLModelのクラス属性はmypyには素のPython型に見えるため.desc()はattr-definedで誤検知される
+    page = query.order_by(Alarm.triggered_at.desc(), Alarm.id.desc()).offset(offset)  # type: ignore[attr-defined]
+    if limit is not None:
+        page = page.limit(limit)
+
+    result = await session.exec(page)
     alarms = list(result.all())
     return AlarmListResponse(
-        alarms=[AlarmRead.model_validate(a) for a in alarms], total=len(alarms)
+        alarms=[AlarmRead.model_validate(a) for a in alarms], total=total
     )
 
 

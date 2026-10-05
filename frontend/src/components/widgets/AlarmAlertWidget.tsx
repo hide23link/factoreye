@@ -7,12 +7,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 
+/** 一覧に出す件数の上限（状態ごと）。新しい順に取る。全件は取らない（応答が大きくなり、サーバーの負荷になるため）。 */
+const ALERT_LIMIT = 100;
+
 /** アラームの一覧ウィジェット。センサーの設定は必要ない（全体のアラームを出す）。 */
 export function AlarmAlertWidget() {
   // 確認済み（acknowledged）は「対応中」なだけで解決はしていないため、active と
   // 合わせて表示する。しきい値内に戻って status=resolved になったら自然に消える
-  const { data: activeData, isLoading: activeLoading } = useAlarms("active");
-  const { data: ackedData, isLoading: ackedLoading } = useAlarms("acknowledged");
+  const { data: activeData, isLoading: activeLoading } = useAlarms("active", ALERT_LIMIT);
+  const { data: ackedData, isLoading: ackedLoading } = useAlarms("acknowledged", ALERT_LIMIT);
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
 

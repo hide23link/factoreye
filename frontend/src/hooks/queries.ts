@@ -44,11 +44,12 @@ export const useDashboard = (id: string | null) =>
     refetchInterval: POLL_INTERVAL_MS,
   });
 
-/** アラームの一覧（5 秒ごとに取り直す）。status で絞り込める。 */
-export const useAlarms = (status?: string) =>
+/** アラームの一覧（5 秒ごとに取り直す）。status で絞り込める。limit で新しい順に件数を絞れる。 */
+export const useAlarms = (status?: string, limit?: number) =>
   useQuery({
-    queryKey: ["alarms", status ?? "all"],
-    queryFn: () => fetchAlarms(status),
+    queryKey: ["alarms", status ?? "all", limit ?? "all"],
+    // limit 無しの呼び出しは、従来どおり fetchAlarms(status) の形のままにする
+    queryFn: () => (limit === undefined ? fetchAlarms(status) : fetchAlarms(status, limit)),
     refetchInterval: POLL_INTERVAL_MS,
   });
 
