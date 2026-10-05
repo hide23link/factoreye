@@ -129,7 +129,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const layout = dashboard.widgets.map(toLayoutItem);
 
   return (
-    <div className="p-4">
+    <div className="px-2 py-4 sm:p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <button
@@ -187,7 +187,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
           <div className="flex flex-col gap-3">
             {dashboard.widgets.map((widget) => (
-              <div key={widget.id} className="h-80 rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+              <div key={widget.id} className="h-80">
                 <WidgetCard widget={widget} dashboard={dashboard} />
               </div>
             ))}
