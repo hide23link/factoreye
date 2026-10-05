@@ -15,6 +15,7 @@ import {
   fetchNotificationSettings,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
+  fetchSensorReadingsDownsampled,
   fetchSensors,
   fetchWebhookSubscriptions,
 } from "../lib/api";
@@ -88,4 +89,35 @@ export const useSensorReadingsAggregate = (
     queryFn: () => fetchSensorReadingsAggregate(sensorId as string, from, to),
     enabled: sensorId !== null,
     refetchInterval: POLL_INTERVAL_MS,
+  });
+
+/**
+ * グラフ用の間引きデータ。from / to は、ミリ秒の時刻（呼び出し側が範囲から求める）。
+ * live（直近モード）のときだけ、POLL_INTERVAL_MS ごとに取り直す。固定モードは取り直さない。
+ *
+ * queryKey は秒単位に丸める。時刻が 1 秒ごとに少しずつ進んでも、同じ範囲の取得を重ねないため。
+ */
+export const useDownsampledReadings = (
+  sensorId: string | null,
+  range: { from: number; to: number },
+  buckets: number,
+  live: boolean,
+) =>
+  useQuery({
+    queryKey: [
+      "readings-downsampled",
+      sensorId,
+      Math.round(range.from / 1000),
+      Math.round(range.to / 1000),
+      buckets,
+    ],
+    queryFn: () =>
+      fetchSensorReadingsDownsampled(
+        sensorId as string,
+        new Date(range.from).toISOString(),
+        new Date(range.to).toISOString(),
+        buckets,
+      ),
+    enabled: sensorId !== null,
+    refetchInterval: live ? POLL_INTERVAL_MS : false,
   });

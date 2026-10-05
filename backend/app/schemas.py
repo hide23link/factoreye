@@ -153,6 +153,23 @@ class ReadingAggregate(CamelModel):
     count: int
 
 
+class DownsampledBucket(CamelModel):
+    """間引きの 1 区間。start から bucketSeconds の間の測定値の最小・平均・最大と件数。"""
+
+    start: datetime
+    min: float
+    avg: float
+    max: float
+    count: int
+
+
+class DownsampledReadings(CamelModel):
+    """グラフ用の間引き結果。測定値が無い区間は含めない。"""
+
+    bucket_seconds: float
+    buckets: list[DownsampledBucket]
+
+
 # ──────────────────────────────────────────────────────────────
 # Alarm
 # ──────────────────────────────────────────────────────────────

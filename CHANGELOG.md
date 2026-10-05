@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **グラフの時間操作（Grafana と同じ）**: ダッシュボード上部で、過去への移動（前へ・後ろへ）、現在への復帰（今）、拡大・縮小、プリセット（直近 5 分〜30 日）と任意の期間を選べる。グラフ上のドラッグで、その期間に拡大する。範囲は URL（`?range=1h` / `?from=…&to=…`）に保持する。SaaS は 90 日まで
+- **グラフ用の間引き API**: `GET /api/sensors/{id}/readings/downsampled`（`from` / `to` / `buckets`）。区間ごとの最小・平均・最大・件数を返す。`SensorGraph` と `MultiSensorComparison` はこれを使う
 - **取り込みのレート制限を、管理画面から期限付きで解除**: 管理画面の上部のカードで「60 分だけ解除」「今すぐ制限を戻す」を操作できる。期限（既定 60 分・最長 240 分）を過ぎると自動で既定の制限に戻る。状態はメモリのみ（再起動で既定に戻る）。`GET` / `PUT /api/admin/ingest-limit`
 - **SaaS → OSS の移行**: SaaS のワークスペースを書き出し（設定画面「データ移行」）、OSS の DB に取り込む（同じ画面・CLI）。ID と取り込みキーを保つ。測定値は差分の配列で圧縮（形式の版 2）。取り込みは1トランザクション、`dry_run` で件数を確認可能
 - **Webhook 連携**: センサー値の受信（`reading.received`）とアラーム発生（`alarm.triggered`）を、任意の URL へ JSON で送信。設定は設定画面の「Webhook連携」タブ
