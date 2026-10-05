@@ -84,7 +84,7 @@ function Nav() {
   const setView = useUiStore((s) => s.setView);
 
   return (
-    <nav className="flex gap-1">
+    <nav className="hidden gap-1 sm:flex">
       {NAV_ITEMS.map((item) => (
         <button
           key={item.value}
@@ -146,6 +146,28 @@ function ImpersonationBanner() {
   );
 }
 
+/** スマホ用の下部ナビゲーション。画面の下に固定し、親指で押しやすい大きさにする（パソコンでは出さない）。 */
+function BottomNav() {
+  const view = useUiStore((s) => s.view);
+  const setView = useUiStore((s) => s.setView);
+
+  return (
+    <nav aria-label="画面の切り替え" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-gray-200 bg-white sm:hidden">
+      {NAV_ITEMS.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          onClick={() => setView(item.value)}
+          aria-current={view === item.value ? "page" : undefined}
+          className={`min-h-14 px-2 text-sm ${view === item.value ? "font-bold text-gray-900" : "text-gray-500"}`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 /** ログイン後（または self-hosted）の画面の枠。ヘッダーと、選ばれた画面の本体を並べる。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
@@ -164,7 +186,7 @@ function AppShell() {
           <HealthBadge />
         </div>
       </header>
-      <main>
+      <main className="pb-20 sm:pb-0">
         {view === "settings" && <SettingsPage />}
         {view === "wizard" && <SetupWizard />}
         {view === "main" &&
@@ -174,6 +196,7 @@ function AppShell() {
             <DashboardListPage />
           ))}
       </main>
+      <BottomNav />
     </div>
   );
 }
