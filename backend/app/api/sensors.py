@@ -3,18 +3,19 @@
 SaaS（multi_tenant）では、各 API が「自分のワークスペースのセンサーだけ」を扱うように絞る。
 他人のセンサーは 404 で返す（存在そのものを知らせないため）。
 """
+import hashlib
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
-from app.api.responses import json_response
+from app.api.responses import json_array_response, json_response
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -47,16 +48,58 @@ async def _get_active_sensor(
     return sensor
 
 
+# 一覧で使う列（ORM のオブジェクトを作らないため。SensorRead の項目と同じ）
+_SENSOR_LIST_COLUMNS = (
+    Sensor.id,
+    Sensor.name,
+    Sensor.ingest_key,
+    Sensor.unit,
+    Sensor.threshold_min_warning,
+    Sensor.threshold_min_critical,
+    Sensor.threshold_max_warning,
+    Sensor.threshold_max_critical,
+    Sensor.threshold_dead_band,
+    Sensor.enabled,
+    Sensor.created_at,
+    Sensor.updated_at,
+)
+
+
+async def _sensors_etag(session: AsyncSession, workspace_id: UUID | None) -> str:
+    """センサー一覧の版（件数と最終更新時刻から作る）。中身を読まずに、変わったかを判定するため。
+
+    センサーの作成・更新・削除は、件数か最終更新時刻を必ず変える。
+    """
+    query = select(func.count(), func.max(Sensor.updated_at))
+    if workspace_id is not None:
+        query = query.where(Sensor.workspace_id == workspace_id)
+    count, latest = (await session.exec(query)).one()
+    raw = f"{count}:{latest.isoformat() if latest else ''}"
+    return '"' + hashlib.sha256(raw.encode()).hexdigest()[:32] + '"'
+
+
 @router.get("", response_model=list[SensorRead])
 async def list_sensors(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-) -> list[Sensor]:
-    query = select(Sensor)
+) -> Response:
+    """センサーの一覧。ETag を付け、変わっていなければ 304（本体を送らない）を返す。
+
+    画面は数秒ごとに一覧を取り直すため、変わらないときの CPU と通信を減らす。
+    """
+    etag = await _sensors_etag(session, workspace_id)
+    # Cache-Control: no-cache は、使う前に必ず再確認させる（ETag で 304 を返せるように）
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+
+    query = select(*_SENSOR_LIST_COLUMNS)  # type: ignore[call-overload]
     if workspace_id is not None:
         query = query.where(Sensor.workspace_id == workspace_id)
     result = await session.exec(query)
-    return list(result.all())
+    sensors = [SensorRead.model_validate(row) for row in result.all()]
+    return json_array_response(sensors, headers=headers)
 
 
 @router.post("", response_model=SensorRead, status_code=status.HTTP_201_CREATED)
