@@ -21,7 +21,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { POLL_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -46,7 +46,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const setRange = useTimeRangeStore((s) => s.setRange);
   // 直近モードでは、横軸（表示範囲）を時間経過で動かす。毎秒ではなく、取り直す間隔（5 秒）ごとに動かす
   // （毎秒動かすと、取得のキーが毎秒変わり、グラフが毎秒描き直されて点滅するため）
-  const now = useNow(POLL_INTERVAL_MS);
+  const now = useNow(LIVE_CHART_INTERVAL_MS);
   const bounds = resolveRange(range, now);
   const { data } = useDownsampledReadings(
     widget.sensorId,

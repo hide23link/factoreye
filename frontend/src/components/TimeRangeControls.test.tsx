@@ -72,4 +72,20 @@ describe("TimeRangeControls", () => {
 
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 30 * 60 * 1000 });
   });
+
+  it("一時停止を押すと、今の表示範囲を固定して動きを止める（幅はそのまま）", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByRole("button", { name: "一時停止" }));
+
+    // 現在（01:00 UTC）の直近 1 時間の範囲（00:00〜01:00 UTC）を、そのまま固定する
+    expect(useTimeRangeStore.getState().range).toEqual({
+      mode: "absolute",
+      from: Date.parse("2024-01-01T00:00:00.000Z"),
+      to: Date.parse("2024-01-01T01:00:00.000Z"),
+    });
+    // 固定モードでは、一時停止のボタンは出ない（今に戻るで再開する）
+    expect(screen.queryByRole("button", { name: "一時停止" })).toBeNull();
+  });
 });
