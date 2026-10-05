@@ -6,6 +6,7 @@
 3. 取り込みキー（ingestKey）からセンサーを探す（無い・無効なら拒否）
 4. 受信バッファに入れて、すぐ 202 Accepted を返す（DB への書き込みは 1 秒ごとにまとめて行う）
 """
+import functools
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from pydantic import ValidationError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app import ingest_limit_toggle
 from app.api.deps import verify_ingest_api_key
 from app.config import settings
 from app.db.models import Sensor
@@ -32,11 +34,22 @@ RATE_LIMIT_OFF = "off"
 
 
 def _ingest_rate_limit(handler: Callable[..., Any]) -> Callable[..., Any]:
-    """取り込み API にレート制限を付ける（設定が off のときは、何も付けずに返す）。"""
+    """取り込み API に制限を付ける。管理画面で期限付き解除中は、制限を通さない。
+
+    環境変数が off のときは、何も付けずに返す（環境変数が管理画面より優先）。
+    """
     if settings.ingest_rate_limit.strip().lower() == RATE_LIMIT_OFF:
         return handler
     limited: Callable[..., Any] = limiter.limit(settings.ingest_rate_limit)(handler)
-    return limited
+
+    @functools.wraps(handler)
+    async def gated(*args: Any, **kwargs: Any) -> Any:
+        # 解除中の判定はリクエストごとにメモリを見るだけ（DB には触れない）
+        if ingest_limit_toggle.is_bypassed():
+            return await handler(*args, **kwargs)
+        return await limited(*args, **kwargs)
+
+    return gated
 
 
 # 取り込み API。202（受け付けた。まだ DB には入っていないことがある）を返す

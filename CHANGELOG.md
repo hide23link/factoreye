@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **取り込みのレート制限を、管理画面から期限付きで解除**: 管理画面の上部のカードで「60 分だけ解除」「今すぐ制限を戻す」を操作できる。期限（既定 60 分・最長 240 分）を過ぎると自動で既定の制限に戻る。状態はメモリのみ（再起動で既定に戻る）。`GET` / `PUT /api/admin/ingest-limit`
 - **SaaS → OSS の移行**: SaaS のワークスペースを書き出し（設定画面「データ移行」）、OSS の DB に取り込む（同じ画面・CLI）。ID と取り込みキーを保つ。測定値は差分の配列で圧縮（形式の版 2）。取り込みは1トランザクション、`dry_run` で件数を確認可能
 - **Webhook 連携**: センサー値の受信（`reading.received`）とアラーム発生（`alarm.triggered`）を、任意の URL へ JSON で送信。設定は設定画面の「Webhook連携」タブ
 - **送信先の制限（SSRF 対策）**: Webhook の送信先は `https` かつ公開 IP のみ。登録時と送信時に検証する。社内ネットワーク向けの例外は `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`（既定 `false`）

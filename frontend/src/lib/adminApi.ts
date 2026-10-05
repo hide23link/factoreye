@@ -113,3 +113,24 @@ export const updateAdminUser = (token: string, userId: string, data: AdminUserUp
 
 export const deleteAdminUser = (token: string, userId: string) =>
   send<void>(`/api/admin/users/${userId}`, { method: "DELETE" }, token);
+
+export interface IngestLimitStatus {
+  // 既定の制限（例: 100/minute）と、環境変数で解除されているか（変更できない）
+  defaultLimit: string;
+  envOff: boolean;
+  // 期限付き解除の状態。解除中でなければ bypassUntil は null
+  bypassed: boolean;
+  bypassUntil: string | null;
+  setBy: string | null;
+  setAt: string | null;
+}
+
+export const fetchIngestLimit = (token: string) =>
+  send<IngestLimitStatus>("/api/admin/ingest-limit", { method: "GET" }, token);
+
+export const setIngestLimit = (token: string, enabled: boolean, minutes = 60) =>
+  send<IngestLimitStatus>(
+    "/api/admin/ingest-limit",
+    { method: "PUT", body: JSON.stringify({ enabled, minutes }) },
+    token,
+  );

@@ -9,6 +9,8 @@
   GET    /api/admin/users/{id}       → ユーザー詳細（ワークスペースのセンサー別状況）
   PATCH  /api/admin/users/{id}       → メール・プラン・パスワードの修正
   DELETE /api/admin/users/{id}       → ユーザーと関連データを物理削除
+  GET    /api/admin/ingest-limit     → 取り込みのレート制限の状態（期限付き解除の有無）
+  PUT    /api/admin/ingest-limit     → 期限付きで解除する／解除を止める
 
 管理者は、利用者（SaaS の users）とは別の仕組み。すべて require_admin（管理者トークン）で守る。
 ただし login は、トークンを作るための入口なので、require_admin は付けず、レート制限で守る。
@@ -25,9 +27,10 @@ from sqlalchemy import delete, func, text
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import admin_accounts
+from app import admin_accounts, ingest_limit_toggle
 from app import auth as auth_utils
 from app.api.deps import require_admin
+from app.config import settings
 from app.db.models import (
     Alarm,
     AlarmStatus,
@@ -115,6 +118,23 @@ class AdminUserUpdate(CamelModel):
     plan: Literal["free", "pro"] | None = None
     # 指定時はパスワードを再設定し、既存のリフレッシュトークンを全て失効させる
     password: str | None = Field(default=None, min_length=8, max_length=100)
+
+
+class IngestLimitStatus(CamelModel):
+    # 既定の制限（例: 100/minute）と、環境変数で解除されているか
+    default_limit: str
+    env_off: bool
+    # 期限付き解除の状態。解除中でなければ bypass_until は None
+    bypassed: bool
+    bypass_until: datetime | None
+    set_by: str | None
+    set_at: datetime | None
+
+
+class IngestLimitUpdate(CamelModel):
+    enabled: bool
+    # 解除するときの時間（分）。解除を止めるときは無視する
+    minutes: int = Field(default=60, ge=1, le=ingest_limit_toggle.MAX_BYPASS_MINUTES)
 
 
 # ── 内部ヘルパー ──────────────────────────────────────────────
@@ -244,6 +264,45 @@ async def overview(
         reading_count=reading_count,
         database_size_bytes=int(db_size),
     )
+
+
+def _ingest_limit_status() -> IngestLimitStatus:
+    state = ingest_limit_toggle.current()
+    return IngestLimitStatus(
+        default_limit=settings.ingest_rate_limit,
+        env_off=settings.ingest_rate_limit.strip().lower() == "off",
+        bypassed=state.until is not None,
+        bypass_until=state.until,
+        set_by=state.set_by,
+        set_at=state.set_at,
+    )
+
+
+@router.get("/ingest-limit", response_model=IngestLimitStatus)
+async def get_ingest_limit(
+    _admin_id: Annotated[str, Depends(require_admin)],
+) -> IngestLimitStatus:
+    return _ingest_limit_status()
+
+
+@router.put("/ingest-limit", response_model=IngestLimitStatus)
+async def set_ingest_limit(
+    body: IngestLimitUpdate,
+    admin_id: Annotated[str, Depends(require_admin)],
+) -> IngestLimitStatus:
+    # 解除・解除の停止は、誰が行ったかを残す（期限切れの自動復帰は記録しない）
+    if body.enabled:
+        state = ingest_limit_toggle.enable(admin_id, body.minutes)
+        _logger.warning(
+            "admin %s bypassed ingest rate limit for %d min (until %s)",
+            admin_id,
+            body.minutes,
+            state.until,
+        )
+    else:
+        ingest_limit_toggle.disable()
+        _logger.warning("admin %s re-enabled ingest rate limit", admin_id)
+    return _ingest_limit_status()
 
 
 @router.get("/users", response_model=list[AdminUserSummary])
