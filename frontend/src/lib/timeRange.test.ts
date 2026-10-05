@@ -9,6 +9,7 @@ import {
   panRange,
   resolveRange,
   toSearchParams,
+  zoomAround,
   zoomRange,
 } from "./timeRange";
 
@@ -102,6 +103,39 @@ describe("zoomRange", () => {
     const range = { mode: "absolute" as const, from: NOW - 60 * 24 * HOUR, to: NOW };
     const next = zoomRange(range, 2, NOW, max);
     expect(next).toEqual({ mode: "absolute", from: NOW - max, to: NOW });
+  });
+});
+
+describe("zoomAround（カーソル位置を基準に拡大・縮小）", () => {
+  it("カーソルの位置を動かさずに、幅を半分にする", () => {
+    const range = { mode: "absolute" as const, from: NOW - 2 * HOUR, to: NOW };
+    const anchor = NOW - 1.5 * HOUR; // 左から 25% の位置
+    const next = zoomAround(range, anchor, 0.5, NOW, UNLIMITED);
+    // 幅は 1 時間。anchor は左から 25% の位置のまま
+    expect(next).toEqual({
+      mode: "absolute",
+      from: anchor - 0.25 * HOUR,
+      to: anchor + 0.75 * HOUR,
+    });
+  });
+
+  it("直近モードのカーソル拡大は、固定モードになる（右端が動くため）", () => {
+    const next = zoomAround({ mode: "relative", durationMs: HOUR }, NOW - 0.5 * HOUR, 0.8, NOW, UNLIMITED);
+    expect(next.mode).toBe("absolute");
+  });
+
+  it("右端が今を越えるときは、今まで寄せる（幅は保つ）", () => {
+    // 直近 1 時間（右端は今）の、今の 10 分前にカーソル。2 倍に広げると右端が今を越えるので寄せる
+    const anchor = NOW - 10 * MINUTE;
+    const next = zoomAround({ mode: "relative", durationMs: HOUR }, anchor, 2, NOW, UNLIMITED);
+    expect(next).toEqual({ mode: "absolute", from: NOW - 2 * HOUR, to: NOW });
+  });
+
+  it("上限を超えない", () => {
+    const max = 90 * 24 * HOUR;
+    const range = { mode: "absolute" as const, from: NOW - 60 * 24 * HOUR, to: NOW };
+    const next = zoomAround(range, NOW - 30 * 24 * HOUR, 2, NOW, max);
+    expect(next.mode === "absolute" && next.to - next.from).toBeLessThanOrEqual(max);
   });
 });
 

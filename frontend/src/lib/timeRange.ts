@@ -45,6 +45,11 @@ export function maxRangeMs(isMultiTenant: boolean): number {
   return isMultiTenant ? 90 * DAY : Number.POSITIVE_INFINITY;
 }
 
+/** このビルド（VITE_AUTH_MODE）での、表示できる最長の期間 */
+export function maxRangeForBuild(): number {
+  return maxRangeMs(import.meta.env.VITE_AUTH_MODE === "multi_tenant");
+}
+
 /** 範囲を、今の時刻を基準に、開始と終了（ミリ秒）に直す */
 export function resolveRange(range: TimeRange, now: number): ResolvedRange {
   if (range.mode === "relative") {
@@ -97,6 +102,32 @@ export function zoomRange(range: TimeRange, factor: number, now: number, maxMs: 
     to = now;
   }
   return clampToMax({ mode: "absolute", from, to }, maxMs);
+}
+
+/**
+ * カーソルの位置（anchor の時刻）を動かさずに、幅を factor 倍にする。
+ * Grafana の「カーソル位置を中心に拡大・縮小」と同じ。anchor が範囲の左寄りなら左側が、
+ * 右寄りなら右側が大きく変わる（anchor から見た左右の比率を保つ）。
+ * 右端が今を越えるときは、今まで寄せる。固定モードになる。
+ */
+export function zoomAround(
+  range: TimeRange,
+  anchor: number,
+  factor: number,
+  now: number,
+  maxMs: number,
+): TimeRange {
+  const { from, to } = resolveRange(range, now);
+  const span = clampSpan((to - from) * factor, maxMs);
+  // anchor より左の割合（0〜1）を保つ。範囲の外にある anchor でも、比率のまま計算する
+  const ratio = (anchor - from) / (to - from);
+  let nextFrom = anchor - ratio * span;
+  let nextTo = nextFrom + span;
+  if (nextTo > now) {
+    nextFrom -= nextTo - now;
+    nextTo = now;
+  }
+  return clampToMax({ mode: "absolute", from: nextFrom, to: nextTo }, maxMs);
 }
 
 /** 「今に戻る」: 幅はそのままで、右端を現在時刻にした直近モードにする */
