@@ -1,5 +1,5 @@
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../test/test-utils";
 import { DEFAULT_RANGE } from "../lib/timeRange";
@@ -10,7 +10,14 @@ vi.mock("../hooks/useNow", () => ({
   useNow: () => new Date("2024-01-01T01:00:00.000Z").getTime(),
 }));
 
+beforeEach(() => {
+  // 操作の時点の現在時刻で計算するため、時計だけを固定する（01:00 UTC）
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2024-01-01T01:00:00.000Z"));
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   useTimeRangeStore.setState({ range: DEFAULT_RANGE });
 });
 

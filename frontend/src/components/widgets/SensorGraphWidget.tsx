@@ -46,7 +46,9 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const setRange = useTimeRangeStore((s) => s.setRange);
   // 直近モードでは、横軸（表示範囲）を時間経過で動かす。毎秒ではなく、取り直す間隔（5 秒）ごとに動かす
   // （毎秒動かすと、取得のキーが毎秒変わり、グラフが毎秒描き直されて点滅するため）
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  // 再描画の合図（30 秒ごと）。表示の範囲は、描画の時点の現在時刻で計算する（範囲の変更がすぐ反映されるように）
+  useNow(LIVE_CHART_INTERVAL_MS);
+  const now = Date.now();
   const bounds = resolveRange(range, now);
   const { data } = useDownsampledReadings(
     widget.sensorId,
