@@ -1,3 +1,8 @@
+/**
+ * ダッシュボードに置かれた1つのウィジェットの枠。
+ * 種類に応じた中身（WidgetBody）を選び、編集（WidgetFormModal）と削除の操作を付ける。
+ * ドラッグで位置を変えられるように、つまみ（widget-drag-handle）を表示する。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -10,6 +15,7 @@ import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
 import { SensorGraphWidget } from "./widgets/SensorGraphWidget";
 import { StatValueWidget } from "./widgets/StatValueWidget";
 
+/** ウィジェットの種類（type）に応じて、中身の部品を切り替える。未知の種類は注意文を出す。 */
 function WidgetBody({ widget }: { widget: Widget }) {
   switch (widget.type) {
     case "SensorGraph":
@@ -27,6 +33,7 @@ function WidgetBody({ widget }: { widget: Widget }) {
   }
 }
 
+/** ウィジェットの枠（種類の中身・編集・削除）。 */
 export function WidgetCard({
   widget,
   dashboard,
@@ -37,6 +44,7 @@ export function WidgetCard({
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
 
+  // 削除後は、ダッシュボードを取り直して、画面から消す
   const deleteMutation = useMutation({
     mutationFn: () => deleteWidget(widget.id),
     onSuccess: () => {

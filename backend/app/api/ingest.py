@@ -1,4 +1,11 @@
-"""POST /api/ingest/readings — センサー値の取り込み（単発 or バッチ）。"""
+"""POST /api/ingest/readings — センサー値の取り込み（単発 or バッチ）。
+
+デバイスはここに測定値を送る。流れ:
+1. 認証（verify_ingest_api_key）と、レート制限（_ingest_rate_limit）
+2. 本文の検査（JSON・必須項目）
+3. 取り込みキー（ingestKey）からセンサーを探す（無い・無効なら拒否）
+4. 受信バッファに入れて、すぐ 202 Accepted を返す（DB への書き込みは 1 秒ごとにまとめて行う）
+"""
 import functools
 import json
 from collections.abc import Callable
@@ -45,6 +52,7 @@ def _ingest_rate_limit(handler: Callable[..., Any]) -> Callable[..., Any]:
     return gated
 
 
+# 取り込み API。202（受け付けた。まだ DB には入っていないことがある）を返す
 @router.post(
     "/readings",
     status_code=status.HTTP_202_ACCEPTED,
@@ -54,6 +62,7 @@ def _ingest_rate_limit(handler: Callable[..., Any]) -> Callable[..., Any]:
 async def ingest_readings(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> IngestAccepted:
+    """測定値を受け付ける。本文は JSON（単発の value か、readings の配列）。"""
     try:
         raw_body = await request.json()
     except json.JSONDecodeError as exc:
@@ -74,6 +83,7 @@ async def ingest_readings(
             status_code=status.HTTP_400_BAD_REQUEST, detail="value or readings is required"
         )
 
+    # 取り込みキーは全体で一意（SaaS でも self-hosted でも、キーだけでセンサーが決まる）
     sensor_query = select(Sensor).where(Sensor.ingest_key == payload.ingest_key)
     result = await session.exec(sensor_query)
     sensor = result.first()

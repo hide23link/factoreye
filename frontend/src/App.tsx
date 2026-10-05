@@ -1,3 +1,11 @@
+/**
+ * 画面の土台（ヘッダー、メニュー、画面の切り替え）と、ログインの判定。
+ *
+ * 動作モード:
+ * - self-hosted（VITE_AUTH_MODE が multi_tenant 以外）: ログイン無しで、すぐ画面を表示する
+ * - SaaS（multi_tenant）: 起動時に保存されたリフレッシュトークンで復元を試み、
+ *   復元できなければログイン画面を表示する
+ */
 import { useEffect } from "react";
 
 import { LoginPage } from "./components/auth/LoginPage";
@@ -11,18 +19,22 @@ import { useHealthStore } from "./store/useHealthStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
 
+// ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。true なら SaaS 版
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
 
+// 上部メニューの項目（画面の名前と、切り替える先）
 const NAV_ITEMS: { value: AppView; label: string }[] = [
   { value: "main", label: "ダッシュボード" },
   { value: "settings", label: "設定" },
   { value: "wizard", label: "セットアップガイド" },
 ];
 
+/** バックエンドとの接続状態を、色の点と文字で示す。30 秒ごとに確かめ直す。 */
 function HealthBadge() {
   const { health, error, check } = useHealthStore();
 
   useEffect(() => {
+    // 表示の直後に1回確かめ、以後は30秒ごとに確かめる（画面を閉じたら止める）
     void check();
     const interval = setInterval(() => void check(), 30000);
     return () => clearInterval(interval);
@@ -39,6 +51,7 @@ function HealthBadge() {
   );
 }
 
+/** SaaS 版で、ログイン中のワークスペース名・プラン・ログアウトを表示する（self-hosted では何も出さない）。 */
 function UserBadge() {
   const me = useAuthStore((s) => s.me);
   const clearAuth = useAuthStore((s) => s.clearAuth);
@@ -60,6 +73,7 @@ function UserBadge() {
   );
 }
 
+/** 上部メニュー。今の画面を強調し、押すと画面を切り替える。 */
 function Nav() {
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
@@ -84,6 +98,7 @@ function Nav() {
   );
 }
 
+/** ログイン後（または self-hosted）の画面の枠。ヘッダーと、選ばれた画面の本体を並べる。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
@@ -114,10 +129,14 @@ function AppShell() {
   );
 }
 
+/**
+ * 画面の最上位。認証の状態に応じて、読み込み中・ログイン画面・本体のいずれかを出す。
+ */
 function App() {
   const { accessToken, isInitializing, setInitializing, setAuth, clearAuth } = useAuthStore();
 
-  // multi-tenant: ページロード時にリフレッシュトークンでセッション復元
+  // multi-tenant: ページ読み込み時に、保存されたリフレッシュトークンでセッションを復元する。
+  // 成功すれば、アクセストークンと利用者の情報を入れる。失敗（期限切れなど）なら、ログイン状態を消す
   useEffect(() => {
     if (!IS_MULTI_TENANT) {
       setInitializing(false);

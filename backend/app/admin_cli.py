@@ -1,5 +1,7 @@
 """管理者アカウントの作成・パスワード変更・削除（テキストファイル admin/admins.txt を編集する）。
 
+コマンドラインから管理者を管理するための道具。管理者画面（Web）からは、作成・変更はできない。
+
 使い方（本番は backend コンテナ内で実行）:
     docker compose -f docker-compose.cloud.yml exec backend python -m app.admin_cli set-admin <ID>
     docker compose -f docker-compose.cloud.yml exec backend \
@@ -17,6 +19,10 @@ from app import admin_accounts
 
 
 def _prompt_new_password() -> str:
+    """新しいパスワードを、画面に表示せずに2回入力させる。
+
+    2 回が一致し、8 文字以上であることを確かめる。
+    """
     first = getpass.getpass("新しいパスワード（8文字以上）: ")
     second = getpass.getpass("もう一度入力: ")
     if first != second:
@@ -27,6 +33,7 @@ def _prompt_new_password() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """副コマンド（set-admin / remove-admin / list-admins）を実行する。終了コードを返す。"""
     parser = argparse.ArgumentParser(prog="python -m app.admin_cli", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

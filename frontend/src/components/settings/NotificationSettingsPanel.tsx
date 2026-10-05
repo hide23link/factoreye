@@ -1,9 +1,15 @@
+/**
+ * Discord 通知の設定パネル。
+ * 重故障と軽故障の送信先（Webhook URL）、有効/無効、重故障の再通知（間隔）を編集して保存する。
+ * 入力欄は、サーバーの値で初期化したあとは、利用者の編集を優先する（保存するまでサーバーには送らない）。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useNotificationSettings } from "../../hooks/queries";
 import { updateNotificationSettings } from "../../lib/api";
 
+/** 通知設定パネル。 */
 export function NotificationSettingsPanel() {
   const { data, isLoading } = useNotificationSettings();
   const queryClient = useQueryClient();
@@ -27,6 +33,7 @@ export function NotificationSettingsPanel() {
     }
   }, [data]);
 
+  // 保存: 入力中の値を、まとめてサーバーへ送る。成功したら「保存しました」を2秒出す
   const saveMutation = useMutation({
     mutationFn: () =>
       updateNotificationSettings({

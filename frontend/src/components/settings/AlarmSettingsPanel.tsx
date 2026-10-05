@@ -1,3 +1,7 @@
+/**
+ * アラームの一覧と、確認（既読）の操作。
+ * 状態（発生中・確認済み・解決済み・すべて）で絞り込める。既定は「発生中」。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -5,6 +9,7 @@ import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 import type { AlarmStatus } from "../../types";
 
+// 絞り込みのタブ（"all" は絞らない）
 const STATUS_TABS: { value: AlarmStatus | "all"; label: string }[] = [
   { value: "active", label: "発生中" },
   { value: "acknowledged", label: "確認済み" },
@@ -12,12 +17,14 @@ const STATUS_TABS: { value: AlarmStatus | "all"; label: string }[] = [
   { value: "all", label: "すべて" },
 ];
 
+/** アラームの設定パネル（一覧と、確認ボタン）。 */
 export function AlarmSettingsPanel() {
   const [statusFilter, setStatusFilter] = useState<AlarmStatus | "all">("active");
   const { data, isLoading } = useAlarms(statusFilter === "all" ? undefined : statusFilter);
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
 
+  // 「確認」を押したら、アラーム一覧を取り直して表示を更新する
   const ackMutation = useMutation({
     mutationFn: (alarmId: string) => acknowledgeAlarm(alarmId, "admin"),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["alarms"] }),

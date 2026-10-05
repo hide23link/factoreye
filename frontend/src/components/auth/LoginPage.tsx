@@ -1,10 +1,17 @@
+/**
+ * SaaS 版の入口の画面。「新規登録」と「ログイン」の2つのタブを持つ。
+ * 成功するとトークンを保存し、利用者の情報を読み込んでから、画面の本体へ進む。
+ * self-hosted では表示されない（App.tsx で SaaS のときだけ使う）。
+ */
 import { useState } from "react";
 
 import { fetchMe, loginUser, registerUser } from "../../lib/api";
 import { useAuthStore } from "../../store/useAuthStore";
 
+// 画面のタブ（ログイン・新規登録）
 type Tab = "login" | "register";
 
+/** ログインのフォーム（メールとパスワード）。 */
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,6 +19,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [loading, setLoading] = useState(false);
   const setAuth = useAuthStore((s) => s.setAuth);
 
+  // 送信: ログインして、トークンと利用者の情報を保存する。失敗したら理由を表示する
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -74,6 +82,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+/** 新規登録のフォーム（メール・パスワード・ワークスペースの名前）。登録と同時にログインする。 */
 function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -163,10 +172,12 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+// 親から受け取る値: 認証が済んだときに呼ぶ関数
 interface LoginPageProps {
   onAuthenticated: () => void;
 }
 
+/** ログイン・新規登録の画面（タブで切り替える）。 */
 export function LoginPage({ onAuthenticated }: LoginPageProps) {
   const [tab, setTab] = useState<Tab>("register");
 

@@ -1,9 +1,19 @@
+/**
+ * バックエンド API との通信をまとめたモジュール。
+ *
+ * 画面は、ここの関数だけを呼ぶ（fetch を直接使わない）。
+ * - request: 通常の呼び出し。JWT（ログイン）を自動で付け、401 なら一度だけ再発行して再試行する
+ * - rawFetch: 認証もリトライもしない、素の呼び出し（再発行そのものに使う）
+ * 応答が失敗（HTTP エラー）のときは、例外（Error）を投げる。呼び出し側（React Query 等）が受け止める。
+ */
 import type {
   Alarm,
   AuthTokens,
   Dashboard,
   DashboardDetail,
   MeResponse,
+  MigrationImportResult,
+  MigrationStatus,
   NotificationSettings,
   Reading,
   ReadingAggregate,
@@ -16,9 +26,11 @@ import type {
 } from "../types";
 import { getStoredRefreshToken, useAuthStore } from "../store/useAuthStore";
 
+// バックエンドのアドレス。ビルド時に決まる（.env の VITE_API_URL。既定は localhost:8000）
 export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 // ── 内部: 生リクエスト（認証なし、リトライなし）────────────────
+/** 認証もリトライもせず、JSON を送って受け取る。失敗（HTTP エラー）は例外にする。 */
 async function rawFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -35,6 +47,10 @@ async function rawFetch<T>(path: string, init?: RequestInit): Promise<T> {
 // 401 時にリフレッシュトークンで再試行する（無限ループ防止のため1回のみ）
 let _isRefreshing = false;
 
+/**
+ * リフレッシュトークンで、アクセストークンを新しくする。
+ * 成功なら true。失敗（期限切れ・トークン無し）なら、ログイン状態を消して false を返す。
+ */
 async function attemptTokenRefresh(): Promise<boolean> {
   if (_isRefreshing) return false;
   const refreshToken = getStoredRefreshToken();
@@ -56,6 +72,12 @@ async function attemptTokenRefresh(): Promise<boolean> {
 }
 
 // ── 公開: JWT 自動注入 + 401 リトライ ─────────────────────────
+/**
+ * 通常の API 呼び出し。
+ * - アクセストークンがあれば、Authorization ヘッダーに付ける
+ * - 401 なら、トークンを再発行して、同じ要求を一度だけ再試行する
+ * - 再発行もできなければ、「ログインし直してください」の例外にする
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const { accessToken } = useAuthStore.getState();
 
@@ -98,6 +120,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // ── Auth API (Phase 0.5) ──────────────────────────────────────
+// SaaS 版のログイン・登録・利用者の情報（self-hosted では使わない）
 
 export const registerUser = (data: {
   email: string;
@@ -126,6 +149,7 @@ export const fetchMe = (accessToken: string) =>
   });
 
 // ── Health ────────────────────────────────────────────────────
+// バックエンドの死活監視（画面の上部に接続状態を出すため）
 
 export interface HealthResponse {
   status: "ok" | "degraded";
@@ -136,6 +160,7 @@ export interface HealthResponse {
 export const fetchHealth = () => request<HealthResponse>("/health");
 
 // ── Sensors ───────────────────────────────────────────────────
+// センサーの一覧・作成・更新・削除
 
 export const fetchSensors = () => request<Sensor[]>("/api/sensors");
 
@@ -168,6 +193,7 @@ export const deleteSensor = (id: string) =>
   request<void>(`/api/sensors/${id}`, { method: "DELETE" });
 
 // ── Readings ──────────────────────────────────────────────────
+// 測定値の履歴と集計（グラフ・累計に使う）
 
 export const fetchSensorReadings = (sensorId: string, from?: string) => {
   const params = new URLSearchParams({ limit: "500" });
@@ -187,6 +213,7 @@ export const fetchSensorReadingsAggregate = (sensorId: string, from: string, to?
 };
 
 // ── Alarms ────────────────────────────────────────────────────
+// アラームの一覧と、確認（既読）の操作
 
 export const fetchAlarms = (status?: string) => {
   const params = status ? `?status=${status}` : "";
@@ -200,6 +227,7 @@ export const acknowledgeAlarm = (alarmId: string, acknowledgedBy: string) =>
   });
 
 // ── Dashboards ────────────────────────────────────────────────
+// ダッシュボードの一覧・作成・更新・削除（削除は論理削除）
 
 export const fetchDashboards = () => request<Dashboard[]>("/api/dashboards");
 
@@ -218,6 +246,7 @@ export const deleteDashboard = (id: string) =>
   request<void>(`/api/dashboards/${id}`, { method: "DELETE" });
 
 // ── Widgets ───────────────────────────────────────────────────
+// ウィジェットの追加・更新・削除
 
 export const addWidget = (
   dashboardId: string,
@@ -252,6 +281,7 @@ export const deleteWidget = (widgetId: string) =>
   request<void>(`/api/widgets/${widgetId}`, { method: "DELETE" });
 
 // ── Notification Settings ─────────────────────────────────────
+// Discord 通知の設定（送信先 URL、有効/無効、重故障の再通知）
 
 export const fetchNotificationSettings = () =>
   request<NotificationSettings>("/api/settings/notifications");
@@ -263,6 +293,7 @@ export const updateNotificationSettings = (data: Partial<NotificationSettings>) 
   });
 
 // ── Webhook Subscriptions（Phase 1: ノーコード連携）─────────────
+// Webhook の購読（イベントを、外部サービスの URL へ送る設定）
 
 export const fetchWebhookSubscriptions = () =>
   request<WebhookSubscription[]>("/api/settings/webhooks");
@@ -284,3 +315,60 @@ export const updateWebhookSubscription = (
 
 export const deleteWebhookSubscription = (id: string) =>
   request<void>(`/api/settings/webhooks/${id}`, { method: "DELETE" });
+
+// ── Migration（SaaS → OSS。設定画面「データ移行」から使う）──────
+
+export const fetchMigrationStatus = () => request<MigrationStatus>("/api/settings/migration/status");
+
+// SaaS: ログイン中のワークスペースを書き出す（gzip のバイナリなので request() を通さない）
+/**
+ * ログイン中のワークスペースを書き出す（SaaS 版）。
+ * JSON ではなく gzip のバイナリなので、request を通さず fetch で直接受け取り、Blob として返す。
+ */
+export async function downloadWorkspaceExport(): Promise<Blob> {
+  const { accessToken } = useAuthStore.getState();
+  const response = await fetch(`${API_BASE_URL}/api/settings/migration/export`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!response.ok) throw new Error(await migrationErrorMessage(response, "書き出し"));
+  return response.blob();
+}
+
+// self-hosted: 書き出したファイルを取り込む（dryRun のときは件数の確認だけ）
+/**
+ * 書き出しファイル（gzip）を取り込む（OSS 版）。
+ * dryRun: true なら、件数の確認だけ（DB は変わらない）。false なら実際に取り込む。
+ * withNotifications: true なら、通知設定も上書きして移す。
+ */
+export async function importWorkspaceFile(
+  file: Blob,
+  options: { dryRun: boolean; withNotifications: boolean },
+): Promise<MigrationImportResult> {
+  const params = new URLSearchParams({
+    dry_run: String(options.dryRun),
+    with_notifications: String(options.withNotifications),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/settings/migration/import?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/gzip" },
+    body: file,
+  });
+  if (!response.ok) throw new Error(await migrationErrorMessage(response, "取り込み"));
+  return response.json() as Promise<MigrationImportResult>;
+}
+
+// サーバーの detail（日本語の理由）があれば、それをそのまま表示する
+/**
+ * 失敗した応答から、画面に出す文言を取り出す。
+ * サーバーが detail（理由の文）を返していれば、それを使う。無ければ「〜に失敗しました（コード）」。
+ */
+async function migrationErrorMessage(response: Response, action: string): Promise<string> {
+  const text = await response.text();
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+  } catch {
+    // JSON でなければ下の汎用メッセージにする
+  }
+  return `${action}に失敗しました（${response.status}）`;
+}

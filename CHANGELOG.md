@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **取り込みのレート制限を、管理画面から期限付きで解除**: 管理画面の上部のカードで「60 分だけ解除」「今すぐ制限を戻す」を操作できる。期限（既定 60 分・最長 240 分）を過ぎると自動で既定の制限に戻る。状態はメモリのみ（再起動で既定に戻る）。`GET` / `PUT /api/admin/ingest-limit`
+- **SaaS → OSS の移行**: SaaS のワークスペースを書き出し（設定画面「データ移行」）、OSS の DB に取り込む（同じ画面・CLI）。ID と取り込みキーを保つ。測定値は差分の配列で圧縮（形式の版 2）。取り込みは1トランザクション、`dry_run` で件数を確認可能
 - **Webhook 連携**: センサー値の受信（`reading.received`）とアラーム発生（`alarm.triggered`）を、任意の URL へ JSON で送信。設定は設定画面の「Webhook連携」タブ
 - **送信先の制限（SSRF 対策）**: Webhook の送信先は `https` かつ公開 IP のみ。登録時と送信時に検証する。社内ネットワーク向けの例外は `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`（既定 `false`）
 - **管理者画面**（`/admin`、SaaS 版の運用者向け）: 件数の確認、ユーザーの閲覧・修正・削除
@@ -20,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた
+- センサー名の一意性を、ワークスペース内に変更（従来は DB 全体で一意）
+- 通知設定をワークスペースごとに持つように変更（従来は ID=1 の1行に固定）
+
+### Fixed
+- マルチテナントで、別のワークスペースが同じセンサー名を使えない問題を修正
+- マルチテナントで、アラームの Discord 通知が、そのワークスペースの設定でなく ID=1 の設定で送られる問題を修正
+- 取り込みキーが別のワークスペースと衝突したとき、500 ではなく 409 を返すように修正
 
 ### Removed
 - **【破壊的変更】Python プラグインシステムを廃止**: `/api/plugins` API、設定画面の「プラグイン」タブ、`plugins` / `plugin_configs` テーブルを削除（マイグレーション `c3d4e5f6a7b8`）。プラグインの設定値は失われる。拡張は Webhook で行う

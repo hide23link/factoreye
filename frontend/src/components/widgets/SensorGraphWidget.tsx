@@ -1,3 +1,7 @@
+/**
+ * 1センサーの測定値を、折れ線・棒・面グラフで表示するウィジェット。
+ * 横軸は「今」から直近 N 時間（timeRangeHours）の窓で、時間が経つと窓が動く（新しいデータが無くても動く）。
+ */
 import type { ReactNode } from "react";
 import {
   Area,
@@ -18,6 +22,7 @@ import { useNow } from "../../hooks/useNow";
 import { formatChartTime } from "../../lib/time";
 import type { Widget } from "../../types";
 
+/** センサーのグラフ。設定（色・グラフの種類・Y 軸の範囲）は widget.config に入っている。 */
 export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   // 「横軸: 直近 N 時間」（WidgetFormModalで設定）がそのまま表示ウィンドウの幅になる
@@ -38,6 +43,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   const domain: [number, number] = [now - windowMs, now];
   const formatTime = (ms: number) => formatChartTime(ms, hours);
 
+  // 測定値は新しい順で届くので、反転して古い順にしてからグラフに渡す
   const chartData = [...data.readings]
     .reverse()
     .map((r) => ({ time: new Date(r.recordedAt).getTime(), value: r.value }));
@@ -49,6 +55,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
     widget.config.yAxisMax ?? "auto",
   ];
 
+  // 横軸の共通の設定（時刻の数値を、表示用の文字列に変換する）
   const xAxisProps = {
     dataKey: "time",
     type: "number" as const,

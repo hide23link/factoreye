@@ -1,8 +1,13 @@
+/**
+ * 最新値を大きく表示するウィジェット（Grafana の Stat パネルを参考にした）。
+ * センサーのしきい値を超えると、背景と文字の色を変える。下部には直近の推移（スパークライン）を出す。
+ */
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import { useSensorReadings, useSensors } from "../../hooks/queries";
 import type { Sensor, Widget } from "../../types";
 
+// 値の状態。重故障・軽故障・正常
 type Severity = "critical" | "warning" | "normal";
 
 // センサー自身の軽故障/重故障しきい値（設定 > センサー管理で編集）に照らして色分けする。
@@ -23,6 +28,7 @@ function classifySeverity(value: number, sensor: Sensor): Severity {
   return "normal";
 }
 
+// 状態ごとの見た目（背景、文字、線の色、説明の文言）
 const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: string; label: string }> = {
   critical: { bg: "bg-red-50", text: "text-red-700", accent: "#dc2626", label: "🚨 重故障しきい値超過" },
   warning: { bg: "bg-yellow-50", text: "text-yellow-700", accent: "#ca8a04", label: "⚠️ 軽故障しきい値超過" },
@@ -31,6 +37,7 @@ const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: strin
 
 // Grafanaの「Stat」パネルを参考にした、最新値を大きく表示するウィジェット。
 // センサーのしきい値に応じて色が変わり、下部に直近の推移（スパークライン）を表示する
+/** 最新値のウィジェット。最新の測定値（新しい順の先頭）を表示する。 */
 export function StatValueWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const hours = widget.config.timeRangeHours ?? 1;
@@ -44,6 +51,7 @@ export function StatValueWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
+  // 最新の測定値（新しい順なので先頭）。無ければ「—」を出す
   const latest = data.readings[0];
   const decimals = widget.config.decimals ?? 1;
   const severity = latest ? classifySeverity(latest.value, sensor) : "normal";

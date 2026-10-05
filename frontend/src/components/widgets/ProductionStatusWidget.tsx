@@ -1,3 +1,9 @@
+/**
+ * 生産の状況のウィジェット。
+ * - 稼働中か停止中か: 直近の生産数（測定値）が、しきい値（onThreshold）を超えているか
+ * - 直近 1 時間と本日の累計: 測定値の合計（集計 API を使う）
+ * - 目標達成率: 本日の累計 ÷ 本日の目標（dailyTarget）
+ */
 import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
 import type { Widget } from "../../types";
 
@@ -9,12 +15,14 @@ function startOfCurrentMinute(offsetMs = 0): string {
   return d.toISOString();
 }
 
+/** 今日の 0 時（ローカル時間）を、UTC の ISO 文字列で返す。「本日累計」の開始時刻に使う。 */
 function startOfTodayLocal(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
 }
 
+/** 生産状況のウィジェット本体。 */
 export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const { data, isLoading } = useSensorReadings(widget.sensorId, 1);
@@ -32,6 +40,7 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
+  // 最新の生産数（新しい順の先頭）と、稼働判定のしきい値（既定 0）
   const latest = data.readings[0];
   const threshold = widget.config.onThreshold ?? 0;
   const isRunning = latest !== undefined && latest.value > threshold;

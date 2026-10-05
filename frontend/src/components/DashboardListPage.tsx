@@ -1,3 +1,7 @@
+/**
+ * ダッシュボードの一覧画面。名前を入れて新しく作れる。
+ * 1つもまだ無いときは、セットアップガイドへの案内を出す。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -5,6 +9,7 @@ import { useDashboards } from "../hooks/queries";
 import { createDashboard } from "../lib/api";
 import { useUiStore } from "../store/useUiStore";
 
+/** ダッシュボードの一覧（作成フォームと、一覧のボタン）。 */
 export function DashboardListPage() {
   const { data: dashboards, isLoading } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
@@ -12,6 +17,7 @@ export function DashboardListPage() {
   const queryClient = useQueryClient();
   const [newName, setNewName] = useState("");
 
+  // 作成後、そのダッシュボードを直接開く
   const createMutation = useMutation({
     mutationFn: () => createDashboard({ name: newName }),
     onSuccess: (dashboard) => {

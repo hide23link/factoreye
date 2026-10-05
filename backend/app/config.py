@@ -1,10 +1,19 @@
-"""FactorEye バックエンド設定。環境変数または .env から読み込む（.env.example 参照）。"""
+"""FactorEye バックエンド設定。環境変数または .env から読み込む（.env.example 参照）。
+
+使い方: 各項目は、同じ名前の環境変数（大文字、例: database_url → DATABASE_URL）で上書きできる。
+値は起動時に1回だけ読まれ、`settings` という1つのオブジェクトとして全体で共有される。
+"""
 from enum import StrEnum
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AuthMode(StrEnum):
+    """認証の動作モード。環境変数 AUTH_MODE で切り替える。
+
+    self-hosted（disabled）と SaaS（multi_tenant）で、API の公開範囲や、データの分け方が変わる。
+    """
+
     # self-hosted デフォルト: 認証なし（Phase 0 互換）
     DISABLED = "disabled"
     # クラウド版: JWT 必須、ワークスペース別データ分離
@@ -12,16 +21,27 @@ class AuthMode(StrEnum):
 
 
 class Settings(BaseSettings):
+    """設定の一覧。型が違う値（例: 数値の項目に文字列）は、起動時にエラーになる。"""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    # 実行環境。"production" 以外（既定は development）では、
+    # API の仕様書（/docs）と SQL のログを出す
     environment: str = "development"
+    # PostgreSQL の接続先。形式: postgresql+asyncpg://ユーザー:パスワード@ホスト:ポート/DB名
     database_url: str = "postgresql+asyncpg://factoreye:password@localhost:5432/factoreye"
+    # self-hosted の取り込み用の共有キー（X-API-Key ヘッダーと比べる）。本番では必ず変える
     ingest_api_key: str = "change-this-in-production"
+    # JWT（ログインのトークン）の署名に使う秘密の値。SaaS 版では必ず長い乱数に変える
     jwt_secret: str = "change-this-in-production"
+    # 画面のアドレス。CORS で、この1つだけを許可する（ほかのサイトからの API 呼び出しを防ぐ）
     frontend_url: str = "http://localhost:3001"
 
+    # 認証モード（AuthMode を参照）。既定は self-hosted（認証なし）
     auth_mode: AuthMode = AuthMode.DISABLED
+    # アクセストークンの有効期限（分）。短いほど安全だが、再ログインが増える
     jwt_access_expire_minutes: int = 15
+    # リフレッシュトークンの有効期限（日）。これを過ぎると、再ログインが必要になる
     jwt_refresh_expire_days: int = 30
     # 管理者トークンはリフレッシュ不可（期限切れ後は再ログイン）。通常ユーザーより短く保つ
     admin_access_expire_minutes: int = 60
@@ -36,7 +56,9 @@ class Settings(BaseSettings):
 
     @property
     def debug(self) -> bool:
+        """開発用の表示（API の仕様書、SQL のログ）を出すかどうか。production 以外で True。"""
         return self.environment != "production"
 
 
+# アプリ全体で使う設定の実体。import するだけで、環境変数（と .env）から読み込まれる
 settings = Settings()

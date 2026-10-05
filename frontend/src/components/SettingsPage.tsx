@@ -1,19 +1,27 @@
+/**
+ * 設定画面。タブで、センサー・アラーム・通知・Webhook・データ移行の各パネルを切り替える。
+ * 選んでいるタブだけを描画する（ほかのパネルは作らない＝不要な通信をしない）。
+ */
 import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
+import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
-type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks";
+// 設定画面のタブの種類（値は、下の描画の分岐と対応させる）
+type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration";
 
 const TABS: { value: SettingsTab; label: string }[] = [
   { value: "sensors", label: "センサー" },
   { value: "alarms", label: "アラーム" },
   { value: "notifications", label: "通知" },
   { value: "webhooks", label: "Webhook連携" },
+  { value: "migration", label: "データ移行" },
 ];
 
+/** 設定画面の本体。初期表示はセンサーのタブ。 */
 export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("sensors");
 
@@ -43,6 +51,7 @@ export function SettingsPage() {
         {tab === "alarms" && <AlarmSettingsPanel />}
         {tab === "notifications" && <NotificationSettingsPanel />}
         {tab === "webhooks" && <WebhookSettingsPanel />}
+        {tab === "migration" && <MigrationSettingsPanel />}
       </div>
     </div>
   );

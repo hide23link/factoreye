@@ -11,6 +11,9 @@
   DELETE /api/admin/users/{id}       → ユーザーと関連データを物理削除
   GET    /api/admin/ingest-limit     → 取り込みのレート制限の状態（期限付き解除の有無）
   PUT    /api/admin/ingest-limit     → 期限付きで解除する／解除を止める
+
+管理者は、利用者（SaaS の users）とは別の仕組み。すべて require_admin（管理者トークン）で守る。
+ただし login は、トークンを作るための入口なので、require_admin は付けず、レート制限で守る。
 """
 
 import logging
@@ -53,16 +56,22 @@ _logger = logging.getLogger(__name__)
 
 
 class AdminLoginRequest(CamelModel):
+    """管理者のログイン入力（管理者 ID とパスワード）。"""
+
     admin_id: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=200)
 
 
 class AdminTokenResponse(CamelModel):
+    """管理者のトークン。有効期限は短い（設定 admin_access_expire_minutes、既定 60 分）。"""
+
     access_token: str
     token_type: str = "bearer"
 
 
 class AdminOverview(CamelModel):
+    """全体の件数。DB の使用量（バイト）を含む。"""
+
     user_count: int
     workspace_count: int
     sensor_count: int
@@ -71,6 +80,8 @@ class AdminOverview(CamelModel):
 
 
 class AdminUserSummary(CamelModel):
+    """利用者の一覧に出す1行分（ワークスペースと、その集計）。"""
+
     id: UUID
     email: str
     created_at: datetime
@@ -83,6 +94,8 @@ class AdminUserSummary(CamelModel):
 
 
 class AdminSensorSummary(CamelModel):
+    """利用者の詳細に出す、センサー1件分の集計。"""
+
     id: UUID
     name: str
     unit: str
@@ -93,10 +106,14 @@ class AdminSensorSummary(CamelModel):
 
 
 class AdminUserDetail(AdminUserSummary):
+    """利用者の詳細（一覧の項目に、センサーごとの状況を加える）。"""
+
     sensors: list[AdminSensorSummary]
 
 
 class AdminUserUpdate(CamelModel):
+    """利用者の修正の入力。送られた項目だけを変える（すべて省略可）。"""
+
     email: EmailStr | None = None
     plan: Literal["free", "pro"] | None = None
     # 指定時はパスワードを再設定し、既存のリフレッシュトークンを全て失効させる
@@ -188,6 +205,7 @@ async def _load_user_summaries(
 
 
 async def _get_user_or_404(session: AsyncSession, user_id: UUID) -> User:
+    """利用者を1件取り出す。無ければ 404。"""
     user = await session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
@@ -197,6 +215,7 @@ async def _get_user_or_404(session: AsyncSession, user_id: UUID) -> User:
 # ── エンドポイント ────────────────────────────────────────────
 
 
+# 管理者のログイン。試行回数は 1 分に 5 回まで（総当たりを防ぐ）
 @router.post("/login", response_model=AdminTokenResponse)
 @limiter.limit("5/minute")
 async def admin_login(
@@ -217,6 +236,10 @@ async def overview(
     _admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminOverview:
+    """全体の件数（利用者・ワークスペース・センサー・測定値）と、DB の使用量。
+
+    センサーと測定値は、SaaS のもの（workspace_id がある）だけを数える。
+    """
     user_count = (await session.exec(select(func.count(col(User.id))))).one()
     workspace_count = (await session.exec(select(func.count(col(Workspace.id))))).one()
     sensor_count = (
@@ -296,6 +319,7 @@ async def get_user(
     _admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminUserDetail:
+    """利用者の詳細。ワークスペースのセンサーごとに、測定値の件数・最終時刻・発生中のアラーム数を返す。"""
     summaries = await _load_user_summaries(session, user_id=user_id)
     if not summaries:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
@@ -358,6 +382,11 @@ async def update_user(
     admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminUserDetail:
+    """利用者の修正（メール・プラン・パスワード）。
+
+    - パスワードを変えると、既存のログイン（リフレッシュトークン）をすべて無効にする
+    - プランは、その利用者のワークスペースすべてに反映する
+    """
     user = await _get_user_or_404(session, user_id)
 
     if body.email is not None and body.email != user.email:
@@ -394,6 +423,11 @@ async def delete_user(
     admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """利用者と、そのワークスペースのデータを、すべて物理削除する（取り消せない）。
+
+    削除の順序: 子（ウィジェット設定 → ウィジェット → ダッシュボード）→ 親（センサー、通知設定、
+    ワークスペース）→ 利用者。外部キーに ON DELETE CASCADE が無いものは、ここで順に消す。
+    """
     user = await _get_user_or_404(session, user_id)
 
     # 外部キーに ON DELETE が無い依存は、子から順に明示的に消す。

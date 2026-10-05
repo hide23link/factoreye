@@ -54,12 +54,12 @@ flowchart LR
 
 | テーブル | 役割 | 主な内容 |
 |---|---|---|
-| `sensors` | センサー | 名前、`ingest_key`（一意）、単位、しきい値4項目、不感帯、有効/無効 |
+| `sensors` | センサー | 名前（ワークスペース内で一意）、`ingest_key`（全体で一意。取り込みAPIがキーだけで特定するため）、単位、しきい値4項目、不感帯、有効/無効 |
 | `readings` | 測定値 | sensor_id、値、`recorded_at`（取り込んだサーバー時刻）。`(sensor_id, recorded_at)` で索引 |
 | `alarms` | アラーム | sensor_id、状態（active / acknowledged / resolved）、重要度（warning / critical）、しきい値方向（min / max）、確認者、`last_notified_at`。ユーザー操作では削除しない（センサーを削除すると関連分も削除される） |
 | `dashboards` | ダッシュボード | 名前、説明、レイアウト設定。削除は論理削除（`deleted_at`） |
 | `widgets` / `widget_configs` | ウィジェット | ダッシュボードの配置（12列グリッド）、種別、センサーとの紐付け、設定 |
-| `notification_settings` | 通知設定 | 1行のみ（id=1）。重故障・軽故障それぞれの Discord Webhook URL、有効/無効、重故障の再通知 |
+| `notification_settings` | 通知設定 | ワークスペースごとに1行（self-hosted は NULL の1行）。重故障・軽故障それぞれの Discord Webhook URL、有効/無効、重故障の再通知 |
 | `webhook_subscriptions` | Webhook 購読 | イベント種別、送信先 URL、有効/無効 |
 | `users` / `workspaces` / `refresh_tokens` | 認証（SaaS のみ） | ユーザー、ワークスペース（テナント）、リフレッシュトークン |
 
@@ -91,6 +91,9 @@ flowchart LR
 | GET / PUT | `/api/settings/notifications` | Discord 通知設定 | なし |
 | GET / POST | `/api/settings/webhooks` | Webhook 購読の一覧・作成 | なし |
 | PUT / DELETE | `/api/settings/webhooks/{id}` | Webhook 購読の更新・削除 | なし |
+| GET | `/api/settings/migration/status` | 移行機能の状態（書き出し・取り込みのどちらが使えるか） | なし |
+| GET | `/api/settings/migration/export` | ワークスペースを書き出す（SaaS のみ。404 は self-hosted） | JWT |
+| POST | `/api/settings/migration/import?dry_run=&with_notifications=` | 書き出しファイル（gzip の本文）を取り込む（self-hosted のみ。404 は SaaS） | なし |
 | POST | `/api/auth/register` `/login` `/refresh` `/logout` | 認証（SaaS のみ） | なし |
 | GET | `/api/me` | 自分のユーザーとワークスペース（SaaS のみ） | JWT |
 | `/api/admin/*` | 管理者 API（SaaS のみ、§10） | 管理者トークン | 管理者 |
@@ -238,6 +241,19 @@ SaaS の運用者向け。一般ユーザーのログイン画面とは別物で
 
 ---
 
+### 10.1 SaaS → OSS の移行
+
+SaaS（マルチテナント）の1ワークスペースを、OSS（self-hosted）の DB へ移す。
+
+- **書き出し（SaaS）**: ログイン中のワークスペースを、gzip の JSON Lines（`factoreye-workspace-export`、形式の版 2）に書き出す。読み取りのみで、REPEATABLE READ の一貫した時点を取る。画面は「設定」→「データ移行」
+- **取り込み（OSS）**: 書き出しファイルを、移行先の DB に1トランザクションで取り込む。`dry_run` では件数だけ確認して戻す。失敗すると何も残さない。画面は同じ「データ移行」タブ（CLI は `python -m app.migrate_saas_to_oss`）
+- **移るもの**: センサー（取り込みキー `ingest_key` を含む）、測定値、アラーム、ダッシュボード（削除済みを除く）、ウィジェット、ウィジェット設定、Webhook 購読。通知設定は `with_notifications` を指定したときだけ、移行先の ID=1 を上書きする
+- **移らないもの**: ユーザー、リフレッシュトークン、ワークスペース（OSS には認証がないため）
+- **ID**: センサー・ダッシュボードなどの UUID と取り込みキーは、そのまま保つ。測定値の ID は移行先で振り直す
+- **測定値の形式（版 2）**: 1行 = 1センサー・最大 5,000 件。`[値, 前の行からの差分（マイクロ秒）]` の配列で、時刻は往復で完全に戻る。10 センサー・90 日分（約 1,550 万件）で、約 90〜110 MB（欠測や不規則な間隔があっても、ほぼ同程度）
+- **スキーマ版の照合**: 書き出し元と移行先の `alembic_version` が一致しないと取り込まない
+- **権限**: 書き出し API は SaaS のみ（JWT で自分のワークスペースに限定）。取り込み API は self-hosted のみで、認証はない（ネットワーク境界で守る前提。§11 の注意と同じ）。もう一方のモードでは 404 を返す
+
 ## 11. 運用
 
 ### ヘルスチェック
@@ -290,4 +306,6 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - Webhook: 再試行なし、同時送信数の制限なし、DNS rebinding 未対応（§7）
 - 測定値の保持期間は、self-hosted では無期限（削除ポリシーなし）
 - 管理画面: ユーザーのページング、管理者の画面からの追加・削除は未対応
-- 次の段階の候補: ルールベースの設定、ワークスペースのエクスポート・インポート（移行ツール）
+- 次の段階の候補: ルールベースの設定
+- 移行の制限: 同じワークスペースを、同じ DB に取り込み直すと失敗する（ID が重なるため。削除済みの行も残っているため同様）。取り込みファイルのサイズに上限はない
+- 移行後のデバイス: OSS 版ではデバイスの送信に `X-API-Key` ヘッダー（`INGEST_API_KEY`）が必要。SaaS 版の `ingestKey` だけの送信とは異なる（§10.1）

@@ -1,3 +1,8 @@
+/**
+ * ウィジェットの追加・編集の小窓。
+ * 種類を選ぶと、その種類に必要な項目（センサー、グラフの色、表示範囲、しきい値など）だけを出す。
+ * 送信すると、追加は新しい位置（一番下）に、編集は既存の位置のまま保存する。
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { createPortal } from "react-dom";
@@ -6,6 +11,7 @@ import { useSensors } from "../hooks/queries";
 import { addWidget, updateWidget } from "../lib/api";
 import type { DashboardDetail, Widget, WidgetConfig, WidgetType } from "../types";
 
+// ウィジェットの種類の一覧（選択欄の項目）
 const WIDGET_TYPES: { value: WidgetType; label: string }[] = [
   { value: "SensorGraph", label: "センサーグラフ" },
   { value: "AlarmAlert", label: "アラーム一覧" },
@@ -26,16 +32,19 @@ const COLOR_PRESETS = [
   { label: "グレー", value: "#4b5563" },
 ];
 
+/** #RRGGBB の色を、[赤, 緑, 青]（0〜255）に分ける。 */
 function hexToRgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.replace("#", ""), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** [赤, 緑, 青] を #RRGGBB にする（範囲外は 0〜255 に丸める）。 */
 function rgbToHex(r: number, g: number, b: number): string {
   const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v) || 0));
   return `#${[r, g, b].map((v) => clamp(v).toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** 新しいウィジェットを置く位置。今あるウィジェットの一番下の行の次の行、左端。 */
 function nextGridPosition(dashboard: DashboardDetail): { gridColumn: number; gridRow: number } {
   if (dashboard.widgets.length === 0) return { gridColumn: 1, gridRow: 1 };
   const maxRow = Math.max(...dashboard.widgets.map((w) => w.gridRow + w.gridHeight - 1));
@@ -46,10 +55,12 @@ function nextGridPosition(dashboard: DashboardDetail): { gridColumn: number; gri
 // "" | number で保持し、送信時にundefined(=auto)へ変換する
 type NumOrBlank = number | "";
 
+/** 空欄は undefined（自動・未設定）にする。数値はそのまま。 */
 function toConfigNumber(v: NumOrBlank): number | undefined {
   return v === "" ? undefined : v;
 }
 
+/** ウィジェットの追加・編集の小窓の本体。widget があれば編集、無ければ追加になる。 */
 export function WidgetFormModal({
   dashboard,
   widget,
@@ -59,6 +70,7 @@ export function WidgetFormModal({
   widget?: Widget;
   onClose: () => void;
 }) {
+  // 編集のときは、種類を変えられない（種類ごとに、設定の形が違うため）
   const isEdit = widget !== undefined;
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
@@ -84,6 +96,7 @@ export function WidgetFormModal({
   const [dailyTarget, setDailyTarget] = useState<NumOrBlank>(widget?.config.dailyTarget ?? "");
   const [decimals, setDecimals] = useState<NumOrBlank>(widget?.config.decimals ?? 1);
 
+  // 種類ごとに、保存する設定（config）の中身を変える。ほかの種類の項目は含めない
   const buildConfig = (): WidgetConfig =>
     type === "MultiSensorComparison"
       ? {
@@ -112,6 +125,7 @@ export function WidgetFormModal({
               }
             : {};
 
+  // 保存: 編集なら更新、追加なら新しいウィジェットを作る（成功したら、ダッシュボードを取り直して閉じる）
   const saveMutation = useMutation({
     mutationFn: () => {
       const config = buildConfig();
@@ -137,6 +151,7 @@ export function WidgetFormModal({
     },
   });
 
+  // 種類ごとに、入力欄を出すかどうか
   const needsSingleSensor =
     type === "SensorGraph" || type === "ProductionStatus" || type === "StatValue";
   const needsMultiSensor = type === "MultiSensorComparison";

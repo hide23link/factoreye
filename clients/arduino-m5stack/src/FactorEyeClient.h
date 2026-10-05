@@ -20,8 +20,12 @@
 
 #include <Arduino.h>
 
+// M5Stack（ESP32）用の、FactorEye への送信クライアント。
+// 状態（持っているもの）: 接続先・認証キー、未送信のリングバッファ（最大 100 件）、連続の失敗回数、次に送ってよい時刻。
+// メモリを使う量は固定（動的なメモリ確保をほとんどしない）。M5Stack のメモリ不足を避けるため。
 class FactorEyeClient {
  public:
+  // 生成しただけでは通信しない。begin() で接続先を設定してから使う
   FactorEyeClient();
 
   // host: 例 "http://192.168.1.50:8000"（末尾スラッシュ不要）
@@ -29,6 +33,7 @@ class FactorEyeClient {
   void begin(const String& host, const String& apiKey);
 
   // ingestKey に対応するセンサーへ value を送信する。
+  // 1回の呼び出しで、送信を最大1回だけ試みる（失敗しても待たない。loop() を止めないため）。
   // 戻り値: 新しい値が（バッファ分も含め）実際に送信できた場合は true。
   //         WiFi未接続・バックオフ中・送信失敗の場合は false（内部でバッファに保持済み）。
   bool send(const String& ingestKey, float value);
@@ -37,12 +42,15 @@ class FactorEyeClient {
   size_t pendingCount() const;
 
  private:
+  // 未送信の1件（どのセンサーの、どの値か）
   struct BufferedReading {
     String ingestKey;
     float value;
   };
 
+  // 未送信の保存件数の上限（超えたら一番古いものから捨てる）
   static const size_t kBufferCapacity = 100;
+  // 送信失敗が続いたときの待ち時間の上限（ミリ秒）
   static const unsigned long kBackoffCapMs = 30000;
 
   String _host;
@@ -52,6 +60,7 @@ class FactorEyeClient {
   uint8_t _consecutiveFailures;
   unsigned long _nextAttemptAtMs;
 
+  // 以下は内部の処理（外から直接は使わない）
   void _pushToBuffer(const String& ingestKey, float value);
   void _removeBufferedFor(const String& ingestKey);
   void _onSendResult(bool success);

@@ -1,3 +1,7 @@
+/**
+ * 複数のセンサーの値を、1つのグラフに重ねて比較するウィジェット。
+ * センサーごとに取得を分けて（useQueries）、時刻をそろえて1本の表にしてから描く。
+ */
 import { useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
@@ -17,9 +21,12 @@ import { fetchSensorReadings } from "../../lib/api";
 import { formatChartTime } from "../../lib/time";
 import type { Widget } from "../../types";
 
+// センサーごとの線の色（順番に使う。足りなくなったら最初から繰り返す）
 const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
+// 取り直す間隔（ミリ秒）
 const POLL_INTERVAL_MS = 5000;
 
+/** 複数センサーの比較グラフ。比較するセンサーは widget.config.sensorIds で決まる。 */
 export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const sensorIds = widget.config.sensorIds ?? [];
@@ -45,6 +52,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const domain: [number, number] = [now - windowMs, now];
   const formatTime = (ms: number) => formatChartTime(ms, hours);
 
+  // 時刻ごとに、各センサーの値を1行にまとめる（同じ時刻の値は、同じ行に入る）
   const seriesByTime = new Map<number, Record<string, number>>();
   sensorIds.forEach((sensorId, i) => {
     const readings = results[i]?.data?.readings ?? [];

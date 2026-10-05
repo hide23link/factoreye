@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """GPIOのデジタル入力（ドアセンサー・人感センサー等）をFactorEyeへ送る例。
 
+流れ: 一定間隔で、入力が ON か OFF かを読み、1.0 か 0.0 にして FactorEyeClient で送る。
+
+
 architecture docの「raspberry-pi-rest-adapter（GPIO→REST）」の典型例: ON/OFFのデジタル
 信号を 1.0/0.0 の値としてFactorEyeに送る。Raspberry Pi OSに標準で入っている gpiozero
 を使う（入っていない環境では `pip install gpiozero` で追加）。
@@ -24,6 +27,7 @@ from gpiozero import DigitalInputDevice
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from factoreye_client import FactorEyeClient  # noqa: E402
 
+# 接続先・認証・取り込みキー・GPIO の番号（BCM）・送信の間隔。環境に合わせて書き換える
 FACTOREYE_HOST = "http://192.168.1.50:8000"
 INGEST_API_KEY = "change-this-in-production"
 INGEST_KEY = "rpi-door-sensor-1"
@@ -32,6 +36,7 @@ SEND_INTERVAL_SECONDS = 5.0
 
 
 def main() -> None:
+    """入力を一定間隔で読み、送り続ける（Ctrl+C で止める）。"""
     sensor = DigitalInputDevice(GPIO_PIN)
     client = FactorEyeClient(FACTOREYE_HOST, INGEST_API_KEY)
 
