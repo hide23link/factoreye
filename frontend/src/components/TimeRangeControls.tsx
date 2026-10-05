@@ -72,7 +72,7 @@ export function TimeRangeControls() {
         type="button"
         aria-label="前へ"
         onClick={() => setRange(panRange(range, -1, now, maxMs))}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
       >
         ◀
       </button>
@@ -80,7 +80,7 @@ export function TimeRangeControls() {
         type="button"
         aria-label="今に戻る"
         onClick={() => setRange(nowRange(range, now))}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
       >
         今
       </button>
@@ -90,7 +90,7 @@ export function TimeRangeControls() {
           aria-label="一時停止"
           // 今の表示範囲を固定して、動きを止める（再開は「今」で、直近モードに戻す）
           onClick={() => setRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
-          className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+          className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           一時停止
         </button>
@@ -99,15 +99,16 @@ export function TimeRangeControls() {
         type="button"
         aria-label="後ろへ"
         onClick={() => setRange(panRange(range, 1, now, maxMs))}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
       >
         ▶
       </button>
+      <span className="hidden gap-2 sm:flex">
       <button
         type="button"
         aria-label="縮小"
         onClick={() => setRange(zoomRange(range, 2, now, maxMs))}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
       >
         －
       </button>
@@ -115,11 +116,13 @@ export function TimeRangeControls() {
         type="button"
         aria-label="拡大"
         onClick={() => setRange(zoomRange(range, 0.5, now, maxMs))}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100"
+        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
       >
         ＋
       </button>
+      </span>
 
+      <span className="hidden sm:inline-block">
       <select
         aria-label="表示期間"
         value={presetKeyOf(range) ?? "custom"}
@@ -136,6 +139,7 @@ export function TimeRangeControls() {
         ))}
         {presetKeyOf(range) === null && <option value="custom">{describeRange(range)}</option>}
       </select>
+      </span>
 
       <span className="text-xs text-gray-500" data-testid="time-range-label">
         {range.mode === "relative" ? "自動で更新" : "固定"}：{describeRange(range)}
