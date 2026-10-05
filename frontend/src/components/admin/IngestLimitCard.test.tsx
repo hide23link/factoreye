@@ -67,7 +67,19 @@ describe("IngestLimitCard", () => {
 
     await user.click(await screen.findByRole("button", { name: "60 分だけ解除" }));
 
-    await waitFor(() => expect(adminApi.setIngestLimit).toHaveBeenCalledWith("tok", true));
+    await waitFor(() => expect(adminApi.setIngestLimit).toHaveBeenCalledWith("tok", true, 60));
+  });
+
+  it("240 分を選ぶと、240 分の解除を送る（長時間の負荷テスト用）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(adminApi.fetchIngestLimit).mockResolvedValue(LIMITED);
+    vi.mocked(adminApi.setIngestLimit).mockResolvedValue({ ...LIMITED, bypassed: true });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithQueryClient(<IngestLimitCard token="tok" onAuthError={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: "240 分だけ解除" }));
+
+    await waitFor(() => expect(adminApi.setIngestLimit).toHaveBeenCalledWith("tok", true, 240));
   });
 
   it("確認で取り消したときは、何も送らない", async () => {
