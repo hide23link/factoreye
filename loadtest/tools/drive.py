@@ -6,6 +6,7 @@
 """
 import argparse
 import json
+import os
 import time
 
 import httpx
@@ -13,6 +14,12 @@ import httpx
 
 def _patch_from_args(args: argparse.Namespace) -> dict[str, object]:
     patch: dict[str, object] = {"target_url": args.target, "allow_production": args.allow_production}
+    if args.oss:
+        # APIキーは環境変数から読む（コマンド履歴・プロセス一覧に残さないため）
+        key = os.environ.get("FACTOREYE_INGEST_API_KEY", "")
+        if not key:
+            raise SystemExit("--oss には環境変数 FACTOREYE_INGEST_API_KEY が必要です")
+        patch.update({"oss_mode": True, "ingest_api_key": key})
     for key, value in [
         ("users", args.users),
         ("sensors_per_user", args.sensors),
@@ -37,6 +44,8 @@ def main() -> None:
     p.add_argument("--duration", type=int, default=60)
     p.add_argument("--allow-production", action="store_true",
                    help="本番ホストへの実行を明示的に許可する")
+    p.add_argument("--oss", action="store_true",
+                   help="OSS 版（認証なし）向け。環境変数 FACTOREYE_INGEST_API_KEY を使う")
     p.add_argument("--report-every", type=int, default=10)
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="実行中に変更する項目（例: users=50）。--set-at 秒後に適用")
@@ -68,6 +77,7 @@ def main() -> None:
             f"users={s['users']['running']}/{s['users']['target']} sensors={s['users']['sensors']} "
             f"rps={m['rps']} total={m['total']} errors={m['errors']} ({m['errorRate']*100:.2f}%) "
             f"ingest_p95={ing.get('p95Ms')}ms"
+            + (f" kinds={m['errorKinds']}" if m.get("errorKinds") else "")
         )
 
     final = api.get("/api/status").json()
