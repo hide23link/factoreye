@@ -46,7 +46,7 @@ flowchart LR
 | Frontend | TypeScript / React 18 / Vite / Zustand / TanStack Query / Recharts / react-grid-layout |
 | 品質 | pytest・mypy・ruff・pip-audit（backend）、Vitest・ESLint・tsc・npm audit（frontend）、Playwright（E2E） |
 
-**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432。
+**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（backend 約 283 MB、frontend は nginx で配信し約 63 MB）。
 
 ---
 
@@ -356,3 +356,11 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - 移行後のデバイス: OSS 版ではデバイスの送信に `X-API-Key` ヘッダー（`INGEST_API_KEY`）が必要。SaaS 版の `ingestKey` だけの送信とは異なる（§10.1）
 - 一覧の件数が増えると、`total` の集計（件数を数える処理）と、ページの読み出しの両方のコストが増える。数十万件規模では見直す
 - 測定値の一覧（`readings`）は、列だけを読むようにしたが、読み出す件数（`limit`）そのものは減らしていない。グラフは `downsampled` を使う（§8）
+
+---
+
+## 14. 更新履歴
+
+| 日付 | 変更 |
+|---|---|
+| 2026-10-06 | Docker イメージを軽量化（§2）。frontend は Vite preview をやめ nginx で静的配信（428 MB → 63 MB）。backend は多段ビルドと、開発用依存（`requirements-dev.txt`）の分離（421 MB → 283 MB）。テスト（201 件）・mypy・ruff は Python 3.12 で通過 |

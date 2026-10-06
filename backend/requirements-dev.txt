@@ -1,0 +1,7 @@
+# テスト・型検査・Lint・依存監査（CI と開発用）。実行時依存は requirements.txt
+-r requirements.txt
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+mypy>=1.11.0
+ruff>=0.6.9
+pip-audit>=2.7.3

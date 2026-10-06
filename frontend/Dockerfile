@@ -1,4 +1,5 @@
-FROM node:20-slim
+# ビルド段: TypeScript検査とViteビルドを行う（devDependenciesはこの段にだけ残る）
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -10,11 +11,13 @@ COPY . .
 # LAN上の別ホストからアクセスする場合は、docker-compose.ymlと同じ階層の.envに
 # VITE_API_URL=http://<このホストのIP>:8000 を設定してビルドし直す必要がある。
 ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
 ARG VITE_AUTH_MODE
-ENV VITE_AUTH_MODE=$VITE_AUTH_MODE
-RUN npm run build
+RUN VITE_API_URL=$VITE_API_URL VITE_AUTH_MODE=$VITE_AUTH_MODE npm run build
+
+# 実行段: 静的ファイルをnginxで配信する（Node.jsとnode_modulesは含めない）
+FROM nginx:alpine
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 3001
-
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3001"]
