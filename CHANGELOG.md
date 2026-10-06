@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた
+- **Docker イメージを軽量化**: frontend は 428 MB → 63 MB（Vite preview をやめ、ビルド済みの静的ファイルを nginx で配信。多段ビルド）、backend は 421 MB → 283 MB（多段ビルド、実行時依存と開発用依存（`requirements-dev.txt`）を分離、`.dockerignore` に tests などを追加）
 - センサー名の一意性を、ワークスペース内に変更（従来は DB 全体で一意）
 - 通知設定をワークスペースごとに持つように変更（従来は ID=1 の1行に固定）
 - アラーム一覧 API（`GET /api/alarms`）に `limit`（1〜500、省略時は全件）と `offset` を追加。`total` は、ページで区切る前の件数。警告ウィジェットは状態ごとに新しい順 100 件まで取得する（応答が大きく、サーバーの CPU を使っていたため）
