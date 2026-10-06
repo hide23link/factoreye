@@ -17,6 +17,10 @@ from emulator.metrics import Metrics
 from emulator.scenario import Scenario
 from emulator.vuser import VirtualUser
 
+# セットアップの再試行（回数と間隔）。間隔は登録の制限（10 回/分）の窓より長くする
+_SETUP_ATTEMPTS = 5
+_SETUP_RETRY_WAIT_S = 65
+
 # 同時に行う登録・セットアップの数（起動直後の負荷を分散させる）
 _SETUP_CONCURRENCY = 10
 
@@ -117,9 +121,18 @@ class Runner:
 
     async def _bring_up(self, vu: VirtualUser) -> None:
         assert self._setup_sem is not None
-        async with self._setup_sem:
-            ok = await vu.setup()
-            if ok:
+        ok = False
+        # 登録は IP ごとに 10 回/分の制限がある。429 で失敗したユーザーは、
+        # 制限の窓（60 秒）を過ぎてから再試行する（諦めると、そのユーザーは一度も動かない）
+        for attempt in range(_SETUP_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(_SETUP_RETRY_WAIT_S)
+            async with self._setup_sem:
+                ok = await vu.setup()
+            if ok or self.state != "running" or self._users.get(vu.index) is not vu:
+                break
+        if ok:
+            async with self._setup_sem:
                 await vu.ensure_sensors()
         # 途中で停止・縮小された場合は起動しない
         if self.state == "running" and self._users.get(vu.index) is vu and ok:

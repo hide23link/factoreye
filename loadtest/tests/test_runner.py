@@ -180,3 +180,32 @@ def test_cleanup_rejects_bad_admin_login() -> None:
             await runner.cleanup_remote(TARGET, "x", "y")
 
     _run(scenario_run())
+
+
+def test_setup_is_retried_after_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 登録・ログインが一度 429 になっても、ユーザーは諦めずに再試行して起動する
+    monkeypatch.setattr("emulator.runner._SETUP_RETRY_WAIT_S", 0.05)
+
+    class RateLimitedOnce(FakeServer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.limited = 0
+
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path in ("/api/auth/register", "/api/auth/login") and self.limited < 2:
+                self.limited += 1
+                return httpx.Response(429, json={})
+            return super().handler(request)
+
+    async def scenario_run() -> dict[str, object]:
+        server = RateLimitedOnce()
+        runner = Runner(transport=httpx.MockTransport(server.handler))
+        await runner.start(_scenario())
+        await asyncio.sleep(1.0)
+        status = runner.status()
+        await runner.stop()
+        assert server.limited == 2
+        return status
+
+    status = _run(scenario_run())
+    assert status["users"]["running"] == 3  # type: ignore[index]
