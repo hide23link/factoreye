@@ -176,6 +176,18 @@
 - **理由**: 画面と負荷テストが数秒ごとに全件を取り直し、300 件分の変換が CPU の大部分を使っていた。版が変わらない間は、読み出しも変換もやり直す必要がない
 - **影響**: 版の判定は、件数と `updated_at` に依存する。センサーの変更は必ずどちらかを変えること（既存の更新処理は `updated_at` を更新する）。キャッシュとは、プロセスごとに持つ（ワーカーを増やすと、ワーカーごと）
 
+## 配布（Docker）
+
+### 2026-10-06 — frontend は Vite preview をやめ、nginx で静的ファイルを配信する
+- **判断**: frontend の実行段は `nginx:alpine` にし、ビルド済みの `dist/` だけを置く。SPA のフォールバックと assets の長期キャッシュは `frontend/nginx.conf` で設定する
+- **理由**: `vite preview` は開発用のサーバーで、devDependencies（約 200 MB）と Node.js を本番イメージに残していた。イメージは 428 MB → 63 MB になった（サイズは §14）
+- **影響**: 実行時の API の URL は、引き続きビルド時の `VITE_API_URL` で決まる（変更するにはビルドし直す）。Vite 独自の preview の設定（`allowedHosts` など）は、実行時には効かなくなった
+
+### 2026-10-06 — backend は多段ビルドにし、開発用依存は分ける。Alpine は見送る
+- **判断**: 実行段には venv と本体だけを入れる。`requirements.txt` は実行時の依存、`requirements-dev.txt` はテスト・型検査・Lint・依存監査（`-r requirements.txt` を含む）。ベースは `python:3.12-slim` のまま
+- **理由**: 開発用依存（mypy・pytest など）が約 100 MB を占めていた。`python:3.12-alpine` も試したところ 177 MB まで減ったが、musl 上での性能と挙動を確認できていないため採用しない（起動と `/health` の確認までは通過）
+- **影響**: CI（backend-test）と README のチェック手順は `requirements-dev.txt` を入れる。Alpine に変える場合は、性能の計測（py-spy など）から行う
+
 ## 運用上の注意
 
 これまでの作業で起きた問題から、次の注意を守ること。

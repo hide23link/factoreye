@@ -64,9 +64,10 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-チェック（CI と同じ内容）:
+チェック（CI と同じ内容。テスト・型検査・Lint の依存は `requirements-dev.txt`）:
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 mypy app
 ruff check app tests
