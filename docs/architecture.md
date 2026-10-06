@@ -46,7 +46,7 @@ flowchart LR
 | Frontend | TypeScript / React 18 / Vite / Zustand / TanStack Query / Recharts / react-grid-layout |
 | 品質 | pytest・mypy・ruff・pip-audit（backend）、Vitest・ESLint・tsc・npm audit（frontend）、Playwright（E2E） |
 
-**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（backend 約 283 MB、frontend は nginx で配信し約 63 MB）。
+**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（frontend は nginx で静的配信。判断は [decisions.md](decisions.md)、サイズは §14）。
 
 ---
 
