@@ -12,7 +12,7 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import EmailStr, Field
 from sqlmodel import select
@@ -22,6 +22,7 @@ from app import auth as auth_utils
 from app.config import AuthMode, settings
 from app.db.models import RefreshToken, User, Workspace
 from app.db.session import get_session
+from app.rate_limit import limiter
 from app.schemas import CamelModel
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -120,8 +121,11 @@ async def _get_current_user_workspace(
 # ── エンドポイント ────────────────────────────────────────────
 
 
+# 登録・ログインは、接続元ごとに 1 分あたりの回数を制限する（総当たり・大量登録の防止）
 @router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def register(
+    request: Request,  # slowapi がレート制限キーの取得に使う
     body: RegisterRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TokenResponse:
@@ -161,7 +165,9 @@ async def register(
 
 
 @router.post("/auth/login", response_model=TokenResponse)
+@limiter.limit("20/minute")
 async def login(
+    request: Request,  # slowapi がレート制限キーの取得に使う
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TokenResponse:

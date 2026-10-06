@@ -12,6 +12,11 @@ from sqlmodel import SQLModel
 
 from app.db.session import engine
 from app.main import app
+from app.rate_limit import limiter
+
+# テストは既定でレート制限を切る（同じ接続元から大量に呼ぶため）。
+# 制限そのものを検証するテストは、個別に limiter.enabled = True にして戻す
+limiter.enabled = False
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

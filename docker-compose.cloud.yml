@@ -8,7 +8,9 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
+      # 127.0.0.1 だけで待ち受ける。外部からは Cloudflare Tunnel（cloudflared）経由でのみ届く。
+      # 全員に公開すると、CF-Connecting-IP（レート制限の鍵）を偽装されるため
+      - "127.0.0.1:80:80"
     volumes:
       - ./infra/cloud/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
