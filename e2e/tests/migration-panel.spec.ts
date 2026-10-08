@@ -9,9 +9,9 @@ test("データ移行: 書き出しファイルの件数を確認できる（取
   await page.locator("nav").getByRole("button", { name: "設定", exact: true }).click();
   await page.getByRole("button", { name: "データ移行" }).click();
 
-  // self-hosted（ログイン無し）では取り込みだけが出て、書き出しは出ない
+  // self-hosted（ログイン無し）では、書き出し（全データのバックアップ用）と取り込みの両方が出る
   await expect(page.getByRole("heading", { name: "取り込み（OSS へ移す）" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "書き出す" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "書き出す" })).toBeVisible();
 
   // 書き出しファイル（gzip の JSON Lines）を、書き出し形式どおりに組み立てる
   const workspaceId = "00000000-0000-4000-8000-000000000001";
