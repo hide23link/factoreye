@@ -13,8 +13,8 @@ def _ws(ws_id: str, sensors: int, readings: int) -> WorkspaceRow:
 
 
 def test_compare_tables_includes_tables_on_either_side() -> None:
-    backup = DbSummary("15", "a", {"users": 3, "readings": 100}, T)
-    current = DbSummary("15", "b", {"users": 1, "webhook_subscriptions": 2}, T)
+    backup = DbSummary("15", "a", {"users": 3, "readings": 100}, T, [])
+    current = DbSummary("15", "b", {"users": 1, "webhook_subscriptions": 2}, T, [])
 
     diffs = {d.table: d for d in compare_tables(backup, current)}
 

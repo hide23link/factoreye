@@ -1,4 +1,5 @@
-# 本番の LXC で使う追加設定: FactorEye のネットワークに入り、今の DB（postgres:5432）を読めるようにする
+# FactorEye と同じホストで使う追加設定: FactorEye のネットワークに入り、今の DB（postgres:5432）を読めるようにする
+# ネットワーク名は SaaS 版（docker-compose.cloud.yml）が factoreye-cloud、OSS 版（docker-compose.yml）が factoreye
 services:
   recovery:
     networks: [default, factoreye]

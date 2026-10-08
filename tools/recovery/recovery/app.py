@@ -29,6 +29,7 @@ from recovery.sources import BackupSource, SourceError, validate_name, verify
 
 CURRENT = "current"
 MAX_PAGE_SIZE = 500
+EXPORT_STATEMENT_TIMEOUT_MS = 600_000
 STATIC_DIR = Path(__file__).parent / "static"
 
 _basic = HTTPBasic(realm="FactorEye recovery")
@@ -107,15 +108,19 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         """取得 → 検証 → 展開。sha256 が記録と合わないものは、force を付けない限り展開しない。"""
         validate_name(name)
         fetched = await asyncio.to_thread(source.fetch, name)
-        result = await asyncio.to_thread(verify, fetched)
-        body: dict[str, object] = {"verify": {**asdict(result), "ok": result.ok}}
-        if not result.gzip_ok or (result.checksum == "mismatch" and not force):
-            raise HTTPException(422, {"message": result.error, **body})
         try:
-            await scratch.load(name, fetched.path)
-        except LoadError as e:
-            raise HTTPException(422, {"message": str(e), **body}) from e
-        return {**body, "loaded": True}
+            result = await asyncio.to_thread(verify, fetched)
+            body: dict[str, object] = {"verify": {**asdict(result), "ok": result.ok}}
+            if not result.gzip_ok or (result.checksum == "mismatch" and not force):
+                raise HTTPException(422, {"message": result.error, **body})
+            try:
+                await scratch.load(name, fetched.path)
+            except LoadError as e:
+                raise HTTPException(422, {"message": str(e), **body}) from e
+            return {**body, "loaded": True}
+        finally:
+            if fetched.temporary:
+                fetched.path.unlink(missing_ok=True)
 
     @app.delete("/api/backups/{name}/load")
     async def unload_backup(name: str) -> dict[str, object]:
@@ -151,8 +156,8 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
     ) -> dict[str, object]:
         f = dbinfo.RowFilter(workspace_id, time_from, time_to)
         async with dbinfo.read_only(await resolve_dsn(db)) as conn:
-            columns, data, total = await dbinfo.fetch_rows(conn, table, f, limit, offset)
-        return {"columns": columns, "rows": data, "total": total}
+            page = await dbinfo.fetch_rows(conn, table, f, limit, offset)
+        return asdict(page)
 
     @app.get("/api/db/{db}/export/{table}.csv")
     async def export_csv(
@@ -172,7 +177,9 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         async def generate() -> AsyncIterator[str]:
             # Excel で文字化けしないよう、先頭に BOM を付ける
             yield "﻿"
-            async with dbinfo.read_only(dsn) as conn:
+            # 全件の書き出しは時間がかかるため、上限を長くする
+            # （カーソルの 1 回の読み出しごとの上限）
+            async with dbinfo.read_only(dsn, EXPORT_STATEMENT_TIMEOUT_MS) as conn:
                 async for row in dbinfo.iter_rows(conn, table, f):
                     buf = io.StringIO()
                     csv.writer(buf).writerow(row)

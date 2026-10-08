@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 from recovery.sources import (
     FetchedBackup,
@@ -125,15 +126,8 @@ def test_verify_detects_non_gzip(tmp_path: Path) -> None:
     assert not verify(FetchedBackup(path, None)).gzip_ok
 
 
-class _NoSuchKey(Exception):
-    pass
-
-
 class _FakeS3:
     """S3Source が使う呼び出しだけを持つ、手元の偽物。"""
-
-    class exceptions:  # noqa: N801  boto3 のクライアントと同じ形にする
-        NoSuchKey = _NoSuchKey
 
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = objects
@@ -154,7 +148,8 @@ class _FakeS3:
 
     def get_object(self, Bucket: str, Key: str) -> dict[str, io.BytesIO]:  # noqa: N803
         if Key not in self.objects:
-            raise _NoSuchKey(Key)
+            # 読むだけの鍵では、無いキーに AccessDenied が返る
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
         return {"Body": io.BytesIO(self.objects[Key])}
 
 
@@ -176,6 +171,7 @@ def test_s3_list_and_fetch(tmp_path: Path) -> None:
     assert with_sum.path.read_bytes() == data
     assert with_sum.expected_sha256 == digest
     assert without_sum.expected_sha256 is None
+    assert with_sum.temporary
     assert source.describe() == "s3://bucket/fe"
 
 
@@ -186,3 +182,12 @@ def test_make_source_local(tmp_path: Path) -> None:
 def test_make_source_s3_requires_bucket(tmp_path: Path) -> None:
     with pytest.raises(SourceError):
         make_source("s3://", tmp_path)
+
+
+def test_csv_cell_neutralizes_formulas() -> None:
+    from recovery.dbinfo import MASK, to_csv_cell
+
+    assert to_csv_cell("name", "=HYPERLINK(\"http://x\")").startswith("'=")
+    assert to_csv_cell("name", "@SUM(A1)") == "'@SUM(A1)"
+    assert to_csv_cell("value", -1.5) == "-1.5"  # 数値はそのまま
+    assert to_csv_cell("password_hash", "=secret") == MASK

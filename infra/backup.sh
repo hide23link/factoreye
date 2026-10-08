@@ -31,6 +31,10 @@ OFFSITE_S3_URI="${OFFSITE_S3_URI:-}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 DEST="$BACKUP_DIR/factoreye-$TIMESTAMP.sql.gz"
 CONFIG_DEST="$BACKUP_DIR/factoreye-$TIMESTAMP-config.tar.gz.enc"
+# 書き込み中は factoreye-* に当たらない名前にしておき、書き終えてから名前を変える。
+# 書きかけのファイルを、外部への取得（offsite-pull.sh）や復旧ツールが拾わないように
+PARTIAL="$BACKUP_DIR/.partial-factoreye-$TIMESTAMP.sql.gz"
+CONFIG_PARTIAL="$BACKUP_DIR/.partial-factoreye-$TIMESTAMP-config.tar.gz.enc"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -71,11 +75,12 @@ backup_config_files() {
   # .env には DB のパスワードや JWT の鍵が入るため、暗号化してから置く（外部の保管先に平文で出さない）
   if ! tar -czf - -C / "${targets[@]}" \
       | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
-          -pass "file:$BACKUP_PASSPHRASE_FILE" -out "$CONFIG_DEST"; then
+          -pass "file:$BACKUP_PASSPHRASE_FILE" -out "$CONFIG_PARTIAL"; then
     log "エラー: 設定ファイルの保存に失敗しました"
-    rm -f "$CONFIG_DEST"
+    rm -f "$CONFIG_PARTIAL"
     return 1
   fi
+  mv "$CONFIG_PARTIAL" "$CONFIG_DEST"
   write_checksum "$CONFIG_DEST"
   log "設定ファイルを保存しました: $CONFIG_DEST（${#targets[@]} 件）"
 }
@@ -87,18 +92,19 @@ mkdir -p "$BACKUP_DIR"
 log "バックアップ開始: $DEST"
 
 # -T: ttyを確保しない（cron等の非対話実行でpg_dumpの出力がTTY制御文字で壊れるのを防ぐ）
-if ! docker compose exec -T "$POSTGRES_SERVICE" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$DEST"; then
+if ! docker compose exec -T "$POSTGRES_SERVICE" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$PARTIAL"; then
   log "エラー: pg_dumpに失敗しました"
-  rm -f "$DEST"
+  rm -f "$PARTIAL"
   exit 1
 fi
 
-if [ ! -s "$DEST" ]; then
+if [ ! -s "$PARTIAL" ]; then
   log "エラー: バックアップファイルが空です（$DEST）"
-  rm -f "$DEST"
+  rm -f "$PARTIAL"
   exit 1
 fi
 
+mv "$PARTIAL" "$DEST"
 write_checksum "$DEST"
 log "バックアップ完了: $DEST ($(du -h "$DEST" | cut -f1))"
 

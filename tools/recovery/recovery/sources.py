@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from botocore.exceptions import ClientError
+
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
@@ -40,6 +42,8 @@ class FetchedBackup:
     path: Path
     # 隣の .sha256 に書かれた値。無ければ None（infra/backup.sh の古い版で取ったもの）
     expected_sha256: str | None
+    # 使い終わったら消すもの（S3 から取ってきた一時的な控え。ディスクを埋めないように）
+    temporary: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,9 +146,11 @@ class S3Source:
                 Bucket=self._bucket, Key=self._key(name + CHECKSUM_SUFFIX)
             )["Body"].read()
             expected = parse_checksum(body.decode("utf-8", errors="replace"))
-        except self._client.exceptions.NoSuchKey:
+        except ClientError:
+            # 無い場合、読むだけの鍵では NoSuchKey ではなく AccessDenied が返る。
+            # どちらも「記録なし」として扱う
             expected = None
-        return FetchedBackup(dest, expected)
+        return FetchedBackup(dest, expected, temporary=True)
 
 
 def make_source(spec: str, cache_dir: Path, s3_endpoint_url: str | None = None) -> BackupSource:

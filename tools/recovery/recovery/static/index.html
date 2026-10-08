@@ -141,7 +141,8 @@ function summaryView(s) {
     el("span", { class: "muted" }, "Postgres"), el("span", {}, s.server_version),
     el("span", { class: "muted" }, "スキーマの版（Alembic）"), el("span", {}, s.alembic_version || "—"),
     el("span", { class: "muted" }, "最後の測定値"), el("span", {}, fmtTime(s.latest_reading_at)));
-  const counts = Object.entries(s.table_counts).map(([t, n]) => [t, fmtNum(n)]);
+  const est = new Set(s.estimated_tables || []);
+  const counts = Object.entries(s.table_counts).map(([t, n]) => [t, est.has(t) ? `約 ${fmtNum(n)}（推定）` : fmtNum(n)]);
   return el("div", {}, kv, el("div", { class: "scroll" }, table(["テーブル", "件数"], counts, new Set([1]))));
 }
 
@@ -302,7 +303,7 @@ async function showRows() {
     const t = table(r.columns, r.rows.map((row) => row.map((c) => (c === null ? "—" : typeof c === "object" ? JSON.stringify(c) : c))));
     t.id = "b-rows";
     document.getElementById("b-rows").replaceWith(t);
-    status.textContent = r.total ? `${fmtNum(r.total)} 件中 ${fmtNum(offset + 1)}〜${fmtNum(offset + r.rows.length)} 件` : "該当する行はありません";
+    status.textContent = r.total ? `${fmtNum(r.total)}${r.total_capped ? " 件以上" : " 件"}中 ${fmtNum(offset + 1)}〜${fmtNum(offset + r.rows.length)} 件` : "該当する行はありません";
     document.getElementById("b-prev").disabled = offset === 0;
     document.getElementById("b-next").disabled = offset + PAGE >= r.total;
   } catch (e) {

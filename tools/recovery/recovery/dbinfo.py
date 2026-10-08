@@ -38,6 +38,13 @@ WORKSPACE_FILTERS: dict[str, str] = {
         " WHERE d.workspace_id = $1)"
     ),
 }
+# 件数を数える上限。本番の大きなテーブルで、1 ページごとに全件を数えないように
+COUNT_CAP = 100_000
+# これより多い（統計上の推定値が）テーブルは、件数を推定値で返す（全件を数えると本番が重くなる）
+EXACT_COUNT_LIMIT = 1_000_000
+# 1 つの SQL の上限。画面を閉じても本番で重いクエリが走り続けないように
+DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
+
 # 期間で絞り込めるテーブルと、その時刻の列
 TIME_COLUMNS: dict[str, str] = {"readings": "recorded_at", "alarms": "triggered_at"}
 
@@ -52,6 +59,8 @@ class DbSummary:
     alembic_version: str | None
     table_counts: dict[str, int]
     latest_reading_at: datetime | None
+    # 件数が推定値のテーブル
+    estimated_tables: list[str]
 
 
 @dataclass(frozen=True)
@@ -74,10 +83,17 @@ class RowFilter:
 
 
 @asynccontextmanager
-async def read_only(dsn: str) -> AsyncIterator[asyncpg.Connection]:
+async def read_only(
+    dsn: str, statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS
+) -> AsyncIterator[asyncpg.Connection]:
     """読み取り専用で接続する。今の DB（本番）にも使うため、書き込みは DB 側でも拒ませる。"""
     conn = await asyncpg.connect(
-        dsn, server_settings={"default_transaction_read_only": "on"}, timeout=10
+        dsn,
+        server_settings={
+            "default_transaction_read_only": "on",
+            "statement_timeout": str(statement_timeout_ms),
+        },
+        timeout=10,
     )
     try:
         yield conn
@@ -110,9 +126,22 @@ def _ident(name: str) -> str:
 
 async def summarize(conn: asyncpg.Connection) -> DbSummary:
     tables = await list_tables(conn)
-    counts = {}
+    # reltuples は統計の推定値（ANALYZE 前は -1）。大きいテーブルだけ推定値を使う
+    estimates = {
+        r["relname"]: int(r["reltuples"])
+        for r in await conn.fetch(
+            "SELECT c.relname, c.reltuples FROM pg_class c"
+            " JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE n.nspname = 'public' AND c.relkind = 'r'"
+        )
+    }
+    counts, estimated = {}, []
     for t in tables:
-        counts[t] = int(await conn.fetchval(f"SELECT count(*) FROM {_ident(t)}"))
+        if estimates.get(t, -1) > EXACT_COUNT_LIMIT:
+            counts[t] = estimates[t]
+            estimated.append(t)
+        else:
+            counts[t] = int(await conn.fetchval(f"SELECT count(*) FROM {_ident(t)}"))
     alembic = None
     if "alembic_version" in tables:
         alembic = await conn.fetchval("SELECT version_num FROM alembic_version LIMIT 1")
@@ -120,7 +149,7 @@ async def summarize(conn: asyncpg.Connection) -> DbSummary:
     if "readings" in tables:
         latest = await conn.fetchval("SELECT max(recorded_at) FROM readings")
     version = str(await conn.fetchval("SHOW server_version"))
-    return DbSummary(version, alembic, counts, latest)
+    return DbSummary(version, alembic, counts, latest, estimated)
 
 
 async def workspaces(conn: asyncpg.Connection) -> list[WorkspaceRow]:
@@ -196,13 +225,18 @@ def _order_by(table: str, columns: list[str]) -> str:
 
 async def _prepare(
     conn: asyncpg.Connection, table: str, f: RowFilter
-) -> tuple[list[str], str, list[object]]:
+) -> tuple[list[str], str, str, list[object]]:
+    """列名、行を取る SQL、数える SQL（並べ替えなし・上限あり）、引数を返す。"""
     if table not in await list_tables(conn):
         raise TableNotFound(f"テーブルがありません: {table}")
     columns = await _columns(conn, table)
     where, args = _where(table, columns, f)
     select = ", ".join(_ident(c) for c in columns)
-    return columns, f"SELECT {select} FROM {_ident(table)}{where}{_order_by(table, columns)}", args
+    rows_sql = f"SELECT {select} FROM {_ident(table)}{where}{_order_by(table, columns)}"
+    count_sql = (
+        f"SELECT count(*) FROM (SELECT 1 FROM {_ident(table)}{where} LIMIT {COUNT_CAP + 1}) t"
+    )
+    return columns, rows_sql, count_sql, args
 
 
 def to_jsonable(column: str, value: object) -> object:
@@ -215,15 +249,29 @@ def to_jsonable(column: str, value: object) -> object:
     return value
 
 
+@dataclass(frozen=True)
+class RowPage:
+    columns: list[str]
+    rows: list[list[object]]
+    # COUNT_CAP を超えたら COUNT_CAP + 1 で止め、total_capped を立てる
+    total: int
+    total_capped: bool
+
+
 async def fetch_rows(
     conn: asyncpg.Connection, table: str, f: RowFilter, limit: int, offset: int
-) -> tuple[list[str], list[list[object]], int]:
-    columns, sql, args = await _prepare(conn, table, f)
-    total = int(await conn.fetchval(f"SELECT count(*) FROM ({sql}) t", *args))
+) -> RowPage:
+    columns, sql, count_sql, args = await _prepare(conn, table, f)
+    total = int(await conn.fetchval(count_sql, *args))
     n = len(args)
     rows = await conn.fetch(f"{sql} LIMIT ${n + 1} OFFSET ${n + 2}", *args, limit, offset)
     data = [[to_jsonable(c, r[c]) for c in columns] for r in rows]
-    return columns, data, total
+    capped = total > COUNT_CAP
+    return RowPage(columns, data, COUNT_CAP if capped else total, capped)
+
+
+# Excel などが式として解釈する先頭の文字（CSV インジェクション）
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def to_csv_cell(column: str, value: object) -> str:
@@ -232,6 +280,9 @@ def to_csv_cell(column: str, value: object) -> str:
         return ""
     if isinstance(v, dict | list):
         return json.dumps(v, ensure_ascii=False)
+    # 文字列の値（センサー名・メールなど）だけを対象にする。数値の負の値は式ではないので変えない
+    if isinstance(value, str) and isinstance(v, str) and v.startswith(_FORMULA_PREFIXES):
+        return "'" + v
     return str(v)
 
 
@@ -240,7 +291,7 @@ async def iter_rows(
 ) -> AsyncIterator[list[str]]:
     """CSV 用。最初に列名の行を返す。大きなテーブル（readings）でもメモリに載せきらないよう、
     カーソルで少しずつ読む。"""
-    columns, sql, args = await _prepare(conn, table, f)
+    columns, sql, _, args = await _prepare(conn, table, f)
     yield columns
     async with conn.transaction():
         async for r in conn.cursor(sql, *args, prefetch=1000):

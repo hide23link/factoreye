@@ -25,11 +25,15 @@ PASSWORD = "correct-horse-battery"
 async def scratch() -> AsyncIterator[Scratch]:
     s = Scratch(SCRATCH_DSN)
     yield s
-    # テストで作った bk_* の DB を残さない
+    # テストで作った bk_* / bktmp_* の DB を残さない
     conn = await asyncpg.connect(SCRATCH_DSN)
     try:
-        for db in await s.loaded_databases():
-            await conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
+        rows = await conn.fetch(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, 'bk_')"
+            " OR starts_with(datname, 'bktmp_')"
+        )
+        for r in rows:
+            await conn.execute(f'DROP DATABASE IF EXISTS "{r["datname"]}" WITH (FORCE)')
     finally:
         await conn.close()
 
@@ -89,18 +93,20 @@ async def test_fetch_rows_filters_and_masks(tmp_path: Path, scratch: Scratch) ->
     ws = uuid.UUID(WS_A)
 
     async with dbinfo.read_only(scratch.dsn_for(name)) as conn:
-        cols, rows, total = await dbinfo.fetch_rows(
+        readings = await dbinfo.fetch_rows(
             conn, "readings", dbinfo.RowFilter(workspace_id=ws), limit=1, offset=0
         )
-        _, users, _ = await dbinfo.fetch_rows(
-            conn, "users", dbinfo.RowFilter(workspace_id=ws), limit=10, offset=0
-        )
+        users = (
+            await dbinfo.fetch_rows(
+                conn, "users", dbinfo.RowFilter(workspace_id=ws), limit=10, offset=0
+            )
+        ).rows
         with pytest.raises(dbinfo.TableNotFound):
             await dbinfo.fetch_rows(conn, "nope", dbinfo.RowFilter(), 10, 0)
 
-    assert total == 2 and len(rows) == 1
+    assert readings.total == 2 and not readings.total_capped and len(readings.rows) == 1
     # 新しい順
-    assert str(rows[0][cols.index("recorded_at")]).startswith("2026-10-06")
+    assert str(readings.rows[0][readings.columns.index("recorded_at")]).startswith("2026-10-06")
     assert len(users) == 1
     assert users[0][1] == "a@example.com" and users[0][2] == dbinfo.MASK
 
@@ -208,3 +214,87 @@ async def test_api_compare_with_current(tmp_path: Path, scratch: Scratch) -> Non
     assert r["workspaces"][0]["status"] == "backup_only"
     assert {t["table"]: t["diff"] for t in r["tables"]}["readings"] == 0
     assert db_name_for(backup_name) != db_name_for(current_name)
+
+
+# ── 書き換えられたバックアップ（乗っ取られた本番で作られたもの）への備え ──
+
+
+async def test_meta_command_is_rejected(tmp_path: Path, scratch: Scratch) -> None:
+    marker = tmp_path / "pwned"
+    name = _unique()
+    path = write_dump(tmp_path, name, DUMP_SQL + f"\\! touch {marker}\n")
+
+    with pytest.raises(LoadError):
+        await scratch.load(name, path)
+
+    assert not marker.exists()
+    assert not await scratch.is_loaded(name)
+
+
+async def test_inline_meta_command_is_blocked_by_restrict(tmp_path: Path, scratch: Scratch) -> None:
+    # 行の途中のメタコマンドは行頭の検査をすり抜けるが、psql の \\restrict が止める
+    marker = tmp_path / "pwned"
+    name = _unique()
+    path = write_dump(tmp_path, name, DUMP_SQL + f"SELECT 1; \\! touch {marker}\n")
+
+    with pytest.raises(LoadError):
+        await scratch.load(name, path)
+
+    assert not marker.exists()
+
+
+async def test_copy_to_program_is_denied(tmp_path: Path, scratch: Scratch) -> None:
+    # 展開は管理者ではないロールで行うため、サーバー側でのコマンド実行もできない
+    name = _unique()
+    path = write_dump(
+        tmp_path, name, DUMP_SQL + "COPY public.users TO PROGRAM 'cat > /dev/null';\n"
+    )
+
+    with pytest.raises(LoadError, match="pg_execute_server_program|permission denied|superuser"):
+        await scratch.load(name, path)
+
+
+async def test_superuser_owner_is_rejected(tmp_path: Path, scratch: Scratch) -> None:
+    conn = await asyncpg.connect(SCRATCH_DSN)
+    try:
+        admin = await conn.fetchval("SELECT current_user")
+    finally:
+        await conn.close()
+    name = _unique()
+    path = write_dump(tmp_path, name, DUMP_SQL.replace("fe_test_owner", admin))
+
+    with pytest.raises(LoadError, match="管理者"):
+        await scratch.load(name, path)
+
+
+async def test_dump_restrict_lines_and_copy_data_pass(tmp_path: Path, scratch: Scratch) -> None:
+    # pg_dump 15.14 以降の \\restrict と、COPY のデータ行の \\N（NULL）
+    sql = (
+        "\\restrict abcDEF123\n" + DUMP_SQL
+        + "COPY public.sensors (id, workspace_id, name, created_at) FROM stdin;\n"
+        + "cccccccc-0000-0000-0000-000000000001\t\\N\tlocal\t\\N\n"
+        + "\\.\n"
+        + "\\unrestrict abcDEF123\n"
+    )
+    name = _unique()
+    await scratch.load(name, write_dump(tmp_path, name, sql))
+
+    async with dbinfo.read_only(scratch.dsn_for(name)) as conn:
+        assert await conn.fetchval("SELECT count(*) FROM sensors") == 3
+        ws = await dbinfo.workspaces(conn)
+    assert any(w.name == "（self-hosted）" and w.sensors == 1 for w in ws)
+
+
+async def test_leftover_partial_database_is_not_loaded(tmp_path: Path, scratch: Scratch) -> None:
+    # 展開の途中で落ちた残り（bktmp_*）は、展開済みとして扱わない
+    name = _unique()
+    conn = await asyncpg.connect(SCRATCH_DSN)
+    try:
+        tmp = "bktmp_" + db_name_for(name).removeprefix("bk_")
+        await conn.execute(f'CREATE DATABASE "{tmp}"')
+    finally:
+        await conn.close()
+
+    assert not await scratch.is_loaded(name)
+    await scratch.load(name, write_dump(tmp_path, name))
+    assert await scratch.is_loaded(name)
