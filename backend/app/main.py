@@ -43,7 +43,7 @@ from app.api import settings as settings_api
 from app.auth import decode_access_token
 from app.config import AuthMode, settings
 from app.db.session import engine
-from app.ingest_buffer import flush_loop
+from app.ingest_buffer import flush_loop, flush_once
 from app.purge import purge_loop
 from app.rate_limit import limiter
 
@@ -54,10 +54,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     起動時: 取り込みのレート制限の状態を警告し、常駐タスク
     （バッファ書き込み・古いデータの削除）を開始する。
-    終了時: 常駐タスクを止め、DB への接続プールを閉じる。
+    終了時: 常駐タスクを止め、バッファに残った測定値を書いてから、DB への接続プールを閉じる。
     """
+    logger = logging.getLogger(__name__)
     if settings.ingest_rate_limit.strip().lower() == "off":
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "INGEST_RATE_LIMIT=off: 取り込みのレート制限を解除しています（実機テスト用）"
         )
     flush_task = asyncio.create_task(flush_loop())
@@ -65,6 +66,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     flush_task.cancel()
     purge_task.cancel()
+    # 書き込み中に止めた場合も、値は flush_once がバッファに戻すので、終了を待ってから書く
+    await asyncio.gather(flush_task, purge_task, return_exceptions=True)
+    try:
+        await flush_once()
+    except Exception:
+        # DB に書けなくても停止は続ける（再起動を妨げないため）
+        logger.exception("final ingest buffer flush on shutdown failed")
     await engine.dispose()
 
 
