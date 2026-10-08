@@ -231,3 +231,52 @@ async def test_shutdown_continues_when_final_flush_fails(
     monkeypatch.setattr(main_module, "flush_once", _fail)
     async with lifespan(app):
         pass
+
+
+async def test_non_utf8_body_returns_400(client: httpx.AsyncClient) -> None:
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers={**VALID_HEADERS, "Content-Type": "application/json"},
+        content=b"\xff\xfe\xfa",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+async def test_non_finite_value_returns_400(client: httpx.AsyncClient, bad: str) -> None:
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers={**VALID_HEADERS, "Content-Type": "application/json"},
+        content=f'{{"ingestKey": "k", "value": {bad}}}'.encode(),
+    )
+    assert resp.status_code == 400
+
+
+async def test_too_many_readings_returns_400(client: httpx.AsyncClient) -> None:
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "k", "readings": [{"value": 1}] * 1001},
+    )
+    assert resp.status_code == 400
+
+
+async def test_exactly_max_readings_is_accepted(client: httpx.AsyncClient) -> None:
+    await _create_sensor(client, "max-batch")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "max-batch", "readings": [{"value": 1}] * 1000},
+    )
+    assert resp.status_code == 202
+
+
+async def test_non_finite_value_inside_readings_returns_400(
+    client: httpx.AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers={**VALID_HEADERS, "Content-Type": "application/json"},
+        content=b'{"ingestKey": "k", "readings": [{"value": 1}, {"value": NaN}]}',
+    )
+    assert resp.status_code == 400

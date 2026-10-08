@@ -18,6 +18,9 @@ from pydantic.alias_generators import to_camel
 
 from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached, WebhookEventType
 
+# 取り込み 1 リクエストあたりの測定値の最大件数
+MAX_READINGS_PER_REQUEST = 1000
+
 
 class CamelModel(BaseModel):
     """すべての API スキーマの基底。Python の snake_case を JSON の camelCase と相互に変換する。
@@ -93,7 +96,7 @@ class ReadingIn(CamelModel):
     timestamp を省略すると、サーバーが受信した時刻を使う（デバイスの時計は信用しない）。
     """
 
-    value: float
+    value: float = Field(allow_inf_nan=False)
     timestamp: datetime | None = None
 
 
@@ -106,9 +109,10 @@ class IngestRequest(CamelModel):
     """
 
     ingest_key: str = Field(min_length=1, max_length=100)
-    value: float | None = None
+    value: float | None = Field(default=None, allow_inf_nan=False)
     timestamp: datetime | None = None
-    readings: list[ReadingIn] | None = None
+    # 1 リクエストの件数に上限を付ける（巨大なバッチで受信バッファを使い切られないため）
+    readings: list[ReadingIn] | None = Field(default=None, max_length=MAX_READINGS_PER_REQUEST)
 
     def to_readings(self) -> list[ReadingIn]:
         """3通りの書き方を、ReadingIn のリストに統一して返す。"""
