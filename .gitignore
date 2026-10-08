@@ -42,3 +42,6 @@ ras.txt
 
 # 負荷テストの実行ログ（loadtest/README.md の手順で生成される。都度変わる手元のログなのでコミットしない）
 /loadtest/*.log
+
+# 外部保管（S3）の認証情報（infra/offsite-s3.sh）
+/.offsite-s3.env

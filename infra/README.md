@@ -1,7 +1,11 @@
 # バックアップ・リストア
 
 `docs/architecture.md` §11 運用（バックアップ） の実装。PostgreSQLを`pg_dump`で日次バックアップし、
-7日より古いファイルは自動削除する。
+7日より古いファイルは自動削除する。各ファイルの隣に sha256（`.sha256`）を書く。
+
+- 設定ファイル（`.env`・管理者ファイル・cloudflared の設定）も、暗号化して一緒に保存できる（下の「設定ファイルの控え」）
+- 本番の外にも控えを置く: S3 に送る（`offsite-s3.sh`）か、ラズパイなどから取りに行く（`offsite-pull.sh`）
+- 中身の確認・比較・書き出しは、復旧ツール（[`tools/recovery/`](../tools/recovery/README.md)）で行う
 
 ## セットアップ（本番運用者向け）
 
@@ -39,9 +43,85 @@ ls -lh backups/
 既存データが残っていると「既に存在する」エラーで失敗する＝安全側に倒れる）。本番データが入った
 DBに丸ごと復元したい場合は、先にそのDB/ボリュームを作り直してから実行すること。
 
+## 設定ファイルの控え
+
+DB だけを戻しても、`.env`（DB のパスワード・JWT の鍵）や管理者ファイルが無いと、プログラムを作り直したときに復旧できない。
+合言葉のファイルを作り、cron の行に `BACKUP_PASSPHRASE_FILE` を足す。
+
+```bash
+openssl rand -hex 32 > /root/.factoreye-backup-pass && chmod 600 /root/.factoreye-backup-pass
+# 合言葉は、本番の外（パスワード管理ツールなど）にも必ず控える。本番が失われると、これが無ければ開けない
+```
+
+```bash
+0 3 * * * cd /opt/factoreye && COMPOSE_FILE=docker-compose.cloud.yml BACKUP_PASSPHRASE_FILE=/root/.factoreye-backup-pass ./infra/backup.sh >> /opt/factoreye/backups/backup.log 2>&1
+```
+
+保存するファイルは `BACKUP_CONFIG_FILES`（空白区切り。既定 `.env admin/admins.txt /etc/cloudflared/config.yml`）で変えられる。
+
+### 設定ファイルの復元
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:<合言葉のファイル> \
+  -in factoreye-<日時>-config.tar.gz.enc | tar -tzvf -    # 中身の確認。展開は -tzvf を -xzf - -C <展開先> に
+```
+
+## 本番の外への控え
+
+本番が乗っ取られても控えを消されないように、本番に渡す権限を絞る。どちらか（または両方）を使う。
+
+### S3 に送る（`offsite-s3.sh`）
+
+1. バケットを作り、**バージョニングを有効**にする（上書き・削除されても前の版が残る）。古い版の削除はライフサイクルのルールで行う（例: 90 日）
+2. 本番用の IAM ユーザーを作り、**追加だけ**の権限にする:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": "s3:PutObject",
+       "Resource": "arn:aws:s3:::<バケット>/factoreye/*"
+     }]
+   }
+   ```
+
+3. 認証情報を `/opt/factoreye/.offsite-s3.env`（権限 600、Git 管理外）に書く:
+
+   ```bash
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   AWS_DEFAULT_REGION=ap-northeast-1
+   ```
+
+4. cron の行に `OFFSITE_S3_URI=s3://<バケット>/factoreye` を足す。`backup.sh` が作ったファイルを送る（aws CLI は Docker のイメージで動かすので、ホストに入れなくてよい）
+
+復旧ツールで S3 から読むときは、別の IAM ユーザー（`s3:ListBucket` と `s3:GetObject` だけ）を使う。
+
+### ラズパイなどから取りに行く（`offsite-pull.sh`）
+
+取りに行く側の cron で実行する。本番側には、読むだけ・`backups/` だけに限った鍵を登録する。
+
+1. 取りに行く側で鍵を作る: `ssh-keygen -t ed25519 -f ~/.ssh/factoreye_backup -N ""`
+2. 本番の `/root/.ssh/authorized_keys` に、制限を付けて登録する（`rrsync -ro` で読み取り専用・ディレクトリ固定）:
+
+   ```
+   command="rrsync -ro /opt/factoreye/backups",restrict ssh-ed25519 AAAA... factoreye-backup
+   ```
+
+3. 取りに行く側の cron:
+
+   ```bash
+   30 3 * * * OFFSITE_SOURCE=root@<本番の Tailscale の IP> /opt/factoreye-offsite/offsite-pull.sh >> /var/log/factoreye-offsite.log 2>&1
+   ```
+
+- 既定は 90 日保持（`OFFSITE_RETENTION_DAYS`）。本番の 7 日より長く持ち、壊れたことに気づくのが遅れても、壊れる前の版が残るようにする
+- 既にあるファイルは取り直さない。取ってきたファイルは `.sha256` で検証し、合わなければ終了コード 1 で知らせる
+- 本番の ufw は SSH を LAN（192.168.11.0/24）と Tailscale だけに許可している。別のネットワークのラズパイからは Tailscale 経由で接続する
+
 ## 注意
 
 - このスクリプトはcompose project名に依存しない（`docker compose exec <service名>`を使うため、
   ディレクトリ名やランナーの構成に依存しない）
-- バックアップファイル自体の保護（暗号化・オフサイト保管等）は運用者の責任範囲。`backups/`は
+- バックアップのファイルは、ほかの利用者が読めない権限（640）で作る（復旧ツールはグループの権限で読む）。`backups/`は
   `.gitignore`済みでリポジトリにはコミットされない
