@@ -43,6 +43,38 @@ ls -lh backups/
 既存データが残っていると「既に存在する」エラーで失敗する＝安全側に倒れる）。本番データが入った
 DBに丸ごと復元したい場合は、先にそのDB/ボリュームを作り直してから実行すること。
 
+復元すると、復旧ツール用の読み取り専用ロール（`factoreye_readonly`）は、無ければログイン不可の
+状態で自動的に作られる（バックアップに含まれる GRANT を通すため）。復旧ツールで使う場合は、
+[`tools/recovery/README.md`](../tools/recovery/README.md) の「読み取り専用のロール」の手順で
+パスワードを設定し直すこと。
+
+### 復旧の訓練（本番以外で行うこと）
+
+本番を壊さずに、復元の手順そのものが動くことを定期的に確かめる。
+
+```bash
+# 1. 空の Postgres を用意する（本番とは別の compose project 名にする）
+COMPOSE_PROJECT_NAME=factoreye-restore-drill docker compose up -d postgres
+
+# 2. バックアップ（本番の外の控えなど）から復元する
+COMPOSE_PROJECT_NAME=factoreye-restore-drill ./infra/restore.sh <バックアップファイル>
+
+# 3. 確かめる（テーブル数・スキーマ版・件数など）
+docker compose exec postgres psql -U factoreye factoreye -c '\dt'
+docker compose exec postgres psql -U factoreye factoreye -c 'SELECT version_num FROM alembic_version'
+
+# 4. 後片付け（-v を忘れると、次の訓練が古いデータの上に重なって誤った結果になる）
+COMPOSE_PROJECT_NAME=factoreye-restore-drill docker compose down -v
+```
+
+2026-10-08 に Mac で実施:
+1. 本番の控え（ラズパイ経由で取得、0 件の時点のもの）を復元し、12 テーブル・スキーマ版・
+   `factoreye_readonly` の権限が復元されることを確認
+2. センサー 1 個・測定値 3 件を作って取ったバックアップで、同じ手順を実施。値（11.5/12.5/13.5）
+   まで完全に一致して復元されることを確認。この過程で、後片付け（`down -v`）を忘れて前の
+   試行のボリュームが残ったまま復元すると `type already exists` 等のエラーになることも確認した
+   （空の DB を前提にする `restore.sh` の設計どおり、安全側に失敗する）
+
 ## 設定ファイルの控え
 
 DB だけを戻しても、`.env`（DB のパスワード・JWT の鍵）や管理者ファイルが無いと、プログラムを作り直したときに復旧できない。

@@ -7,6 +7,10 @@
 #   （黙って上書き・混在させることはない。本番データが入ったDBへの復元が必要な場合は、
 #   事前にそのDB/ボリュームを作り直してから本スクリプトを実行すること）。
 # - 確認なしに即実行されると事故の元なので、対象ファイルの明示と`--yes`相当の確認を必須にする。
+# - ON_ERROR_STOP で、どれか1行でも失敗したら即座に止める（黙って一部だけ復元しない）。
+#   復旧ツール用の読み取り専用ロール（factoreye_readonly）への GRANT がバックアップに
+#   含まれるが、復元先にそのロールが無いと失敗するため、無ければ（ログイン不可で）先に作る
+#   （実機の復元訓練で判明。パスワードは別途 tools/recovery/README.md の手順で設定し直すこと）
 set -euo pipefail
 
 usage() {
@@ -33,6 +37,18 @@ case "$REPLY" in
   *) echo "中止しました"; exit 1 ;;
 esac
 
-gunzip -c "$BACKUP_FILE" | docker compose exec -T "$POSTGRES_SERVICE" psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+echo "読み取り専用ロール（factoreye_readonly）が無ければ作成します（ログイン不可の状態で）"
+docker compose exec -T "$POSTGRES_SERVICE" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" "$POSTGRES_DB" <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'factoreye_readonly') THEN
+    CREATE ROLE factoreye_readonly NOLOGIN;
+  END IF;
+END $$;
+SQL
+
+gunzip -c "$BACKUP_FILE" \
+  | docker compose exec -T "$POSTGRES_SERVICE" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" "$POSTGRES_DB"
 
 echo "復元完了"
+echo "注意: factoreye_readonly はログイン不可の状態です。復旧ツールで使う場合は"
+echo "  tools/recovery/README.md の「読み取り専用のロール」の手順でパスワードを設定してください。"
