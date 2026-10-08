@@ -43,6 +43,19 @@ DB を丸ごと戻す場合は、`infra/restore.sh` を使います。
 - 直前の控えから DB を丸ごと戻すと、控えを取った後に届いた測定値は失われます
 - バックアップと今の DB のスキーマの版（Alembic）が違うときは、書き戻せません
 
+### OSS 版 ⇄ SaaS 版
+
+バックアップと今の DB の版（OSS 版・SaaS 版）が違っても、所属を付け替えて書き戻せます。今の DB がどちらかは `TARGET_MODE` で指定します（データの中身からは判断しません。空の SaaS 版は OSS 版と見分けられないため）。
+
+| バックアップ → 今の DB | 書き戻し方 |
+|---|---|
+| OSS 版 → SaaS 版 | 書き戻し先のワークスペースを選び、センサー・測定値・アラーム・ダッシュボード・Webhook・通知設定を、そのワークスペースのものとして入れる。先に SaaS 版で利用者登録をしてワークスペースを作っておく |
+| SaaS 版 → OSS 版 | 選んだワークスペースのデータを、OSS 版のデータ（ワークスペースに属さない）として入れる。ユーザー・ワークスペースの行は入れない。通知設定は OSS 版が読む id=1 の 1 行にする |
+
+- センサーの ID と取り込みキーは保ちます（機器の設定を変えずに、そのまま送り続けられます）
+- 書き戻し先で、同じ名前のセンサーや同じ取り込みキーがぶつかると、手順 3 で分かり、何も書き込みません
+- SaaS 版の Free Tier のセンサー数の上限（10）は確かめません。超える場合は、プランを見直してください
+
 書き込み用の接続は、本番の DB の所有者（`factoreye`）で設定します。書き戻しは閲覧と同じ認証で使えるため、画面は 127.0.0.1（SSH のトンネル経由）か Tailscale だけで開くようにします。
 
 ```bash
@@ -75,6 +88,8 @@ OSS 版の compose（`docker-compose.yml`）はネットワーク名が `factore
 ```bash
 FACTOREYE_NETWORK=factoreye docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d --build
 ```
+
+書き戻しを使う場合は、`.env` に `TARGET_MODE=oss` を設定します（SaaS 版は `TARGET_MODE=saas`）。
 
 `TARGET_DATABASE_URL` は `postgresql://factoreye_readonly:<パスワード>@postgres:5432/factoreye`。バックアップは `infra/backup.sh`（OSS 版はそのまま。`COMPOSE_FILE` の指定は要りません）で取ったものを使います。
 
@@ -113,6 +128,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE factoreye IN SCHEMA public GRANT SELECT ON TAB
 | `BACKUP_DIR` | `../../backups` | compose で `/backups` に見せる手元のディレクトリ（読み取り専用） |
 | `TARGET_DATABASE_URL` | なし | 今の DB。読み取り専用で接続する |
 | `TARGET_WRITE_DATABASE_URL` | なし | 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しは使えない |
+| `TARGET_MODE` | なし（書き戻しを使うなら必須） | 今の DB が SaaS 版なら `saas`、OSS 版なら `oss` |
 | `AWS_ACCESS_KEY_ID` など | なし | S3 の認証。`s3:ListBucket` と `s3:GetObject` だけの鍵にする |
 | `S3_ENDPOINT_URL` | なし | S3 互換のサービス（MinIO など） |
 | `BACKUP_GID` | `0` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |

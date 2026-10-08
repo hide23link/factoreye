@@ -30,3 +30,13 @@ def test_required(missing: str) -> None:
 def test_short_password_rejected() -> None:
     with pytest.raises(ConfigError):
         load_settings({**BASE, "RECOVERY_PASSWORD": "short"})
+
+
+def test_write_requires_mode() -> None:
+    env = {**BASE, "TARGET_DATABASE_URL": "postgresql://u@h/db",
+           "TARGET_WRITE_DATABASE_URL": "postgresql://u@h/db"}
+    with pytest.raises(ConfigError, match="TARGET_MODE"):
+        load_settings(env)
+    assert load_settings({**env, "TARGET_MODE": "SaaS"}).target_mode == "saas"
+    with pytest.raises(ConfigError):
+        load_settings({**env, "TARGET_MODE": "cloud"})

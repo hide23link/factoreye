@@ -42,6 +42,9 @@ class MergeRequest(BaseModel):
     include_self_hosted: bool = False
     time_from: datetime | None = Field(default=None, alias="from")
     time_to: datetime | None = Field(default=None, alias="to")
+    # 書き戻し先（OSS 版 ⇄ SaaS 版で所属を変えるとき）。省略すると元と同じ所属
+    into_workspace_id: UUID | None = None
+    into_self_hosted: bool = False
     # false: 試行（件数を確かめて取り消す）、true: 実行（直前に今の DB の控えを取ってから書き込む）
     apply: bool = False
     # 実行のとき: 画面で確認した試行の件数（足す行の合計）。実行の直前の試行と違えば中止する。
@@ -116,6 +119,7 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             "source": source.describe(),
             "target_configured": settings.target_dsn is not None,
             "merge_enabled": settings.target_write_dsn is not None,
+            "target_mode": settings.target_mode,
         }
 
     @app.get("/api/backups")
@@ -244,7 +248,8 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             )
         backup_dsn = await resolve_dsn(name)
         sel = merge.MergeSelection(
-            req.workspace_ids, req.include_self_hosted, req.time_from, req.time_to
+            req.workspace_ids, req.include_self_hosted, req.time_from, req.time_to,
+            req.into_workspace_id, req.into_self_hosted,
         )
         # 書き戻しは同時に 1 つだけ（控えと書き込みの順番が入れ違わないように）
         async with merge_lock:
@@ -255,7 +260,9 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
                 async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
                     settings.target_write_dsn
                 ) as dst:
-                    plan = await merge.merge(src, dst, sel, apply=False)
+                    plan = await merge.merge(
+                        src, dst, sel, apply=False, target_mode=settings.target_mode
+                    )
                 planned = sum(t.inserted for t in plan.tables)
                 if planned != req.expected_inserted:
                     raise HTTPException(
@@ -268,7 +275,9 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
                 settings.target_write_dsn
             ) as dst:
-                result = await merge.merge(src, dst, sel, apply=req.apply)
+                result = await merge.merge(
+                    src, dst, sel, apply=req.apply, target_mode=settings.target_mode
+                )
         return {**asdict(result), "snapshot": snapshot.name if snapshot else None}
 
     return app
