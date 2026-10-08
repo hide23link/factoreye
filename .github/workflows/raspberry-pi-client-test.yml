@@ -2,6 +2,7 @@ name: raspberry-pi-client-test
 
 on:
   push:
+    branches: [main]
     paths: ["clients/raspberry-pi/**", ".github/workflows/raspberry-pi-client-test.yml"]
   pull_request:
     paths: ["clients/raspberry-pi/**", ".github/workflows/raspberry-pi-client-test.yml"]

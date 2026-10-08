@@ -2,6 +2,7 @@ name: arduino-client-compile
 
 on:
   push:
+    branches: [main]
     paths: ["clients/arduino-m5stack/**", ".github/workflows/arduino-client-compile.yml"]
   pull_request:
     paths: ["clients/arduino-m5stack/**", ".github/workflows/arduino-client-compile.yml"]
