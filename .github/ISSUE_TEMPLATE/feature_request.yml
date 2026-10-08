@@ -1,0 +1,28 @@
+name: 機能要望
+description: 新機能や既存機能の改善を提案する
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: usecase
+    attributes:
+      label: ユースケース
+      description: どんな場面で困っているか、何を実現したいか。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する解決策
+      description: 考えている実装方法があれば書いてください（なくても構いません）。
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討した代替案
+      description: 既存の機能やWebhook連携などで回避できないか検討した結果。
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 確認事項
+      options:
+        - label: docs/architecture.md の「非目標」に抵触しないか確認した
+        - label: 既存の Issue で同様の提案がないか確認した

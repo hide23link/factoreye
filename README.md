@@ -133,6 +133,14 @@ GitHub Actions（`.github/workflows/`）:
 
 ---
 
+## コントリビューション
+
+バグ報告・機能提案・PR を歓迎します。[`CONTRIBUTING.md`](CONTRIBUTING.md) を参照してください。参加にあたっては [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) に従ってください。
+
+脆弱性を見つけた場合は、公開の Issue ではなく [`SECURITY.md`](SECURITY.md) の手順に従って報告してください。
+
+---
+
 ## ライセンス
 
 [MIT License](LICENSE)
