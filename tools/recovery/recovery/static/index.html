@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FactorEye 復旧ツール</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #677085; --line: #dde1e8;
+    --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #98a1b3; --line: #2c323d;
+      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  main { padding: 16px 20px; display: grid; gap: 16px; max-width: 1400px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  section h2 { margin: 0 0 10px; font-size: 15px; }
+  .muted { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  button, select, input { font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin-bottom: 10px; }
+  .badge { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 12px; border: 1px solid currentColor; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .msg { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); margin-bottom: 10px; white-space: pre-wrap; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FactorEye 復旧ツール</h1>
+  <p id="info">読み込み中…</p>
+</header>
+<main>
+  <div id="message" class="msg hidden"></div>
+
+  <section>
+    <h2>今の DB</h2>
+    <div id="current"></div>
+  </section>
+
+  <section>
+    <h2>バックアップ</h2>
+    <p class="muted">「読み込む」で作業用の DB に展開します（本番の DB には書き込みません）。sha256 が記録と合わないものは、確認してから展開します。</p>
+    <div class="scroll"><table id="backups"></table></div>
+  </section>
+
+  <section id="compare-section" class="hidden">
+    <h2 id="compare-title">比較</h2>
+    <div id="compare"></div>
+  </section>
+
+  <section id="browse-section" class="hidden">
+    <h2 id="browse-title">データの閲覧</h2>
+    <div class="row">
+      <label>テーブル <select id="b-table"></select></label>
+      <label>ワークスペース <select id="b-ws"></select></label>
+      <label>期間 <input id="b-from" type="datetime-local"> 〜 <input id="b-to" type="datetime-local"></label>
+      <button class="primary" id="b-show">表示</button>
+      <a id="b-csv" href="#"><button type="button">CSV で書き出す</button></a>
+    </div>
+    <p class="muted" id="b-status"></p>
+    <div class="scroll"><table id="b-rows"></table></div>
+    <div class="row" style="margin-top:8px">
+      <button id="b-prev">前へ</button><button id="b-next">次へ</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const PAGE = 100;
+const state = { targetConfigured: false, browse: null };
+
+// DB の値は利用者が入れた文字列なので、innerHTML を使わず textContent で入れる
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "onclick") e.addEventListener("click", v);
+    else if (k === "class") e.className = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c instanceof Node ? c : String(c ?? ""));
+  return e;
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = body.detail;
+    const err = new Error(typeof d === "string" ? d : (d && d.message) || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.detail = d;
+    throw err;
+  }
+  return body;
+}
+
+function showMessage(text, kind = "bad") {
+  const m = document.getElementById("message");
+  m.className = `msg ${kind}`;
+  m.textContent = text;
+  if (!text) m.classList.add("hidden");
+}
+
+const fmtNum = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString());
+const fmtTime = (s) => (s ? new Date(s).toLocaleString() : "—");
+const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(1)} KB`);
+const label = (db) => (db === "current" ? "今の DB" : db);
+
+function table(headers, rows, numeric = new Set()) {
+  const t = el("table");
+  t.append(el("tr", {}, ...headers.map((h, i) => el("th", numeric.has(i) ? { class: "num" } : {}, h))));
+  for (const r of rows) {
+    t.append(el("tr", {}, ...r.map((c, i) => (c instanceof Node ? el("td", {}, c)
+      : el("td", numeric.has(i) ? { class: "num" } : {}, c)))));
+  }
+  return t;
+}
+
+function summaryView(s) {
+  const kv = el("div", { class: "kv" },
+    el("span", { class: "muted" }, "Postgres"), el("span", {}, s.server_version),
+    el("span", { class: "muted" }, "スキーマの版（Alembic）"), el("span", {}, s.alembic_version || "—"),
+    el("span", { class: "muted" }, "最後の測定値"), el("span", {}, fmtTime(s.latest_reading_at)));
+  const counts = Object.entries(s.table_counts).map(([t, n]) => [t, fmtNum(n)]);
+  return el("div", {}, kv, el("div", { class: "scroll" }, table(["テーブル", "件数"], counts, new Set([1]))));
+}
+
+function workspacesView(db, list) {
+  if (!list.length) return el("p", { class: "muted" }, "ワークスペース・センサーはありません");
+  return el("div", { class: "scroll" }, table(
+    ["名前", "所有者", "プラン", "センサー", "測定値", "最後の測定値", ""],
+    list.map((w) => [w.name, w.owner_email || "—", w.plan || "—", fmtNum(w.sensors),
+      fmtNum(w.readings), fmtTime(w.latest_reading_at),
+      el("button", { onclick: () => openBrowse(db, w.id || null) }, "閲覧")]),
+    new Set([3, 4])));
+}
+
+async function loadCurrent() {
+  const box = document.getElementById("current");
+  box.replaceChildren();
+  if (!state.targetConfigured) {
+    box.append(el("p", { class: "muted" }, "TARGET_DATABASE_URL が設定されていません（バックアップだけを扱います）"));
+    return;
+  }
+  try {
+    const [s, ws] = await Promise.all([api("/api/db/current/summary"), api("/api/db/current/workspaces")]);
+    box.append(el("p", {}, el("span", { class: "badge ok" }, "接続できています")),
+      summaryView(s), el("h2", { style: "margin-top:12px" }, "ワークスペース"), workspacesView("current", ws),
+      el("div", { class: "row", style: "margin-top:8px" },
+        el("button", { onclick: () => openBrowse("current", null) }, "全テーブルを閲覧")));
+  } catch (e) {
+    box.append(el("p", {}, el("span", { class: "badge bad" }, "接続できません")), el("p", { class: "bad" }, e.message));
+  }
+}
+
+async function loadBackups() {
+  const t = document.getElementById("backups");
+  const list = await api("/api/backups");
+  const next = list.length ? table(["名前", "日時", "サイズ", "状態", ""],
+    list.map((b) => [b.name, fmtTime(b.modified), fmtSize(b.size),
+      b.loaded ? el("span", { class: "badge ok" }, "展開済み") : el("span", { class: "muted" }, "未展開"),
+      backupActions(b)]), new Set([2])) : el("p", { class: "muted" }, "バックアップがありません");
+  next.id = "backups";
+  t.replaceWith(next);
+}
+
+function backupActions(b) {
+  const box = el("span", { class: "row", style: "margin:0" });
+  if (!b.loaded) {
+    box.append(el("button", { class: "primary", onclick: (ev) => loadBackup(b.name, false, ev.target) }, "読み込む"));
+  } else {
+    if (state.targetConfigured) box.append(el("button", { onclick: () => showCompare(b.name) }, "今の DB と比較"));
+    box.append(el("button", { onclick: () => openBrowse(b.name, null) }, "閲覧"),
+      el("button", { onclick: () => unloadBackup(b.name) }, "作業用 DB から消す"));
+  }
+  return box;
+}
+
+async function loadBackup(name, force, button) {
+  if (button) { button.disabled = true; button.textContent = "展開中…"; }
+  showMessage("");
+  try {
+    const r = await api(`/api/backups/${encodeURIComponent(name)}/load?force=${force}`, { method: "POST" });
+    const v = r.verify;
+    const note = v.checksum === "ok" ? "sha256 は記録と一致しました"
+      : v.checksum === "missing" ? "sha256 の記録が無いため、gzip の検査だけを行いました" : "sha256 は記録と一致しません（確認の上で展開）";
+    showMessage(`${name} を展開しました。${note}`, v.checksum === "ok" ? "ok" : "warn");
+  } catch (e) {
+    const v = e.detail && e.detail.verify;
+    if (v && v.gzip_ok && v.checksum === "mismatch" && !force) {
+      if (confirm(`${name}\n\nsha256 が記録と一致しません。破損か改ざんの可能性があります。それでも展開しますか？`)) {
+        return loadBackup(name, true, button);
+      }
+    }
+    showMessage(`${name}: ${e.message}`);
+  }
+  await loadBackups();
+}
+
+async function unloadBackup(name) {
+  await api(`/api/backups/${encodeURIComponent(name)}/load`, { method: "DELETE" });
+  await loadBackups();
+}
+
+const STATUS = {
+  backup_only: ["bad", "今の DB に無い"],
+  current_only: ["warn", "バックアップの後に増えた"],
+  both: ["ok", "両方にある"],
+};
+
+async function showCompare(name) {
+  const sec = document.getElementById("compare-section");
+  const box = document.getElementById("compare");
+  document.getElementById("compare-title").textContent = `比較: ${name} → 今の DB`;
+  sec.classList.remove("hidden");
+  box.replaceChildren(el("p", { class: "muted" }, "比較中…"));
+  try {
+    const r = await api(`/api/backups/${encodeURIComponent(name)}/compare`);
+    const diffCell = (d) => (d === null ? "—" : el("span", { class: d < 0 ? "bad" : d > 0 ? "warn" : "muted" }, (d > 0 ? "+" : "") + fmtNum(d)));
+    const ver = r.backup.alembic_version === r.current.alembic_version ? el("span", { class: "ok" }, "同じ")
+      : el("span", { class: "warn" }, `違う（バックアップ ${r.backup.alembic_version || "—"} / 今 ${r.current.alembic_version || "—"}）`);
+    box.replaceChildren(
+      el("div", { class: "kv" }, el("span", { class: "muted" }, "スキーマの版"), ver,
+        el("span", { class: "muted" }, "最後の測定値"), el("span", {}, `${fmtTime(r.backup.latest_reading_at)} → ${fmtTime(r.current.latest_reading_at)}`)),
+      el("div", { class: "scroll" }, table(["テーブル", "バックアップ", "今", "差"],
+        r.tables.map((t) => [t.table, fmtNum(t.backup), fmtNum(t.current), diffCell(t.diff)]), new Set([1, 2, 3]))),
+      el("h2", { style: "margin-top:12px" }, "ワークスペース"),
+      r.workspaces.length ? el("div", { class: "scroll" }, table(
+        ["名前", "所有者", "状態", "センサー（バックアップ → 今）", "測定値（バックアップ → 今）", ""],
+        r.workspaces.map((w) => [w.name, w.owner_email || "—",
+          el("span", { class: `badge ${STATUS[w.status][0]}` }, STATUS[w.status][1]),
+          `${fmtNum(w.backup_sensors)} → ${fmtNum(w.current_sensors)}`,
+          `${fmtNum(w.backup_readings)} → ${fmtNum(w.current_readings)}`,
+          w.backup_sensors !== null ? el("button", { onclick: () => openBrowse(name, w.id || null) }, "バックアップを閲覧") : ""]))
+      ) : el("p", { class: "muted" }, "ワークスペースはありません"));
+  } catch (e) {
+    box.replaceChildren(el("p", { class: "bad" }, e.message));
+  }
+}
+
+async function openBrowse(db, workspaceId) {
+  const sec = document.getElementById("browse-section");
+  sec.classList.remove("hidden");
+  document.getElementById("browse-title").textContent = `データの閲覧: ${label(db)}`;
+  const [tables, ws] = await Promise.all([api(`/api/db/${encodeURIComponent(db)}/tables`),
+    api(`/api/db/${encodeURIComponent(db)}/workspaces`)]);
+  const tSel = document.getElementById("b-table");
+  tSel.replaceChildren(...tables.map((t) => el("option", { value: t }, t)));
+  tSel.value = tables.includes("readings") ? "readings" : tables[0];
+  const wSel = document.getElementById("b-ws");
+  wSel.replaceChildren(el("option", { value: "" }, "すべて"),
+    ...ws.filter((w) => w.id).map((w) => el("option", { value: w.id }, `${w.name}（${w.owner_email || "所有者なし"}）`)));
+  wSel.value = workspaceId || "";
+  state.browse = { db, offset: 0 };
+  sec.scrollIntoView({ behavior: "smooth" });
+  await showRows();
+}
+
+function browseQuery() {
+  const p = new URLSearchParams();
+  const ws = document.getElementById("b-ws").value;
+  const from = document.getElementById("b-from").value;
+  const to = document.getElementById("b-to").value;
+  if (ws) p.set("workspace_id", ws);
+  // datetime-local は時差を持たないため、ブラウザの時刻として解釈して UTC で送る
+  if (from) p.set("from", new Date(from).toISOString());
+  if (to) p.set("to", new Date(to).toISOString());
+  return p;
+}
+
+async function showRows() {
+  const { db, offset } = state.browse;
+  const tableName = document.getElementById("b-table").value;
+  const p = browseQuery();
+  const base = `/api/db/${encodeURIComponent(db)}`;
+  document.getElementById("b-csv").href = `${base}/export/${encodeURIComponent(tableName)}.csv?${p}`;
+  p.set("limit", PAGE);
+  p.set("offset", offset);
+  const status = document.getElementById("b-status");
+  try {
+    const r = await api(`${base}/tables/${encodeURIComponent(tableName)}?${p}`);
+    const t = table(r.columns, r.rows.map((row) => row.map((c) => (c === null ? "—" : typeof c === "object" ? JSON.stringify(c) : c))));
+    t.id = "b-rows";
+    document.getElementById("b-rows").replaceWith(t);
+    status.textContent = r.total ? `${fmtNum(r.total)} 件中 ${fmtNum(offset + 1)}〜${fmtNum(offset + r.rows.length)} 件` : "該当する行はありません";
+    document.getElementById("b-prev").disabled = offset === 0;
+    document.getElementById("b-next").disabled = offset + PAGE >= r.total;
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+document.getElementById("b-show").addEventListener("click", () => { state.browse.offset = 0; showRows(); });
+document.getElementById("b-prev").addEventListener("click", () => { state.browse.offset = Math.max(0, state.browse.offset - PAGE); showRows(); });
+document.getElementById("b-next").addEventListener("click", () => { state.browse.offset += PAGE; showRows(); });
+
+(async () => {
+  try {
+    const info = await api("/api/info");
+    state.targetConfigured = info.target_configured;
+    document.getElementById("info").textContent = `バックアップの読み込み元: ${info.source}`;
+    await Promise.all([loadCurrent(), loadBackups()]);
+  } catch (e) {
+    showMessage(e.message);
+  }
+})();
+</script>
+</body>
+</html>

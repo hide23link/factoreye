@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **復旧ツール**（`tools/recovery/`）: バックアップを今の DB と見比べ、閲覧・CSV で書き出す Web 画面。FactorEye 本体に依存せず、Docker があればどこでも動く（本番の LXC・ラズパイ・Mac）。読み込み元はディレクトリか S3。sha256 と gzip を検証してから、コンテナの中の作業用の Postgres に展開する。今の DB には読み取り専用で接続する
+- **バックアップの拡張**（`infra/backup.sh`）: 各ファイルの隣に sha256 を書く。設定ファイル（`.env`・管理者ファイル・cloudflared の設定）を暗号化して保存できる（`BACKUP_PASSPHRASE_FILE`）。S3 への送信（`infra/offsite-s3.sh`、`OFFSITE_S3_URI`）と、別のマシンからの取得（`infra/offsite-pull.sh`）
 - **グラフの時間操作（Grafana と同じ）**: ダッシュボード上部で、過去への移動（前へ・後ろへ）、現在への復帰（今）、拡大・縮小、プリセット（直近 5 分〜30 日）と任意の期間を選べる。グラフ上のドラッグで、その期間に拡大する。範囲は URL（`?range=1h` / `?from=…&to=…`）に保持する。SaaS は 90 日まで
 - **グラフ用の間引き API**: `GET /api/sensors/{id}/readings/downsampled`（`from` / `to` / `buckets`）。区間ごとの最小・平均・最大・件数を返す。`SensorGraph` と `MultiSensorComparison` はこれを使う
 - **取り込みのレート制限を、管理画面から期限付きで解除**: 管理画面の上部のカードで「60 分だけ解除」「今すぐ制限を戻す」を操作できる。期限（既定 60 分・最長 240 分）を過ぎると自動で既定の制限に戻る。状態はメモリのみ（再起動で既定に戻る）。`GET` / `PUT /api/admin/ingest-limit`
@@ -22,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SaaS の Free Tier**: 測定値を 90 日より古いものから毎日削除（SaaS のセンサーのみ対象）。上限到達時の案内を画面に表示
 
 ### Changed
+- **バックアップのファイルの権限を 600 に**（従来は 644）。利用者のデータとパスワードのハッシュが入るため
 - **Webhook の送信に上限を設定**: 接続を使い回し、同時送信は 10 件まで、送信待ちは 1,000 件まで（超えた分は送らずに捨て、ログに件数を出す）。大量の取り込みや送信先の遅延で、CPU・メモリ・接続を使い切らないため
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた
 - **Docker イメージを軽量化**: frontend は 428 MB → 63 MB（Vite preview をやめ、ビルド済みの静的ファイルを nginx で配信。多段ビルド）、backend は 421 MB → 283 MB（多段ビルド、実行時依存と開発用依存（`requirements-dev.txt`）を分離、`.dockerignore` に tests などを追加）

@@ -1,0 +1,23 @@
+# FactorEye 復旧ツール（単体で起動する。FactorEye 本体の compose とは別）
+#   ラズパイ・Mac:  docker compose up -d --build
+#   本番の LXC:     docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d --build
+# 設定は同じディレクトリの .env（.env.example を参照）
+services:
+  recovery:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 下の volumes で手元のバックアップを /backups に見せる。S3 を使う場合は .env で s3://... に変える
+      BACKUP_SOURCE: ${BACKUP_SOURCE:-/backups}
+    volumes:
+      # バックアップは読むだけ（ツールから消したり書き換えたりできないように :ro）
+      - ${BACKUP_DIR:-../../backups}:/backups:ro
+      - recovery-data:/var/lib/recovery
+    ports:
+      # 既定は自分のマシンからだけ開ける。Docker の公開ポートは ufw を素通りするため、
+      # 0.0.0.0 にはしない。Tailscale から開く場合は RECOVERY_BIND に Tailscale の IP を入れる
+      - "${RECOVERY_BIND:-127.0.0.1}:${RECOVERY_PORT:-8090}:8090"
+
+volumes:
+  recovery-data:

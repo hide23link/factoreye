@@ -1,0 +1,9 @@
+# 本番の LXC で使う追加設定: FactorEye のネットワークに入り、今の DB（postgres:5432）を読めるようにする
+services:
+  recovery:
+    networks: [default, factoreye]
+
+networks:
+  factoreye:
+    external: true
+    name: ${FACTOREYE_NETWORK:-factoreye-cloud}

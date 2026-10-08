@@ -314,7 +314,10 @@ DB に接続できない場合は `status` が `degraded` になる。
 
 ### バックアップ
 - `infra/backup.sh` が PostgreSQL を `pg_dump` で取得する。cron で毎日 3 時に実行する想定
-- 保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。復元は `infra/restore.sh`
+- 保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。各ファイルの隣に sha256 を書く。復元は `infra/restore.sh`
+- 設定ファイル（`.env`・管理者ファイルなど）も、暗号化して保存できる（`BACKUP_PASSPHRASE_FILE`）
+- 本番の外の控え: S3 に送る（`infra/offsite-s3.sh`、追加だけの権限）か、別のマシンから取りに行く（`infra/offsite-pull.sh`、読むだけの鍵）
+- 中身の確認・今の DB との比較・CSV の書き出しは、復旧ツール（`tools/recovery/`）。FactorEye 本体に依存せず、どこでも起動できる
 - 手順は [`infra/README.md`](../infra/README.md)
 
 ### 設定（環境変数）
