@@ -24,11 +24,15 @@ class Settings:
     scratch_dsn: str
     # 状態を確認する、今の DB。本番が失われた後に別のマシンで使う場合は無し
     target_dsn: str | None
+    # 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しの機能を出さない
+    target_write_dsn: str | None
     # S3 から取ってきたファイルを置く場所
     cache_dir: Path
     username: str
     password: str
     s3_endpoint_url: str | None
+    # 書き戻しの直前に取る、今の DB の控えの置き場所
+    snapshot_dir: Path
 
 
 def normalize_dsn(dsn: str) -> str:
@@ -52,12 +56,17 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         raise ConfigError("BACKUP_SOURCE（ディレクトリか s3://...）を設定してください")
 
     target = e.get("TARGET_DATABASE_URL") or None
+    write = e.get("TARGET_WRITE_DATABASE_URL") or None
+    if write and not target:
+        raise ConfigError("TARGET_WRITE_DATABASE_URL には TARGET_DATABASE_URL も必要です")
     return Settings(
         backup_source=source,
         scratch_dsn=normalize_dsn(scratch),
         target_dsn=normalize_dsn(target) if target else None,
+        target_write_dsn=normalize_dsn(write) if write else None,
         cache_dir=Path(e.get("RECOVERY_CACHE_DIR", "/var/lib/recovery/cache")),
         username=e.get("RECOVERY_USERNAME", "admin"),
         password=password,
         s3_endpoint_url=e.get("S3_ENDPOINT_URL") or None,
+        snapshot_dir=Path(e.get("RECOVERY_SNAPSHOT_DIR", "/var/lib/recovery/snapshots")),
     )

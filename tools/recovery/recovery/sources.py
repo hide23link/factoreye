@@ -88,6 +88,9 @@ class LocalSource:
     def describe(self) -> str:
         return str(self._dir)
 
+    def exists(self) -> bool:
+        return self._dir.is_dir()
+
     def list(self) -> list[BackupEntry]:
         if not self._dir.is_dir():
             raise SourceError(f"バックアップのディレクトリがありません: {self._dir}")
@@ -151,6 +154,33 @@ class S3Source:
             # どちらも「記録なし」として扱う
             expected = None
         return FetchedBackup(dest, expected, temporary=True)
+
+
+class CompositeSource:
+    """複数の読み込み元を 1 つに見せる（本来のバックアップ ＋ 書き戻しの直前の控え）。"""
+
+    def __init__(self, sources: list[BackupSource]) -> None:
+        self._sources = sources
+
+    def describe(self) -> str:
+        return " ＋ ".join(s.describe() for s in self._sources)
+
+    def list(self) -> list[BackupEntry]:
+        entries: list[BackupEntry] = []
+        for s in self._sources:
+            if isinstance(s, LocalSource) and not s.exists():
+                continue  # 控えのディレクトリは、最初の書き戻しまで無い
+            entries.extend(s.list())
+        return sorted(entries, key=lambda e: e.modified, reverse=True)
+
+    def fetch(self, name: str) -> FetchedBackup:
+        errors = []
+        for s in self._sources:
+            try:
+                return s.fetch(name)
+            except SourceError as e:
+                errors.append(str(e))
+        raise SourceError(errors[-1] if errors else f"バックアップが見つかりません: {name}")
 
 
 def make_source(spec: str, cache_dir: Path, s3_endpoint_url: str | None = None) -> BackupSource:

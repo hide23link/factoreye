@@ -118,7 +118,7 @@ async def _columns(conn: asyncpg.Connection, table: str) -> list[str]:
     return [r["column_name"] for r in rows]
 
 
-def _ident(name: str) -> str:
+def ident(name: str) -> str:
     # 名前は list_tables / _columns で実在を確かめたものだけが来るが、
     # 念のため引用符を二重にして埋め込む
     return '"' + name.replace('"', '""') + '"'
@@ -141,7 +141,7 @@ async def summarize(conn: asyncpg.Connection) -> DbSummary:
             counts[t] = estimates[t]
             estimated.append(t)
         else:
-            counts[t] = int(await conn.fetchval(f"SELECT count(*) FROM {_ident(t)}"))
+            counts[t] = int(await conn.fetchval(f"SELECT count(*) FROM {ident(t)}"))
     alembic = None
     if "alembic_version" in tables:
         alembic = await conn.fetchval("SELECT version_num FROM alembic_version LIMIT 1")
@@ -206,10 +206,10 @@ def _where(table: str, columns: list[str], f: RowFilter) -> tuple[str, list[obje
     if time_col and time_col in columns:
         if f.time_from is not None:
             args.append(f.time_from)
-            clauses.append(f"{_ident(time_col)} >= ${len(args)}")
+            clauses.append(f"{ident(time_col)} >= ${len(args)}")
         if f.time_to is not None:
             args.append(f.time_to)
-            clauses.append(f"{_ident(time_col)} < ${len(args)}")
+            clauses.append(f"{ident(time_col)} < ${len(args)}")
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     return where, args
 
@@ -217,7 +217,7 @@ def _where(table: str, columns: list[str], f: RowFilter) -> tuple[str, list[obje
 def _order_by(table: str, columns: list[str]) -> str:
     time_col = TIME_COLUMNS.get(table)
     if time_col and time_col in columns:
-        return f" ORDER BY {_ident(time_col)} DESC"
+        return f" ORDER BY {ident(time_col)} DESC"
     if "created_at" in columns:
         return ' ORDER BY "created_at"'
     return " ORDER BY 1"
@@ -231,10 +231,10 @@ async def _prepare(
         raise TableNotFound(f"テーブルがありません: {table}")
     columns = await _columns(conn, table)
     where, args = _where(table, columns, f)
-    select = ", ".join(_ident(c) for c in columns)
-    rows_sql = f"SELECT {select} FROM {_ident(table)}{where}{_order_by(table, columns)}"
+    select = ", ".join(ident(c) for c in columns)
+    rows_sql = f"SELECT {select} FROM {ident(table)}{where}{_order_by(table, columns)}"
     count_sql = (
-        f"SELECT count(*) FROM (SELECT 1 FROM {_ident(table)}{where} LIMIT {COUNT_CAP + 1}) t"
+        f"SELECT count(*) FROM (SELECT 1 FROM {ident(table)}{where} LIMIT {COUNT_CAP + 1}) t"
     )
     return columns, rows_sql, count_sql, args
 

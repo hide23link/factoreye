@@ -21,10 +21,12 @@ import asyncpg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from pydantic import BaseModel, Field
 
-from recovery import compare, dbinfo
+from recovery import compare, dbinfo, merge
 from recovery.config import Settings
 from recovery.scratch import LoadError, Scratch, db_name_for
+from recovery.snapshot import SnapshotError, dump_database
 from recovery.sources import BackupSource, SourceError, validate_name, verify
 
 CURRENT = "current"
@@ -33,6 +35,15 @@ EXPORT_STATEMENT_TIMEOUT_MS = 600_000
 STATIC_DIR = Path(__file__).parent / "static"
 
 _basic = HTTPBasic(realm="FactorEye recovery")
+
+
+class MergeRequest(BaseModel):
+    workspace_ids: list[UUID] = Field(default_factory=list, max_length=1000)
+    include_self_hosted: bool = False
+    time_from: datetime | None = Field(default=None, alias="from")
+    time_to: datetime | None = Field(default=None, alias="to")
+    # false: 試行（件数を確かめて取り消す）、true: 実行（直前に今の DB の控えを取ってから書き込む）
+    apply: bool = False
 
 
 def _require_auth(settings: Settings) -> Callable[[HTTPBasicCredentials], None]:
@@ -54,6 +65,16 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         openapi_url=None,
         dependencies=[Depends(_require_auth(settings))],
     )
+
+    merge_lock = asyncio.Lock()
+
+    @app.exception_handler(merge.MergeError)
+    async def _merge_error(_: Request, e: merge.MergeError) -> JSONResponse:
+        return JSONResponse({"detail": str(e)}, status_code=422)
+
+    @app.exception_handler(SnapshotError)
+    async def _snapshot_error(_: Request, e: SnapshotError) -> JSONResponse:
+        return JSONResponse({"detail": str(e)}, status_code=503)
 
     @app.exception_handler(SourceError)
     async def _source_error(_: Request, e: SourceError) -> JSONResponse:
@@ -88,7 +109,11 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
 
     @app.get("/api/info")
     async def info() -> dict[str, object]:
-        return {"source": source.describe(), "target_configured": settings.target_dsn is not None}
+        return {
+            "source": source.describe(),
+            "target_configured": settings.target_dsn is not None,
+            "merge_enabled": settings.target_write_dsn is not None,
+        }
 
     @app.get("/api/backups")
     async def list_backups() -> list[dict[str, object]]:
@@ -206,6 +231,33 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             "tables": [{**asdict(t), "diff": t.diff} for t in compare.compare_tables(b_sum, c_sum)],
             "workspaces": [asdict(w) for w in compare.compare_workspaces(b_ws, c_ws)],
         }
+
+    @app.post("/api/backups/{name}/merge")
+    async def merge_into_current(name: str, req: MergeRequest) -> dict[str, object]:
+        """選んだワークスペースの、今の DB に無い行だけを書き戻す。"""
+        if settings.target_write_dsn is None:
+            raise HTTPException(
+                403, "書き戻しは無効です（TARGET_WRITE_DATABASE_URL が設定されていません）"
+            )
+        backup_dsn = await resolve_dsn(name)
+        sel = merge.MergeSelection(
+            req.workspace_ids, req.include_self_hosted, req.time_from, req.time_to
+        )
+        # 書き戻しは同時に 1 つだけ（控えと書き込みの順番が入れ違わないように）
+        async with merge_lock:
+            snapshot = None
+            if req.apply:
+                # 試行で問題が無くても、実行の直前の状態を必ず控える
+                async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
+                    settings.target_write_dsn
+                ) as dst:
+                    await merge.merge(src, dst, sel, apply=False)
+                snapshot = await dump_database(settings.target_write_dsn, settings.snapshot_dir)
+            async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
+                settings.target_write_dsn
+            ) as dst:
+                result = await merge.merge(src, dst, sel, apply=req.apply)
+        return {**asdict(result), "snapshot": snapshot.name if snapshot else None}
 
     return app
 
