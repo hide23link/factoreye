@@ -329,7 +329,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 - `infra/backup.sh` が PostgreSQL を `pg_dump` で取得する。cron で毎日 3 時に実行する想定
 - 保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。各ファイルの隣に sha256 を書く。復元は `infra/restore.sh`
 - 設定ファイル（`.env`・管理者ファイルなど）も、暗号化して保存できる（`BACKUP_PASSPHRASE_FILE`）
-- 本番の外の控え: S3 に送る（`infra/offsite-s3.sh`、追加だけの権限）か、別のマシンから取りに行く（`infra/offsite-pull.sh`、読むだけの鍵）
+- 本番の外の控え: 別のマシン（Tailscale 経由で到達できるもの）から取りに行く（`infra/offsite-pull.sh`、読むだけの鍵）。S3 に送る方法（`infra/offsite-s3.sh`、追加だけの権限）も用意している
 - バックアップのファイルは権限 640 で作り、書き込み中は `.partial-*` に書いてから名前を変える（書きかけを外部の取得や復旧ツールが拾わないように）
 - 中身の確認・比較・書き出し・書き戻しは、復旧ツール（§11.1）
 - 手順は [`infra/README.md`](../infra/README.md)
@@ -426,7 +426,7 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - 一覧の件数が増えると、`total` の集計（件数を数える処理）と、ページの読み出しの両方のコストが増える。数十万件規模では見直す
 - 測定値の一覧（`readings`）は、列だけを読むようにしたが、読み出す件数（`limit`）そのものは減らしていない。グラフは `downsampled` を使う（§8）
 - 復旧ツール（§11.1）: DB を丸ごと戻す機能は無い（`infra/restore.sh` を使う）。スキーマの版が違うバックアップは書き戻せない（古い版を新しい版に上げてから書き戻す機能は無い）。書き戻しで SaaS の Free Tier のセンサー数の上限は確かめない。書き戻しは閲覧と同じ認証で使える
-- 本番の外への控え（`offsite-s3.sh` / `offsite-pull.sh`）は、実機での確認がまだ
+- 本番の外への控え（`offsite-s3.sh`）は、実機での確認がまだ（`offsite-pull.sh` は実機で確認済み）
 
 ---
 
