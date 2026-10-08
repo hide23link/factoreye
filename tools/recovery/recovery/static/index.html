@@ -107,14 +107,14 @@
 
     <section class="step disabled" id="s2">
       <div class="step-head"><span class="step-num">2</span><h2>戻すものを選ぶ</h2></div>
-      <p class="lead">バックアップと今の DB を比べた結果です。戻したいワークスペースにチェックを入れます（今の DB で消えているものは、最初から選ばれています）。</p>
+      <p class="lead">バックアップと今の DB を比べた結果です。戻したいものにチェックを入れます（今の DB で消えているもの・測定値が足りないものは、最初から選ばれています）。</p>
       <div class="body" id="s2-body"><p class="muted small">先に手順 1 でバックアップを選んでください。</p></div>
     </section>
 
     <section class="step disabled" id="s3">
       <div class="step-head"><span class="step-num">3</span><h2>内容を確認する</h2></div>
       <p class="lead">選んだ内容で書き戻すと、今の DB に何が追加されるかを、実際には書き込まずに確かめた結果です。</p>
-      <div class="body" id="s3-body"><p class="muted small">手順 2 でワークスペースを選ぶと、ここに表示されます。</p></div>
+      <div class="body" id="s3-body"><p class="muted small">手順 2 で戻すものを選ぶと、ここに表示されます。</p></div>
     </section>
 
     <section class="step disabled" id="s4">
@@ -240,6 +240,8 @@ function table(headers, rows, numeric = new Set()) {
   return t;
 }
 
+const modeLabel = () => ({ saas: "（SaaS 版）", oss: "（OSS 版）" }[state.info.target_mode] || "");
+
 // ── ヘッダー: 今の DB の状態 ──
 async function loadStatus() {
   const bar = $("status");
@@ -251,7 +253,7 @@ async function loadStatus() {
     const [s, ws] = await Promise.all([api("/api/db/current/summary"), api("/api/db/current/workspaces")]);
     const c = s.table_counts;
     bar.replaceChildren(
-      el("span", { class: "badge b-ok" }, "今の DB: 接続中"),
+      el("span", { class: "badge b-ok" }, `今の DB: 接続中${modeLabel()}`),
       el("span", {}, "ワークスペース ", el("b", {}, fmtNum(ws.filter((w) => w.id).length))),
       el("span", {}, "センサー ", el("b", {}, fmtNum(c.sensors))),
       el("span", {}, "測定値 ", el("b", {}, fmtNum(c.readings))),
@@ -329,7 +331,7 @@ function resetLaterSteps() {
   setStep("s1", "");
   for (const id of ["s2", "s3", "s4"]) setStep(id, "disabled");
   $("s2-body").replaceChildren(el("p", { class: "muted small" }, "先に手順 1 でバックアップを選んでください。"));
-  $("s3-body").replaceChildren(el("p", { class: "muted small" }, "手順 2 でワークスペースを選ぶと、ここに表示されます。"));
+  $("s3-body").replaceChildren(el("p", { class: "muted small" }, "手順 2 で戻すものを選ぶと、ここに表示されます。"));
   $("apply-btn").disabled = true;
   $("apply-btn").textContent = "書き戻す";
 }
@@ -346,29 +348,42 @@ async function showCompare() {
   setStep("s2", "");
   body.replaceChildren(spinner("今の DB と比べています…"));
   try {
-    state.compare = await api(`/api/backups/${encodeURIComponent(state.selected)}/compare`);
+    [state.compare, state.currentWs] = await Promise.all([
+      api(`/api/backups/${encodeURIComponent(state.selected)}/compare`),
+      api("/api/db/current/workspaces"),
+    ]);
   } catch (e) {
     body.replaceChildren(box("bad", el("p", {}, e.message)));
     return;
   }
   const r = state.compare;
-  const lost = r.workspaces.filter((w) => w.status === "backup_only").length;
+  // OSS 版（self-hosted）のデータは、ワークスペースに属さない（id が空）
+  const isOss = (w) => !w.id;
+  const lostWs = r.workspaces.filter((w) => w.status === "backup_only" && !isOss(w)).length;
+  const lostOss = r.workspaces.some((w) => w.status === "backup_only" && isOss(w));
   const both = r.workspaces.filter((w) => w.status === "both");
-  const short = both.filter((w) => (w.backup_readings || 0) > (w.current_readings || 0)).length;
+  const short = both.filter((w) => (w.backup_readings || 0) > (w.current_readings || 0));
   const parts = [];
-  if (lost) parts.push(`今の DB で消えているワークスペースが ${lost} 件あります。`);
-  if (short) parts.push(`両方にあるワークスペースのうち ${short} 件は、測定値が今の DB のほうが少なくなっています。`);
-  if (!parts.length) parts.push("今の DB に足りないワークスペースは見つかりませんでした。");
+  if (lostOss) parts.push("今の DB で、OSS 版（self-hosted）のセンサーと測定値が消えています。");
+  if (lostWs) parts.push(`今の DB で消えているワークスペースが ${lostWs} 件あります。`);
+  if (short.length) {
+    parts.push(short.length === 1 && isOss(short[0])
+      ? "OSS 版（self-hosted）の測定値が、今の DB のほうが少なくなっています。"
+      : `両方にあるもののうち ${short.length} 件は、測定値が今の DB のほうが少なくなっています。`);
+  }
+  if (!parts.length) parts.push("今の DB に足りないものは見つかりませんでした。");
 
   const sameVersion = r.backup.alembic_version === r.current.alembic_version;
   const rows = r.workspaces.map((w) => {
     const selectable = w.status !== "current_only";
-    const cb = el("input", { type: "checkbox", value: w.id, disabled: !selectable, checked: w.status === "backup_only" });
-    cb.addEventListener("change", schedulePlan);
+    // 消えているもの・測定値が足りないものは、最初から選んでおく
+    const lacking = w.status === "backup_only" || (w.status === "both" && (w.backup_readings || 0) > (w.current_readings || 0));
+    const cb = el("input", { type: "checkbox", value: w.id, disabled: !selectable, checked: lacking });
+    cb.addEventListener("change", () => { renderDest(); schedulePlan(); });
     const diff = (w.current_readings || 0) - (w.backup_readings || 0);
     return el("tr", { class: selectable ? "" : "muted-row" },
       el("td", {}, cb),
-      el("td", {}, el("b", {}, w.name), el("div", { class: "small muted" }, w.owner_email || "")),
+      el("td", {}, el("b", {}, isOss(w) ? "OSS 版（self-hosted）のデータ" : w.name), el("div", { class: "small muted" }, w.owner_email || "")),
       el("td", {}, el("span", { class: `badge ${STATUS[w.status][0]}` }, STATUS[w.status][1])),
       el("td", { class: "num" }, fmtNum(w.backup_readings)),
       el("td", { class: "num" }, fmtNum(w.current_readings)),
@@ -376,7 +391,7 @@ async function showCompare() {
         el("span", { class: diff < 0 ? "badge b-bad" : "muted" }, diff === 0 ? "同じ" : (diff > 0 ? "+" : "") + fmtNum(diff))),
       el("td", {}, w.backup_sensors !== null ? el("button", { class: "link", onclick: () => openBrowse(state.selected, w.id || "") }, "中身を見る") : ""));
   });
-  const t = el("table", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "ワークスペース"), el("th", {}, "状態"),
+  const t = el("table", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "ワークスペース / OSS 版"), el("th", {}, "状態"),
     el("th", { class: "num" }, "測定値（バックアップ）"), el("th", { class: "num" }, "測定値（今）"), el("th", { class: "num" }, "差"), el("th", {}, "")), rows);
 
   body.replaceChildren(
@@ -384,10 +399,12 @@ async function showCompare() {
     sameVersion ? "" : box("bad", el("p", {}, el("b", {}, "このバックアップは、今の DB と構成の版が違うため書き戻せません。")),
       el("p", { class: "small" }, "同じ版のバックアップを選ぶか、「データを見る・書き出す」で CSV として取り出してください。")),
     r.workspaces.length ? el("div", { class: "scroll", id: "ws-table" }, t) : el("p", { class: "muted" }, "ワークスペースはありません"),
+    el("div", { id: "dest" }),
     el("details", { id: "period" }, el("summary", {}, "期間を絞る（測定値・アラームだけ。例: 消えた日の分だけ戻す）"),
       el("div", { class: "row" }, el("input", { type: "datetime-local", id: "p-from", onchange: schedulePlan }), "〜",
         el("input", { type: "datetime-local", id: "p-to", onchange: schedulePlan }),
         el("span", { class: "small muted" }, "空欄なら、すべての期間"))));
+  renderDest();
   if (!sameVersion || !state.info.merge_enabled) {
     if (!state.info.merge_enabled) {
       $("s3-body").replaceChildren(box("info", el("p", {}, "書き戻しは無効です（TARGET_WRITE_DATABASE_URL が未設定）。比較と閲覧だけができます。")));
@@ -397,9 +414,54 @@ async function showCompare() {
   schedulePlan();
 }
 
+// ── 書き戻し先: OSS 版のデータ ⇄ SaaS 版のワークスペースで、所属を変えて入れる ──
+function checkedIds() {
+  return [...document.querySelectorAll("#ws-table input[type=checkbox]:checked")].map((cb) => cb.value);
+}
+
+// 今の DB に合わせて、書き戻し先を選ぶ必要があるか
+function destNeed() {
+  const ids = checkedIds();
+  if (state.info.target_mode === "saas" && ids.includes("")) return "workspace";
+  if (state.info.target_mode === "oss" && ids.some((id) => id)) return "oss";
+  return null;
+}
+
+function renderDest() {
+  const box_ = $("dest");
+  if (!box_) return;
+  const need = destNeed();
+  if (need === "workspace") {
+    const ws = (state.currentWs || []).filter((w) => w.id);
+    if (!ws.length) {
+      box_.replaceChildren(box("warn", el("p", {}, el("b", {}, "OSS 版のデータを入れるワークスペースがありません")),
+        el("p", { class: "small" }, "今の DB（SaaS 版）は、どのワークスペースにも属さないデータを表示できません。先に SaaS 版で利用者登録をしてワークスペースを作り、もう一度この画面を開いてください。")));
+      return;
+    }
+    const prev = $("dest-ws") ? $("dest-ws").value : "";
+    const sel = el("select", { id: "dest-ws", onchange: schedulePlan },
+      el("option", { value: "" }, "選んでください"),
+      ws.map((w) => el("option", { value: w.id }, `${w.name}（${w.owner_email || "所有者なし"}）`)));
+    sel.value = prev;
+    box_.replaceChildren(box("info",
+      el("p", {}, el("b", {}, "書き戻し先: "), "OSS 版のデータは、SaaS 版のどのワークスペースに入れますか？"),
+      el("div", { class: "row" }, sel),
+      el("p", { class: "small muted" }, "選んだデータは、すべてこのワークスペースのものとして入ります（センサー・測定値・アラーム・ダッシュボード・通知設定）。")));
+  } else if (need === "oss") {
+    box_.replaceChildren(box("info",
+      el("p", {}, el("b", {}, "書き戻し先: "), "今の DB は OSS 版です。SaaS 版のワークスペースのデータは、OSS 版のデータとして入れます。"),
+      el("p", { class: "small muted" }, "センサー・測定値・アラーム・ダッシュボード・通知設定を入れます。SaaS 版のユーザーとワークスペースの情報は入れません。")));
+  } else {
+    box_.replaceChildren();
+  }
+}
+
 function selection() {
-  const ids = [...document.querySelectorAll("#ws-table input[type=checkbox]:checked")].map((cb) => cb.value);
+  const ids = checkedIds();
   const b = { workspace_ids: ids.filter((id) => id), include_self_hosted: ids.includes("") };
+  const need = destNeed();
+  if (need === "workspace" && $("dest-ws") && $("dest-ws").value) b.into_workspace_id = $("dest-ws").value;
+  if (need === "oss") b.into_self_hosted = true;
   const from = $("p-from") && $("p-from").value;
   const to = $("p-to") && $("p-to").value;
   // datetime-local は時差を持たないため、ブラウザの時刻として解釈して UTC で送る
@@ -420,10 +482,16 @@ function schedulePlan() {
 async function runPlan() {
   const body = $("s3-body");
   const sel = selection();
+  if (destNeed() === "workspace" && !sel.into_workspace_id) {
+    setStep("s3", "disabled");
+    setStep("s4", "disabled");
+    body.replaceChildren(el("p", { class: "muted small" }, "手順 2 で、OSS 版のデータの書き戻し先のワークスペースを選んでください。"));
+    return;
+  }
   if (!sel.workspace_ids.length && !sel.include_self_hosted) {
     setStep("s3", "disabled");
     setStep("s4", "disabled");
-    body.replaceChildren(el("p", { class: "muted small" }, "手順 2 でワークスペースを選ぶと、ここに表示されます。"));
+    body.replaceChildren(el("p", { class: "muted small" }, "手順 2 で戻すものを選ぶと、ここに表示されます。"));
     return;
   }
   setStep("s2", "done");
@@ -473,12 +541,23 @@ function renderPlan(r) {
     existing.length ? el("p", { class: "small muted" }, "今の DB に既にあるため追加しないもの: ",
       existing.map(([t, v]) => `${label(t)} ${fmtNum(v.existing)}`).join("、")) : "",
     closed ? box("warn", el("p", { class: "small" }, `発生中のアラーム ${closed} 件は、同じセンサーで今も別のアラームが発生中のため、「解除済み」として戻します。`)) : "",
-    el("p", { class: "small muted" }, "今あるデータは変更・削除しません。ログインの状態は戻らないため、利用者はログインし直す必要があります。"));
+    el("p", { class: "small muted" }, "今あるデータは変更・削除しません。",
+      totals.users && totals.users.inserted ? "ログインの状態は戻らないため、利用者はログインし直す必要があります。" : ""));
   setStep("s3", "done");
   setStep("s4", "");
   const btn = $("apply-btn");
   btn.disabled = false;
   btn.textContent = `今の DB に ${fmtNum(total)} 件を書き戻す`;
+}
+
+function destText() {
+  const sel = selection();
+  if (sel.into_self_hosted) return "OSS 版のデータとして";
+  if (sel.into_workspace_id) {
+    const w = (state.currentWs || []).find((x) => x.id === sel.into_workspace_id);
+    return w ? `ワークスペース「${w.name}」` : "選んだワークスペース";
+  }
+  return "";
 }
 
 // ── 手順 4: 書き戻す ──
@@ -496,6 +575,7 @@ $("apply-btn").addEventListener("click", () => {
   openDialog(
     el("h3", {}, "書き戻しを実行しますか？"),
     el("p", {}, `${fmtDate(b.modified)} のバックアップから、${fmtNum(total)} 件を今の DB に追加します。`),
+    destText() ? el("p", {}, el("b", {}, "書き戻し先: "), destText()) : "",
     el("ol", {},
       el("li", {}, "今の DB の控えを取ります（あとで元に戻せるように）"),
       el("li", {}, `${fmtNum(total)} 件を追加します。今あるデータは変更しません`),

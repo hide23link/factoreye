@@ -12,6 +12,9 @@ from pathlib import Path
 MIN_PASSWORD_LENGTH = 12
 
 
+TARGET_MODES = ("saas", "oss")
+
+
 class ConfigError(Exception):
     pass
 
@@ -26,6 +29,8 @@ class Settings:
     target_dsn: str | None
     # 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しの機能を出さない
     target_write_dsn: str | None
+    # 今の DB が SaaS 版（"saas"）か OSS 版（"oss"）か。書き戻すデータの種類を合わせるために使う
+    target_mode: str | None
     # S3 から取ってきたファイルを置く場所
     cache_dir: Path
     username: str
@@ -59,11 +64,21 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     write = e.get("TARGET_WRITE_DATABASE_URL") or None
     if write and not target:
         raise ConfigError("TARGET_WRITE_DATABASE_URL には TARGET_DATABASE_URL も必要です")
+    mode = e.get("TARGET_MODE", "").strip().lower() or None
+    if mode not in (None, *TARGET_MODES):
+        raise ConfigError("TARGET_MODE は saas か oss を設定してください")
+    # データの中身からは判断しない（空の SaaS 版の DB は、OSS 版と見分けられないため）
+    if write and mode is None:
+        raise ConfigError(
+            "書き戻しを使う場合は TARGET_MODE（今の DB が SaaS 版なら saas、OSS 版なら oss）を"
+            "設定してください"
+        )
     return Settings(
         backup_source=source,
         scratch_dsn=normalize_dsn(scratch),
         target_dsn=normalize_dsn(target) if target else None,
         target_write_dsn=normalize_dsn(write) if write else None,
+        target_mode=mode,
         cache_dir=Path(e.get("RECOVERY_CACHE_DIR", "/var/lib/recovery/cache")),
         username=e.get("RECOVERY_USERNAME", "admin"),
         password=password,

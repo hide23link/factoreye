@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from uuid import UUID
 
@@ -37,6 +37,15 @@ class MergeSelection:
     # 測定値・アラームだけを、この期間に絞る（「この日の不足分だけ戻す」ため）
     time_from: datetime | None = None
     time_to: datetime | None = None
+    # 書き戻し先。どちらも指定しなければ、元と同じ所属のまま入れる。
+    # into_workspace_id: OSS 版のデータを SaaS 版のこのワークスペースに入れる（まとめる）
+    # into_self_hosted: SaaS 版のワークスペースのデータを、OSS 版のデータとして入れる
+    into_workspace_id: UUID | None = None
+    into_self_hosted: bool = False
+
+    @property
+    def remaps(self) -> bool:
+        return self.into_workspace_id is not None or self.into_self_hosted
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,12 @@ class TableSpec:
     # 発生中のアラームが今の DB の同じセンサーにもある場合、戻すほうを解除済みにする。
     # 「発生中はセンサーごとに 1 つ」が前提のため（両方が発生中だと、片方が解除されずに残る）
     close_duplicate_open: bool = False
+    # 書き戻し先に合わせて workspace_id を付け替える（所属を変えて書き戻すとき）
+    remap_workspace: bool = False
+    # 書き戻し先で 1 行だけにする（通知設定は、ワークスペースごと・OSS 版で 1 行）
+    single_row: bool = False
+    # id をこの値にして入れる（OSS 版の通知設定は、backend が id=1 を読むため）
+    force_id: int | None = None
 
 
 def _ws(alias: str = "") -> str:
@@ -100,6 +115,48 @@ SPECS: tuple[TableSpec, ...] = (
     ),
 )
 # refresh_tokens（ログインの状態）は戻さない。戻すと、失効させたはずのログインが復活しうるため
+
+# 所属を変えて書き戻すとき（OSS 版 ⇄ SaaS 版）。ユーザー・ワークスペースの行は入れない
+# （書き戻し先のワークスペース、または OSS 版に入れるため、元の所属の情報は使わない）
+_REMAP_SPECS: tuple[TableSpec, ...] = (
+    TableSpec("sensors", _ws(), ("id",), remap_workspace=True),
+    TableSpec(
+        "readings", _SENSORS, ("sensor_id", "recorded_at"), drop_id=True,
+        time_column="recorded_at",
+    ),
+    TableSpec("alarms", _SENSORS, ("id",), time_column="triggered_at", close_duplicate_open=True),
+    TableSpec("dashboards", _ws(), ("id",), remap_workspace=True),
+    TableSpec(
+        "widgets", f"dashboard_id IN (SELECT id FROM dashboards WHERE {_ws()})", ("id",)
+    ),
+    TableSpec(
+        "widget_configs",
+        "widget_id IN (SELECT w.id FROM widgets w JOIN dashboards d ON d.id = w.dashboard_id"
+        f" WHERE {_ws('d')})",
+        ("id",),
+    ),
+    TableSpec("webhook_subscriptions", _ws(), ("id",), remap_workspace=True),
+    # 書き戻し先に通知設定が既にあれば入れない。無ければ、元の 1 行目を書き戻し先のものとして入れる
+    TableSpec(
+        "notification_settings", _ws(), ("workspace_id",), nullable_key=True,
+        remap_workspace=True, single_row=True,
+    ),
+)
+
+
+def specs_for(sel: MergeSelection) -> tuple[TableSpec, ...]:
+    if not sel.remaps:
+        return SPECS
+    specs = []
+    for spec in _REMAP_SPECS:
+        if spec.table == "notification_settings":
+            spec = (
+                replace(spec, force_id=1, fix_sequence=True)
+                if sel.into_self_hosted
+                else replace(spec, drop_id=True)
+            )
+        specs.append(spec)
+    return tuple(specs)
 
 
 @dataclass(frozen=True)
@@ -218,6 +275,14 @@ async def _merge_table(
         source += len(batch)
 
     t, s_ = f"public.{_ident(spec.table)}", _ident(tmp)
+    if spec.remap_workspace and sel.remaps:
+        # OSS 版として入れるときは NULL（into_workspace_id が None）
+        await dst.execute(f"UPDATE {s_} SET workspace_id = $1::uuid", sel.into_workspace_id)
+    if spec.single_row and source > 1:
+        await dst.execute(f"DELETE FROM {s_} WHERE ctid NOT IN (SELECT ctid FROM {s_} LIMIT 1)")
+        source = 1
+    if spec.force_id is not None:
+        await dst.execute(f"UPDATE {s_} SET id = $1", spec.force_id)
     op = "IS NOT DISTINCT FROM" if spec.nullable_key else "="
     match = " AND ".join(f"x.{_ident(k)} {op} s.{_ident(k)}" for k in spec.key)
     existing = _rowcount(
@@ -266,12 +331,46 @@ def _rowcount(status: str) -> int:
     return int(status.rsplit(" ", 1)[-1])
 
 
+def check_mode(sel: MergeSelection, target_mode: str | None) -> None:
+    """書き戻し先が、今の DB（SaaS 版・OSS 版）で使える形かを確かめる。
+
+    - SaaS 版: OSS 版のデータ（ワークスペースに属さない）は、どの利用者の画面にも出ないため、
+      書き戻し先のワークスペースを選んでもらう
+    - OSS 版: SaaS 版のワークスペースのデータは、OSS 版のデータとして入れる
+    """
+    if sel.into_workspace_id is not None and sel.into_self_hosted:
+        raise MergeError("書き戻し先は 1 つだけ選んでください")
+    if target_mode == "saas":
+        if sel.into_self_hosted:
+            raise MergeError("今の DB は SaaS 版のため、OSS 版のデータとしては入れられません")
+        if sel.include_self_hosted and sel.into_workspace_id is None:
+            raise MergeError(
+                "OSS 版のデータを SaaS 版に入れるには、書き戻し先のワークスペースを選んでください"
+            )
+    if target_mode == "oss":
+        if sel.into_workspace_id is not None:
+            raise MergeError("今の DB は OSS 版のため、ワークスペースには入れられません")
+        if sel.workspace_ids and not sel.into_self_hosted:
+            raise MergeError(
+                "SaaS 版のワークスペースを OSS 版に入れるには、書き戻し先を OSS 版にしてください"
+            )
+
+
 async def merge(
-    src: asyncpg.Connection, dst: asyncpg.Connection, sel: MergeSelection, apply: bool
+    src: asyncpg.Connection,
+    dst: asyncpg.Connection,
+    sel: MergeSelection,
+    apply: bool,
+    target_mode: str | None = None,
 ) -> MergeResult:
     """src（展開したバックアップ）から dst（今の DB）へ。apply=False なら最後に取り消す。"""
     if not sel.workspace_ids and not sel.include_self_hosted:
         raise MergeError("書き戻すワークスペースを選んでください")
+    check_mode(sel, target_mode)
+    if sel.into_workspace_id is not None and not await dst.fetchval(
+        "SELECT 1 FROM workspaces WHERE id = $1", sel.into_workspace_id
+    ):
+        raise MergeError("書き戻し先のワークスペースが、今の DB にありません")
     src_ver, dst_ver = await _alembic(src), await _alembic(dst)
     if src_ver != dst_ver:
         # 列の意味が版で変わっている可能性があるため、同じ版どうしに限る
@@ -286,12 +385,15 @@ async def merge(
     tr = dst.transaction()
     await tr.start()
     try:
-        for i, spec in enumerate(SPECS):
+        for i, spec in enumerate(specs_for(sel)):
             if spec.table not in src_tables or spec.table not in dst_tables:
                 results.append(TableResult(spec.table, 0, 0, 0, "テーブルが無いため飛ばしました"))
                 continue
-            if spec.table == "notification_settings" and spec.nullable_key and not (
-                sel.include_self_hosted
+            if (
+                not sel.remaps
+                and spec.table == "notification_settings"
+                and spec.nullable_key
+                and not sel.include_self_hosted
             ):
                 continue
             try:

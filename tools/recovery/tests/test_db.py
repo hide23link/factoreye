@@ -132,7 +132,7 @@ async def client(tmp_path: Path, scratch: Scratch) -> AsyncIterator[httpx.AsyncC
     settings = Settings(
         backup_source=str(tmp_path), scratch_dsn=SCRATCH_DSN, target_dsn=None,
         cache_dir=tmp_path / "cache", username="admin", password=PASSWORD, s3_endpoint_url=None,
-        target_write_dsn=None, snapshot_dir=tmp_path / "snapshots",
+        target_write_dsn=None, snapshot_dir=tmp_path / "snapshots", target_mode=None,
     )
     app = create_app(settings, LocalSource(tmp_path), scratch)
     token = base64.b64encode(f"admin:{PASSWORD}".encode()).decode()
@@ -214,7 +214,7 @@ async def test_api_compare_with_current(tmp_path: Path, scratch: Scratch) -> Non
         backup_source=str(tmp_path), scratch_dsn=SCRATCH_DSN,
         target_dsn=scratch.dsn_for(current_name), cache_dir=tmp_path,
         username="admin", password=PASSWORD, s3_endpoint_url=None,
-        target_write_dsn=None, snapshot_dir=tmp_path / "snapshots",
+        target_write_dsn=None, snapshot_dir=tmp_path / "snapshots", target_mode=None,
     )
     app = create_app(settings, LocalSource(tmp_path), scratch)
     token = base64.b64encode(f"admin:{PASSWORD}".encode()).decode()
