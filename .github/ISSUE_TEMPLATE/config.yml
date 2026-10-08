@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 質問・使い方の相談
+    url: https://github.com/hide23link/factoreye/discussions
+    about: バグ報告・機能要望以外の質問はこちらへ
+  - name: 脆弱性の報告
+    url: https://github.com/hide23link/factoreye/security/advisories/new
+    about: 公開のIssueではなく、こちらから非公開で報告してください

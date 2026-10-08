@@ -39,3 +39,6 @@ ras.txt
 # 管理者アカウント（ハッシュ入り。Git にコミットしない）
 /admin/admins.txt
 /admin/*.tmp
+
+# 負荷テストの実行ログ（loadtest/README.md の手順で生成される。都度変わる手元のログなのでコミットしない）
+/loadtest/*.log
