@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - アラーム一覧 API（`GET /api/alarms`）に `limit`（1〜500、省略時は全件）と `offset` を追加。`total` は、ページで区切る前の件数。警告ウィジェットは状態ごとに新しい順 100 件まで取得する（応答が大きく、サーバーの CPU を使っていたため）
 - センサー一覧（`GET /api/sensors`）に ETag を付け、変わっていなければ 304 を返す。版（ETag）ごとに応答をメモリに持ち、版が変わらない間は読み出しも変換もやり直さない。一覧の応答は ORM を通さず 1 回だけ JSON にする（画面の数秒ごとの取り直しの CPU を減らすため）
 - 測定値・アラームの一覧の応答を、1 回だけ JSON にし、必要な列だけ読むように変更（CPU の使用を減らすため。応答の形は変わらない）
+- **【起動条件の変更】本番で既定の秘密値のままだと起動しない**: `ENVIRONMENT=production` のとき、`INGEST_API_KEY`（self-hosted）または `JWT_SECRET`（`AUTH_MODE=multi_tenant`）が既定値 `change-this-in-production` のままだと、起動時にエラーにする。`.env.example` をそのままコピーして本番にした場合は、値を変えること
+- `docker-compose.cloud.yml`: `DOMAIN` / `POSTGRES_PASSWORD` / `INGEST_API_KEY` / `JWT_SECRET` が未設定だと、空文字で起動せず、エラーで止める
+- `docker-compose.yml`: PostgreSQL のポートを `127.0.0.1:5432` だけに公開（従来は LAN に公開）
+- 取り込み API: `NaN` / `Infinity` の値と、1 リクエスト 1,000 件を超える `readings` を 400 で拒否する。UTF-8 でない本文も 500 でなく 400 を返す
 
 ### Fixed
 - 取り込みの API キー（`X-API-Key`）の照合を、一定時間で比較する方法（`hmac.compare_digest`）に変更（比較時間からキーを推測されないため）

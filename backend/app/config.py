@@ -5,7 +5,11 @@
 """
 from enum import StrEnum
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 配布物に書かれている既定の秘密値（本番では使えない）
+DEFAULT_SECRET = "change-this-in-production"
 
 
 class AuthMode(StrEnum):
@@ -31,9 +35,9 @@ class Settings(BaseSettings):
     # PostgreSQL の接続先。形式: postgresql+asyncpg://ユーザー:パスワード@ホスト:ポート/DB名
     database_url: str = "postgresql+asyncpg://factoreye:password@localhost:5432/factoreye"
     # self-hosted の取り込み用の共有キー（X-API-Key ヘッダーと比べる）。本番では必ず変える
-    ingest_api_key: str = "change-this-in-production"
+    ingest_api_key: str = DEFAULT_SECRET
     # JWT（ログインのトークン）の署名に使う秘密の値。SaaS 版では必ず長い乱数に変える
-    jwt_secret: str = "change-this-in-production"
+    jwt_secret: str = DEFAULT_SECRET
     # 画面のアドレス。CORS で、この1つだけを許可する（ほかのサイトからの API 呼び出しを防ぐ）
     frontend_url: str = "http://localhost:3001"
 
@@ -55,6 +59,25 @@ class Settings(BaseSettings):
     # Webhook送信先に社内ネットワーク（プライベートIP・http）を許可する。既定は禁止（SSRF対策）。
     # 社内LANの自動化基盤（n8n等）へ送る自己ホスト利用者だけ true にする
     webhook_allow_private_networks: bool = False
+
+    @model_validator(mode="after")
+    def _reject_default_secrets_in_production(self) -> "Settings":
+        """本番（ENVIRONMENT=production）で、公開されている既定の秘密値のまま起動させない。
+
+        INGEST_API_KEY は self-hosted（disabled）で、JWT_SECRET は SaaS（multi_tenant）で使う。
+        使わない側の値は検査しない（片方だけ変えた既存の構成を壊さないため）。
+        """
+        if self.environment != "production":
+            return self
+        if self.auth_mode == AuthMode.MULTI_TENANT:
+            used, name = self.jwt_secret, "JWT_SECRET"
+        else:
+            used, name = self.ingest_api_key, "INGEST_API_KEY"
+        if used == DEFAULT_SECRET:
+            raise ValueError(
+                f"{name} が既定値のままです。ENVIRONMENT=production では必ず変更してください"
+            )
+        return self
 
     @property
     def debug(self) -> bool:

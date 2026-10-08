@@ -65,7 +65,7 @@ async def ingest_readings(
     """測定値を受け付ける。本文は JSON（単発の value か、readings の配列）。"""
     try:
         raw_body = await request.json()
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="invalid JSON body"
         ) from exc
