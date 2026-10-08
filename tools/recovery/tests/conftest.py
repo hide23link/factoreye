@@ -27,7 +27,8 @@ DUMP_SQL = f"""
 SET client_encoding = 'UTF8';
 CREATE TABLE public.alembic_version (version_num varchar(32) NOT NULL);
 ALTER TABLE public.alembic_version OWNER TO fe_test_owner;
-CREATE TABLE public.users (id uuid PRIMARY KEY, email varchar(254) UNIQUE, password_hash varchar(200),
+CREATE TABLE public.users (id uuid PRIMARY KEY, email varchar(254) UNIQUE,
+  password_hash varchar(200),
   created_at timestamptz);
 ALTER TABLE public.users OWNER TO fe_test_owner;
 CREATE TABLE public.workspaces (id uuid PRIMARY KEY, name varchar(100), owner_id uuid,
