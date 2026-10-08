@@ -12,7 +12,7 @@ import pytest
 from recovery import dbinfo
 from recovery.app import create_app
 from recovery.config import Settings
-from recovery.scratch import LoadError, Scratch, db_name_for, scan_owner_roles
+from recovery.scratch import LoadError, Scratch, db_name_for, scan_roles
 from recovery.sources import LocalSource
 from tests.conftest import DUMP_SQL, SCRATCH_DSN, WS_A, WS_B, needs_db, write_dump
 
@@ -42,9 +42,25 @@ def _unique(prefix: str = "factoreye") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}.sql.gz"
 
 
-def test_scan_owner_roles(tmp_path: Path) -> None:
-    path = write_dump(tmp_path, "x.sql.gz")
-    assert scan_owner_roles(path) == {"fe_test_owner"}
+def test_scan_roles(tmp_path: Path) -> None:
+    path = write_dump(tmp_path, "x.sql.gz", DUMP_SQL + GRANTS_SQL)
+    assert scan_roles(path) == ({"fe_test_owner"}, {"fe_test_reader", "fe_test_other"})
+
+
+# 本番で読み取り専用のロールを作った後のバックアップに入る行（2026-10-08 に実機で確認した形）
+GRANTS_SQL = (
+    "GRANT USAGE ON SCHEMA public TO fe_test_reader;\n"
+    'GRANT SELECT ON TABLE public.users TO fe_test_reader, "fe_test_other";\n'
+    "REVOKE ALL ON TABLE public.sensors FROM PUBLIC;\n"
+    "ALTER DEFAULT PRIVILEGES FOR ROLE fe_test_owner IN SCHEMA public"
+    " GRANT SELECT ON TABLES  TO fe_test_reader;\n"
+)
+
+
+async def test_load_with_grants_to_other_roles(tmp_path: Path, scratch: Scratch) -> None:
+    name = _unique()
+    await scratch.load(name, write_dump(tmp_path, name, DUMP_SQL + GRANTS_SQL))
+    assert await scratch.is_loaded(name)
 
 
 async def test_load_and_summarize(tmp_path: Path, scratch: Scratch) -> None:

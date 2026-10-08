@@ -33,6 +33,16 @@ RESTORE_ROLE = "bk_restorer"
 # pg_dump は各オブジェクトの所有者を `ALTER ... OWNER TO <ロール>;` で書く。
 # 作業用の Postgres にそのロールが無いと流し込みが止まるため、先に作っておく
 _OWNER_RE = re.compile(rb'OWNER TO "?([A-Za-z_][A-Za-z0-9_$]*)"?;')
+# ALTER DEFAULT PRIVILEGES FOR ROLE <ロール> は、そのロールに属していないと実行できない
+# （所有者と同じ扱いにする）
+_FOR_ROLE_RE = re.compile(rb'FOR ROLE "?([A-Za-z_][A-Za-z0-9_$]*)"?')
+# GRANT ... TO <ロール>; / REVOKE ... FROM <ロール>; のロール（例: 読み取り専用のロール）。
+# 権限を渡す先として在ればよい（展開用のロールは属さない）
+_GRANTEE_RE = re.compile(
+    rb"^(?:GRANT|REVOKE|ALTER DEFAULT PRIVILEGES) .* (?:TO|FROM) (.+);\s*$"
+)
+_ROLE_NAME_RE = re.compile(r'^"?([A-Za-z_][A-Za-z0-9_$]*)"?$')
+_BUILTIN_GRANTEES = frozenset({"PUBLIC", "CURRENT_USER", "CURRENT_ROLE", "SESSION_USER"})
 # pg_dump 15.14 以降が書く \restrict / \unrestrict。こちらで付ける \restrict と重なるため取り除く
 _DUMP_RESTRICT_RE = re.compile(rb"^\\(?:un)?restrict [A-Za-z0-9]+\r?\n?$")
 _COPY_START_RE = re.compile(rb"^COPY .* FROM stdin;\r?\n?$")
@@ -64,13 +74,23 @@ def dsn_with_user(dsn: str, user: str) -> str:
     return urlunsplit(parts._replace(netloc=f"{user}@{host}"))
 
 
-def scan_owner_roles(path: Path) -> set[str]:
-    roles: set[str] = set()
+def scan_roles(path: Path) -> tuple[set[str], set[str]]:
+    """バックアップが使うロールを、(所有者のロール, 権限を渡す先だけのロール) に分けて返す。"""
+    owners: set[str] = set()
+    grantees: set[str] = set()
     with gzip.open(path, "rb") as f:
         for line in f:
             if b"OWNER TO" in line:
-                roles.update(m.decode() for m in _OWNER_RE.findall(line))
-    return roles
+                owners.update(m.decode() for m in _OWNER_RE.findall(line))
+            if line.startswith((b"GRANT ", b"REVOKE ", b"ALTER DEFAULT PRIVILEGES ")):
+                owners.update(m.decode() for m in _FOR_ROLE_RE.findall(line))
+                m = _GRANTEE_RE.match(line)
+                if m:
+                    for part in m.group(1).decode().split(","):
+                        name = _ROLE_NAME_RE.match(part.strip().removesuffix(" WITH GRANT OPTION"))
+                        if name and name.group(1).upper() not in _BUILTIN_GRANTEES:
+                            grantees.add(name.group(1))
+    return owners, grantees - owners
 
 
 def guarded_lines(path: Path, restrict_key: str) -> Iterator[bytes]:
@@ -138,10 +158,15 @@ class Scratch:
         async with lock:
             if await self.is_loaded(backup_name):
                 return
-            roles = await asyncio.to_thread(scan_owner_roles, path)
+            roles, grantees = await asyncio.to_thread(scan_roles, path)
             tmp = _tmp_name_for(backup_name)
             async with self._admin() as conn:
                 await self._prepare_roles(conn, roles)
+                for role in sorted(grantees):
+                    if role == RESTORE_ROLE:
+                        raise LoadError(f"バックアップで使えないロールです: {role}")
+                    if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", role):
+                        await conn.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER')
                 # 前回の途中で落ちた残りがあれば消してから作る
                 await conn.execute(f'DROP DATABASE IF EXISTS "{tmp}" WITH (FORCE)')
                 await conn.execute(f'CREATE DATABASE "{tmp}" OWNER "{RESTORE_ROLE}"')
