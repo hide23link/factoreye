@@ -1,12 +1,18 @@
-"""SaaS（マルチテナント）の1ワークスペースを、OSS（self-hosted）の DB へ移す。
+"""1ワークスペース（SaaS）、または self-hosted の全データを、別の self-hosted DB へ移す。
 
 使い方:
-    # 1. SaaS 側で書き出す（読み取りのみ。REPEATABLE READ で一貫した時点を取る）
+    # 1a. SaaS 側で、1ワークスペースを書き出す（読み取りのみ。REPEATABLE READ で一貫した時点を取る）
     python -m app.migrate_saas_to_oss export \
         --source-url URL --workspace-id UUID --out FILE.jsonl.gz
+    # 1b. self-hosted 側で、全データを書き出す（バックアップ・別サーバーへの移行用）
+    python -m app.migrate_saas_to_oss export \
+        --source-url URL --out FILE.jsonl.gz
     # 2. 移行先（空の self-hosted DB。同じ alembic 版まで migrate 済み）へ取り込む
     python -m app.migrate_saas_to_oss import \
         --target-url URL --in FILE.jsonl.gz [--dry-run] [--with-notifications]
+
+書き出しの対象は、SaaS は指定したワークスペースのデータ、self-hosted は
+workspace_id が NULL の全データ（self-hosted には複数ワークスペースという概念が無いため）。
 
 移すもの: センサー・測定値・アラーム・ダッシュボード（削除済みを除く）・ウィジェット・
 ウィジェット設定・Webhook 購読。
@@ -133,18 +139,27 @@ def _tables() -> dict[str, sa.Table]:
     return {name: SQLModel.metadata.tables[name] for name in TABLES}
 
 
+def _ws_eq(column: sa.ColumnElement[Any], workspace_id: UUID | None) -> sa.ColumnElement[bool]:
+    """workspace_id の等価条件。None（self-hosted）のときは IS NULL で比較する。"""
+    return column.is_(None) if workspace_id is None else column == workspace_id
+
+
 async def export_workspace(
-    engine: AsyncEngine, workspace_id: UUID, out_path: Path
+    engine: AsyncEngine, workspace_id: UUID | None, out_path: Path
 ) -> dict[str, int]:
-    """ワークスペース1つ分を gzip JSONL に書き出し、テーブルごとの件数を返す。"""
+    """データを gzip JSONL に書き出し、テーブルごとの件数を返す。
+
+    workspace_id を指定すれば SaaS の1ワークスペース分、None なら self-hosted の全データ
+    （workspace_id が NULL の行）を対象にする。
+    """
     t = _tables()
     sensors, dashboards, widgets = t["sensors"], t["dashboards"], t["widgets"]
     widget_configs, alarms = t["widget_configs"], t["alarms"]
     webhooks, notifications = t["webhook_subscriptions"], t["notification_settings"]
 
-    sensor_ids = sa.select(sensors.c.id).where(sensors.c.workspace_id == workspace_id)
+    sensor_ids = sa.select(sensors.c.id).where(_ws_eq(sensors.c.workspace_id, workspace_id))
     dashboard_ids = sa.select(dashboards.c.id).where(
-        dashboards.c.workspace_id == workspace_id, dashboards.c.deleted_at.is_(None)
+        _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)
     )
     widget_ids = sa.select(widgets.c.id).where(widgets.c.dashboard_id.in_(dashboard_ids))
 
@@ -154,35 +169,38 @@ async def export_workspace(
     # - 測定値（readings）は _export_readings で別に書く（件数が多く、形式を圧縮するため）
     # - ユーザーやリフレッシュトークンは、OSS には不要なので対象外
     queries: dict[str, sa.Select[Any]] = {
-        "sensors": sa.select(sensors).where(sensors.c.workspace_id == workspace_id),
+        "sensors": sa.select(sensors).where(_ws_eq(sensors.c.workspace_id, workspace_id)),
         "dashboards": sa.select(dashboards).where(
-            dashboards.c.workspace_id == workspace_id, dashboards.c.deleted_at.is_(None)
+            _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)
         ),
         "widgets": sa.select(widgets).where(widgets.c.dashboard_id.in_(dashboard_ids)),
         "widget_configs": sa.select(widget_configs).where(
             widget_configs.c.widget_id.in_(widget_ids)
         ),
         "alarms": sa.select(alarms).where(alarms.c.sensor_id.in_(sensor_ids)),
-        "webhook_subscriptions": sa.select(webhooks).where(webhooks.c.workspace_id == workspace_id),
+        "webhook_subscriptions": sa.select(webhooks).where(
+            _ws_eq(webhooks.c.workspace_id, workspace_id)
+        ),
         "notification_settings": sa.select(notifications).where(
-            notifications.c.workspace_id == workspace_id
+            _ws_eq(notifications.c.workspace_id, workspace_id)
         ),
     }
 
     counts = {name: 0 for name in TABLES}
     async with engine.connect() as conn, conn.begin():
         await conn.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
-        workspace_exists = await conn.scalar(
-            sa.text("SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = :id)"),
-            {"id": workspace_id},
-        )
-        if not workspace_exists:
-            raise MigrationError(f"ワークスペースが見つかりません: {workspace_id}")
+        if workspace_id is not None:
+            workspace_exists = await conn.scalar(
+                sa.text("SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = :id)"),
+                {"id": workspace_id},
+            )
+            if not workspace_exists:
+                raise MigrationError(f"ワークスペースが見つかりません: {workspace_id}")
 
         header = {
             "format": FORMAT,
             "version": VERSION,
-            "workspace_id": str(workspace_id),
+            "workspace_id": str(workspace_id) if workspace_id is not None else None,
             "exported_at": datetime.now(UTC).isoformat(),
             "alembic_version": await _alembic_version(conn),
         }
@@ -491,9 +509,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.migrate_saas_to_oss", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    exp = sub.add_parser("export", help="SaaS の1ワークスペースを書き出す（読み取りのみ）")
-    exp.add_argument("--source-url", required=True, help="SaaS 側の DATABASE_URL")
-    exp.add_argument("--workspace-id", required=True, type=UUID)
+    exp = sub.add_parser(
+        "export",
+        help="SaaS の1ワークスペース、または self-hosted の全データを書き出す（読み取りのみ）",
+    )
+    exp.add_argument("--source-url", required=True, help="書き出し元の DATABASE_URL")
+    exp.add_argument(
+        "--workspace-id",
+        type=UUID,
+        default=None,
+        help="SaaS の1ワークスペースを書き出す場合に指定する（省略時は self-hosted の全データ）",
+    )
     exp.add_argument("--out", required=True, type=Path)
 
     imp = sub.add_parser("import", help="書き出したファイルを移行先（self-hosted）へ取り込む")

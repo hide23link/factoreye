@@ -1,11 +1,14 @@
-"""移行API（SaaS → OSS）。Web の設定画面「データ移行」から使う。
+"""移行API。Web の設定画面「データ移行」から使う。
 
 - GET  /api/settings/migration/status : このサーバーで使える移行機能
-- GET  /api/settings/migration/export : SaaS（multi_tenant）。ログイン中のワークスペースを書き出す
+- GET  /api/settings/migration/export : 書き出す。SaaS はログイン中のワークスペース、
+  self-hosted は全データ（他の self-hosted サーバーへの移行・バックアップ用）
 - POST /api/settings/migration/import : OSS（self-hosted）。本文（gzip）の書き出しファイルを取り込む
 
-書き出しは SaaS だけ、取り込みは self-hosted だけ有効。もう一方のモードでは 404 を返す。
-取り込みは self-hosted の他の書き込みAPIと同じく認証がない（ネットワーク境界で守る前提）。
+書き出しはどちらのモードでも使える。取り込みは self-hosted だけ有効（SaaS では 404）。
+self-hosted の書き出し・取り込みは、他の書き込みAPIと同じく認証がない
+（ネットワーク境界で守る前提。元々 GET /api/sensors 等でも全データが読めるため、
+書き出しを足しても新たな漏えいにはならない）。
 """
 
 import os
@@ -47,7 +50,9 @@ async def migration_status() -> dict[str, object]:
     saas = _is_saas()
     return {
         "mode": "multi_tenant" if saas else "self_hosted",
-        "canExport": saas,
+        # 書き出しはどちらのモードでも使える。SaaS はログイン中のワークスペース、
+        # self-hosted は全データが対象（§10.1）
+        "canExport": True,
         "canImport": not saas,
     }
 
@@ -56,7 +61,9 @@ async def migration_status() -> dict[str, object]:
 async def export_my_workspace(
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> FileResponse:
-    if not _is_saas() or workspace_id is None:
+    # SaaS はログイン必須（workspace_id が取れないと 401 は get_current_workspace_id 側で起きる）。
+    # self-hosted は workspace_id が常に None で、全データを対象にする
+    if _is_saas() and workspace_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     path = _new_temp_file()
@@ -69,10 +76,11 @@ async def export_my_workspace(
         path.unlink(missing_ok=True)
         raise
 
+    name = str(workspace_id) if workspace_id is not None else "self-hosted"
     return FileResponse(
         path,
         media_type="application/gzip",
-        filename=f"factoreye-workspace-{workspace_id}.jsonl.gz",
+        filename=f"factoreye-workspace-{name}.jsonl.gz",
         background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
