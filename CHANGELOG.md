@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SaaS の Free Tier**: 測定値を 90 日より古いものから毎日削除（SaaS のセンサーのみ対象）。上限到達時の案内を画面に表示
 
 ### Changed
+- **Webhook の送信に上限を設定**: 接続を使い回し、同時送信は 10 件まで、送信待ちは 1,000 件まで（超えた分は送らずに捨て、ログに件数を出す）。大量の取り込みや送信先の遅延で、CPU・メモリ・接続を使い切らないため
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた
 - **Docker イメージを軽量化**: frontend は 428 MB → 63 MB（Vite preview をやめ、ビルド済みの静的ファイルを nginx で配信。多段ビルド）、backend は 421 MB → 283 MB（多段ビルド、実行時依存と開発用依存（`requirements-dev.txt`）を分離、`.dockerignore` に tests などを追加）
 - センサー名の一意性を、ワークスペース内に変更（従来は DB 全体で一意）
