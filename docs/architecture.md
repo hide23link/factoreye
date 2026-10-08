@@ -377,7 +377,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では必ず変更する |
 | `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する |
 | `JWT_SECRET` | `change-this-in-production` | JWT の署名鍵。本番では必ず変更する |
-| `ENVIRONMENT` | `development` | `production` で `/docs` を無効化 |
+| `ENVIRONMENT` | `development` | `production` で `/docs` を無効化。このとき `INGEST_API_KEY`（`AUTH_MODE=multi_tenant` なら `JWT_SECRET`）が既定値のままだと起動しない（大文字小文字は区別しない） |
 | `FRONTEND_URL` | `http://localhost:3001` | CORS の許可オリジン（`*` は使わない） |
 | `AUTH_MODE` | `disabled` | `multi_tenant` で SaaS モード |
 | `INGEST_RATE_LIMIT` | `100/minute` | 取り込みの制限。`off` で解除（管理画面からの期限付き解除は §10） |

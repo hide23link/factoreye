@@ -40,3 +40,8 @@ def test_production_allows_changed_secrets() -> None:
 
 def test_development_allows_default_secrets() -> None:
     assert _make(environment="development").environment == "development"
+
+
+def test_environment_is_case_insensitive() -> None:
+    with pytest.raises(ValidationError, match="INGEST_API_KEY"):
+        _make(environment=" Production ")
