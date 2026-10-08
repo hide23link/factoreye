@@ -36,17 +36,19 @@ LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` �
 - **ダッシュボード**: 12 列グリッドでの自由な配置。グラフ・比較グラフ・最新値・アラーム一覧・生産数の各ウィジェット
 - **公式クライアント**: Arduino / M5Stack（`clients/arduino-m5stack/`）、Raspberry Pi（`clients/raspberry-pi/`）
 - **テスト用エミュレータ**: `tools/factory-emulator/`（手動操作画面つき）
+- **復旧ツール**: `tools/recovery/`。バックアップを今の DB と見比べて閲覧・CSV 書き出し・書き戻しをする Web 画面（本体とは独立）
 
 ---
 
 ## ディレクトリ構成
 
 ```
+admin/      管理者ファイルの例（SaaS 版。実体は admins.txt で、リポジトリには含めない）
 backend/    REST API・取り込み（Python / FastAPI / SQLModel / PostgreSQL）
 frontend/   ダッシュボード UI（React / TypeScript / Vite）
 e2e/        E2E テスト（Playwright。起動済みのスタックに対して実行）
 clients/    センサー向け公式クライアント（Arduino / M5Stack、Raspberry Pi）
-tools/      開発補助（テスト用の工場エミュレータ）
+tools/      開発補助（テスト用の工場エミュレータ）と、バックアップの復旧ツール（recovery）
 loadtest/   負荷テスト用のエミュレータ
 infra/      運用スクリプト（DB のバックアップ・復元、クラウド版のサーバー設定）
 docs/       仕様書と設計判断の記録
@@ -109,7 +111,7 @@ cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
 
 ## バックアップ
 
-`infra/backup.sh` は PostgreSQL を `pg_dump` で取得します。cron で毎日 3 時に実行し、既定で 7 日分を保持します。手順は [`infra/README.md`](infra/README.md) を参照してください。
+`infra/backup.sh` は PostgreSQL を `pg_dump` で取得します。cron で毎日 3 時に実行し、既定で 7 日分を保持します。手順は [`infra/README.md`](infra/README.md) を参照してください。バックアップの中身の確認・比較・書き戻しは、復旧ツール（[`tools/recovery/README.md`](tools/recovery/README.md)）で行えます。
 
 ```bash
 ./infra/backup.sh            # 手動実行
@@ -129,6 +131,7 @@ GitHub Actions（`.github/workflows/`）:
 | `e2e-test.yml` | スタックを起動して Playwright で E2E |
 | `arduino-client-compile.yml` | Arduino クライアントのコンパイル確認 |
 | `raspberry-pi-client-test.yml` | Raspberry Pi クライアントのテスト |
+| `recovery-tool-test.yml` | 復旧ツールのテスト |
 | `deploy-cloud.yml` | クラウド版のデプロイ |
 
 ---

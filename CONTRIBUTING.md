@@ -34,7 +34,7 @@ FactorEye への貢献に興味を持っていただきありがとうござい�
 
 ## コーディング規約
 
-- **Backend**: Python 3.12+ / FastAPI / SQLModel。型ヒント必須、`mypy --strict` を通す（`Any` は使わない）。関数は単一責任で 20 行を超えたら分割を検討する。
+- **Backend**: Python 3.12+ / FastAPI / SQLModel。型ヒント必須、`mypy --strict` を通す（`Any` は、外部ライブラリの型が合わないなど、やむを得ない場合だけ使う）。関数は単一責任を目安にし、長くなったら分割を検討する。
 - **Frontend**: TypeScript（`strict: true`）/ React 18。`any` は使わない（`unknown` を使う）。
 - **命名**: backend は `snake_case`（ファイル）/ `PascalCase`（クラス）、frontend は `kebab-case`（ファイル）/ `PascalCase`（コンポーネント）。
 - **コメント**: 「何を」ではなくコードから読み取れない「なぜ」を書く。
