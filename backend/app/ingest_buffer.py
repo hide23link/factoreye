@@ -35,6 +35,10 @@ from app.webhooks import send_webhook
 
 FLUSH_INTERVAL_SECONDS = 1.0
 
+# DB 障害が長引いたときに、再試行待ちの測定値でメモリを使い切らないための上限
+# （1件あたり約 200 バイト → 約 20 MB）。超えた分は古いものから捨てる
+MAX_PENDING_READINGS = 100_000
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +74,21 @@ class IngestBuffer:
         async with self._lock:
             pending, self._pending = self._pending, []
         return pending
+
+    async def requeue(self, readings: list[PendingReading]) -> None:
+        """DB に書けなかった測定値を、バッファの先頭に戻す（次の flush で再試行する）。
+
+        drain の後に届いた値より前に置き、到着順を保つ。上限を超えた分は古いものから捨てる。
+        """
+        async with self._lock:
+            self._pending = readings + self._pending
+            overflow = len(self._pending) - MAX_PENDING_READINGS
+            if overflow > 0:
+                del self._pending[:overflow]
+        if overflow > 0:
+            logger.warning(
+                "ingest buffer over capacity: dropped %d oldest readings", overflow
+            )
 
 
 # アプリ全体で1つのバッファ（API の受信処理と、flush_loop の両方から使う）
@@ -221,45 +240,25 @@ async def flush_once() -> int:
     処理の順序（ここが重要）:
     1. 測定値を DB に書く → 2. アラームを評価する → 3. commit する（ここで初めて確定）
     4. commit の後で、Webhook と Discord 通知を送る（送信に失敗しても、DB は確定済み）
+
+    commit より前に失敗した場合は、取り出した測定値をバッファに戻して例外を投げ直す
+    （次の周期で再試行する）。commit の後の失敗では戻さない（二重に書かないため）。
     """
     pending = await buffer.drain()
     if not pending:
         return 0
 
     async with AsyncSession(engine) as session:
-        session.add_all(
-            [
-                Reading(sensor_id=p.sensor_id, value=p.value, recorded_at=p.recorded_at)
-                for p in pending
-            ]
-        )
-        # 通知設定はワークスペースごとに持つ（Settings画面から変更）。センサーのワークスペースに
-        # 対応する設定を使う。重故障の再通知判定にも使うためevaluate_alarms呼び出し前に取得する
-        sensors_result = await session.exec(
-            select(Sensor.id, Sensor.workspace_id).where(
-                col(Sensor.id).in_({p.sensor_id for p in pending})
+        try:
+            pending, discord_jobs, notifications = await _write_and_evaluate(
+                session, pending
             )
-        )
-        workspace_by_sensor: dict[UUID, UUID | None] = dict(sensors_result.all())
-        settings_by_workspace = await _load_notification_settings(
-            session, set(workspace_by_sensor.values())
-        )
-        notifications = await evaluate_alarms(session, pending, settings_by_workspace)
-        # 送信先（重故障・軽故障で別々のURL）を、セッションがまだ開いている今のうちに
-        # プレーン値へ退避する。有効フラグがオフのワークスペースは送らない
-        discord_jobs: list[tuple[str, AlarmNotification]] = []
-        for notification in notifications:
-            settings_row = settings_by_workspace.get(notification.workspace_id)
-            if settings_row is None or not settings_row.enabled:
-                continue
-            if notification.severity == AlarmSeverity.CRITICAL:
-                url = settings_row.discord_webhook_url_critical
-            else:
-                url = settings_row.discord_webhook_url_warning
-            if url:
-                discord_jobs.append((url, notification))
-        # ここで初めて確定する。これより前に失敗した場合、測定値もアラームも残らない
-        await session.commit()
+        except BaseException:
+            # CancelledError（停止時）も含めて戻す。戻さないと取り出した分が消える
+            await buffer.requeue(pending)
+            raise
+        if not pending:
+            return 0
 
         # 汎用Webhook配信はDiscord専用通知の有効/無効フラグとは独立に動く
         # （セッションがまだ開いているうちに購読先を引いておく）
@@ -273,6 +272,57 @@ async def flush_once() -> int:
     return len(pending)
 
 
+async def _write_and_evaluate(
+    session: AsyncSession, pending: list[PendingReading]
+) -> tuple[list[PendingReading], list[tuple[str, AlarmNotification]], list[AlarmNotification]]:
+    """測定値の書き込み・アラーム評価・commit までを行う。戻り値の測定値は、実際に書いたもの。"""
+    # 通知設定はワークスペースごとに持つ（Settings画面から変更）。センサーのワークスペースに
+    # 対応する設定を使う。重故障の再通知判定にも使うためevaluate_alarms呼び出し前に取得する
+    sensors_result = await session.exec(
+        select(Sensor.id, Sensor.workspace_id).where(
+            col(Sensor.id).in_({p.sensor_id for p in pending})
+        )
+    )
+    workspace_by_sensor: dict[UUID, UUID | None] = dict(sensors_result.all())
+
+    # 受信から flush までの間に削除されたセンサーの値は捨てる。残すと外部キー違反で
+    # バッチ全体が失敗し、再試行のたびに失敗し続けて、他のセンサーの値も書けなくなる
+    existing = [p for p in pending if p.sensor_id in workspace_by_sensor]
+    if len(existing) < len(pending):
+        logger.info(
+            "dropped %d readings for deleted sensors", len(pending) - len(existing)
+        )
+    if not existing:
+        return [], [], []
+
+    session.add_all(
+        [
+            Reading(sensor_id=p.sensor_id, value=p.value, recorded_at=p.recorded_at)
+            for p in existing
+        ]
+    )
+    settings_by_workspace = await _load_notification_settings(
+        session, set(workspace_by_sensor.values())
+    )
+    notifications = await evaluate_alarms(session, existing, settings_by_workspace)
+    # 送信先（重故障・軽故障で別々のURL）を、セッションがまだ開いている今のうちに
+    # プレーン値へ退避する。有効フラグがオフのワークスペースは送らない
+    discord_jobs: list[tuple[str, AlarmNotification]] = []
+    for notification in notifications:
+        settings_row = settings_by_workspace.get(notification.workspace_id)
+        if settings_row is None or not settings_row.enabled:
+            continue
+        if notification.severity == AlarmSeverity.CRITICAL:
+            url = settings_row.discord_webhook_url_critical
+        else:
+            url = settings_row.discord_webhook_url_warning
+        if url:
+            discord_jobs.append((url, notification))
+    # ここで初めて確定する。これより前に失敗した場合、測定値もアラームも残らない
+    await session.commit()
+    return existing, discord_jobs, notifications
+
+
 async def flush_loop() -> None:
     """常駐タスク（app/main.py の lifespan で起動する）。
 
@@ -283,5 +333,6 @@ async def flush_loop() -> None:
         try:
             await flush_once()
         except Exception:
-            # 1回のflush失敗でタスク全体を落とさない（次の周期でリトライ）
+            # 1回のflush失敗でタスク全体を落とさない。値は flush_once がバッファに戻しており、
+            # 次の周期で再試行される
             logger.exception("ingest buffer flush failed")
