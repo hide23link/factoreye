@@ -27,6 +27,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.responses import Response
 
+from app import webhooks as webhooks_sender
 from app.api import (
     admin,
     alarms,
@@ -54,7 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     起動時: 取り込みのレート制限の状態を警告し、常駐タスク
     （バッファ書き込み・古いデータの削除）を開始する。
-    終了時: 常駐タスクを止め、バッファに残った測定値を書いてから、DB への接続プールを閉じる。
+    終了時: 常駐タスクを止め、バッファに残った測定値を書いてから、Webhook の送信用の接続と
+    DB への接続プールを閉じる。
     """
     logger = logging.getLogger(__name__)
     if settings.ingest_rate_limit.strip().lower() == "off":
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         # DB に書けなくても停止は続ける（再起動を妨げないため）
         logger.exception("final ingest buffer flush on shutdown failed")
+    await webhooks_sender.close_client()
     await engine.dispose()
 
 

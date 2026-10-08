@@ -17,6 +17,7 @@ import asyncio
 import ipaddress
 import logging
 import socket
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,6 +26,18 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 値の受信ごとに送るため、大量の取り込みで送信が一気に増える。同時に送る数と、
+# 送信待ちの数に上限を設け、送信先が遅いときにメモリ・スレッド・接続を使い切らないようにする
+MAX_CONCURRENT_SENDS = 10
+MAX_PENDING_SENDS = 1000
+_DROP_LOG_INTERVAL_SECONDS = 60.0
+
+_send_slots = asyncio.Semaphore(MAX_CONCURRENT_SENDS)
+_pending_sends = 0
+_dropped_since_log = 0
+_last_drop_log = 0.0
+_client: httpx.AsyncClient | None = None
 
 
 class UnsafeWebhookUrl(ValueError):
@@ -91,17 +104,62 @@ async def assert_webhook_url_allowed(url: str) -> None:
     await asyncio.to_thread(check_webhook_url, url)
 
 
+def _get_client() -> httpx.AsyncClient:
+    """送信に使う共有のクライアント（接続を使い回す）。閉じられていれば作り直す。"""
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            timeout=10.0,
+            # 公開URLから内部へ転送されるのを防ぐため、リダイレクトは追わない
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=MAX_CONCURRENT_SENDS),
+        )
+    return _client
+
+
+async def close_client() -> None:
+    """共有のクライアントを閉じる（app/main.py の lifespan の終了時に呼ぶ）。"""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
+
+def _record_drop() -> None:
+    """送信待ちが上限を超えて捨てた件数を数え、多くても1分に1回だけログに出す。"""
+    global _dropped_since_log, _last_drop_log
+    _dropped_since_log += 1
+    now = time.monotonic()
+    if now - _last_drop_log >= _DROP_LOG_INTERVAL_SECONDS:
+        logger.warning(
+            "webhook backlog full (%d pending): dropped %d webhooks",
+            MAX_PENDING_SENDS,
+            _dropped_since_log,
+        )
+        _dropped_since_log = 0
+        _last_drop_log = now
+
+
 async def send_webhook(url: str, payload: dict[str, Any]) -> None:
     """購読先の URL へ、イベントの内容（payload）を JSON で送る。
 
     再試行はしない（失敗はログに残すだけ）。送信前に、もう一度 URL を検証する。
+    同時に送るのは MAX_CONCURRENT_SENDS 件まで。送信待ちが MAX_PENDING_SENDS 件を
+    超えたら、送らずに捨てる。
     """
+    global _pending_sends
+    if _pending_sends >= MAX_PENDING_SENDS:
+        _record_drop()
+        return
+    _pending_sends += 1
     try:
-        # 登録後に宛先が内部を指すよう変わった場合に備え、送信直前にも検証する
-        await assert_webhook_url_allowed(url)
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url, json=payload)
+        async with _send_slots:
+            # 登録後に宛先が内部を指すよう変わった場合に備え、送信直前にも検証する
+            await assert_webhook_url_allowed(url)
+            response = await _get_client().post(url, json=payload)
             response.raise_for_status()
     except Exception:
         # 通知失敗でingest/flushパイプラインを落とさない（send_alarm_discordと同方針）
         logger.exception("failed to send webhook to %s", url)
+    finally:
+        _pending_sends -= 1

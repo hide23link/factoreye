@@ -4,7 +4,7 @@ DNS解決は _addresses_for_host をモックし、宛先IPごとの判定を検
 登録API（422）と送信時（httpxを呼ばない）の両方を確かめる。
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -125,9 +125,9 @@ async def test_send_webhook_does_not_post_to_internal_target(
     monkeypatch: pytest.MonkeyPatch, private_networks_off: None
 ) -> None:
     _resolve_to(monkeypatch, ["127.0.0.1"])
-    with patch("app.webhooks.httpx.AsyncClient") as client_cls:
+    with patch("app.webhooks._get_client") as get_client:
         await send_webhook("https://rebound.example.com/hook", {"event": "x"})
-    client_cls.assert_not_called()
+    get_client.assert_not_called()
 
 
 async def test_send_webhook_posts_to_public_target(
@@ -135,8 +135,7 @@ async def test_send_webhook_posts_to_public_target(
 ) -> None:
     _resolve_to(monkeypatch, ["93.184.216.34"])
     post = AsyncMock(return_value=httpx.Response(200, request=httpx.Request("POST", "https://x")))
-    with patch("app.webhooks.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value.post = post
+    with patch("app.webhooks._get_client", return_value=MagicMock(post=post)):
         await send_webhook("https://hooks.example.com/abc", {"event": "x"})
     post.assert_awaited_once()
 
