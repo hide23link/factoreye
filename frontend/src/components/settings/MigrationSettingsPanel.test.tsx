@@ -13,7 +13,7 @@ vi.mock("../../lib/api", () => ({
 
 import * as api from "../../lib/api";
 
-const selfHosted: MigrationStatus = { mode: "self_hosted", canExport: false, canImport: true };
+const selfHosted: MigrationStatus = { mode: "self_hosted", canExport: true, canImport: true };
 const saas: MigrationStatus = { mode: "multi_tenant", canExport: true, canImport: false };
 
 afterEach(() => {
@@ -21,12 +21,15 @@ afterEach(() => {
 });
 
 describe("MigrationSettingsPanel", () => {
-  it("OSS版では取り込みだけ表示する", async () => {
+  it("OSS版では書き出しと取り込みの両方を表示する", async () => {
     vi.mocked(api.fetchMigrationStatus).mockResolvedValue(selfHosted);
     renderWithQueryClient(<MigrationSettingsPanel />);
 
     expect(await screen.findByText("取り込み（OSS へ移す）")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "書き出す" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("書き出し（バックアップ・他サーバーへの移行）"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "書き出す" })).toBeInTheDocument();
   });
 
   it("SaaS版では書き出しだけ表示する", async () => {
@@ -34,7 +37,20 @@ describe("MigrationSettingsPanel", () => {
     renderWithQueryClient(<MigrationSettingsPanel />);
 
     expect(await screen.findByRole("button", { name: "書き出す" })).toBeInTheDocument();
+    expect(screen.getByText("書き出し（SaaS → OSS）")).toBeInTheDocument();
     expect(screen.queryByText("取り込み（OSS へ移す）")).not.toBeInTheDocument();
+  });
+
+  it("OSS版で書き出すと、ダウンロードが始まる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchMigrationStatus).mockResolvedValue(selfHosted);
+    const blob = new Blob(["dummy"], { type: "application/gzip" });
+    vi.mocked(api.downloadWorkspaceExport).mockResolvedValue(blob);
+    renderWithQueryClient(<MigrationSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "書き出す" }));
+
+    await waitFor(() => expect(api.downloadWorkspaceExport).toHaveBeenCalled());
   });
 
   it("どちらも使えないモードでは理由を表示する", async () => {

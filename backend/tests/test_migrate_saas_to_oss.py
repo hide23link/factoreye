@@ -5,6 +5,7 @@
 """
 
 import gzip
+import json
 import subprocess
 import sys
 from collections.abc import AsyncGenerator
@@ -165,6 +166,28 @@ async def test_export_counts_exclude_deleted_dashboards(
     assert counts["widget_configs"] == 1
     assert counts["webhook_subscriptions"] == 1
     assert counts["notification_settings"] == 1
+
+
+@pytest.mark.asyncio
+async def test_export_self_hosted_scope_excludes_saas_workspaces(
+    tmp_path: Path, saas_data: dict[str, UUID]
+) -> None:
+    """workspace_id=None を指定すると、self-hosted のデータ（NULL）だけが対象になる。"""
+    async with AsyncSession(engine) as session:
+        session.add(Sensor(workspace_id=None, name="自宅温度", ingest_key="oss-key-x1", unit="℃"))
+        await session.commit()
+
+    out = tmp_path / "self-hosted.jsonl.gz"
+    counts = await export_workspace(engine, None, out)
+
+    # SaaS 側（ws_a・ws_b）のセンサーは含めず、self-hosted の1件だけ
+    assert counts["sensors"] == 1
+    with gzip.open(out, "rt", encoding="utf-8") as f:
+        header = json.loads(f.readline())
+        rows = [json.loads(line) for line in f]
+    assert header["workspace_id"] is None
+    sensor_rows = [r["r"] for r in rows if r["t"] == "sensors"]
+    assert [r["ingest_key"] for r in sensor_rows] == ["oss-key-x1"]
 
 
 @pytest.mark.asyncio

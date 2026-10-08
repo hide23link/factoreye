@@ -2,9 +2,12 @@
  * データ移行のパネル（設定画面「データ移行」）。
  *
  * - SaaS 版: 書き出し（ログイン中のワークスペースを、gzip のファイルとして保存する）
- * - OSS 版: 取り込み（書き出しファイルを選び、確認（dry-run）→ 取り込む、の2段階）
+ * - OSS 版: 書き出し（全データを保存する。他の OSS サーバーへの移行・バックアップ用）、
+ *   取り込み（書き出しファイルを選び、確認（dry-run）→ 取り込む、の2段階）
  *
  * どちらが使えるかは、バックエンドの状態（/api/settings/migration/status）で決まる。
+ * OSS → SaaS（ワークスペースを選んでの取り込み）は、このパネルではなく復旧ツール
+ * （tools/recovery/）で行う（ワークスペースの選択・Free Tier の確認が要るため）。
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -41,8 +44,8 @@ function CountList({ counts }: { counts: Record<string, number> }) {
   );
 }
 
-/** 書き出しの節（SaaS 版）。押すと、ワークスペースのファイルをダウンロードさせる。 */
-function ExportSection() {
+/** 書き出しの節。押すと、ファイルをダウンロードさせる（SaaS はワークスペース、OSS は全データ）。 */
+function ExportSection({ selfHosted }: { selfHosted: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   const exportMutation = useMutation({
@@ -63,9 +66,13 @@ function ExportSection() {
 
   return (
     <section className="space-y-2">
-      <h3 className="text-base font-bold text-gray-900">書き出し（SaaS → OSS）</h3>
+      <h3 className="text-base font-bold text-gray-900">
+        {selfHosted ? "書き出し（バックアップ・他サーバーへの移行）" : "書き出し（SaaS → OSS）"}
+      </h3>
       <p className="text-xs text-gray-500">
-        このワークスペースのセンサー・測定値・アラーム・ダッシュボード・Webhook連携を、OSS版に移すためのファイルとして書き出します。ユーザー情報とログイン情報は含みません。
+        {selfHosted
+          ? "このサーバーの全データ（センサー・測定値・アラーム・ダッシュボード・Webhook連携）を、別の OSS 版サーバーに移すためのファイルとして書き出します。移行先では「取り込み」から読み込んでください。"
+          : "このワークスペースのセンサー・測定値・アラーム・ダッシュボード・Webhook連携を、OSS版に移すためのファイルとして書き出します。ユーザー情報とログイン情報は含みません。"}
       </p>
       <button
         type="button"
@@ -210,10 +217,12 @@ export function MigrationSettingsPanel() {
       <div>
         <h2 className="mb-1 text-lg font-bold text-gray-900">データ移行</h2>
         <p className="text-xs text-gray-400">
-          SaaS版のワークスペースを、OSS版（セルフホスト）へ移します。
+          {status.mode === "self_hosted"
+            ? "このサーバーの全データを書き出し、別の OSS 版サーバーへ取り込みます。"
+            : "SaaS版のワークスペースを、OSS版（セルフホスト）へ移します。"}
         </p>
       </div>
-      {status.canExport && <ExportSection />}
+      {status.canExport && <ExportSection selfHosted={status.mode === "self_hosted"} />}
       {status.canExport && status.canImport && <hr className="border-gray-200" />}
       {status.canImport && <ImportSection />}
     </div>

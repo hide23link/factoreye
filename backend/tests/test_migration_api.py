@@ -4,6 +4,9 @@ SaaS（multi_tenant）と self-hosted の切り替えは monkeypatch で行う�
 同じテストDBの中で、SaaS 側で書き出し → ワークスペース削除 → self-hosted 側で取り込み、を通す。
 """
 
+import gzip
+import io
+import json
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
@@ -63,9 +66,9 @@ def saas_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_self_hosted_allows_import_only(client: httpx.AsyncClient) -> None:
+async def test_status_self_hosted_allows_export_and_import(client: httpx.AsyncClient) -> None:
     body = (await client.get("/api/settings/migration/status")).json()
-    assert body == {"mode": "self_hosted", "canExport": False, "canImport": True}
+    assert body == {"mode": "self_hosted", "canExport": True, "canImport": True}
 
 
 @pytest.mark.asyncio
@@ -75,9 +78,19 @@ async def test_status_saas_allows_export_only(client: httpx.AsyncClient, saas_mo
 
 
 @pytest.mark.asyncio
-async def test_export_is_hidden_in_self_hosted(client: httpx.AsyncClient) -> None:
+async def test_export_in_self_hosted_returns_all_data(client: httpx.AsyncClient) -> None:
+    async with AsyncSession(engine) as session:
+        session.add(Sensor(workspace_id=None, name="自宅温度", ingest_key="oss-key-1", unit="℃"))
+        await session.commit()
+
     response = await client.get("/api/settings/migration/export")
-    assert response.status_code == 404
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/gzip"
+    assert "factoreye-workspace-self-hosted.jsonl.gz" in response.headers["content-disposition"]
+    with gzip.open(io.BytesIO(response.content), "rt", encoding="utf-8") as f:
+        header = json.loads(f.readline())
+    assert header["workspace_id"] is None
 
 
 @pytest.mark.asyncio
@@ -152,6 +165,34 @@ async def test_import_rejects_broken_file(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 400
     assert "読めません" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_export_then_import_round_trips(
+    client: httpx.AsyncClient, alembic_table: None
+) -> None:
+    """OSS → OSS の移行・バックアップ: 書き出し元のデータを消してから取り込み、復元できること。"""
+    async with AsyncSession(engine) as session:
+        session.add(Sensor(workspace_id=None, name="自宅温度", ingest_key="oss-key-rt", unit="℃"))
+        await session.commit()
+
+    exported = await client.get("/api/settings/migration/export")
+    assert exported.status_code == 200
+    async with engine.begin() as conn:
+        await conn.execute(sa.text("DELETE FROM sensors WHERE workspace_id IS NULL"))
+    assert await _count("SELECT COUNT(*) FROM sensors") == 0
+
+    imported = await client.post(
+        "/api/settings/migration/import",
+        content=exported.content,
+        headers={"Content-Type": "application/gzip"},
+    )
+
+    assert imported.status_code == 200
+    assert imported.json()["counts"]["sensors"] == 1
+    assert await _count(
+        "SELECT COUNT(*) FROM sensors WHERE ingest_key = 'oss-key-rt' AND workspace_id IS NULL"
+    ) == 1
 
 
 @pytest.mark.asyncio
