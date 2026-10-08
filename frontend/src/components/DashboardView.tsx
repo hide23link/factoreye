@@ -51,7 +51,8 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  // 表示時間範囲: 開いたとき URL（あれば）から読み、閉じたら既定に戻して URL からも消す
+  // 表示時間範囲: 開いたとき URL（あれば）、無ければ最後に見ていた範囲（localStorage）から読み、
+  // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
   useEffect(() => {
     initTimeRangeFromUrl();
     return () => resetTimeRange();
