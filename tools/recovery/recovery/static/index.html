@@ -87,7 +87,7 @@
 <script>
 "use strict";
 const PAGE = 100;
-const state = { targetConfigured: false, browse: null };
+const state = { targetConfigured: false, mergeEnabled: false, browse: null };
 
 // DB の値は利用者が入れた文字列なので、innerHTML を使わず textContent で入れる
 function el(tag, attrs = {}, ...children) {
@@ -254,9 +254,84 @@ async function showCompare(name) {
           `${fmtNum(w.backup_readings)} → ${fmtNum(w.current_readings)}`,
           w.backup_sensors !== null ? el("button", { onclick: () => openBrowse(name, w.id || null) }, "バックアップを閲覧") : ""]))
       ) : el("p", { class: "muted" }, "ワークスペースはありません"));
+    if (state.mergeEnabled) box.append(mergePanel(name, r.workspaces));
   } catch (e) {
     box.replaceChildren(el("p", { class: "bad" }, e.message));
   }
+}
+
+// ── 書き戻し: 選んだワークスペースの、今の DB に無い行だけを足す ──
+function mergePanel(name, workspaces) {
+  const candidates = workspaces.filter((w) => w.backup_sensors !== null);
+  const panel = el("div", { style: "margin-top:16px;border-top:1px solid var(--line);padding-top:12px" },
+    el("h2", {}, "今の DB に書き戻す"),
+    el("p", { class: "muted" }, "選んだワークスペースについて、今の DB に無い行だけを足します（今ある行は変えません）。まず「試行」で件数を確かめてください。実行の直前に、今の DB の控えを自動で取ります。"));
+  if (!candidates.length) {
+    panel.append(el("p", { class: "muted" }, "書き戻せるワークスペースがありません"));
+    return panel;
+  }
+  const checks = candidates.map((w) => {
+    const cb = el("input", { type: "checkbox", value: w.id });
+    if (w.status === "backup_only") cb.checked = true;
+    return [cb, w];
+  });
+  const all = el("input", { type: "checkbox" });
+  all.addEventListener("change", () => checks.forEach(([cb]) => { cb.checked = all.checked; }));
+  panel.append(el("div", { class: "scroll" }, table(
+    [all, "名前", "所有者", "状態", "測定値（バックアップ → 今）"],
+    checks.map(([cb, w]) => [cb, w.name, w.owner_email || "—",
+      el("span", { class: `badge ${STATUS[w.status][0]}` }, STATUS[w.status][1]),
+      `${fmtNum(w.backup_readings)} → ${fmtNum(w.current_readings)}`]))));
+  const from = el("input", { type: "datetime-local" });
+  const to = el("input", { type: "datetime-local" });
+  const result = el("div", { style: "margin-top:10px" });
+  const dryBtn = el("button", {}, "試行（件数の確認）");
+  const applyBtn = el("button", { class: "primary", disabled: "" }, "書き戻す");
+  panel.append(el("div", { class: "row", style: "margin-top:10px" },
+    el("label", {}, "測定値・アラームの期間（任意） ", from, " 〜 ", to), dryBtn, applyBtn), result);
+
+  const body = (apply) => {
+    const ids = checks.filter(([cb]) => cb.checked).map(([cb]) => cb.value);
+    const b = { workspace_ids: ids.filter((id) => id), include_self_hosted: ids.includes(""), apply };
+    if (apply) b.expected_inserted = lastPlan.tables.reduce((n, t) => n + t.inserted, 0);
+    if (from.value) b.from = new Date(from.value).toISOString();
+    if (to.value) b.to = new Date(to.value).toISOString();
+    return b;
+  };
+  let lastPlan = null;
+  // 試行の後に選び直したら、もう一度試行するまで実行できないようにする
+  panel.addEventListener("change", () => { applyBtn.disabled = true; lastPlan = null; });
+  const run = async (apply) => {
+    const b = body(apply);
+    if (!b.workspace_ids.length && !b.include_self_hosted) { result.replaceChildren(el("p", { class: "bad" }, "ワークスペースを選んでください")); return; }
+    if (apply) {
+      const total = lastPlan.tables.reduce((n, t) => n + t.inserted, 0);
+      if (!confirm(`${fmtNum(total)} 行を今の DB に書き戻します。直前に今の DB の控えを取ります。実行しますか？`)) return;
+    }
+    dryBtn.disabled = applyBtn.disabled = true;
+    result.replaceChildren(el("p", { class: "muted" }, apply ? "書き戻し中…" : "試行中…"));
+    try {
+      const r = await api(`/api/backups/${encodeURIComponent(name)}/merge`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+      const total = r.tables.reduce((n, t) => n + t.inserted, 0);
+      result.replaceChildren(
+        el("p", { class: r.applied ? "ok" : "" }, r.applied
+          ? `${fmtNum(total)} 行を書き戻しました。直前の控え: ${r.snapshot}（バックアップの一覧に出ます）`
+          : `試行の結果: ${fmtNum(total)} 行を足します（まだ書き込んでいません）`),
+        el("div", { class: "scroll" }, table(["テーブル", "バックアップの対象", "足す", "今の DB に既にある", ""],
+          r.tables.map((t) => [t.table, fmtNum(t.source), fmtNum(t.inserted), fmtNum(t.existing), t.note || ""]), new Set([1, 2, 3]))));
+      lastPlan = r.applied ? null : r;
+      applyBtn.disabled = r.applied || total === 0;
+      if (r.applied) { await loadCurrent(); await loadBackups(); }
+    } catch (e) {
+      result.replaceChildren(el("p", { class: "bad" }, e.message));
+    } finally {
+      dryBtn.disabled = false;
+    }
+  };
+  dryBtn.addEventListener("click", () => run(false));
+  applyBtn.addEventListener("click", () => run(true));
+  return panel;
 }
 
 async function openBrowse(db, workspaceId) {
@@ -319,6 +394,7 @@ document.getElementById("b-next").addEventListener("click", () => { state.browse
   try {
     const info = await api("/api/info");
     state.targetConfigured = info.target_configured;
+    state.mergeEnabled = info.merge_enabled;
     document.getElementById("info").textContent = `バックアップの読み込み元: ${info.source}`;
     await Promise.all([loadCurrent(), loadBackups()]);
   } catch (e) {
