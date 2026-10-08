@@ -41,7 +41,7 @@ async def test_non_ascii_api_key_returns_401(client: httpx.AsyncClient) -> None:
     # 一定時間の比較でも、ASCII 以外のキーで 500 にならない
     resp = await client.post(
         "/api/ingest/readings",
-        headers={"X-API-Key": "キー".encode()},
+        headers={b"X-API-Key": "キー".encode()},
         json={"ingestKey": "sensor-1", "value": 42},
     )
     assert resp.status_code == 401
