@@ -191,3 +191,15 @@ def test_csv_cell_neutralizes_formulas() -> None:
     assert to_csv_cell("name", "@SUM(A1)") == "'@SUM(A1)"
     assert to_csv_cell("value", -1.5) == "-1.5"  # 数値はそのまま
     assert to_csv_cell("password_hash", "=secret") == MASK
+
+
+def test_composite_requires_primary_but_not_optional(tmp_path: Path) -> None:
+    from recovery.sources import CompositeSource
+
+    write_dump(tmp_path, "factoreye-1.sql.gz")
+    ok = CompositeSource([LocalSource(tmp_path)], optional=[LocalSource(tmp_path / "none")])
+    assert [e.name for e in ok.list()] == ["factoreye-1.sql.gz"]
+
+    broken = CompositeSource([LocalSource(tmp_path / "typo")], optional=[])
+    with pytest.raises(SourceError):
+        broken.list()

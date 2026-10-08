@@ -35,6 +35,10 @@ INSERT INTO public.sensors VALUES
   ('bbbbbbbb-0000-0000-0000-000000000001', '{WS_A}', 'temp', '2026-10-01T00:00:00Z');
 INSERT INTO public.readings (sensor_id, value, recorded_at) VALUES
   ('bbbbbbbb-0000-0000-0000-000000000001', 20.5, '2026-10-05T00:00:00Z');
+-- 消失の後に、同じセンサーで新しいアラームが発生している
+INSERT INTO public.alarms VALUES
+  ('dddddddd-0000-0000-0000-000000000002', 'bbbbbbbb-0000-0000-0000-000000000001',
+   '2026-10-08T00:00:00Z', NULL, 'ACTIVE');
 """
 
 
@@ -174,7 +178,7 @@ async def test_api_merge_takes_snapshot_first(
         s3_endpoint_url=None, target_write_dsn=s.dsn_for(current), snapshot_dir=snapshots,
     )
     app = create_app(
-        settings, CompositeSource([LocalSource(tmp_path), LocalSource(snapshots)]), s
+        settings, CompositeSource([LocalSource(tmp_path)], optional=[LocalSource(snapshots)]), s
     )
     token = base64.b64encode(b"admin:correct-horse-battery").decode()
     async with httpx.AsyncClient(
@@ -184,9 +188,20 @@ async def test_api_merge_takes_snapshot_first(
         assert (await c.get("/api/info")).json()["merge_enabled"] is True
         dry = (await c.post(f"/api/backups/{backup}/merge", json={"workspace_ids": [WS_B]})).json()
         assert dry["applied"] is False and dry["snapshot"] is None
-        r = await c.post(
+        planned = sum(t["inserted"] for t in dry["tables"])
+        # 試行をせずに実行・試行と違う件数で実行は、どちらも拒否する
+        no_plan = await c.post(
             f"/api/backups/{backup}/merge", json={"workspace_ids": [WS_B], "apply": True}
         )
+        assert no_plan.status_code == 422
+        stale = await c.post(f"/api/backups/{backup}/merge", json={
+            "workspace_ids": [WS_B], "apply": True, "expected_inserted": planned + 1,
+        })
+        assert stale.status_code == 409
+        assert not snapshots.exists() or not list(snapshots.glob("*.sql.gz"))
+        r = await c.post(f"/api/backups/{backup}/merge", json={
+            "workspace_ids": [WS_B], "apply": True, "expected_inserted": planned,
+        })
         assert r.status_code == 200, r.text
         snap = r.json()["snapshot"]
         listed = [b["name"] for b in (await c.get("/api/backups")).json()]
@@ -227,3 +242,58 @@ def test_bind_numbers_only_used_parameters() -> None:
     sql, args = merge.bind("id = ANY(:ids)", sel, "recorded_at")
     assert sql == 'id = ANY($1::uuid[]) AND "recorded_at" < $2::timestamptz'
     assert args == [sel.workspace_ids, sel.time_to]
+
+
+async def test_open_alarm_is_closed_when_sensor_already_has_one(
+    dbs: tuple[Scratch, str, str],
+) -> None:
+    s, backup, current = dbs
+    r = await _run(s, backup, current, merge.MergeSelection([uuid.UUID(WS_A)]), apply=True)
+
+    alarms = next(t for t in r.tables if t.table == "alarms")
+    assert (alarms.inserted, alarms.closed) == (1, 1) and alarms.note
+    dsn = s.dsn_for(current)
+    restored = "SELECT status::text FROM alarms WHERE id = 'dddddddd-0000-0000-0000-000000000001'"
+    newer = "SELECT status::text FROM alarms WHERE id = 'dddddddd-0000-0000-0000-000000000002'"
+    conn = await asyncpg.connect(dsn)
+    try:
+        assert await conn.fetchval(restored) == "RESOLVED"
+        assert await conn.fetchval(newer) == "ACTIVE"
+    finally:
+        await conn.close()
+
+
+async def test_self_hosted_settings_keep_id_and_advance_sequence(
+    dbs: tuple[Scratch, str, str],
+) -> None:
+    s, backup, current = dbs
+    sel = merge.MergeSelection([], include_self_hosted=True)
+
+    dry = await _run(s, backup, current, sel, apply=False)
+    await _run(s, backup, current, sel, apply=True)
+    again = await _run(s, backup, current, sel, apply=True)
+
+    # 通知設定は、ワークスペースの分と self-hosted の分の 2 行で報告する
+    assert [t.inserted for t in dry.tables if t.table == "notification_settings"] == [0, 1]
+    assert all(t.inserted == 0 for t in again.tables)
+    conn = await asyncpg.connect(s.dsn_for(current))
+    try:
+        # backend は self-hosted の設定を id=1 で読む
+        assert await conn.fetchval(
+            "SELECT id FROM notification_settings WHERE workspace_id IS NULL"
+        ) == 1
+        # 次の採番が id=1 と重ならない
+        assert await conn.fetchval("SELECT nextval('notification_settings_id_seq')") == 2
+    finally:
+        await conn.close()
+
+
+async def test_workspace_settings_get_new_ids(dbs: tuple[Scratch, str, str]) -> None:
+    s, backup, current = dbs
+    r = await _run(s, backup, current, merge.MergeSelection([uuid.UUID(WS_A)]), apply=True)
+
+    assert [t.inserted for t in r.tables if t.table == "notification_settings"] == [1]
+    assert await _count(
+        s.dsn_for(current),
+        f"SELECT count(*) FROM notification_settings WHERE workspace_id = '{WS_A}'",
+    ) == 1

@@ -52,7 +52,10 @@ async def dump_database(dsn: str, dest_dir: Path) -> Path:
                 f"今の DB の控えを取れませんでした（pg_dump 終了コード {code}）: "
                 + stderr.decode("utf-8", errors="replace")[-1000:]
             )
-        digest.update(partial.read_bytes())
+        # 書き終えたファイルを少しずつ読んで計算する（大きな DB でもメモリに載せない）
+        with partial.open("rb") as f:
+            while chunk := f.read(1024 * 1024):
+                digest.update(chunk)
         partial.rename(dest)
     except BaseException:
         partial.unlink(missing_ok=True)

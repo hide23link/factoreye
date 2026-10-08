@@ -159,23 +159,27 @@ class S3Source:
 class CompositeSource:
     """複数の読み込み元を 1 つに見せる（本来のバックアップ ＋ 書き戻しの直前の控え）。"""
 
-    def __init__(self, sources: list[BackupSource]) -> None:
+    def __init__(self, sources: list[BackupSource], optional: list[LocalSource]) -> None:
+        # optional: 無くてもよい読み込み元（書き戻しの控えは、最初の書き戻しまで無い）。
+        # 本来のバックアップの置き場所が無いのは設定の誤りなので、そちらはエラーにする
         self._sources = sources
+        self._optional = optional
 
     def describe(self) -> str:
-        return " ＋ ".join(s.describe() for s in self._sources)
+        return " ＋ ".join(s.describe() for s in [*self._sources, *self._optional])
 
     def list(self) -> list[BackupEntry]:
         entries: list[BackupEntry] = []
         for s in self._sources:
-            if isinstance(s, LocalSource) and not s.exists():
-                continue  # 控えのディレクトリは、最初の書き戻しまで無い
             entries.extend(s.list())
+        for o in self._optional:
+            if o.exists():
+                entries.extend(o.list())
         return sorted(entries, key=lambda e: e.modified, reverse=True)
 
     def fetch(self, name: str) -> FetchedBackup:
         errors = []
-        for s in self._sources:
+        for s in [*self._sources, *self._optional]:
             try:
                 return s.fetch(name)
             except SourceError as e:

@@ -44,6 +44,9 @@ class MergeRequest(BaseModel):
     time_to: datetime | None = Field(default=None, alias="to")
     # false: 試行（件数を確かめて取り消す）、true: 実行（直前に今の DB の控えを取ってから書き込む）
     apply: bool = False
+    # 実行のとき: 画面で確認した試行の件数（足す行の合計）。実行の直前の試行と違えば中止する。
+    # 試行の後に今の DB が変わり、確認した内容と違うものを書き込まないように
+    expected_inserted: int | None = Field(default=None, ge=0)
 
 
 def _require_auth(settings: Settings) -> Callable[[HTTPBasicCredentials], None]:
@@ -247,11 +250,20 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         async with merge_lock:
             snapshot = None
             if req.apply:
-                # 試行で問題が無くても、実行の直前の状態を必ず控える
+                if req.expected_inserted is None:
+                    raise HTTPException(422, "先に試行して、件数を確かめてください")
                 async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
                     settings.target_write_dsn
                 ) as dst:
-                    await merge.merge(src, dst, sel, apply=False)
+                    plan = await merge.merge(src, dst, sel, apply=False)
+                planned = sum(t.inserted for t in plan.tables)
+                if planned != req.expected_inserted:
+                    raise HTTPException(
+                        409,
+                        f"試行の後に今の DB が変わりました（確認した {req.expected_inserted} 行"
+                        f" → 今は {planned} 行）。もう一度試行してください",
+                    )
+                # 試行で問題が無くても、実行の直前の状態を必ず控える
                 snapshot = await dump_database(settings.target_write_dsn, settings.snapshot_dir)
             async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
                 settings.target_write_dsn

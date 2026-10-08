@@ -293,6 +293,7 @@ function mergePanel(name, workspaces) {
   const body = (apply) => {
     const ids = checks.filter(([cb]) => cb.checked).map(([cb]) => cb.value);
     const b = { workspace_ids: ids.filter((id) => id), include_self_hosted: ids.includes(""), apply };
+    if (apply) b.expected_inserted = lastPlan.tables.reduce((n, t) => n + t.inserted, 0);
     if (from.value) b.from = new Date(from.value).toISOString();
     if (to.value) b.to = new Date(to.value).toISOString();
     return b;

@@ -52,6 +52,11 @@ class TableSpec:
     # key に NULL がありうる（self-hosted の通知設定は workspace_id が NULL）。
     # NULL どうしも同じとみなす（IS NOT DISTINCT FROM。索引が効かないので、行の少ない表だけに使う）
     nullable_key: bool = False
+    # id をそのまま入れるので、連番を表の最大の id まで進める（次の採番と重ならないように）
+    fix_sequence: bool = False
+    # 発生中のアラームが今の DB の同じセンサーにもある場合、戻すほうを解除済みにする。
+    # 「発生中はセンサーごとに 1 つ」が前提のため（両方が発生中だと、片方が解除されずに残る）
+    close_duplicate_open: bool = False
 
 
 def _ws(alias: str = "") -> str:
@@ -70,7 +75,7 @@ SPECS: tuple[TableSpec, ...] = (
         "readings", _SENSORS, ("sensor_id", "recorded_at"), drop_id=True,
         time_column="recorded_at",
     ),
-    TableSpec("alarms", _SENSORS, ("id",), time_column="triggered_at"),
+    TableSpec("alarms", _SENSORS, ("id",), time_column="triggered_at", close_duplicate_open=True),
     TableSpec("dashboards", _ws(), ("id",)),
     TableSpec(
         "widgets", f"dashboard_id IN (SELECT id FROM dashboards WHERE {_ws()})", ("id",)
@@ -82,8 +87,16 @@ SPECS: tuple[TableSpec, ...] = (
         ("id",),
     ),
     TableSpec("webhook_subscriptions", _ws(), ("id",)),
+    # ワークスペースの通知設定: 連番の id は持ち込まず、ワークスペースごとに 1 行
     TableSpec(
-        "notification_settings", _ws(), ("workspace_id",), drop_id=True, nullable_key=True
+        "notification_settings", "workspace_id = ANY(:ids)", ("workspace_id",), drop_id=True
+    ),
+    # self-hosted の通知設定: backend は id=1 の行を固定で読むため、id を保ったまま入れる。
+    # NULL の行が既にあれば（id に関係なく）飛ばす（NULL の行が 2 つになると、
+    # どちらが使われるかが決まらない）
+    TableSpec(
+        "notification_settings", ":self_hosted AND workspace_id IS NULL", ("workspace_id",),
+        nullable_key=True, fix_sequence=True,
     ),
 )
 # refresh_tokens（ログインの状態）は戻さない。戻すと、失効させたはずのログインが復活しうるため
@@ -99,6 +112,8 @@ class TableResult:
     # 今の DB に既にあったため飛ばした行数
     existing: int
     note: str | None = None
+    # 戻すときに解除済みにしたアラームの数（close_duplicate_open）
+    closed: int = 0
 
 
 @dataclass(frozen=True)
@@ -166,7 +181,12 @@ async def connect_target(dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 
 async def _merge_table(
-    src: asyncpg.Connection, dst: asyncpg.Connection, spec: TableSpec, sel: MergeSelection
+    src: asyncpg.Connection,
+    dst: asyncpg.Connection,
+    spec: TableSpec,
+    sel: MergeSelection,
+    tmp: str,
+    apply: bool,
 ) -> TableResult:
     src_cols = await _columns(src, spec.table)
     dst_cols = await _columns(dst, spec.table)
@@ -176,8 +196,8 @@ async def _merge_table(
         raise MergeError(f"{spec.table}: 判定に使う列がありません: {missing_key}")
     insert_cols = [c for c in cols if not (spec.drop_id and c == "id")]
 
-    # 今の DB に一時テーブルを作り、バックアップの対象の行を流し込んでから、無い行だけを足す
-    tmp = f"_merge_{spec.table}"
+    # 今の DB に一時テーブルを作り、バックアップの対象の行を流し込む。
+    # 今の DB に既にある行を一時テーブルから消し、残り（＝足す行）をすべて入れる
     await dst.execute(
         f"CREATE TEMP TABLE {_ident(tmp)} (LIKE public.{_ident(spec.table)}) ON COMMIT DROP"
     )
@@ -197,16 +217,53 @@ async def _merge_table(
         await dst.copy_records_to_table(tmp, records=batch, columns=cols)
         source += len(batch)
 
-    ins = ", ".join(_ident(c) for c in insert_cols)
+    t, s_ = f"public.{_ident(spec.table)}", _ident(tmp)
     op = "IS NOT DISTINCT FROM" if spec.nullable_key else "="
     match = " AND ".join(f"x.{_ident(k)} {op} s.{_ident(k)}" for k in spec.key)
-    status = await dst.execute(
-        f"INSERT INTO public.{_ident(spec.table)} ({ins})"
-        f" SELECT {', '.join('s.' + _ident(c) for c in insert_cols)} FROM {_ident(tmp)} s"
-        f" WHERE NOT EXISTS (SELECT 1 FROM public.{_ident(spec.table)} x WHERE {match})"
+    existing = _rowcount(
+        await dst.execute(f"DELETE FROM {s_} s WHERE EXISTS (SELECT 1 FROM {t} x WHERE {match})")
     )
-    inserted = int(status.rsplit(" ", 1)[-1])
-    return TableResult(spec.table, source, inserted, source - inserted)
+    ins = ", ".join(_ident(c) for c in insert_cols)
+    inserted = _rowcount(
+        await dst.execute(
+            f"INSERT INTO {t} ({ins}) SELECT {', '.join('s.' + _ident(c) for c in insert_cols)}"
+            f" FROM {s_} s"
+        )
+    )
+    closed = 0
+    if spec.close_duplicate_open and inserted:
+        closed = _rowcount(
+            await dst.execute(
+                f"UPDATE {t} a SET status = 'RESOLVED', resolved_at = now()"
+                f" WHERE a.id IN (SELECT id FROM {s_}) AND a.status <> 'RESOLVED'"
+                f" AND EXISTS (SELECT 1 FROM {t} b WHERE b.sensor_id = a.sensor_id"
+                f" AND b.status <> 'RESOLVED' AND b.id NOT IN (SELECT id FROM {s_}))"
+            )
+        )
+    # 連番（sequence）は取り消しても戻らないため、実行のときだけ進める
+    if spec.fix_sequence and inserted and apply:
+        await _advance_sequence(dst, spec.table)
+    note = f"発生中のアラーム {closed} 件を解除済みにして戻します" if closed else None
+    return TableResult(spec.table, source, inserted, existing, note, closed)
+
+
+async def _advance_sequence(dst: asyncpg.Connection, table: str) -> None:
+    """連番を、表の最大の id まで進める（戻すことはしない）。"""
+    seq = await dst.fetchval("SELECT pg_get_serial_sequence($1, 'id')", f"public.{table}")
+    if seq is None:
+        return
+    max_id = await dst.fetchval(f"SELECT max(id) FROM public.{_ident(table)}")
+    # seq は pg_get_serial_sequence が返す、引用符付きの正しい名前
+    row = await dst.fetchrow(f"SELECT last_value, is_called FROM {seq}")
+    if row is None:
+        return
+    used = row["last_value"] if row["is_called"] else row["last_value"] - 1
+    if max_id is not None and max_id > used:
+        await dst.execute("SELECT setval($1::regclass, $2, true)", seq, max_id)
+
+
+def _rowcount(status: str) -> int:
+    return int(status.rsplit(" ", 1)[-1])
 
 
 async def merge(
@@ -229,12 +286,18 @@ async def merge(
     tr = dst.transaction()
     await tr.start()
     try:
-        for spec in SPECS:
+        for i, spec in enumerate(SPECS):
             if spec.table not in src_tables or spec.table not in dst_tables:
                 results.append(TableResult(spec.table, 0, 0, 0, "テーブルが無いため飛ばしました"))
                 continue
+            if spec.table == "notification_settings" and spec.nullable_key and not (
+                sel.include_self_hosted
+            ):
+                continue
             try:
-                results.append(await _merge_table(src, dst, spec, sel))
+                results.append(
+                    await _merge_table(src, dst, spec, sel, f"_merge_{i}_{spec.table}", apply)
+                )
             except asyncpg.PostgresError as e:
                 # 外部キー・一意制約の違反（例: 同じメールの別のユーザーが今の DB にいる）
                 raise MergeError(f"{spec.table}: {e}") from e
