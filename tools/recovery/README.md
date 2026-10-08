@@ -85,6 +85,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE factoreye IN SCHEMA public GRANT SELECT ON TAB
 | `TARGET_DATABASE_URL` | なし | 今の DB。読み取り専用で接続する |
 | `AWS_ACCESS_KEY_ID` など | なし | S3 の認証。`s3:ListBucket` と `s3:GetObject` だけの鍵にする |
 | `S3_ENDPOINT_URL` | なし | S3 互換のサービス（MinIO など） |
+| `BACKUP_GID` | `0` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |
 | `RECOVERY_BIND` / `RECOVERY_PORT` | `127.0.0.1` / `8090` | 画面の待ち受け |
 | `SCRATCH_DSN` | コンテナが自動で設定 | 作業用の Postgres。コンテナの外で動かす場合だけ指定する |
 

@@ -10,6 +10,10 @@ services:
     environment:
       # 下の volumes で手元のバックアップを /backups に見せる。S3 を使う場合は .env で s3://... に変える
       BACKUP_SOURCE: ${BACKUP_SOURCE:-/backups}
+    # バックアップのファイルは 640（infra/backup.sh）。そのグループに入って読む。
+    # 本番は root（0）。ラズパイなどでは、offsite-pull.sh を動かす利用者のグループの ID にする
+    group_add:
+      - "${BACKUP_GID:-0}"
     volumes:
       # バックアップは読むだけ（ツールから消したり書き換えたりできないように :ro）
       - ${BACKUP_DIR:-../../backups}:/backups:ro

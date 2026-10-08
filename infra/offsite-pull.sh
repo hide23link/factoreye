@@ -16,7 +16,8 @@ OFFSITE_RETENTION_DAYS="${OFFSITE_RETENTION_DAYS:-90}"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 mkdir -p "$OFFSITE_DIR"
-chmod 700 "$OFFSITE_DIR"
+# グループには読ませる（復旧ツールは BACKUP_GID にこの利用者のグループを指定して読む）
+chmod 750 "$OFFSITE_DIR"
 
 log "取得開始: $OFFSITE_SOURCE → $OFFSITE_DIR"
 # rrsync -ro が送り元を backups/ に固定しているため、送り元のパスは "/" でよい

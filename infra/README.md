@@ -123,5 +123,5 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:<合言葉のファ�
 
 - このスクリプトはcompose project名に依存しない（`docker compose exec <service名>`を使うため、
   ディレクトリ名やランナーの構成に依存しない）
-- バックアップのファイルは、所有者（root）だけが読める権限（600）で作る。`backups/`は
+- バックアップのファイルは、ほかの利用者が読めない権限（640）で作る（復旧ツールはグループの権限で読む）。`backups/`は
   `.gitignore`済みでリポジトリにはコミットされない

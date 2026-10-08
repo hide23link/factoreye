@@ -85,8 +85,9 @@ backup_config_files() {
   log "設定ファイルを保存しました: $CONFIG_DEST（${#targets[@]} 件）"
 }
 
-# バックアップには利用者のデータとパスワードのハッシュが入るため、所有者（root）だけが読めるようにする
-umask 077
+# バックアップには利用者のデータとパスワードのハッシュが入るため、ほかの利用者には読ませない（640）。
+# グループには読ませる: 復旧ツール（tools/recovery）は root 以外の利用者で動き、root のグループで読むため
+umask 027
 mkdir -p "$BACKUP_DIR"
 
 log "バックアップ開始: $DEST"
