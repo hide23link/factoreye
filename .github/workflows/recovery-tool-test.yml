@@ -2,6 +2,7 @@ name: recovery-tool-test
 
 on:
   push:
+    branches: [main]
     paths: ["tools/recovery/**", ".github/workflows/recovery-tool-test.yml"]
   pull_request:
     paths: ["tools/recovery/**", ".github/workflows/recovery-tool-test.yml"]
