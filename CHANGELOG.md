@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **復旧ツールの画面を手順形式に**: 「書き戻す」（①バックアップを選ぶ → ②戻すものを選ぶ → ③内容を確認 → ④書き戻す）と「データを見る・書き出す」の 2 つのタブに分けた。バックアップは日時と種類で表示し、選ぶだけで検証・準備する。確認は選び直すたびに自動で行い、追加する件数を文章で示す。閲覧は列名を日本語にし、センサーは名前で、日時は現地時刻で表示する
 - **復旧ツールの書き戻し**: 選んだワークスペースについて、バックアップから今の DB に無い行だけを足す。試行（件数の確認、取り消し）と実行は同じ処理。実行の直前に今の DB の控えを取り、1 つのトランザクションで書き込む。`TARGET_WRITE_DATABASE_URL` を設定した場合だけ使える
 - **復旧ツール**（`tools/recovery/`）: バックアップを今の DB と見比べ、閲覧・CSV で書き出す Web 画面。FactorEye 本体に依存せず、Docker があればどこでも動く（本番の LXC・ラズパイ・Mac）。読み込み元はディレクトリか S3。sha256 と gzip を検証してから、コンテナの中の作業用の Postgres に展開する。今の DB には読み取り専用で接続する
 - **バックアップの拡張**（`infra/backup.sh`）: 各ファイルの隣に sha256 を書く。設定ファイル（`.env`・管理者ファイル・cloudflared の設定）を暗号化して保存できる（`BACKUP_PASSPHRASE_FILE`）。S3 への送信（`infra/offsite-s3.sh`、`OFFSITE_S3_URI`）と、別のマシンからの取得（`infra/offsite-pull.sh`）
