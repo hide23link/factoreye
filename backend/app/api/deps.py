@@ -5,6 +5,7 @@ FastAPI の Depends（依存関係）として、各 API から使い回す認�
 - get_current_workspace_id: SaaS の利用者のワークスペース（JWT から取り出す）
 - require_admin: 管理者 API の認可（管理者トークン＋管理者ファイルの存在確認）
 """
+import hmac
 from typing import Annotated
 from uuid import UUID
 
@@ -32,7 +33,11 @@ async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) ->
     """
     if settings.auth_mode == AuthMode.MULTI_TENANT:
         return  # multi-tenant: body の ingest_key がセンサー単位の認証になる
-    if x_api_key is None or x_api_key != settings.ingest_api_key:
+    # 比較にかかる時間からキーを推測されないよう、一定時間で比較する。
+    # 文字列のままだと ASCII 以外で TypeError（500）になるため、バイト列にする
+    if x_api_key is None or not hmac.compare_digest(
+        x_api_key.encode(), settings.ingest_api_key.encode()
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API key")
 
 
