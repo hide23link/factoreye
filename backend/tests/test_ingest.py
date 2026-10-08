@@ -4,11 +4,15 @@ docs/architecture.md §12 テスト のシナリオ（認証・不正ペイロ�
 高頻度バッチ）を実装に合わせて踏襲。Alarm評価・dedupeはSprint 4で追加。
 """
 import time
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import httpx
+import pytest
 
+import app.ingest_buffer as ingest_buffer
 from app.config import settings
-from app.ingest_buffer import flush_once
+from app.ingest_buffer import IngestBuffer, PendingReading, flush_once
 
 VALID_HEADERS = {"X-API-Key": settings.ingest_api_key}
 
@@ -126,3 +130,64 @@ async def test_ingest_batch_handles_many_readings(client: httpx.AsyncClient) -> 
 async def test_flush_once_with_empty_buffer_returns_zero() -> None:
     # 何も溜まっていない状態でflushが呼ばれても0件として正常終了する
     assert await flush_once() == 0
+
+
+async def test_flush_failure_requeues_readings_for_retry(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # commit 前に失敗しても値は消えず、次の flush で書かれる
+    sensor_id = await _create_sensor(client, "retry-sensor")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "retry-sensor", "value": 7.0},
+    )
+    assert resp.status_code == 202
+
+    async def _fail(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("db unavailable")
+
+    with monkeypatch.context() as m:
+        m.setattr(ingest_buffer, "evaluate_alarms", _fail)
+        with pytest.raises(RuntimeError):
+            await flush_once()
+
+    assert await flush_once() == 1
+    body = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
+    assert body["total"] == 1
+    assert body["readings"][0]["value"] == 7.0
+
+
+async def test_flush_drops_readings_of_deleted_sensor_without_blocking_others(
+    client: httpx.AsyncClient,
+) -> None:
+    deleted_id = await _create_sensor(client, "deleted-before-flush")
+    kept_id = await _create_sensor(client, "kept-sensor")
+    for key in ("deleted-before-flush", "kept-sensor"):
+        resp = await client.post(
+            "/api/ingest/readings", headers=VALID_HEADERS, json={"ingestKey": key, "value": 1.0}
+        )
+        assert resp.status_code == 202
+    assert (await client.delete(f"/api/sensors/{deleted_id}")).status_code in (200, 204)
+
+    assert await flush_once() == 1
+    assert await flush_once() == 0
+    body = (await client.get(f"/api/sensors/{kept_id}/readings")).json()
+    assert body["total"] == 1
+
+
+async def test_requeue_keeps_order_and_drops_oldest_over_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ingest_buffer, "MAX_PENDING_READINGS", 3)
+    buf = IngestBuffer()
+    sensor_id = uuid4()
+
+    def reading(value: float) -> PendingReading:
+        return PendingReading(sensor_id=sensor_id, value=value, recorded_at=datetime.now(UTC))
+
+    await buf.add(reading(3.0))
+    await buf.add(reading(4.0))
+    await buf.requeue([reading(1.0), reading(2.0)])
+
+    assert [p.value for p in await buf.drain()] == [2.0, 3.0, 4.0]
