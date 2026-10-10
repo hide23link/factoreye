@@ -23,7 +23,6 @@ const TABLE_LABELS: Record<string, string> = {
   alarms: "アラーム",
   dashboards: "ダッシュボード",
   widgets: "ウィジェット",
-  widget_configs: "ウィジェット設定",
   webhook_subscriptions: "Webhook連携",
   notification_settings: "通知設定",
 };
