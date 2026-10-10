@@ -23,7 +23,7 @@ test("データ移行: 書き出しファイルの件数を確認できる（取
       version: 2,
       workspace_id: workspaceId,
       exported_at: now,
-      alembic_version: "d4e5f6a7b8c9",
+      alembic_version: "e5f6a7b8c9d0",
     },
     {
       t: "sensors",
