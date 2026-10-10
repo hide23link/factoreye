@@ -126,12 +126,14 @@ ALTER DEFAULT PRIVILEGES FOR ROLE factoreye IN SCHEMA public GRANT SELECT ON TAB
 | `BACKUP_SOURCE` | `/backups` | 読み込み元。ディレクトリか `s3://<バケット>/<接頭辞>` |
 | `BACKUP_DIR` | `../../backups` | compose で `/backups` に見せる手元のディレクトリ（読み取り専用） |
 | `TARGET_DATABASE_URL` | なし | 今の DB。読み取り専用で接続する |
-| `TARGET_WRITE_DATABASE_URL` | なし | 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しは使えない |
+| `TARGET_WRITE_DATABASE_URL` | なし | 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しは使えない。設定するには `TARGET_DATABASE_URL` と `TARGET_MODE` も必要（無いと起動時にエラー） |
 | `TARGET_MODE` | なし（書き戻しを使うなら必須） | 今の DB が SaaS 版なら `saas`、OSS 版なら `oss` |
 | `AWS_ACCESS_KEY_ID` など | なし | S3 の認証。`s3:ListBucket` と `s3:GetObject` だけの鍵にする |
 | `S3_ENDPOINT_URL` | なし | S3 互換のサービス（MinIO など） |
 | `BACKUP_GID` | `0` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |
 | `RECOVERY_BIND` / `RECOVERY_PORT` | `127.0.0.1` / `8090` | 画面の待ち受け |
+| `RECOVERY_CACHE_DIR` | `/var/lib/recovery/cache` | S3 から取ったバックアップの置き場（コンテナ内） |
+| `RECOVERY_SNAPSHOT_DIR` | `/var/lib/recovery/snapshots` | 書き戻しの直前の控え（`before-merge-*.sql.gz`）の置き場（コンテナ内） |
 | `SCRATCH_DSN` | コンテナが自動で設定 | 作業用の Postgres。コンテナの外で動かす場合だけ指定する |
 
 ## 書き換えられたバックアップへの備え
