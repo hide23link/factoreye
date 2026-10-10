@@ -12,5 +12,4 @@ Closes #
 ## チェックリスト
 - [ ] backend: mypy/ruffエラーなし ／ frontend: TypeScript/ESLintエラーなし
 - [ ] テストカバレッジ維持
-- [ ] 破壊的変更がある場合、CHANGELOG.md の「Removed」に明記した
-- [ ] CHANGELOG.md 更新
+- [ ] CHANGELOG.md 更新（破壊的変更がある場合は「Removed」に明記）
