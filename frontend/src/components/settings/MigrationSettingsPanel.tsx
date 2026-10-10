@@ -225,6 +225,29 @@ export function MigrationSettingsPanel() {
       {status.canExport && <ExportSection selfHosted={status.mode === "self_hosted"} />}
       {status.canExport && status.canImport && <hr className="border-gray-200" />}
       {status.canImport && <ImportSection />}
+      <hr className="border-gray-200" />
+      <RecoveryToolNote />
     </div>
+  );
+}
+
+/** OSS版⇄SaaS版（ワークスペースを指定しての移行）は復旧ツールを使う、という案内。 */
+function RecoveryToolNote() {
+  return (
+    <section className="space-y-1 rounded border border-gray-200 bg-gray-50 p-3">
+      <h3 className="text-sm font-bold text-gray-900">OSS版とSaaS版の間で移行したい場合</h3>
+      <p className="text-xs text-gray-500">
+        ワークスペースを指定してのOSS版⇄SaaS版の移行（Free Tierの確認を含む）は、このパネルではなく復旧ツール（運営者向け）で行います。
+        <a
+          href="https://github.com/hide23link/factoreye/tree/main/tools/recovery"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-1 text-blue-500 hover:underline"
+        >
+          tools/recovery の説明
+        </a>
+        を参照してください。
+      </p>
+    </section>
   );
 }
