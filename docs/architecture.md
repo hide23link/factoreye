@@ -73,7 +73,7 @@ flowchart LR
 ## 4. REST API
 
 認証欄の「APIキー」は `X-API-Key` ヘッダー（§5）。「JWT」は `AUTH_MODE=multi_tenant`（SaaS）時のみ必要なもの。
-**認証欄が「なし」の API も、SaaS では JWT が必須**（なければ 401）。SaaS で JWT が要らないのは、`/health`、`/api/ingest/readings`（本文の `ingestKey` で識別）、`/api/auth/*`、`/api/settings/migration/status` だけ。self-hosted は取り込み以外に認証がない（§11）。
+**認証欄が「なし」の API も、SaaS では JWT が必須**（なければ 401）。SaaS で JWT が要らないのは、`/health`、`/api/ingest/readings`（本文の `ingestKey` で識別）、`/api/auth/*`、`/api/settings/migration/status` だけ。管理者 API（`/api/admin/*`）は利用者の JWT ではなく、管理者トークンで認可する（§10）。self-hosted は取り込み以外に認証がない（§11）。
 
 | Method | Path | 内容 | 認証 |
 |---|---|---|---|
