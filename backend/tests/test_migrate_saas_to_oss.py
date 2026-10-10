@@ -31,7 +31,6 @@ from app.db.models import (
     WebhookEventType,
     WebhookSubscription,
     Widget,
-    WidgetConfig,
     Workspace,
 )
 from app.db.session import engine
@@ -108,7 +107,6 @@ async def saas_data(alembic_table: None) -> AsyncGenerator[dict[str, UUID], None
         )
         session.add_all([widget, widget_on_deleted])
         await session.flush()
-        session.add(WidgetConfig(widget_id=widget.id, settings={"color": "#00aa00"}))
 
         session.add(
             WebhookSubscription(
@@ -133,10 +131,6 @@ async def _remove_workspace_a(ws_a: UUID) -> None:
     # 移し終えた想定: SaaS 側から A を消す。widgets.dashboard_id は CASCADE ではないため先に消す
     async with engine.begin() as conn:
         dashboard_ids = "SELECT id FROM dashboards WHERE workspace_id = :id"
-        widget_ids = f"SELECT id FROM widgets WHERE dashboard_id IN ({dashboard_ids})"
-        await conn.execute(
-            sa.text(f"DELETE FROM widget_configs WHERE widget_id IN ({widget_ids})"), {"id": ws_a}
-        )
         await conn.execute(
             sa.text(f"DELETE FROM widgets WHERE dashboard_id IN ({dashboard_ids})"), {"id": ws_a}
         )
@@ -163,7 +157,6 @@ async def test_export_counts_exclude_deleted_dashboards(
     assert counts["alarms"] == 1
     assert counts["dashboards"] == 1
     assert counts["widgets"] == 1
-    assert counts["widget_configs"] == 1
     assert counts["webhook_subscriptions"] == 1
     assert counts["notification_settings"] == 1
 
@@ -230,7 +223,6 @@ async def test_import_moves_workspace_to_self_hosted(
         await _count("SELECT COUNT(*) FROM widgets WHERE sensor_id = :id", id=saas_data["sensor"])
         == 1
     )
-    assert await _count("SELECT COUNT(*) FROM widget_configs") == 1
     assert (
         await _count("SELECT COUNT(*) FROM webhook_subscriptions WHERE workspace_id IS NULL") == 1
     )

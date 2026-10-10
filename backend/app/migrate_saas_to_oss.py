@@ -56,7 +56,6 @@ TABLES = [
     "sensors",
     "dashboards",
     "widgets",
-    "widget_configs",
     "readings",
     "alarms",
     "webhook_subscriptions",
@@ -154,14 +153,13 @@ async def export_workspace(
     """
     t = _tables()
     sensors, dashboards, widgets = t["sensors"], t["dashboards"], t["widgets"]
-    widget_configs, alarms = t["widget_configs"], t["alarms"]
+    alarms = t["alarms"]
     webhooks, notifications = t["webhook_subscriptions"], t["notification_settings"]
 
     sensor_ids = sa.select(sensors.c.id).where(_ws_eq(sensors.c.workspace_id, workspace_id))
     dashboard_ids = sa.select(dashboards.c.id).where(
         _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)
     )
-    widget_ids = sa.select(widgets.c.id).where(widgets.c.dashboard_id.in_(dashboard_ids))
 
     # 移すものの判断:
     # - ダッシュボードは「削除済み（deleted_at あり）」を除く。
@@ -174,9 +172,6 @@ async def export_workspace(
             _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)
         ),
         "widgets": sa.select(widgets).where(widgets.c.dashboard_id.in_(dashboard_ids)),
-        "widget_configs": sa.select(widget_configs).where(
-            widget_configs.c.widget_id.in_(widget_ids)
-        ),
         "alarms": sa.select(alarms).where(alarms.c.sensor_id.in_(sensor_ids)),
         "webhook_subscriptions": sa.select(webhooks).where(
             _ws_eq(webhooks.c.workspace_id, workspace_id)
