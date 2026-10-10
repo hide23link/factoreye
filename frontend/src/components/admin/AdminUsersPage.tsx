@@ -68,6 +68,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
   return (
     <div>
       <IngestLimitCard token={token} onAuthError={onAuthError} />
+      <RecoveryToolCard />
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="ユーザー数" value={overview.data?.userCount} />
         <Stat label="ワークスペース数" value={overview.data?.workspaceCount} />
@@ -165,6 +166,28 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
         />
       )}
     </div>
+  );
+}
+
+/** ワークスペースを指定してのOSS版⇄SaaS版の移行は復旧ツールを使う、という案内。 */
+function RecoveryToolCard() {
+  return (
+    <section className="mb-6 rounded border border-gray-200 bg-white p-4">
+      <h2 className="mb-1 text-sm font-bold text-gray-900">OSS版⇄SaaS版の移行（復旧ツール）</h2>
+      <p className="text-sm text-gray-600">
+        ワークスペースを指定してのOSS版⇄SaaS版の移行（Free Tierの確認を含む）は、この画面ではなく復旧ツール（
+        <code className="text-xs">tools/recovery/</code>
+        ・127.0.0.1 または Tailscale のみ）で行います。
+        <a
+          href="https://github.com/hide23link/factoreye/tree/main/tools/recovery"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-1 text-blue-500 hover:underline"
+        >
+          説明を見る
+        </a>
+      </p>
+    </section>
   );
 }
 

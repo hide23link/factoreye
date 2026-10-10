@@ -225,13 +225,21 @@ export function MigrationSettingsPanel() {
       {status.canExport && <ExportSection selfHosted={status.mode === "self_hosted"} />}
       {status.canExport && status.canImport && <hr className="border-gray-200" />}
       {status.canImport && <ImportSection />}
-      <hr className="border-gray-200" />
-      <RecoveryToolNote />
+      {status.mode === "self_hosted" && (
+        <>
+          <hr className="border-gray-200" />
+          <RecoveryToolNote />
+        </>
+      )}
     </div>
   );
 }
 
-/** OSS版⇄SaaS版（ワークスペースを指定しての移行）は復旧ツールを使う、という案内。 */
+/**
+ * OSS版⇄SaaS版（ワークスペースを指定しての移行）は復旧ツールを使う、という案内。
+ * OSS版（self-hosted）のみ表示する。SaaS版は利用者ごとの設定画面ではなく、
+ * FactorEye管理者画面（/admin）側に案内を置く（運営者だけが使うツールのため）。
+ */
 function RecoveryToolNote() {
   return (
     <section className="space-y-1 rounded border border-gray-200 bg-gray-50 p-3">
