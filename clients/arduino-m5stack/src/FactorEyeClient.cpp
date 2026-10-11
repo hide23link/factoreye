@@ -21,6 +21,13 @@ size_t FactorEyeClient::pendingCount() const { return _bufferCount; }
 // 値を送る。流れ: バックオフ中ならバッファへ入れて戻る。そうでなければ、同じセンサーの溜まった値と今回の値を
 // まとめて1回の POST で送る。成功なら送った分をバッファから消す。失敗なら今回の値をバッファに残す。
 bool FactorEyeClient::send(const String& ingestKey, float value) {
+  // NaN・Infinity は backend が 400 で拒否する値。バッファに入れると同じセンサーの以降のバッチが
+  // すべて拒否されるため、送る前に捨てる
+  if (isnan(value) || isinf(value)) {
+    Serial.println("[FactorEye] non-finite value dropped: " + ingestKey);
+    return false;
+  }
+
   unsigned long now = millis();
   // バックオフ期間中は通信を試みず、黙ってバッファに積んで即return
   // （millis()の桁あふれを跨いでも正しく動くよう符号付き差分で比較する）
@@ -39,14 +46,26 @@ bool FactorEyeClient::send(const String& ingestKey, float value) {
   }
   values[count++] = value;
 
-  bool ok = _postReadings(ingestKey, values, count);
-  _onSendResult(ok);
+  unsigned long retryAfterMs = 0;
+  SendOutcome outcome = _postReadings(ingestKey, values, count, &retryAfterMs);
 
-  if (ok) {
+  if (outcome == kOutcomeOk || outcome == kOutcomeDrop) {
+    if (outcome == kOutcomeDrop) {
+      // 再送しても成功しない内容（400・422 など）。溜まっていた分も同じバッチなので、まとめて捨てる
+      Serial.println("[FactorEye] rejected by server, dropped " + String((unsigned long)count) +
+                     " reading(s): " + ingestKey);
+    }
+    // サーバーとは通信できているので、バックオフは解除する
+    _onSendResult(true, 0);
     _removeBufferedFor(ingestKey);
-    return true;
+    return outcome == kOutcomeOk;
   }
 
+  if (outcome == kOutcomeHold) {
+    // 401・403・404: 設定の誤り。データは捨てず、バックオフしながら再送し続ける
+    Serial.println("[FactorEye] check API key / ingestKey (data kept): " + ingestKey);
+  }
+  _onSendResult(false, retryAfterMs);
   _pushToBuffer(ingestKey, value);
   return false;
 }
@@ -78,7 +97,7 @@ void FactorEyeClient::_removeBufferedFor(const String& ingestKey) {
 
 // 送信の結果に応じて、次に送ってよい時刻を決める。
 // 成功: 失敗の回数と待ち時間をリセット。失敗: 待ち時間を 1, 2, 4, 8, 16, 30 秒と倍にし、±10% のゆらぎを付ける。
-void FactorEyeClient::_onSendResult(bool success) {
+void FactorEyeClient::_onSendResult(bool success, unsigned long retryAfterMs) {
   if (success) {
     _consecutiveFailures = 0;
     _nextAttemptAtMs = 0;
@@ -98,15 +117,24 @@ void FactorEyeClient::_onSendResult(bool success) {
   long jitterRange = (long)(backoff / 10);
   long jitter = jitterRange > 0 ? random(-jitterRange, jitterRange + 1) : 0;
   unsigned long delay = backoff + (unsigned long)jitter;
+  // 429 の Retry-After があれば、それより早くは送らない
+  if (retryAfterMs > delay) delay = retryAfterMs;
 
   _nextAttemptAtMs = millis() + delay;
 }
 
-// 値を、取り込み API へ1回だけ POST する。成功（202）なら true。
-// WiFi につながっていない、または値が無いときは、通信せずに false を返す。
-bool FactorEyeClient::_postReadings(const String& ingestKey, const float* values, size_t count) {
+// 値を、取り込み API へ1回だけ POST し、結果を分類して返す。
+//   kOutcomeOk:    202 Accepted
+//   kOutcomeRetry: 通信エラー・WiFi未接続・5xx・408・429（バッファに残して、バックオフ後に再送）
+//   kOutcomeHold:  401・403・404（設定の誤り。データは捨てず再送し続ける）
+//   kOutcomeDrop:  400・422 などの 4xx（同じ内容を送り直しても成功しない。その分を捨てる）
+// 429 の Retry-After（秒）があれば、*retryAfterMs に待ち時間（ミリ秒、上限5分）を入れる。
+FactorEyeClient::SendOutcome FactorEyeClient::_postReadings(const String& ingestKey,
+                                                           const float* values, size_t count,
+                                                           unsigned long* retryAfterMs) {
+  *retryAfterMs = 0;
   if (WiFi.status() != WL_CONNECTED || count == 0) {
-    return false;
+    return kOutcomeRetry;
   }
 
   // 本文の JSON を組み立てる（1件なら value、複数件なら readings の配列）
@@ -126,9 +154,25 @@ bool FactorEyeClient::_postReadings(const String& ingestKey, const float* values
   http.begin(_host + "/api/ingest/readings");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", _apiKey);
+  // 応答ヘッダーのうち Retry-After だけ読めるようにする（POST の前に指定する）
+  const char* headerKeys[] = {"Retry-After"};
+  http.collectHeaders(headerKeys, 1);
   int httpCode = http.POST(body);
+  String retryAfter = (httpCode > 0) ? http.header("Retry-After") : String("");
   http.end();
 
   // backend は成功時 202 Accepted を返す（app/api/ingest.py 参照）
-  return httpCode == 202;
+  if (httpCode == 202) return kOutcomeOk;
+  if (httpCode == 401 || httpCode == 403 || httpCode == 404) return kOutcomeHold;
+  if (httpCode == 429) {
+    long seconds = retryAfter.toInt();  // 数字でなければ 0（日付形式は扱わない）
+    if (seconds > 0) {
+      if (seconds > 300) seconds = 300;
+      *retryAfterMs = (unsigned long)seconds * 1000UL;
+    }
+    return kOutcomeRetry;
+  }
+  if (httpCode >= 400 && httpCode < 500 && httpCode != 408) return kOutcomeDrop;
+  // 負の値（通信エラー・タイムアウト）、5xx、408、その他の想定外はデータを失わない側に倒す
+  return kOutcomeRetry;
 }
