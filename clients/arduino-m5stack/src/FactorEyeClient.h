@@ -8,8 +8,8 @@
 // 仕様の根拠: docs/architecture.md §9 デバイス連携
 //   - 指数バックオフ: 1s, 2s, 4s, ... 上限30s（ジッター ±10%）
 //   - 送信失敗分はリングバッファ（最大100件）に一時保持し、次回成功時にまとめて送信
-//   - 再送するのは通信エラー・5xx・408・429（Retry-After を尊重）。401・403・404 は設定の誤りなので
-//     捨てずに保持して再送し続ける。400・422 など再送しても成功しない 4xx は、その分を捨てる。
+//   - 再送するのは通信エラー・5xx・408・429（Retry-After が付いていれば尊重）。401・403・404 は設定の誤りなので
+//     捨てずに保持して再送し続ける（保持は1センサー10件まで。全体のバックオフは延ばさない）。400・422 など再送しても成功しない 4xx は、その分を捨てる。
 //     NaN・Infinity は送る前に捨てる
 //
 // 注意:
@@ -55,6 +55,8 @@ class FactorEyeClient {
   static const size_t kBufferCapacity = 100;
   // 送信失敗が続いたときの待ち時間の上限（ミリ秒）
   static const unsigned long kBackoffCapMs = 30000;
+  // 401・403・404（設定の誤り）で保持する、1センサーあたりの最大件数（超えたら古い値から捨てる）
+  static const size_t kHoldPerKeyLimit = 10;
 
   String _host;
   String _apiKey;
@@ -69,6 +71,7 @@ class FactorEyeClient {
   // 以下は内部の処理（外から直接は使わない）
   void _pushToBuffer(const String& ingestKey, float value);
   void _removeBufferedFor(const String& ingestKey);
+  void _trimBufferedFor(const String& ingestKey, size_t limit);
   void _onSendResult(bool success, unsigned long retryAfterMs);
   SendOutcome _postReadings(const String& ingestKey, const float* values, size_t count,
                             unsigned long* retryAfterMs);

@@ -34,6 +34,9 @@ _BACKOFF_CAP_SECONDS = 30.0
 _BUFFER_CAPACITY = 100
 # Retry-After（429 のとき）に従って待つ時間の上限（秒）。バックオフの上限より長く待つ場合があるため別に持つ
 _RETRY_AFTER_CAP_SECONDS = 300.0
+# 401・403・404（設定の誤り）で保持する、1センサーあたりの最大件数。超えたらそのセンサーの古い値から捨てる。
+# 共有バッファ（100件）が、設定の誤ったセンサー1つで埋まって他のセンサーの値を押し出さないための上限
+_HOLD_PER_KEY_LIMIT = 10
 
 # 送信結果の分類（_post_readings の戻り値）
 _OK = "ok"  # 202 Accepted
@@ -93,10 +96,14 @@ class FactorEyeClient:
         バックオフ中・送信失敗の場合は False（内部でバッファに保持済み）。
         ブロッキングのリトライは行わない（呼び出し元のループを止めない）。
         """
-        if not math.isfinite(value):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not _is_finite(value)
+        ):
             # NaN・Infinity は backend が 400 で拒否する値。バッファに入れると、同じセンサーの
             # 以降のバッチがすべて拒否されるため、送る前に捨てる
-            _log.warning("%s: 有限でない値（%r）は送らずに捨てました", ingest_key, value)
+            _log.warning("%s: 数値でない・有限でない値（%r）は送らずに捨てました", ingest_key, value)
             return False
 
         now = self._clock()
@@ -128,13 +135,31 @@ class FactorEyeClient:
 
         if outcome == _HOLD:
             _log.warning(
-                "%s: 認証・登録の設定を確認してください（%d 件を保持して再送します）",
+                "%s: 認証・登録の設定を確認してください（値を保持して再送します。保持は最大 %d 件）",
                 ingest_key,
-                len(values),
+                _HOLD_PER_KEY_LIMIT,
             )
+            # 設定の誤りはこのセンサー（や鍵）だけの問題。クライアント全体のバックオフは延ばさず、
+            # 保持する件数にセンサーごとの上限を設けて、他のセンサーの未送信値を押し出さない
+            self._buffer.append(_BufferedReading(ingest_key, value))
+            self._trim_key(ingest_key, _HOLD_PER_KEY_LIMIT)
+            return False
         self._on_result(False, retry_after)
         self._buffer.append(_BufferedReading(ingest_key, value))
         return False
+
+    def _trim_key(self, ingest_key: str, limit: int) -> None:
+        """そのセンサーの未送信が limit 件を超えていたら、古いものから捨てる（他のセンサーは触らない）。"""
+        excess = sum(1 for b in self._buffer if b.ingest_key == ingest_key) - limit
+        if excess <= 0:
+            return
+        kept: list[_BufferedReading] = []
+        for b in self._buffer:
+            if excess > 0 and b.ingest_key == ingest_key:
+                excess -= 1
+                continue
+            kept.append(b)
+        self._buffer = deque(kept, maxlen=_BUFFER_CAPACITY)
 
     def _post_readings(
         self, ingest_key: str, values: list[float]
@@ -163,7 +188,8 @@ class FactorEyeClient:
                 # backend は成功時 202 Accepted を返す（app/api/ingest.py 参照）
                 return (_OK if response.status == 202 else _RETRY), None
         except urllib.error.HTTPError as exc:  # URLError の派生なので、先に判定する
-            return _classify_http_error(exc.code), _parse_retry_after(exc.headers)
+            retry_after = _parse_retry_after(exc.headers) if exc.code == 429 else None
+            return _classify_http_error(exc.code), retry_after
         except (urllib.error.URLError, TimeoutError, OSError):
             return _RETRY, None
 
@@ -188,6 +214,14 @@ class FactorEyeClient:
         if retry_after is not None:
             delay = max(delay, min(retry_after, _RETRY_AFTER_CAP_SECONDS))
         self._next_attempt_at = self._clock() + delay
+
+
+def _is_finite(value: float) -> bool:
+    """有限の数か。巨大な int など float に直せないものは False（例外を出さない）。"""
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _classify_http_error(code: int) -> str:

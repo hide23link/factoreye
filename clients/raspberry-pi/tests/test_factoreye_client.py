@@ -187,6 +187,46 @@ class FactorEyeClientTest(unittest.TestCase):
         self.assertEqual(self.client.pending_count, 0)
         self.assertTrue(self.client.send("s", 1.0))
 
+    def test_non_numeric_values_are_dropped_without_raising(self) -> None:
+        for bad in ("1.0", None, True, 10**400):
+            with self.subTest(bad=bad):
+                self.assertFalse(self.client.send("s", bad))  # type: ignore[arg-type]
+        self.assertEqual(self.mock.requests, [])
+        self.assertEqual(self.client.pending_count, 0)
+
+    def test_retry_after_is_ignored_for_non_429(self) -> None:
+        self.mock.next_status = 503
+        self.mock.next_headers = {"Retry-After": "120"}
+        self.client.send("s", 1.0)
+        self.clock.advance(2.0)
+        self.mock.next_status = 202
+        self.assertTrue(self.client.send("s", 2.0))
+
+    def test_misconfigured_sensor_does_not_disturb_other_sensors(self) -> None:
+        # A だけ 404、B は 202 を返すよう、リクエスト本文で切り替える
+        orig = self.mock.server.RequestHandlerClass.do_POST
+
+        def routed(handler: BaseHTTPRequestHandler) -> None:
+            length = int(handler.headers.get("Content-Length", 0))
+            body = json.loads(handler.rfile.read(length))
+            self.mock.requests.append({"body": body})
+            handler.send_response(404 if body["ingestKey"] == "A" else 202)
+            handler.end_headers()
+
+        self.mock.server.RequestHandlerClass.do_POST = routed  # type: ignore[method-assign]
+        try:
+            for i in range(30):
+                self.assertFalse(self.client.send("A", float(i)))
+                self.assertTrue(self.client.send("B", float(i)), f"B が遅れた: {i}")
+        finally:
+            self.mock.server.RequestHandlerClass.do_POST = orig  # type: ignore[method-assign]
+        b_sent = [
+            r["body"] for r in self.mock.requests if r["body"]["ingestKey"] == "B"  # type: ignore[index]
+        ]
+        self.assertEqual(len(b_sent), 30)
+        # A の保持は上限まで。古いものから捨てて、新しい 10 件が残る
+        self.assertEqual(self.client.pending_count, 10)
+
     def test_5xx_and_408_are_retried(self) -> None:
         for status in (500, 503, 408):
             with self.subTest(status=status):

@@ -62,12 +62,35 @@ bool FactorEyeClient::send(const String& ingestKey, float value) {
   }
 
   if (outcome == kOutcomeHold) {
-    // 401・403・404: 設定の誤り。データは捨てず、バックオフしながら再送し続ける
-    Serial.println("[FactorEye] check API key / ingestKey (data kept): " + ingestKey);
+    // 401・403・404: 設定の誤り。データは捨てずに保持するが、このセンサーだけの問題なので、
+    // クライアント全体のバックオフは延ばさず、保持はセンサーごとの上限までにする
+    // （他のセンサーの未送信値を押し出さないため）
+    Serial.println("[FactorEye] check API key / ingestKey (data kept, max 10): " + ingestKey);
+    _pushToBuffer(ingestKey, value);
+    _trimBufferedFor(ingestKey, kHoldPerKeyLimit);
+    return false;
   }
   _onSendResult(false, retryAfterMs);
   _pushToBuffer(ingestKey, value);
   return false;
+}
+
+// 指定したセンサーの未送信が limit 件を超えていたら、古いものから捨てる（他のセンサーは触らない）。
+void FactorEyeClient::_trimBufferedFor(const String& ingestKey, size_t limit) {
+  size_t total = 0;
+  for (size_t i = 0; i < _bufferCount; i++) {
+    if (_buffer[i].ingestKey == ingestKey) total++;
+  }
+  size_t excess = total > limit ? total - limit : 0;
+  size_t writeIdx = 0;
+  for (size_t readIdx = 0; readIdx < _bufferCount; readIdx++) {
+    if (excess > 0 && _buffer[readIdx].ingestKey == ingestKey) {
+      excess--;
+      continue;
+    }
+    _buffer[writeIdx++] = _buffer[readIdx];
+  }
+  _bufferCount = writeIdx;
 }
 
 // バッファの末尾に1件追加する。満杯なら、一番古い1件を捨ててから追加する。
