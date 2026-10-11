@@ -11,6 +11,7 @@ services:
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
       # Webhookの送信先に社内ネットワーク（http・プライベートIP）を許可する。既定は禁止（SSRF対策）
       - WEBHOOK_ALLOW_PRIVATE_NETWORKS=${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
+    restart: unless-stopped
     ports:
       - "8000:8000"
     depends_on:
@@ -24,6 +25,7 @@ services:
         # Viteはビルド時に値を静的ファイルへ焼き込むため、build.argsで渡す必要がある
         # （実行時のenvironment:をいくら変えても効果が無い）。.envでの上書き先はこちら。
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
     ports:
       - "3001:3001"
     depends_on:
@@ -31,6 +33,7 @@ services:
 
   postgres:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=factoreye
       - POSTGRES_PASSWORD=password
