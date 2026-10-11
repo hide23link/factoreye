@@ -8,7 +8,11 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // CI では GitHub の注釈に加え、HTML レポート（playwright-report/）も作る。
+  // 失敗時のトレースは test-results/ に残る（workflow がどちらもアップロードする）
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }]]
+    : "list",
   use: {
     baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
