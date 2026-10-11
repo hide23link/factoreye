@@ -7,7 +7,8 @@
 # 既にあるファイルは取り直さない（本番で書き換えられたものに上書きされないように）。
 set -euo pipefail
 
-OFFSITE_SOURCE="${OFFSITE_SOURCE:-root@100.70.133.58}"
+# 本番への接続先（例: root@<本番の Tailscale の IP>）。取りに行く側の cron で必ず指定する
+OFFSITE_SOURCE="${OFFSITE_SOURCE:?OFFSITE_SOURCE（root@<本番の Tailscale の IP>）を指定してください}"
 OFFSITE_SSH_KEY="${OFFSITE_SSH_KEY:-$HOME/.ssh/factoreye_backup}"
 # 既定は鍵と同じディレクトリに置く。$HOME/.ssh/known_hosts が別の理由で書けない環境
 # （所有者が違う等）でも、ここは自分専用の鍵の置き場所なので必ず書き込める

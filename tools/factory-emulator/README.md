@@ -96,7 +96,7 @@ http://localhost:8765
 
 ```bash
 cd tools/factory-emulator
-FACTOREYE_EMAIL=<メール> FACTOREYE_HOST=https://factoreye.hide23.link \
+FACTOREYE_EMAIL=<メール> FACTOREYE_HOST=https://<FactorEye の URL> \
   EMULATOR_SUFFIX=-demo EMULATOR_RUN_SECONDS=300 python3 emulator.py
 ```
 
