@@ -76,7 +76,8 @@ export function WidgetCard({
           <button
             type="button"
             onClick={() => setConfirmingDelete(true)}
-            className="text-red-400 hover:text-red-600"
+            disabled={deleteMutation.isPending}
+            className="text-red-400 hover:text-red-600 disabled:opacity-50"
             aria-label="ウィジェットを削除"
           >
             ✕
@@ -96,8 +97,10 @@ export function WidgetCard({
         <ConfirmDialog
           title="ウィジェットを削除"
           message="このウィジェットを削除しますか？設定（色・軸など）は元に戻せません。"
+          pending={deleteMutation.isPending}
           onCancel={() => setConfirmingDelete(false)}
           onConfirm={() => {
+            if (deleteMutation.isPending) return;
             setConfirmingDelete(false);
             deleteMutation.mutate();
           }}
