@@ -6,6 +6,7 @@
  */
 import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
 import type { Widget } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
 
 // queryKeyが毎レンダー変わって無駄に再フェッチされないよう、分単位に丸めた境界を使う
 // （「直近1時間」「本日累計」は数十秒のズレが出ても実用上問題にならない）
@@ -25,7 +26,7 @@ function startOfTodayLocal(): string {
 /** 生産状況のウィジェット本体。 */
 export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const { data, isLoading } = useSensorReadings(widget.sensorId, 1);
+  const { data, isLoading, isError, refetch } = useSensorReadings(widget.sensorId, 1);
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   const lastHourFrom = startOfCurrentMinute(60 * 60 * 1000);
@@ -35,6 +36,9 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+  }
+  if (!data && isError) {
+    return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (isLoading || !data) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
