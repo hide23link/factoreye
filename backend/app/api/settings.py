@@ -6,7 +6,7 @@ multi-tenant: ワークスペースごとの行を自動作成
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,6 +14,7 @@ from app.api.deps import get_current_workspace_id
 from app.db.models import NotificationSettings
 from app.db.session import get_session
 from app.schemas import NotificationSettingsRead, NotificationSettingsUpdate
+from app.webhooks import UnsafeWebhookUrl, assert_webhook_url_allowed
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -62,8 +63,21 @@ async def update_notification_settings(
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> NotificationSettings:
     """通知設定の更新。送られた項目だけを変える。"""
+    changes = payload.model_dump(exclude_unset=True)
+    # Discord の URL は、サーバーから POST する宛先なので、Webhook 購読と同じ SSRF 検証を通す
+    # （空文字は「未設定」なので許可）。送信時にも再検証する
+    for field in ("discord_webhook_url_critical", "discord_webhook_url_warning"):
+        url = changes.get(field)
+        if url:
+            try:
+                await assert_webhook_url_allowed(url)
+            except UnsafeWebhookUrl as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+                ) from exc
+
     settings_row = await _get_notification_settings(session, workspace_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    for field, value in changes.items():
         setattr(settings_row, field, value)
     session.add(settings_row)
     await session.commit()

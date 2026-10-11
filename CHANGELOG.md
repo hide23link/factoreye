@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - マルチテナントで、アラームの Discord 通知が、そのワークスペースの設定でなく ID=1 の設定で送られる問題を修正
 - 取り込みキーが別のワークスペースと衝突したとき、500 ではなく 409 を返すように修正
 - 直近モードのグラフが 30 秒ごとでなく毎秒取り直される問題を修正（描画のたびの現在時刻を、取り直しの間隔に合わせた値にした。応答が遅い環境で起きやすかった）
+- 通知設定の Discord Webhook URL を、登録時と送信時に検証するようにした。社内ネットワーク・ループバック・リンクローカルなどの宛先と、https 以外は登録できない（汎用 Webhook と同じ検証。`WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` で許可できる）
+- 通知の送信に失敗したとき、ログに Discord や Webhook の URL（トークンを含む秘密）が出ていた問題を修正。ホスト名と失敗の理由（HTTP の状態など）だけを記録する
+- メールアドレスの大文字小文字が別のアカウントになっていた問題を修正。登録・ログインで前後の空白を除き小文字にして扱う（大文字を含む既存のアカウントも、そのままログインできる）
+- ログインで、未登録のメールのとき応答が速く、登録の有無が応答時間で分かった問題を修正。未登録でもパスワードの照合を行い、時間を揃える
 
 - 本番（`ENVIRONMENT=production`）で、`infra/cloud/.env.cloud.example` の `CHANGE_ME_*` などのひな形の値のままでも起動し、公開されている値で署名してしまう問題を修正。`change-this…` / `CHANGE_ME…` で始まる値と空の値も拒否する
 - OSS 版の `docker-compose.yml` に `restart: unless-stopped` が無く、ホストの再起動後に自動で復帰しなかった問題を修正（backend・frontend・postgres）

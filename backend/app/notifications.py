@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.db.models import AlarmSeverity, ThresholdBreached
+from app.webhooks import assert_webhook_url_allowed, describe_send_error, redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +84,17 @@ async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) 
         body["flags"] = _DISCORD_FLAG_SUPPRESS_NOTIFICATIONS
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # 登録後に宛先が内部を指すよう変わった場合に備え、送信直前（DNS 解決後の IP）にも検証する
+        await assert_webhook_url_allowed(webhook_url)
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
             response = await client.post(webhook_url, json=body)
             response.raise_for_status()
-    except Exception:
-        # 通知失敗でingest/flushパイプラインを落とさない
-        logger.exception(
-            "failed to send alarm discord notification for sensor %s", notification.sensor_name
+    except Exception as exc:
+        # 通知失敗でingest/flushパイプラインを落とさない。
+        # Discord の URL はトークンを含む秘密なので、例外の本文・トレースバックは出さない
+        logger.warning(
+            "failed to send alarm discord notification for sensor %s to %s: %s",
+            notification.sensor_name,
+            redact_url(webhook_url),
+            describe_send_error(exc),
         )
