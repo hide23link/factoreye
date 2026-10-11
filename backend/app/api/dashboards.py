@@ -11,6 +11,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.sensors import _get_active_sensor
 from app.api.updates import apply_update
 from app.db.models import Dashboard, Widget
 from app.db.session import get_session
@@ -143,6 +144,8 @@ async def add_widget(
 ) -> Widget:
     """ダッシュボードにウィジェットを1つ追加する。"""
     await _get_active_dashboard(session, dashboard_id, workspace_id)
+    if payload.sensor_id is not None:
+        await _get_active_sensor(session, payload.sensor_id, workspace_id)
     widget = Widget(dashboard_id=dashboard_id, **payload.model_dump())
     session.add(widget)
     await session.commit()

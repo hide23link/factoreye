@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.sensors import _get_active_sensor as _get_sensor
 from app.api.updates import apply_update
 from app.db.models import Dashboard, Widget
 from app.db.session import get_session
@@ -38,6 +39,8 @@ async def update_widget(
 ) -> Widget:
     """ウィジェットの更新（位置・サイズ・設定など）。送られた項目だけを変える。"""
     widget = await _get_widget(session, widget_id, workspace_id)
+    if payload.sensor_id is not None:
+        await _get_sensor(session, payload.sensor_id, workspace_id)
     apply_update(
         widget,
         payload,
