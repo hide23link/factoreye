@@ -6,6 +6,7 @@
 import { useState } from "react";
 
 import { fetchMe, loginUser, registerUser } from "../../lib/api";
+import { describeAuthError } from "../../lib/errors";
 import { useAuthStore } from "../../store/useAuthStore";
 
 // 画面のタブ（ログイン・新規登録）
@@ -30,7 +31,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       setAuth(tokens.accessToken, tokens.refreshToken, me);
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ログインに失敗しました");
+      setError(describeAuthError(err, "login"));
     } finally {
       setLoading(false);
     }
@@ -101,7 +102,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
       setAuth(tokens.accessToken, tokens.refreshToken, me);
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登録に失敗しました");
+      setError(describeAuthError(err, "register"));
     } finally {
       setLoading(false);
     }
@@ -217,7 +218,7 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
         <p className="mt-6 text-center text-xs text-gray-400">
           セルフホストで使いたい方は
           <a
-            href="https://github.com/ecopower/factoreye"
+            href="https://github.com/hide23link/factoreye"
             target="_blank"
             rel="noopener noreferrer"
             className="ml-1 text-blue-500 hover:underline"

@@ -35,6 +35,7 @@ import {
 } from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
 
 /** グラフの区間数（表示の横幅に合わせた本数の目安。API の上限は 1000） */
 export const GRAPH_BUCKETS = 500;
@@ -49,7 +50,7 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   // 取得 → 再描画 → 新しいキー → 取得、の連鎖で毎秒取り直すため、現在時刻は useNow の値を使う
   const now = useNow(LIVE_CHART_INTERVAL_MS);
   const bounds = resolveRange(range, now);
-  const { data } = useDownsampledReadings(
+  const { data, isError, refetch } = useDownsampledReadings(
     widget.sensorId,
     bounds,
     GRAPH_BUCKETS,
@@ -67,6 +68,9 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+  }
+  if (!data && isError) {
+    return <ErrorNotice message="グラフのデータを取得できませんでした。" onRetry={() => void refetch()} />;
   }
   // 最初の 1 回だけ「読み込み中」を出す（以後は前のデータを残して、取り直す）
   if (!data) {

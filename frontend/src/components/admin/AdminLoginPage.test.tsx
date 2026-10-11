@@ -45,4 +45,34 @@ describe("AdminLoginPage", () => {
     expect(await screen.findByText(/IDまたはパスワードが正しくありません/)).toBeInTheDocument();
     expect(useAdminStore.getState().token).toBeNull();
   });
+
+  it.each([
+    [429, /試行回数/],
+    [500, /サーバーで問題/],
+  ])("状態コード %i のときは、パスワード誤りとは別の文言を表示する", async (status, pattern) => {
+    const user = userEvent.setup();
+    vi.mocked(adminApi.adminLogin).mockRejectedValue(
+      new adminApi.AdminApiError(status, `POST /api/admin/login failed: ${status}`),
+    );
+    renderWithQueryClient(<AdminLoginPage />);
+
+    await user.type(screen.getByLabelText("管理者ID"), "admin");
+    await user.type(screen.getByLabelText("パスワード"), "pw");
+    await user.click(screen.getByRole("button", { name: "ログイン" }));
+
+    expect(await screen.findByText(pattern)).toBeInTheDocument();
+    expect(screen.queryByText(/IDまたはパスワードが正しくありません/)).not.toBeInTheDocument();
+  });
+
+  it("サーバーに接続できないときは、接続の失敗を表示する", async () => {
+    const user = userEvent.setup();
+    vi.mocked(adminApi.adminLogin).mockRejectedValue(new TypeError("Failed to fetch"));
+    renderWithQueryClient(<AdminLoginPage />);
+
+    await user.type(screen.getByLabelText("管理者ID"), "admin");
+    await user.type(screen.getByLabelText("パスワード"), "pw");
+    await user.click(screen.getByRole("button", { name: "ログイン" }));
+
+    expect(await screen.findByText(/接続できませんでした/)).toBeInTheDocument();
+  });
 });

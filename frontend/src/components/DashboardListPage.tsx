@@ -8,10 +8,11 @@ import { useState } from "react";
 import { useDashboards } from "../hooks/queries";
 import { createDashboard } from "../lib/api";
 import { useUiStore } from "../store/useUiStore";
+import { ErrorNotice } from "./ErrorNotice";
 
 /** ダッシュボードの一覧（作成フォームと、一覧のボタン）。 */
 export function DashboardListPage() {
-  const { data: dashboards, isLoading } = useDashboards();
+  const { data: dashboards, isLoading, isError, refetch } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const setView = useUiStore((s) => s.setView);
   const queryClient = useQueryClient();
@@ -55,6 +56,10 @@ export function DashboardListPage() {
       </form>
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+
+      {!isLoading && !dashboards && isError && (
+        <ErrorNotice message="ダッシュボードの一覧を取得できませんでした。" onRetry={() => void refetch()} />
+      )}
 
       {!isLoading && dashboards?.length === 0 && (
         <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
