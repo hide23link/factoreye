@@ -15,6 +15,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import EmailStr, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -147,26 +148,33 @@ async def register(
     if existing.first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already registered")
 
-    user = User(email=body.email, password_hash=auth_utils.hash_password(body.password))
-    session.add(user)
-    await session.flush()  # user.id を確定させてから workspace に使う
+    try:
+        user = User(email=body.email, password_hash=auth_utils.hash_password(body.password))
+        session.add(user)
+        await session.flush()  # user.id を確定させてから workspace に使う
 
-    workspace = Workspace(name=body.workspace_name, owner_id=user.id)
-    session.add(workspace)
-    await session.flush()
+        workspace = Workspace(name=body.workspace_name, owner_id=user.id)
+        session.add(workspace)
+        await session.flush()
 
-    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
-    user_id, workspace_id = user.id, workspace.id
-    raw, token_hash = auth_utils.create_refresh_token()
-    session.add(
-        RefreshToken(
-            user_id=user_id,
-            workspace_id=workspace_id,
-            token_hash=token_hash,
-            expires_at=auth_utils.refresh_token_expiry(),
+        # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
+        user_id, workspace_id = user.id, workspace.id
+        raw, token_hash = auth_utils.create_refresh_token()
+        session.add(
+            RefreshToken(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                token_hash=token_hash,
+                expires_at=auth_utils.refresh_token_expiry(),
+            )
         )
-    )
-    await session.commit()
+        await session.commit()
+    except IntegrityError:
+        # 同時登録で、上の事前確認をすり抜けて users.email の一意制約に当たった場合
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="email already registered"
+        ) from None
 
     return TokenResponse(
         access_token=auth_utils.create_access_token(user_id, workspace_id),

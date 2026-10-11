@@ -24,6 +24,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import EmailStr, Field, field_validator
 from sqlalchemy import delete, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -461,7 +462,14 @@ async def update_user(
             ws.plan = body.plan
 
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # 同時の変更で、事前確認をすり抜けて users.email の一意制約に当たった場合
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="email already exists"
+        ) from None
     _logger.info("admin %s updated user %s", admin_id, user_id)
     return await get_user(user_id, admin_id, session)
 

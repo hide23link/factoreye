@@ -273,3 +273,21 @@ async def test_login_unknown_email_still_verifies_password_hash(
     })
     assert resp.status_code == 401
     assert len(calls) == 1
+
+
+async def test_register_concurrent_unique_violation_returns_409(
+    auth_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 事前確認をすり抜けた同時登録が、一意制約違反（IntegrityError）になる状況を再現する
+    from sqlalchemy.exc import IntegrityError
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def boom(self: AsyncSession, *args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT INTO users", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(AsyncSession, "flush", boom)
+    resp = await auth_client.post("/api/auth/register", json={
+        "email": "race@example.com", "password": "password123", "workspaceName": "W",
+    })
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "email already registered"
