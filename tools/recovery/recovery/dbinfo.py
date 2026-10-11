@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
@@ -19,6 +20,18 @@ import asyncpg
 # 画面・CSV に出さない列（復旧に要らず、漏れると困るもの）
 MASKED_COLUMNS = frozenset({"password_hash", "token_hash"})
 MASK = "***"
+# URL の列。Webhook の送信先（Discord など）は、パスに秘密のトークンを含むため、
+# ホスト名と末尾だけ出す
+URL_COLUMNS = frozenset({"url"})
+
+
+def mask_url(value: str) -> str:
+    """秘密のトークンを含みうる URL を、ホスト名と末尾 4 文字だけにする（例: https://host/…abcd）。"""
+    parts = urlsplit(value)
+    if not parts.hostname:
+        return MASK
+    tail = value[-4:] if len(value) > 24 else ""
+    return f"{parts.scheme}://{parts.hostname}/…{tail}"
 
 # ワークスペースで絞り込むときの条件（$1 = ワークスペースの ID）。ここに無いテーブルは絞り込めない
 _SENSORS_IN_WS = "SELECT id FROM sensors WHERE workspace_id = $1"
@@ -238,6 +251,8 @@ async def _prepare(
 def to_jsonable(column: str, value: object) -> object:
     if column in MASKED_COLUMNS and value is not None:
         return MASK
+    if column in URL_COLUMNS and isinstance(value, str):
+        return mask_url(value)
     if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, UUID | Decimal):
