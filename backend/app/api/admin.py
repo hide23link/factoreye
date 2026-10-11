@@ -22,7 +22,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, field_validator
 from sqlalchemy import delete, func, text
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -114,6 +114,12 @@ class AdminUserUpdate(CamelModel):
     """利用者の修正の入力。送られた項目だけを変える（すべて省略可）。"""
 
     email: EmailStr | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, value: object) -> object:
+        return auth_utils.normalize_email(value) if isinstance(value, str) else value
+
     plan: Literal["free", "pro"] | None = None
     # 指定時はパスワードを再設定し、既存のリフレッシュトークンを全て失効させる
     password: str | None = Field(default=None, min_length=8, max_length=100)
@@ -428,7 +434,12 @@ async def update_user(
     user = await _get_user_or_404(session, user_id)
 
     if body.email is not None and body.email != user.email:
-        dup = (await session.exec(select(User).where(User.email == body.email))).first()
+        # 大文字を含む既存のメールとも突き合わせる。自分自身の大文字違いへの変更は重複としない
+        dup = (
+            await session.exec(
+                select(User).where(func.lower(User.email) == body.email, User.id != user.id)
+            )
+        ).first()
         if dup is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
         user.email = body.email

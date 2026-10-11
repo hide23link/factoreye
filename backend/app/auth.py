@@ -92,3 +92,15 @@ def hash_refresh_token(raw: str) -> str:
 def refresh_token_expiry() -> datetime:
     """リフレッシュトークンの期限（今から設定日数後）。"""
     return datetime.now(UTC) + timedelta(days=settings.jwt_refresh_expire_days)
+
+
+def normalize_email(email: str) -> str:
+    """メールを、保存・照合用に正規化する（前後の空白を除き、全体を小文字にする）。
+
+    `Foo@example.com` と `foo@example.com` を別のアカウントにしないため。
+    """
+    return email.strip().lower()
+
+
+# bcryptの時間差を作るためのダミーハッシュ（存在しないメール・IDのログイン時に照合を走らせる）
+DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-timing")
