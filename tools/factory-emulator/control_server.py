@@ -11,6 +11,7 @@ emulator.pyのMachineStateと同じプロセス内で、別スレッドのHTTP�
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
 
 # 手動操作画面の待ち受けポート（ブラウザで http://localhost:8765 を開く）
 CONTROL_PORT = 8765
+# 待ち受けアドレス。既定は 127.0.0.1（この PC だけ）。認証が無いため、LAN に公開する場合だけ
+# 環境変数 CONTROL_HOST=0.0.0.0 で明示的に指定する
+CONTROL_HOST = os.environ.get("CONTROL_HOST", "127.0.0.1")
 
 # 操作画面の HTML（CSS と JavaScript を含む1枚の文字列）。ブラウザで表示され、
 # 1秒ごとに /state を読んで表示を更新し、スライダーの変化を /control へ送る。
@@ -181,11 +185,13 @@ def _make_handler(
 def start(state: "MachineState", lock: threading.Lock) -> None:
     """バックグラウンドスレッドで操作画面を起動する（呼び出し元をブロックしない）。
 
-    注意: 0.0.0.0 で待ち受けるため、同じ LAN の機器からも操作できる。認証は無い。
-    開発・デモの PC で使い、外部に公開しないこと。
+    既定は 127.0.0.1 で待ち受ける（この PC だけ）。認証は無いため、環境変数 CONTROL_HOST で
+    0.0.0.0 などを明示した場合だけ、同じ LAN の機器からも操作できる。外部には公開しないこと。
     """
     handler = _make_handler(state, lock)
-    httpd = ThreadingHTTPServer(("0.0.0.0", CONTROL_PORT), handler)
+    httpd = ThreadingHTTPServer((CONTROL_HOST, CONTROL_PORT), handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    print(f"手動操作画面: http://localhost:{CONTROL_PORT}")
+    print(f"手動操作画面: http://localhost:{CONTROL_PORT}（待ち受け: {CONTROL_HOST}）")
+    if CONTROL_HOST not in ("127.0.0.1", "localhost", "::1"):
+        print("警告: 操作画面を外部に公開しています。認証は無いため、信頼できるネットワークだけで使うこと")
