@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 取り込みキーが別のワークスペースと衝突したとき、500 ではなく 409 を返すように修正
 - 直近モードのグラフが 30 秒ごとでなく毎秒取り直される問題を修正（描画のたびの現在時刻を、取り直しの間隔に合わせた値にした。応答が遅い環境で起きやすかった）
 
+- 本番（`ENVIRONMENT=production`）で、`infra/cloud/.env.cloud.example` の `CHANGE_ME_*` などのひな形の値のままでも起動し、公開されている値で署名してしまう問題を修正。`change-this…` / `CHANGE_ME…` で始まる値と空の値も拒否する
+- OSS 版の `docker-compose.yml` に `restart: unless-stopped` が無く、ホストの再起動後に自動で復帰しなかった問題を修正（backend・frontend・postgres）
+- `tools/factory-emulator` の手動操作画面が、認証なしで全てのネットワークに公開されていた問題を修正。既定は `127.0.0.1` のみ。LAN に公開するには `CONTROL_HOST=0.0.0.0` を明示する
+- 復旧ツールの画面と CSV に Webhook の URL（秘密のトークンを含む）が平文で出ていた問題を修正。ホスト名と末尾 4 文字だけにする。また、バックアップのファイルを読めない場合（`BACKUP_GID` の誤りなど）も「DB に接続できません」と出ていたのを、原因が分かる表示に分けた
+- OSS 版の `docker-compose.yml` が `INGEST_RATE_LIMIT` を backend に渡しておらず、`.env` に書いても効かなかった問題を修正（既定は `100/minute` のまま）
+- CI の E2E テストで、HTML レポートが作られず、失敗時のトレースも保存されなかった問題を修正。`loadtest/` の単体テストを backend-test で実行するようにした
+- `infra/README.md` の cron 例に `COMPOSE_FILE` が無く、本番でそのまま使うと失敗する問題と、復元の前に postgres だけ起動する手順が無かった問題を修正
+
 ### Removed
 - **【破壊的変更】Python プラグインシステムを廃止**: `/api/plugins` API、設定画面の「プラグイン」タブ、`plugins` / `plugin_configs` テーブルを削除（マイグレーション `c3d4e5f6a7b8`）。プラグインの設定値は失われる。拡張は Webhook で行う
 
