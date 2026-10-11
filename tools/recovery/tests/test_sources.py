@@ -203,3 +203,42 @@ def test_composite_requires_primary_but_not_optional(tmp_path: Path) -> None:
     broken = CompositeSource([LocalSource(tmp_path / "typo")], optional=[])
     with pytest.raises(SourceError):
         broken.list()
+
+
+def test_webhook_url_is_masked_in_view_and_csv() -> None:
+    from recovery.dbinfo import to_csv_cell, to_jsonable
+
+    url = "https://discord.com/api/webhooks/123456/SECRETTOKENabcdWXYZ"
+    for out in (to_jsonable("url", url), to_csv_cell("url", url)):
+        assert isinstance(out, str)
+        assert "SECRETTOKEN" not in out and "123456" not in out
+        assert out.startswith("https://discord.com/") and out.endswith("WXYZ")
+    assert to_jsonable("url", "not a url") == "***"
+    assert to_jsonable("url", None) is None
+
+
+def test_os_error_messages_distinguish_causes() -> None:
+    from recovery.app import describe_os_error
+
+    msg, status = describe_os_error(PermissionError(13, "Permission denied", "/backups/x.sql.gz"))
+    assert "BACKUP_GID" in msg and "DB に接続できません" not in msg and status == 500
+    msg, _ = describe_os_error(FileNotFoundError(2, "No such file", "/backups/x"))
+    assert "見つかりません" in msg and "DB に接続できません" not in msg
+    msg, status = describe_os_error(ConnectionRefusedError(111, "refused"))
+    assert "DB に接続できません" in msg and status == 503
+    msg, status = describe_os_error(OSError(5, "I/O error"))
+    assert "DB に接続できません" not in msg and status == 500
+
+
+def test_url_suffix_columns_masked_and_short_urls_hide_tail() -> None:
+    from recovery.dbinfo import to_jsonable
+
+    long_url = "https://discord.com/api/webhooks/123456/SECRETTOKENabcdWXYZ"
+    for col in ("discord_webhook_url_critical", "discord_webhook_url_warning", "image_url"):
+        out = to_jsonable(col, long_url)
+        assert isinstance(out, str) and "SECRET" not in out
+    short = "https://h.example/abcdef"
+    out = to_jsonable("url", short)
+    assert out == "https://h.example/…" and "cdef" not in str(out)
+    assert to_jsonable("name", long_url) == long_url
+    assert to_jsonable("urls_count", 3) == 3
