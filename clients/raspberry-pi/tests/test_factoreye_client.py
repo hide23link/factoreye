@@ -36,6 +36,7 @@ class _MockIngestServer:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
         self.next_status = 202
+        self.next_headers: dict[str, str] = {}
         self.server = HTTPServer(("127.0.0.1", 0), self._make_handler())
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -61,6 +62,8 @@ class _MockIngestServer:
                     }
                 )
                 self.send_response(outer.next_status)
+                for name, header_value in outer.next_headers.items():
+                    self.send_header(name, header_value)
                 self.end_headers()
 
             def log_message(self, format: str, *args: object) -> None:
@@ -149,6 +152,86 @@ class FactorEyeClientTest(unittest.TestCase):
             last_request["body"],
             {"ingestKey": "sensor-1", "readings": [{"value": 1.0}, {"value": 2.0}]},
         )
+
+    # --- 再送する失敗と、しない失敗（docs/architecture.md §9） ---
+
+    def test_400_and_422_are_dropped_not_retried(self) -> None:
+        for status in (400, 422):
+            with self.subTest(status=status):
+                self.mock.next_status = status
+                ok = self.client.send(f"s{status}", 1.0)
+                self.assertFalse(ok)
+                self.assertEqual(self.client.pending_count, 0)
+                # バックオフもかからず、次の値をすぐ送れる
+                self.mock.next_status = 202
+                self.assertTrue(self.client.send(f"s{status}", 2.0))
+                self.assertEqual(
+                    self.mock.requests[-1]["body"], {"ingestKey": f"s{status}", "value": 2.0}
+                )
+
+    def test_rejected_batch_does_not_poison_later_sends(self) -> None:
+        self.mock.next_status = 500
+        self.client.send("s", 1.0)
+        self.clock.advance(2.0)
+        self.mock.next_status = 400
+        self.client.send("s", 2.0)  # 溜まっていた分ごと捨てられる
+        self.assertEqual(self.client.pending_count, 0)
+        self.mock.next_status = 202
+        self.assertTrue(self.client.send("s", 3.0))
+        self.assertEqual(self.mock.requests[-1]["body"], {"ingestKey": "s", "value": 3.0})
+
+    def test_non_finite_values_are_never_sent_or_buffered(self) -> None:
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            self.assertFalse(self.client.send("s", bad))
+        self.assertEqual(self.mock.requests, [])
+        self.assertEqual(self.client.pending_count, 0)
+        self.assertTrue(self.client.send("s", 1.0))
+
+    def test_5xx_and_408_are_retried(self) -> None:
+        for status in (500, 503, 408):
+            with self.subTest(status=status):
+                client = FactorEyeClient(self.mock.url, "k", timeout=2.0)
+                self.mock.next_status = status
+                self.assertFalse(client.send("s", 1.0))
+                self.assertEqual(client.pending_count, 1)
+
+    def test_429_is_retried_and_retry_after_is_honored(self) -> None:
+        self.mock.next_status = 429
+        self.mock.next_headers = {"Retry-After": "60"}
+        self.assertFalse(self.client.send("s", 1.0))
+        self.assertEqual(self.client.pending_count, 1)
+        self.clock.advance(30.0)  # 通常のバックオフ（約1秒）は過ぎたが、Retry-After は未経過
+        before = len(self.mock.requests)
+        self.assertFalse(self.client.send("s", 2.0))
+        self.assertEqual(len(self.mock.requests), before)
+        self.clock.advance(31.0)
+        self.mock.next_status = 202
+        self.mock.next_headers = {}
+        self.assertTrue(self.client.send("s", 3.0))
+        self.assertEqual(
+            self.mock.requests[-1]["body"],
+            {"ingestKey": "s", "readings": [{"value": 1.0}, {"value": 2.0}, {"value": 3.0}]},
+        )
+
+    def test_429_without_retry_after_uses_normal_backoff(self) -> None:
+        self.mock.next_status = 429
+        self.client.send("s", 1.0)
+        self.clock.advance(2.0)
+        self.mock.next_status = 202
+        self.assertTrue(self.client.send("s", 2.0))
+
+    def test_auth_and_unknown_key_errors_keep_the_data(self) -> None:
+        for status in (401, 403, 404):
+            with self.subTest(status=status):
+                client = FactorEyeClient(self.mock.url, "k", timeout=2.0)
+                self.mock.next_status = status
+                self.assertFalse(client.send("s", 1.0))
+                self.assertEqual(client.pending_count, 1)
+
+    def test_connection_failure_is_retried(self) -> None:
+        client = FactorEyeClient("http://127.0.0.1:1", "k", timeout=0.5)
+        self.assertFalse(client.send("s", 1.0))
+        self.assertEqual(client.pending_count, 1)
 
 
 if __name__ == "__main__":
