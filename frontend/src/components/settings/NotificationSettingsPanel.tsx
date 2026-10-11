@@ -8,10 +8,11 @@ import { useEffect, useState } from "react";
 
 import { useNotificationSettings } from "../../hooks/queries";
 import { updateNotificationSettings } from "../../lib/api";
+import { ErrorNotice } from "../ErrorNotice";
 
 /** 通知設定パネル。 */
 export function NotificationSettingsPanel() {
-  const { data, isLoading } = useNotificationSettings();
+  const { data, isLoading, isError, refetch } = useNotificationSettings();
   const queryClient = useQueryClient();
 
   const [webhookUrlCritical, setWebhookUrlCritical] = useState("");
@@ -61,7 +62,11 @@ export function NotificationSettingsPanel() {
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 
-      {!isLoading && (
+      {!isLoading && !data && isError && (
+        <ErrorNotice message="通知設定を取得できませんでした。" onRetry={() => void refetch()} />
+      )}
+
+      {!isLoading && !(isError && !data) && (
         <form
           className="max-w-xl space-y-4"
           onSubmit={(e) => {

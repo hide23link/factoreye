@@ -10,6 +10,7 @@ import asyncio
 import csv
 import io
 import secrets
+import socket
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
 from datetime import datetime
@@ -63,6 +64,26 @@ def _require_auth(settings: Settings) -> Callable[[HTTPBasicCredentials], None]:
     return check
 
 
+def describe_os_error(e: OSError) -> tuple[str, int]:
+    """OSError の原因を区別して、利用者に見せる文言と HTTP ステータスを返す。
+
+    asyncpg は接続できないとき OSError の仲間（ConnectionRefusedError、socket.gaierror、
+    TimeoutError）を投げる。一方、バックアップのファイルを読めないときは PermissionError など
+    （BACKUP_GID の誤りなど）になる。これらを「DB に接続できません」とひとまとめにしない。
+    """
+    if isinstance(e, PermissionError):
+        return (
+            f"ファイルを読む権限がありません: {e.filename or e}。"
+            "バックアップのファイルのグループと BACKUP_GID が合っているか確認してください",
+            500,
+        )
+    if isinstance(e, FileNotFoundError):
+        return f"ファイルまたはディレクトリが見つかりません: {e.filename or e}", 500
+    if isinstance(e, ConnectionError | TimeoutError | socket.gaierror):
+        return f"DB に接続できません: {e}", 503
+    return f"入出力のエラー（DB の接続ではありません）: {e}", 500
+
+
 def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> FastAPI:
     app = FastAPI(
         title="FactorEye recovery",
@@ -91,9 +112,9 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         return JSONResponse({"detail": str(e)}, status_code=404)
 
     @app.exception_handler(OSError)
-    async def _conn_error(_: Request, e: OSError) -> JSONResponse:
-        # asyncpg は接続できないときに OSError（ConnectionRefusedError など）を投げる
-        return JSONResponse({"detail": f"DB に接続できません: {e}"}, status_code=503)
+    async def _os_error(_: Request, e: OSError) -> JSONResponse:
+        detail, status = describe_os_error(e)
+        return JSONResponse({"detail": detail}, status_code=status)
 
     @app.exception_handler(asyncpg.PostgresError)
     async def _pg_error(_: Request, e: asyncpg.PostgresError) -> JSONResponse:

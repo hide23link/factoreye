@@ -7,7 +7,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { deleteWidget } from "../lib/api";
+import { describeActionError } from "../lib/errors";
 import type { DashboardDetail, Widget } from "../types";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { WidgetFormModal } from "./WidgetFormModal";
 import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
 import { MultiSensorComparisonWidget } from "./widgets/MultiSensorComparisonWidget";
@@ -43,8 +45,9 @@ export function WidgetCard({
 }) {
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
 
-  // 削除後は、ダッシュボードを取り直して、画面から消す
+  // 削除後は、ダッシュボードを取り直して、画面から消す。失敗したら、枠の中に理由を出す
   const deleteMutation = useMutation({
     mutationFn: () => deleteWidget(widget.id),
     onSuccess: () => {
@@ -72,17 +75,37 @@ export function WidgetCard({
           </button>
           <button
             type="button"
-            onClick={() => deleteMutation.mutate()}
-            className="text-red-400 hover:text-red-600"
+            onClick={() => setConfirmingDelete(true)}
+            disabled={deleteMutation.isPending}
+            className="text-red-400 hover:text-red-600 disabled:opacity-50"
             aria-label="ウィジェットを削除"
           >
             ✕
           </button>
         </div>
       </div>
+      {deleteMutation.isError && (
+        <p role="alert" className="mb-1 text-xs text-red-600">
+          {describeActionError(deleteMutation.error, "ウィジェットの削除")}
+        </p>
+      )}
       <div className="min-h-0 flex-1 overflow-hidden">
         <WidgetBody widget={widget} />
       </div>
+
+      {isConfirmingDelete && (
+        <ConfirmDialog
+          title="ウィジェットを削除"
+          message="このウィジェットを削除しますか？設定（色・軸など）は元に戻せません。"
+          pending={deleteMutation.isPending}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            if (deleteMutation.isPending) return;
+            setConfirmingDelete(false);
+            deleteMutation.mutate();
+          }}
+        />
+      )}
 
       {isEditing && (
         <WidgetFormModal

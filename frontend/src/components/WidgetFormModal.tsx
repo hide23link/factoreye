@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 
 import { useSensors } from "../hooks/queries";
 import { addWidget, updateWidget } from "../lib/api";
+import { describeActionError } from "../lib/errors";
 import type { DashboardDetail, Widget, WidgetConfig, WidgetType } from "../types";
 
 // ウィジェットの種類の一覧（選択欄の項目）
@@ -55,6 +56,9 @@ function nextGridPosition(dashboard: DashboardDetail): { gridColumn: number; gri
 // "" | number で保持し、送信時にundefined(=auto)へ変換する
 type NumOrBlank = number | "";
 
+// 表示時間の既定値（時間）
+const DEFAULT_TIME_RANGE_HOURS = 1;
+
 /** 空欄は undefined（自動・未設定）にする。数値はそのまま。 */
 function toConfigNumber(v: NumOrBlank): number | undefined {
   return v === "" ? undefined : v;
@@ -87,7 +91,7 @@ export function WidgetFormModal({
   const [graphType, setGraphType] = useState<NonNullable<WidgetConfig["graphType"]>>(
     widget?.config.graphType ?? "line",
   );
-  const [timeRangeHours, setTimeRangeHours] = useState<number>(
+  const [timeRangeHours, setTimeRangeHours] = useState<NumOrBlank>(
     widget?.config.timeRangeHours ?? 1,
   );
   const [yAxisMin, setYAxisMin] = useState<NumOrBlank>(widget?.config.yAxisMin ?? "");
@@ -96,12 +100,16 @@ export function WidgetFormModal({
   const [dailyTarget, setDailyTarget] = useState<NumOrBlank>(widget?.config.dailyTarget ?? "");
   const [decimals, setDecimals] = useState<NumOrBlank>(widget?.config.decimals ?? 1);
 
+  // 表示時間（時間）。空欄や 0 以下は、既定の 1 時間に戻す（0 だと StatValue が値を出せなくなるため）
+  const resolvedTimeRangeHours =
+    timeRangeHours !== "" && timeRangeHours > 0 ? timeRangeHours : DEFAULT_TIME_RANGE_HOURS;
+
   // 種類ごとに、保存する設定（config）の中身を変える。ほかの種類の項目は含めない
   const buildConfig = (): WidgetConfig =>
     type === "MultiSensorComparison"
       ? {
           sensorIds,
-          timeRangeHours,
+          timeRangeHours: resolvedTimeRangeHours,
           yAxisMin: toConfigNumber(yAxisMin),
           yAxisMax: toConfigNumber(yAxisMax),
         }
@@ -109,7 +117,7 @@ export function WidgetFormModal({
         ? {
             color,
             graphType,
-            timeRangeHours,
+            timeRangeHours: resolvedTimeRangeHours,
             yAxisMin: toConfigNumber(yAxisMin),
             yAxisMax: toConfigNumber(yAxisMax),
           }
@@ -120,7 +128,7 @@ export function WidgetFormModal({
             }
           : type === "StatValue"
             ? {
-                timeRangeHours,
+                timeRangeHours: resolvedTimeRangeHours,
                 decimals: toConfigNumber(decimals) ?? 1,
               }
             : {};
@@ -155,6 +163,8 @@ export function WidgetFormModal({
   const needsSingleSensor =
     type === "SensorGraph" || type === "ProductionStatus" || type === "StatValue";
   const needsMultiSensor = type === "MultiSensorComparison";
+  // センサーが要る種類は、選ぶまで保存できない（センサー無しのウィジェットは何も表示しないため）
+  const sensorMissing = needsSingleSensor ? sensorId === "" : needsMultiSensor && sensorIds.length === 0;
   const needsAxisConfig = type === "SensorGraph" || type === "MultiSensorComparison";
 
   // WidgetCard経由（編集時）はreact-grid-layoutのグリッドアイテム（transform指定あり）の
@@ -381,8 +391,11 @@ export function WidgetFormModal({
                   type="number"
                   min={0.1}
                   step={0.5}
+                  placeholder={String(DEFAULT_TIME_RANGE_HOURS)}
                   value={timeRangeHours}
-                  onChange={(e) => setTimeRangeHours(Number(e.target.value))}
+                  onChange={(e) =>
+                    setTimeRangeHours(e.target.value === "" ? "" : Number(e.target.value))
+                  }
                   className="w-20 rounded border border-gray-300 px-2 py-1"
                 />
               </span>
@@ -407,6 +420,17 @@ export function WidgetFormModal({
           </>
         )}
 
+        {sensorMissing && (
+          <p className="mt-2 text-xs text-gray-500">
+            {needsMultiSensor ? "比較するセンサーを1つ以上選んでください。" : "センサーを選んでください。"}
+          </p>
+        )}
+        {saveMutation.isError && (
+          <p role="alert" className="mt-2 text-xs text-red-600">
+            {describeActionError(saveMutation.error, isEdit ? "ウィジェットの保存" : "ウィジェットの追加")}
+          </p>
+        )}
+
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
@@ -417,7 +441,7 @@ export function WidgetFormModal({
           </button>
           <button
             type="button"
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || sensorMissing}
             onClick={() => saveMutation.mutate()}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
           >

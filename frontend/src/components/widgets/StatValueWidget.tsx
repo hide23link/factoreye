@@ -6,6 +6,7 @@ import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import { useSensorReadings, useSensors } from "../../hooks/queries";
 import type { Sensor, Widget } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
 
 // 値の状態。重故障・軽故障・正常
 type Severity = "critical" | "warning" | "normal";
@@ -40,12 +41,17 @@ const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: strin
 /** 最新値のウィジェット。最新の測定値（新しい順の先頭）を表示する。 */
 export function StatValueWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const hours = widget.config.timeRangeHours ?? 1;
-  const { data, isLoading } = useSensorReadings(widget.sensorId, hours);
+  // 0 以下（空欄のまま保存された古い設定など）は、既定の 1 時間として扱う
+  const configuredHours = widget.config.timeRangeHours;
+  const hours = configuredHours !== undefined && configuredHours > 0 ? configuredHours : 1;
+  const { data, isLoading, isError, refetch } = useSensorReadings(widget.sensorId, hours);
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+  }
+  if (!data && isError) {
+    return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (isLoading || !data || !sensor) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;

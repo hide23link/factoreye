@@ -10,6 +10,7 @@ import { useSensors } from "../../hooks/queries";
 import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
 import type { Sensor } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
 
 // 入力欄の値。数値、または空欄（""）。空欄は「しきい値なし」を表す
 type NumOrBlank = number | "";
@@ -236,7 +237,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
 
 /** センサー設定パネル（新規登録フォームと、センサー一覧）。 */
 export function SensorSettingsPanel() {
-  const { data: sensors, isLoading } = useSensors();
+  const { data: sensors, isLoading, isError, refetch } = useSensors();
   const queryClient = useQueryClient();
 
   // 新規登録フォームの入力値（登録に成功すると、次の入力のために初期値へ戻す）
@@ -315,6 +316,10 @@ export function SensorSettingsPanel() {
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+
+      {!isLoading && !sensors && isError && (
+        <ErrorNotice message="センサーの一覧を取得できませんでした。" onRetry={() => void refetch()} />
+      )}
 
       {!isLoading && sensors && sensors.length > 0 && (
         <div className="overflow-x-auto">

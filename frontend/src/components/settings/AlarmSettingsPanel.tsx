@@ -8,6 +8,10 @@ import { useState } from "react";
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 import type { AlarmStatus } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
+
+// 一覧に出す件数の上限（新しい順）。全件は取らない（長く動かした環境で応答が大きくなり、5 秒ごとの取得が重くなるため）
+const ALARM_LIST_LIMIT = 100;
 
 // 絞り込みのタブ（"all" は絞らない）
 const STATUS_TABS: { value: AlarmStatus | "all"; label: string }[] = [
@@ -20,7 +24,10 @@ const STATUS_TABS: { value: AlarmStatus | "all"; label: string }[] = [
 /** アラームの設定パネル（一覧と、確認ボタン）。 */
 export function AlarmSettingsPanel() {
   const [statusFilter, setStatusFilter] = useState<AlarmStatus | "all">("active");
-  const { data, isLoading } = useAlarms(statusFilter === "all" ? undefined : statusFilter);
+  const { data, isLoading, isError, refetch } = useAlarms(
+    statusFilter === "all" ? undefined : statusFilter,
+    ALARM_LIST_LIMIT,
+  );
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
 
@@ -52,6 +59,16 @@ export function AlarmSettingsPanel() {
       </div>
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+
+      {!isLoading && !data && isError && (
+        <ErrorNotice message="アラームを取得できませんでした。" onRetry={() => void refetch()} />
+      )}
+
+      {data && data.total > data.alarms.length && (
+        <p className="mb-2 text-xs text-gray-400">
+          新しい順に {data.alarms.length} 件を表示しています（該当は全部で {data.total} 件）。
+        </p>
+      )}
 
       {!isLoading && data?.alarms.length === 0 && (
         <p className="text-sm text-gray-400">該当するアラームはありません。</p>

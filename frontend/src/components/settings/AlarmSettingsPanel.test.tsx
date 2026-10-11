@@ -53,7 +53,7 @@ describe("AlarmSettingsPanel", () => {
 
     expect(await screen.findByText("圧力計A-1")).toBeInTheDocument();
     expect(screen.getByText("上限超過")).toBeInTheDocument();
-    expect(api.fetchAlarms).toHaveBeenCalledWith("active");
+    expect(api.fetchAlarms).toHaveBeenCalledWith("active", 100);
   });
 
   it("タブを切り替えると対応するstatusでfetchAlarmsを呼び直す", async () => {
@@ -65,7 +65,26 @@ describe("AlarmSettingsPanel", () => {
     await screen.findByText(/該当するアラームはありません/);
     await user.click(screen.getByRole("button", { name: "すべて" }));
 
-    await waitFor(() => expect(api.fetchAlarms).toHaveBeenCalledWith(undefined));
+    await waitFor(() => expect(api.fetchAlarms).toHaveBeenCalledWith(undefined, 100));
+  });
+
+  it("件数が上限を超えるとき、表示件数と全件数を案内する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [activeAlarm], total: 250 });
+    renderWithQueryClient(<AlarmSettingsPanel />);
+
+    expect(await screen.findByText(/新しい順に 1 件を表示/)).toBeInTheDocument();
+    expect(screen.getByText(/全部で 250 件/)).toBeInTheDocument();
+  });
+
+  it("取得に失敗したとき、エラーと再試行を表示する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchAlarms).mockRejectedValue(new Error("boom"));
+    renderWithQueryClient(<AlarmSettingsPanel />);
+
+    expect(await screen.findByText("アラームを取得できませんでした。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
+    expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument();
   });
 
   it("確認ボタンでacknowledgeAlarmを呼ぶ", async () => {
