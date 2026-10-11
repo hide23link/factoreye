@@ -6,7 +6,11 @@ import {
   deleteSensor,
   fetchSensorReadingsAggregate,
   fetchSensors,
+  logout,
 } from "./api";
+import { ApiError } from "./errors";
+import { useAuthStore } from "../store/useAuthStore";
+import type { MeResponse } from "../types";
 
 function mockFetchOnce(status: number, body: unknown) {
   vi.stubGlobal(
@@ -88,5 +92,94 @@ describe("api client", () => {
     const fetchMock = vi.mocked(fetch);
     const [url] = fetchMock.mock.calls[0];
     expect(url).toContain("to=");
+  });
+});
+
+describe("ログアウトと認証の更新", () => {
+  afterEach(() => {
+    localStorage.clear();
+    useAuthStore.getState().clearAuth();
+  });
+
+  const me = { email: "u@example.com", workspaceName: "WS", plan: "free" } as unknown as MeResponse;
+
+  it("logout はリフレッシュトークンをサーバーへ送って失効させ、端末のログインも消す", async () => {
+    useAuthStore.getState().setAuth("access-1", "refresh-1", me);
+    mockFetchOnce(204, null);
+
+    await logout();
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toContain("/api/auth/logout");
+    expect(JSON.parse(init?.body as string)).toEqual({ refreshToken: "refresh-1" });
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(localStorage.getItem("factoreye_rt")).toBeNull();
+  });
+
+  it("logout はサーバーへの通知が失敗しても、端末のログアウトを完了させる", async () => {
+    useAuthStore.getState().setAuth("access-1", "refresh-1", me);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(localStorage.getItem("factoreye_rt")).toBeNull();
+  });
+
+  it("失敗の応答は、状態コードを持つ ApiError になる", async () => {
+    mockFetchOnce(409, "duplicate");
+    const err = await fetchSensors().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+  });
+
+  it("401 が同時に複数起きても、再発行は 1 回だけで、全員が新しいトークンで再試行して成功する", async () => {
+    useAuthStore.getState().setAuth("old-access", "refresh-1", me);
+    let refreshCalls = 0;
+    const okJson = (body: unknown) => ({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/api/auth/refresh")) {
+          refreshCalls += 1;
+          await new Promise((r) => setTimeout(r, 20));
+          return okJson({ accessToken: "new-access", refreshToken: "refresh-2" });
+        }
+        const auth = (init?.headers as Record<string, string>).Authorization;
+        if (auth === "Bearer old-access") {
+          return { ok: false, status: 401, text: () => Promise.resolve("expired") };
+        }
+        return okJson([{ id: "s1" }]);
+      }),
+    );
+
+    const results = await Promise.all([fetchSensors(), fetchSensors(), fetchSensors()]);
+
+    expect(results).toEqual([[{ id: "s1" }], [{ id: "s1" }], [{ id: "s1" }]]);
+    expect(refreshCalls).toBe(1);
+    expect(useAuthStore.getState().accessToken).toBe("new-access");
+  });
+
+  it("再発行に失敗したとき、待っていた全員が「Session expired」になる", async () => {
+    useAuthStore.getState().setAuth("old-access", "refresh-1", me);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/auth/refresh")) {
+          return { ok: false, status: 401, text: () => Promise.resolve("revoked") };
+        }
+        return { ok: false, status: 401, text: () => Promise.resolve("expired") };
+      }),
+    );
+
+    const results = await Promise.allSettled([fetchSensors(), fetchSensors()]);
+
+    expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 });
