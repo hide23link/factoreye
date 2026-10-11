@@ -22,7 +22,10 @@ MASKED_COLUMNS = frozenset({"password_hash", "token_hash"})
 MASK = "***"
 # URL の列。Webhook の送信先（Discord など）は、パスに秘密のトークンを含むため、
 # ホスト名と末尾だけ出す
-URL_COLUMNS = frozenset({"url"})
+# 列名が url / *_url のものをマスクする（discord_webhook_url_* など古い版の列も含む。
+# 無関係な *_url 列が潰れても、復旧画面で秘密を出さない側を優先する）
+def is_url_column(column: str) -> bool:
+    return column == "url" or column.endswith("_url") or "_url_" in column
 
 
 def mask_url(value: str) -> str:
@@ -30,7 +33,7 @@ def mask_url(value: str) -> str:
     parts = urlsplit(value)
     if not parts.hostname:
         return MASK
-    tail = value[-4:] if len(value) > 24 else ""
+    tail = value[-4:] if len(value) >= 40 else ""  # 短い URL は末尾にトークンの大半が出る
     return f"{parts.scheme}://{parts.hostname}/…{tail}"
 
 # ワークスペースで絞り込むときの条件（$1 = ワークスペースの ID）。ここに無いテーブルは絞り込めない
@@ -251,7 +254,7 @@ async def _prepare(
 def to_jsonable(column: str, value: object) -> object:
     if column in MASKED_COLUMNS and value is not None:
         return MASK
-    if column in URL_COLUMNS and isinstance(value, str):
+    if is_url_column(column) and isinstance(value, str):
         return mask_url(value)
     if isinstance(value, datetime | date):
         return value.isoformat()

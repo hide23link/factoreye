@@ -228,3 +228,17 @@ def test_os_error_messages_distinguish_causes() -> None:
     assert "DB に接続できません" in msg and status == 503
     msg, status = describe_os_error(OSError(5, "I/O error"))
     assert "DB に接続できません" not in msg and status == 500
+
+
+def test_url_suffix_columns_masked_and_short_urls_hide_tail() -> None:
+    from recovery.dbinfo import to_jsonable
+
+    long_url = "https://discord.com/api/webhooks/123456/SECRETTOKENabcdWXYZ"
+    for col in ("discord_webhook_url_critical", "discord_webhook_url_warning", "image_url"):
+        out = to_jsonable(col, long_url)
+        assert isinstance(out, str) and "SECRET" not in out
+    short = "https://h.example/abcdef"
+    out = to_jsonable("url", short)
+    assert out == "https://h.example/…" and "cdef" not in str(out)
+    assert to_jsonable("name", long_url) == long_url
+    assert to_jsonable("urls_count", 3) == 3
