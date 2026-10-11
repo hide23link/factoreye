@@ -104,6 +104,34 @@ async def assert_webhook_url_allowed(url: str) -> None:
     await asyncio.to_thread(check_webhook_url, url)
 
 
+def redact_url(url: str) -> str:
+    """ログに出してよい形（スキーム + ホスト名だけ）にする。
+
+    Discord や Zapier の URL は、パスやクエリそのものが認証情報（トークン）なので、
+    ログには出さない。解析できない値は、中身を出さず固定の文字列にする。
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+    except ValueError:
+        return "<invalid url>"
+    if not host or not parsed.scheme:
+        return "<invalid url>"
+    return f"{parsed.scheme}://{host}/..."
+
+
+def describe_send_error(exc: BaseException) -> str:
+    """送信失敗の理由を、URL を含まない短い文字列にする。
+
+    httpx の例外メッセージ（`... for url '...'`）やトレースバックは URL を含むので使わない。
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, UnsafeWebhookUrl):
+        return f"unsafe url ({exc})"
+    return type(exc).__name__
+
+
 def _get_client() -> httpx.AsyncClient:
     """送信に使う共有のクライアント（接続を使い回す）。閉じられていれば作り直す。"""
     global _client
@@ -158,8 +186,11 @@ async def send_webhook(url: str, payload: dict[str, Any]) -> None:
             await assert_webhook_url_allowed(url)
             response = await _get_client().post(url, json=payload)
             response.raise_for_status()
-    except Exception:
+    except Exception as exc:
         # 通知失敗でingest/flushパイプラインを落とさない（send_alarm_discordと同方針）
-        logger.exception("failed to send webhook to %s", url)
+        # 例外の本文・トレースバックは URL（秘密）を含み得るので出さない
+        logger.warning(
+            "failed to send webhook to %s: %s", redact_url(url), describe_send_error(exc)
+        )
     finally:
         _pending_sends -= 1
