@@ -69,8 +69,39 @@ describe("WidgetCard", () => {
     renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
 
     await user.click(screen.getByLabelText("ウィジェットを削除"));
+    // 確認の小窓が出るまでは、削除しない
+    expect(api.deleteWidget).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "削除" }));
 
     await waitFor(() => expect(api.deleteWidget).toHaveBeenCalledWith("w1"));
+  });
+
+  it("削除の確認でキャンセルすると、deleteWidgetを呼ばない", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+
+    await user.click(screen.getByLabelText("ウィジェットを削除"));
+    await user.click(await screen.findByRole("button", { name: "キャンセル" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(api.deleteWidget).not.toHaveBeenCalled();
+  });
+
+  it("削除に失敗したとき、エラーを表示する", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.deleteWidget).mockRejectedValue(new Error("network"));
+
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+
+    await user.click(screen.getByLabelText("ウィジェットを削除"));
+    await user.click(await screen.findByRole("button", { name: "削除" }));
+
+    expect(await screen.findByText(/ウィジェットの削除に失敗しました/)).toBeInTheDocument();
   });
 
   it("不明なウィジェットタイプのとき未対応メッセージを表示する", () => {

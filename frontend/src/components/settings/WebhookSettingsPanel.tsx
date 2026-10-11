@@ -12,6 +12,9 @@ import {
   deleteWebhookSubscription,
   updateWebhookSubscription,
 } from "../../lib/api";
+import { describeActionError } from "../../lib/errors";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { ErrorNotice } from "../ErrorNotice";
 import type { WebhookEventType, WebhookSubscription } from "../../types";
 
 // イベントの種類ごとの、画面に出す説明
@@ -24,6 +27,7 @@ const EVENT_LABELS: Record<WebhookEventType, string> = {
 function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["webhook-subscriptions"] });
@@ -44,7 +48,7 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
       invalidate();
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeActionError(e, "Webhookの削除")),
   });
 
   return (
@@ -69,7 +73,7 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
           </button>
           <button
             type="button"
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => setConfirmingDelete(true)}
             disabled={deleteMutation.isPending}
             className="text-xs text-gray-400 hover:text-red-600"
           >
@@ -78,6 +82,17 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
         </div>
       </div>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {isConfirmingDelete && (
+        <ConfirmDialog
+          title="Webhookを削除"
+          message={`このWebhook（${webhook.url}）を削除しますか？再登録にはURLの入力が必要です。`}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            deleteMutation.mutate();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -149,7 +164,7 @@ function AddWebhookForm() {
 
 /** Webhook 連携の設定パネル（一覧と、追加フォーム）。 */
 export function WebhookSettingsPanel() {
-  const { data: webhooks, isLoading } = useWebhookSubscriptions();
+  const { data: webhooks, isLoading, isError, refetch } = useWebhookSubscriptions();
 
   return (
     <div>
@@ -160,7 +175,11 @@ export function WebhookSettingsPanel() {
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 
-      {!isLoading && (
+      {!isLoading && !webhooks && isError && (
+        <ErrorNotice message="Webhookの一覧を取得できませんでした。" onRetry={() => void refetch()} />
+      )}
+
+      {!isLoading && !(isError && !webhooks) && (
         <div className="space-y-2">
           {webhooks?.map((webhook) => (
             <WebhookRow key={webhook.id} webhook={webhook} />
