@@ -11,6 +11,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.updates import apply_update
 from app.db.models import NotificationSettings
 from app.db.session import get_session
 from app.schemas import NotificationSettingsRead, NotificationSettingsUpdate
@@ -63,8 +64,19 @@ async def update_notification_settings(
 ) -> NotificationSettings:
     """通知設定の更新。送られた項目だけを変える。"""
     settings_row = await _get_notification_settings(session, workspace_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(settings_row, field, value)
+    apply_update(
+        settings_row,
+        payload,
+        non_nullable=frozenset(
+            {
+                "discord_webhook_url_critical",
+                "discord_webhook_url_warning",
+                "enabled",
+                "critical_repeat_enabled",
+                "critical_repeat_interval_minutes",
+            }
+        ),
+    )
     session.add(settings_row)
     await session.commit()
     await session.refresh(settings_row)

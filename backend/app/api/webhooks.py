@@ -4,7 +4,6 @@ docs/architecture.md §7 通知 参照。配信本体（app.webhooks.send_webhoo
 呼び出しはapp.ingest_buffer側の責務であり、ここは設定のCRUDのみを扱う。
 """
 
-from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -13,6 +12,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.updates import apply_update
 from app.db.models import WebhookSubscription
 from app.db.session import get_session
 from app.schemas import (
@@ -85,9 +85,7 @@ async def update_webhook_subscription(
     subscription = await _get_owned_subscription(session, subscription_id, workspace_id)
     if payload.url is not None:
         await _ensure_safe_url(payload.url)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(subscription, field, value)
-    subscription.updated_at = datetime.now(UTC)
+    apply_update(subscription, payload, non_nullable=frozenset({"url", "enabled"}))
     session.add(subscription)
     await session.commit()
     await session.refresh(subscription)

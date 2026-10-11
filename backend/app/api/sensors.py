@@ -17,6 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
+from app.api.updates import apply_update
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -198,9 +199,11 @@ async def update_sensor(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already in use")
 
     # exclude_unset=True: 利用者が送った項目だけを使う（送っていない項目は、今の値のまま）
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(sensor, field, value)
-    sensor.updated_at = datetime.now(UTC)
+    apply_update(
+        sensor,
+        payload,
+        non_nullable=frozenset({"name", "unit", "threshold_dead_band", "enabled"}),
+    )
     session.add(sensor)
     try:
         await session.commit()
