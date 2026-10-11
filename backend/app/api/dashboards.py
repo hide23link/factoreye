@@ -11,6 +11,8 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
+from app.api.sensors import _get_active_sensor
+from app.api.updates import apply_update
 from app.db.models import Dashboard, Widget
 from app.db.session import get_session
 from app.schemas import (
@@ -106,9 +108,7 @@ async def update_dashboard(
 ) -> DashboardDetail:
     """ダッシュボードの更新。送られた項目だけを変える。"""
     dashboard = await _get_active_dashboard(session, dashboard_id, workspace_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(dashboard, field, value)
-    dashboard.updated_at = datetime.now(UTC)
+    apply_update(dashboard, payload, non_nullable=frozenset({"name", "layout_config"}))
     session.add(dashboard)
     await session.commit()
     await session.refresh(dashboard)
@@ -144,6 +144,8 @@ async def add_widget(
 ) -> Widget:
     """ダッシュボードにウィジェットを1つ追加する。"""
     await _get_active_dashboard(session, dashboard_id, workspace_id)
+    if payload.sensor_id is not None:
+        await _get_active_sensor(session, payload.sensor_id, workspace_id)
     widget = Widget(dashboard_id=dashboard_id, **payload.model_dump())
     session.add(widget)
     await session.commit()

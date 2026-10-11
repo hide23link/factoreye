@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import AwareDatetime
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
@@ -17,6 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
+from app.api.updates import apply_update
 from app.db.models import Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -198,9 +200,11 @@ async def update_sensor(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already in use")
 
     # exclude_unset=True: 利用者が送った項目だけを使う（送っていない項目は、今の値のまま）
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(sensor, field, value)
-    sensor.updated_at = datetime.now(UTC)
+    apply_update(
+        sensor,
+        payload,
+        non_nullable=frozenset({"name", "unit", "threshold_dead_band", "enabled"}),
+    )
     session.add(sensor)
     try:
         await session.commit()
@@ -231,8 +235,8 @@ async def get_sensor_readings(
     sensor_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-    from_: datetime | None = Query(default=None, alias="from"),
-    to: datetime | None = Query(default=None),
+    from_: AwareDatetime | None = Query(default=None, alias="from"),
+    to: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=10000),
 ) -> Response:
     await _get_active_sensor(session, sensor_id, workspace_id)
@@ -258,8 +262,8 @@ async def get_sensor_readings_aggregate(
     sensor_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-    from_: datetime = Query(..., alias="from"),
-    to: datetime | None = Query(default=None),
+    from_: AwareDatetime = Query(..., alias="from"),
+    to: AwareDatetime | None = Query(default=None),
 ) -> ReadingAggregate:
     """指定区間のReading合計値・件数。生産数センサーの「直近1時間」「本日累計」等、
     時間/日単位の集計をフロントで生データ全件集計せずに済ませるためのエンドポイント。
@@ -284,8 +288,8 @@ async def get_sensor_readings_downsampled(
     sensor_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-    from_: datetime = Query(..., alias="from"),
-    to: datetime = Query(...),
+    from_: AwareDatetime = Query(..., alias="from"),
+    to: AwareDatetime = Query(...),
     buckets: int = Query(default=500, ge=1, le=1000),
 ) -> DownsampledReadings:
     """グラフ用。from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数を返す。

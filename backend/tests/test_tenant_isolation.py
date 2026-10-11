@@ -283,3 +283,71 @@ async def test_repeat_notification_follows_each_workspace_setting(session: Async
 
     repeated = {(url, name) for url, name, _ in _sent(mock_send)}
     assert repeated == {("https://on/crit", "再通知あり")}
+
+
+# ──────────────────────────────────────────────────────────────
+# ウィジェットの sensorId（存在と所有の確認）
+# ──────────────────────────────────────────────────────────────
+
+_WIDGET = {"type": "SensorGraph", "gridColumn": 1, "gridRow": 1, "gridWidth": 4, "gridHeight": 2}
+
+
+async def test_widget_create_rejects_sensor_of_another_workspace(
+    client: httpx.AsyncClient, session: AsyncSession, as_workspace: Any
+) -> None:
+    ws_a = await _make_workspace(session)
+    ws_b = await _make_workspace(session)
+    foreign = await _make_sensor(session, ws_b, "B のセンサー")
+
+    as_workspace(ws_a)
+    dashboard = await client.post("/api/dashboards", json={"name": "A の盤"})
+    dashboard_id = dashboard.json()["id"]
+    resp = await client.post(
+        f"/api/dashboards/{dashboard_id}/widgets", json={**_WIDGET, "sensorId": str(foreign.id)}
+    )
+    assert resp.status_code == 404
+    got = await client.get(f"/api/dashboards/{dashboard_id}")
+    assert got.json()["widgets"] == []
+
+
+async def test_widget_create_rejects_unknown_sensor_with_404_not_500(
+    client: httpx.AsyncClient, session: AsyncSession, as_workspace: Any
+) -> None:
+    ws = await _make_workspace(session)
+    as_workspace(ws)
+    dashboard_id = (await client.post("/api/dashboards", json={"name": "盤"})).json()["id"]
+    resp = await client.post(
+        f"/api/dashboards/{dashboard_id}/widgets", json={**_WIDGET, "sensorId": str(uuid4())}
+    )
+    assert resp.status_code == 404
+
+
+async def test_widget_update_rejects_sensor_of_another_workspace_or_unknown(
+    client: httpx.AsyncClient, session: AsyncSession, as_workspace: Any
+) -> None:
+    ws_a = await _make_workspace(session)
+    ws_b = await _make_workspace(session)
+    own = await _make_sensor(session, ws_a, "A のセンサー")
+    foreign = await _make_sensor(session, ws_b, "B のセンサー")
+
+    as_workspace(ws_a)
+    dashboard_id = (await client.post("/api/dashboards", json={"name": "A の盤"})).json()["id"]
+    widget = await client.post(
+        f"/api/dashboards/{dashboard_id}/widgets", json={**_WIDGET, "sensorId": str(own.id)}
+    )
+    assert widget.status_code == 201
+    widget_id = widget.json()["id"]
+
+    for bad in (str(foreign.id), str(uuid4())):
+        resp = await client.put(f"/api/widgets/{widget_id}", json={"sensorId": bad})
+        assert resp.status_code == 404
+    got = await client.get(f"/api/dashboards/{dashboard_id}")
+    assert got.json()["widgets"][0]["sensorId"] == str(own.id)
+
+    # 自分のワークスペースのセンサーへの付け替えと、紐付けの解除（null）はできる
+    other = await _make_sensor(session, ws_a, "A の別のセンサー")
+    resp = await client.put(f"/api/widgets/{widget_id}", json={"sensorId": str(other.id)})
+    assert resp.status_code == 200
+    resp = await client.put(f"/api/widgets/{widget_id}", json={"sensorId": None})
+    assert resp.status_code == 200
+    assert resp.json()["sensorId"] is None
