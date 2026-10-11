@@ -33,10 +33,6 @@ WORKSPACE_FILTERS: dict[str, str] = {
     "readings": f"sensor_id IN ({_SENSORS_IN_WS})",
     "alarms": f"sensor_id IN ({_SENSORS_IN_WS})",
     "widgets": "dashboard_id IN (SELECT id FROM dashboards WHERE workspace_id = $1)",
-    "widget_configs": (
-        "widget_id IN (SELECT w.id FROM widgets w JOIN dashboards d ON d.id = w.dashboard_id"
-        " WHERE d.workspace_id = $1)"
-    ),
 }
 # 件数を数える上限。本番の大きなテーブルで、1 ページごとに全件を数えないように
 COUNT_CAP = 100_000

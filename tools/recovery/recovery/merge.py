@@ -95,12 +95,6 @@ SPECS: tuple[TableSpec, ...] = (
     TableSpec(
         "widgets", f"dashboard_id IN (SELECT id FROM dashboards WHERE {_ws()})", ("id",)
     ),
-    TableSpec(
-        "widget_configs",
-        "widget_id IN (SELECT w.id FROM widgets w JOIN dashboards d ON d.id = w.dashboard_id"
-        f" WHERE {_ws('d')})",
-        ("id",),
-    ),
     TableSpec("webhook_subscriptions", _ws(), ("id",)),
     # ワークスペースの通知設定: 連番の id は持ち込まず、ワークスペースごとに 1 行
     TableSpec(
@@ -128,12 +122,6 @@ _REMAP_SPECS: tuple[TableSpec, ...] = (
     TableSpec("dashboards", _ws(), ("id",), remap_workspace=True),
     TableSpec(
         "widgets", f"dashboard_id IN (SELECT id FROM dashboards WHERE {_ws()})", ("id",)
-    ),
-    TableSpec(
-        "widget_configs",
-        "widget_id IN (SELECT w.id FROM widgets w JOIN dashboards d ON d.id = w.dashboard_id"
-        f" WHERE {_ws('d')})",
-        ("id",),
     ),
     TableSpec("webhook_subscriptions", _ws(), ("id",), remap_workspace=True),
     # 書き戻し先に通知設定が既にあれば入れない。無ければ、元の 1 行目を書き戻し先のものとして入れる

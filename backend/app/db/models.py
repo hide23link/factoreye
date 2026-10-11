@@ -4,7 +4,7 @@ FactorEye データモデル
 仕様: docs/architecture.md §3 データモデル 参照
 (ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
 
-Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget / WidgetConfig
+Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget
 Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
 Phase 1: WebhookSubscription（Pluginシステムを廃止し、拡張はWebhookに統一。Phase 2参照）
 """
@@ -155,7 +155,7 @@ class Alarm(SQLModel, table=True):
 
 
 # ──────────────────────────────────────────────────────────────
-# Dashboard / Widget / WidgetConfig
+# Dashboard / Widget
 # ──────────────────────────────────────────────────────────────
 class Dashboard(SQLModel, table=True):
     __tablename__ = "dashboards"
@@ -199,17 +199,6 @@ class Widget(SQLModel, table=True):
 
     dashboard: Dashboard = Relationship(back_populates="widgets")
     sensor: Sensor | None = Relationship(back_populates="widgets")
-    widget_configs: list["WidgetConfig"] = Relationship(back_populates="widget")
-
-
-class WidgetConfig(SQLModel, table=True):
-    __tablename__ = "widget_configs"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    widget_id: UUID = Field(foreign_key="widgets.id", index=True)
-    settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB))
-
-    widget: Widget = Relationship(back_populates="widget_configs")
 
 
 # ──────────────────────────────────────────────────────────────

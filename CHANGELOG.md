@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SaaS の Free Tier**: 測定値を 90 日より古いものから毎日削除（SaaS のセンサーのみ対象）。上限到達時の案内を画面に表示
 
 ### Changed
+- **未使用の `widget_configs` テーブルを削除**: ウィジェットの設定は `widgets.config` に持つため不要だった（本番・OSS 版とも 0 件）。マイグレーション `e5f6a7b8c9d0` で drop する（downgrade で空のテーブルを再作成）。SaaS → OSS の書き出し・取り込みと復旧ツールの対象からも外した。スキーマの版が変わるため、復旧ツールの書き戻し・マージは、このマイグレーション適用前（版 `d4e5f6a7b8c9`）のバックアップを、適用後の DB には使えない（同じ版どうしに限る）。適用前のバックアップは、`infra/restore.sh` で丸ごと戻したあと、アプリを起動すると `alembic upgrade head` が走って `widget_configs` が削除される
 - **バックアップのファイルの権限を 640 に**（従来は 644）。利用者のデータとパスワードのハッシュが入るため。復旧ツールはグループの権限で読む
 - **Webhook の送信に上限を設定**: 接続を使い回し、同時送信は 10 件まで、送信待ちは 1,000 件まで（超えた分は送らずに捨て、ログに件数を出す）。大量の取り込みや送信先の遅延で、CPU・メモリ・接続を使い切らないため
 - ドキュメントを整理し、仕様書を `docs/architecture.md`、設計判断を `docs/decisions.md` にまとめた

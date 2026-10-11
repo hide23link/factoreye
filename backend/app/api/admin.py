@@ -41,7 +41,6 @@ from app.db.models import (
     Sensor,
     User,
     Widget,
-    WidgetConfig,
     Workspace,
 )
 from app.db.session import get_session
@@ -481,15 +480,6 @@ async def delete_user(
             )
         ).all()
         if dash_ids:
-            widget_ids = (
-                await session.exec(
-                    select(col(Widget.id)).where(col(Widget.dashboard_id).in_(dash_ids))
-                )
-            ).all()
-            if widget_ids:
-                await session.execute(
-                    delete(WidgetConfig).where(col(WidgetConfig.widget_id).in_(widget_ids))
-                )
             await session.execute(delete(Widget).where(col(Widget.dashboard_id).in_(dash_ids)))
         await session.execute(delete(Dashboard).where(col(Dashboard.workspace_id).in_(ws_ids)))
         await session.execute(delete(Sensor).where(col(Sensor.workspace_id).in_(ws_ids)))
