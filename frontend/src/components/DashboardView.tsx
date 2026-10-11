@@ -16,6 +16,7 @@ import { deleteDashboard, updateDashboard, updateWidget } from "../lib/api";
 import type { Widget } from "../types";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
+import { ErrorNotice } from "./ErrorNotice";
 import { TimeRangeControls } from "./TimeRangeControls";
 import { WidgetCard } from "./WidgetCard";
 import { WidgetFormModal } from "./WidgetFormModal";
@@ -42,7 +43,7 @@ function toLayoutItem(widget: Widget): Layout[number] {
 
 /** ダッシュボードの表示本体。dashboardId のダッシュボードを、取得して描く。 */
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
-  const { data: dashboard, isLoading } = useDashboard(dashboardId);
+  const { data: dashboard, isLoading, isError, refetch } = useDashboard(dashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const [isModalOpen, setModalOpen] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
@@ -122,6 +123,21 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     },
   });
 
+  if (!dashboard && isError) {
+    return (
+      <div className="p-4">
+        <ErrorNotice message="ダッシュボードを取得できませんでした。" onRetry={() => void refetch()}>
+          <button
+            type="button"
+            onClick={() => selectDashboard(null)}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            ← 一覧へ
+          </button>
+        </ErrorNotice>
+      </div>
+    );
+  }
   if (isLoading || !dashboard) {
     return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
   }

@@ -29,7 +29,7 @@ def apply_update(
     if null_fields:
         names = ", ".join(to_camel(name) for name in null_fields)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"{names} must not be null",
         )
     for name, value in changes.items():

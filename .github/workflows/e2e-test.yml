@@ -68,12 +68,16 @@ jobs:
         if: failure()
         run: docker compose logs
 
-      - name: Upload Playwright report
+      - name: Upload Playwright report and traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: e2e/playwright-report/
+          # playwright-report/ は HTML レポート、test-results/ は失敗時のトレース（trace.zip）
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Stop stack

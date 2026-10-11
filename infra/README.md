@@ -9,14 +9,21 @@
 
 ## セットアップ（本番運用者向け）
 
-1. docker-composeでスタックが起動していること（`docker compose up -d`）
-2. cronに登録する（毎日午前3時に実行）:
+1. docker-composeでスタックが起動していること（OSS 版は `docker compose up -d`、クラウド版は `docker compose -f docker-compose.cloud.yml up -d`）
+2. cronに登録する（毎日午前3時に実行）。スクリプトは `docker compose exec` を使うため、
+   **クラウド版では `COMPOSE_FILE=docker-compose.cloud.yml` が必須**（無いと既定の `docker-compose.yml`
+   を見て、postgres が見つからず失敗する）。OSS 版は `COMPOSE_FILE` は不要:
 
    ```bash
    crontab -e
-   # 以下の行を追加（パスは実際のクローン先に合わせる）
+   # 以下のどちらかの行を追加（パスは実際のクローン先に合わせる）
+   # クラウド版（本番）
+   0 3 * * * cd /opt/factoreye && COMPOSE_FILE=docker-compose.cloud.yml ./infra/backup.sh >> /opt/factoreye/backups/backup.log 2>&1
+   # OSS 版
    0 3 * * * cd /opt/factoreye && ./infra/backup.sh >> /opt/factoreye/backups/backup.log 2>&1
    ```
+
+   設定ファイルの控えも取る場合は、下の「設定ファイルの控え」の行（`BACKUP_PASSPHRASE_FILE` 付き）を使う。
 
 3. バックアップ先ディレクトリや保持日数を変えたい場合は環境変数で上書きする:
 
@@ -35,8 +42,16 @@ ls -lh backups/
 
 ## リストア
 
+先に、**postgres のサービスだけ**を起動する（backend を起動すると、マイグレーションで空でなくなり、
+復元が「既に存在する」エラーで失敗する）。`restore.sh` もバックアップと同じく `docker compose exec` を
+使うため、クラウド版では `COMPOSE_FILE` を付ける。
+
 ```bash
+# クラウド版（OSS 版は COMPOSE_FILE の指定は不要）
+export COMPOSE_FILE=docker-compose.cloud.yml
+docker compose up -d postgres      # postgres だけ。healthy になるまで待つ（docker compose ps）
 ./infra/restore.sh backups/factoreye-20261002-030000.sql.gz
+docker compose up -d               # 復元後に全体を起動する
 ```
 
 `restore.sh`は**空のDB**への復元のみを想定している（`pg_dump`の出力に`--clean`を付けていないため、

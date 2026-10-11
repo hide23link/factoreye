@@ -81,7 +81,37 @@ describe("WebhookSettingsPanel", () => {
     renderWithQueryClient(<WebhookSettingsPanel />);
 
     await user.click(await screen.findByRole("button", { name: "削除" }));
+    // 確認の小窓（もう1つの「削除」ボタン）で確定する
+    expect(api.deleteWebhookSubscription).not.toHaveBeenCalled();
+    const buttons = await screen.findAllByRole("button", { name: "削除" });
+    await user.click(buttons[buttons.length - 1]);
 
     await waitFor(() => expect(api.deleteWebhookSubscription).toHaveBeenCalledWith(webhook.id));
+  });
+});
+
+describe("WebhookSettingsPanel の削除の確認と失敗", () => {
+  it("確認でキャンセルすると削除しない", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchWebhookSubscriptions).mockResolvedValue([webhook]);
+    renderWithQueryClient(<WebhookSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "削除" }));
+    await user.click(await screen.findByRole("button", { name: "キャンセル" }));
+
+    expect(api.deleteWebhookSubscription).not.toHaveBeenCalled();
+  });
+
+  it("削除に失敗したとき、利用者向けの文言を表示する", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchWebhookSubscriptions).mockResolvedValue([webhook]);
+    vi.mocked(api.deleteWebhookSubscription).mockRejectedValue(new Error("network"));
+    renderWithQueryClient(<WebhookSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "削除" }));
+    const buttons = await screen.findAllByRole("button", { name: "削除" });
+    await user.click(buttons[buttons.length - 1]);
+
+    expect(await screen.findByText(/Webhookの削除に失敗しました/)).toBeInTheDocument();
   });
 });

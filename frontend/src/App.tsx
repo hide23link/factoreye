@@ -13,7 +13,7 @@ import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardView } from "./components/DashboardView";
 import { SettingsPage } from "./components/SettingsPage";
 import { SetupWizard } from "./components/SetupWizard";
-import { fetchMe, refreshTokens } from "./lib/api";
+import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
@@ -59,8 +59,6 @@ function HealthBadge() {
 /** SaaS 版で、ログイン中のワークスペース名・プラン・ログアウトを表示する（self-hosted では何も出さない）。 */
 function UserBadge() {
   const me = useAuthStore((s) => s.me);
-  const clearAuth = useAuthStore((s) => s.clearAuth);
-
   if (!IS_MULTI_TENANT || !me) return null;
 
   return (
@@ -69,7 +67,7 @@ function UserBadge() {
       <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-400">{me.plan}</span>
       <button
         type="button"
-        onClick={clearAuth}
+        onClick={() => void logout()}
         className="text-gray-400 hover:text-gray-600"
       >
         ログアウト

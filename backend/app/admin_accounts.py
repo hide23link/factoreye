@@ -154,4 +154,4 @@ def _write(body_lines: list[str]) -> None:
 
 
 # bcryptの時間差を作るためのダミーハッシュ（存在しないIDのログイン時に使う）
-_DUMMY_HASH = auth_utils.hash_password("dummy-password-for-timing")
+_DUMMY_HASH = auth_utils.DUMMY_PASSWORD_HASH

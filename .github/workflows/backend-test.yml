@@ -3,9 +3,9 @@ name: backend-test
 on:
   push:
     branches: [main]
-    paths: ["backend/**", ".github/workflows/backend-test.yml"]
+    paths: ["backend/**", "loadtest/**", ".github/workflows/backend-test.yml"]
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend-test.yml"]
+    paths: ["backend/**", "loadtest/**", ".github/workflows/backend-test.yml"]
 
 defaults:
   run:
@@ -45,6 +45,13 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+      - name: Load test emulator tests
+        # loadtest/ の単体テスト（外部サービス不要）。backend と同じ環境で実行する
+        working-directory: loadtest
+        run: |
+          pip install -r requirements.txt
+          pytest
 
       - name: Type check
         run: mypy .

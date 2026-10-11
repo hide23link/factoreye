@@ -323,3 +323,25 @@ async def test_delete_unknown_user_returns_404(api: httpx.AsyncClient) -> None:
     headers = await _admin_login(api)
     resp = await api.delete(f"/api/admin/users/{uuid4()}", headers=headers)
     assert resp.status_code == 404
+
+
+async def test_patch_email_unique_violation_returns_409(
+    api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 事前確認をすり抜けた同時変更が、一意制約違反（IntegrityError）になる状況を再現する
+    from sqlalchemy.exc import IntegrityError
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    headers = await _admin_login(api)
+    await _register(api, "race-admin@example.com")
+    user_id = await _user_id("race-admin@example.com")
+
+    async def boom(self: AsyncSession) -> None:
+        raise IntegrityError("UPDATE users", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(AsyncSession, "commit", boom)
+    resp = await api.patch(
+        f"/api/admin/users/{user_id}", headers=headers, json={"email": "new@example.com"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "email already exists"

@@ -25,6 +25,7 @@ import type {
   WidgetType,
 } from "../types";
 import { getStoredRefreshToken, useAuthStore } from "../store/useAuthStore";
+import { ApiError } from "./errors";
 
 // バックエンドのアドレス。ビルド時に決まる（.env の VITE_API_URL。既定は localhost:8000）
 export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -38,21 +39,18 @@ async function rawFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status} ${body}`);
+    throw new ApiError(response.status, `${init?.method ?? "GET"} ${path} failed: ${response.status} ${body}`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
 // 401 時にリフレッシュトークンで再試行する（無限ループ防止のため1回のみ）
-let _isRefreshing = false;
+// 再発行の最中は、その Promise を共有する。同時に 401 になった要求は、1 回の再発行の結果をみんなで待つ
+let _refreshPromise: Promise<boolean> | null = null;
 
-/**
- * リフレッシュトークンで、アクセストークンを新しくする。
- * 成功なら true。失敗（期限切れ・トークン無し）なら、ログイン状態を消して false を返す。
- */
-async function attemptTokenRefresh(): Promise<boolean> {
-  if (_isRefreshing) return false;
+/** リフレッシュトークンで再発行する本体（二重に走らないよう attemptTokenRefresh から呼ぶ）。 */
+async function doTokenRefresh(): Promise<boolean> {
   // 管理者が利用者として閲覧中は、再発行しない（期限が切れたら閲覧を終える。
   // 別の利用者のリフレッシュトークンで続けることにならないように）
   if (useAuthStore.getState().impersonation) {
@@ -61,7 +59,6 @@ async function attemptTokenRefresh(): Promise<boolean> {
   }
   const refreshToken = getStoredRefreshToken();
   if (!refreshToken) return false;
-  _isRefreshing = true;
   try {
     const tokens = await rawFetch<AuthTokens>("/api/auth/refresh", {
       method: "POST",
@@ -72,9 +69,21 @@ async function attemptTokenRefresh(): Promise<boolean> {
   } catch {
     useAuthStore.getState().clearAuth();
     return false;
-  } finally {
-    _isRefreshing = false;
   }
+}
+
+/**
+ * リフレッシュトークンで、アクセストークンを新しくする。
+ * 成功なら true。失敗（期限切れ・トークン無し）なら、ログイン状態を消して false を返す。
+ * 再発行の最中に呼ばれたら、新しく始めずに、その結果を待って同じ結果を返す。
+ */
+function attemptTokenRefresh(): Promise<boolean> {
+  if (_refreshPromise) return _refreshPromise;
+  const promise = doTokenRefresh().finally(() => {
+    _refreshPromise = null;
+  });
+  _refreshPromise = promise;
+  return promise;
 }
 
 // ── 公開: JWT 自動注入 + 401 リトライ ─────────────────────────
@@ -96,7 +105,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (response.status === 401 && accessToken) {
-    const refreshed = await attemptTokenRefresh();
+    // 自分の要求を送ったあとに、別の要求がトークンを更新済みなら、再発行せずにそのトークンで再試行する
+    const latestToken = useAuthStore.getState().accessToken;
+    const refreshed = latestToken !== accessToken && latestToken !== null ? true : await attemptTokenRefresh();
     if (refreshed) {
       const newToken = useAuthStore.getState().accessToken!;
       const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
@@ -109,7 +120,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       });
       if (!retryResponse.ok) {
         const body = await retryResponse.text();
-        throw new Error(`${init?.method ?? "GET"} ${path} failed: ${retryResponse.status} ${body}`);
+        throw new ApiError(
+          retryResponse.status,
+          `${init?.method ?? "GET"} ${path} failed: ${retryResponse.status} ${body}`,
+        );
       }
       if (retryResponse.status === 204) return undefined as T;
       return retryResponse.json() as Promise<T>;
@@ -119,7 +133,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status} ${body}`);
+    throw new ApiError(response.status, `${init?.method ?? "GET"} ${path} failed: ${response.status} ${body}`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -148,6 +162,18 @@ export const logoutUser = (refreshToken: string) =>
     method: "POST",
     body: JSON.stringify({ refreshToken }),
   });
+
+/**
+ * ログアウト: 先にこの端末のログインを消し（待たせない）、サーバーのリフレッシュトークンも失効させる。
+ * サーバーへの通知が失敗しても、この端末のログアウトは済んでいる。
+ * 管理者が利用者として閲覧中は、利用者本人のトークンを失効させない。
+ */
+export function logout(): Promise<void> {
+  const refreshToken = useAuthStore.getState().impersonation ? null : getStoredRefreshToken();
+  useAuthStore.getState().clearAuth();
+  if (!refreshToken) return Promise.resolve();
+  return logoutUser(refreshToken).catch(() => {});
+}
 
 export const fetchMe = (accessToken: string) =>
   rawFetch<MeResponse>("/api/me", {

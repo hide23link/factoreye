@@ -188,3 +188,106 @@ async def test_me_no_token(auth_client: httpx.AsyncClient) -> None:
 async def test_me_invalid_token(auth_client: httpx.AsyncClient) -> None:
     resp = await auth_client.get("/api/me", headers={"Authorization": "Bearer invalid.token.here"})
     assert resp.status_code == 401
+
+
+# ── メールの大文字小文字・タイミング ───────────────────────────
+
+
+async def test_register_email_is_normalized(auth_client: httpx.AsyncClient) -> None:
+    resp = await auth_client.post("/api/auth/register", json={
+        "email": "  Case.User@Example.COM ",
+        "password": "password123",
+        "workspaceName": "W",
+    })
+    assert resp.status_code == 201
+    me = await auth_client.get(
+        "/api/me", headers={"Authorization": f"Bearer {resp.json()['accessToken']}"}
+    )
+    assert me.json()["email"] == "case.user@example.com"
+
+
+async def test_register_email_case_variant_is_duplicate(auth_client: httpx.AsyncClient) -> None:
+    payload = {"email": "foo@example.com", "password": "password123", "workspaceName": "W"}
+    assert (await auth_client.post("/api/auth/register", json=payload)).status_code == 201
+    resp = await auth_client.post(
+        "/api/auth/register", json={**payload, "email": "Foo@Example.com"}
+    )
+    assert resp.status_code == 409
+
+
+async def test_login_is_case_insensitive(auth_client: httpx.AsyncClient) -> None:
+    payload = {"email": "login.case@example.com", "password": "password123", "workspaceName": "W"}
+    await auth_client.post("/api/auth/register", json=payload)
+    resp = await auth_client.post("/api/auth/login", json={
+        "email": " Login.Case@EXAMPLE.com", "password": "password123",
+    })
+    assert resp.status_code == 200
+
+
+async def test_login_matches_existing_mixed_case_account(
+    auth_client: httpx.AsyncClient,
+) -> None:
+    # 正規化の導入前に作られた、大文字を含む既存アカウントでもログインできる
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app import auth as auth_utils
+    from app.db.models import User, Workspace
+    from app.db.session import engine
+
+    async with AsyncSession(engine) as session:
+        user = User(
+            email="Legacy@Example.com",
+            password_hash=auth_utils.hash_password("password123"),
+        )
+        session.add(user)
+        await session.flush()
+        session.add(Workspace(name="W", owner_id=user.id))
+        await session.commit()
+
+    resp = await auth_client.post("/api/auth/login", json={
+        "email": "legacy@example.com", "password": "password123",
+    })
+    assert resp.status_code == 200
+    dup = await auth_client.post("/api/auth/register", json={
+        "email": "LEGACY@example.com", "password": "password123", "workspaceName": "W2",
+    })
+    assert dup.status_code == 409
+
+
+async def test_login_unknown_email_still_verifies_password_hash(
+    auth_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 未登録のときも bcrypt の照合を走らせ、応答時間で登録の有無を推測させない
+    from app import auth as auth_utils
+
+    calls: list[str] = []
+    original = auth_utils.verify_password
+
+    def spy(plain: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return original(plain, hashed)
+
+    monkeypatch.setattr(auth_utils, "verify_password", spy)
+    resp = await auth_client.post("/api/auth/login", json={
+        "email": "nobody@example.com", "password": "password123",
+    })
+    assert resp.status_code == 401
+    assert len(calls) == 1
+
+
+async def test_register_concurrent_unique_violation_returns_409(
+    auth_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 事前確認をすり抜けた同時登録が、一意制約違反（IntegrityError）になる状況を再現する
+    from sqlalchemy.exc import IntegrityError
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def boom(self: AsyncSession, *args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT INTO users", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(AsyncSession, "flush", boom)
+    resp = await auth_client.post("/api/auth/register", json={
+        "email": "race@example.com", "password": "password123", "workspaceName": "W",
+    })
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "email already registered"

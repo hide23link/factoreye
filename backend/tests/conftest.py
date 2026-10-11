@@ -6,6 +6,7 @@ DATABASE_URL は CI の postgres service / docker-compose の postgres を指す
 from collections.abc import AsyncGenerator
 
 import httpx
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport
 from sqlmodel import SQLModel
@@ -43,3 +44,12 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """送信先 URL の検証（app.webhooks）が実 DNS を引かないよう、既定で公開アドレスに解決させる。
+
+    内部アドレスの拒否を検証するテストは、個別に _addresses_for_host を差し替える。
+    """
+    monkeypatch.setattr("app.webhooks._addresses_for_host", lambda host: ["93.184.216.34"])

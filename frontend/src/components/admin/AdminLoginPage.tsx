@@ -1,12 +1,13 @@
 /**
  * 管理者のログイン画面（管理者 ID とパスワード）。
- * 失敗の理由は2つだけ区別する: 試行回数の超過（429）と、ID・パスワードの誤り。
+ * 失敗の理由は、状態コードで区別する（401 は ID・パスワードの誤り、429 は試行回数の超過、それ以外は接続・サーバーの問題）。
  * パスワードは、送信のあと必ず画面から消す（再表示しない）。
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { adminLogin } from "../../lib/adminApi";
+import { describeAdminLoginError } from "../../lib/errors";
 import { useAdminStore } from "../../store/useAdminStore";
 
 /** 管理者ログインのフォーム。 */
@@ -24,9 +25,7 @@ export function AdminLoginPage() {
 
   // 失敗の文言。429 は、試行回数の制限（1分に5回まで）に当たったとき
   const errorMessage = loginMutation.isError
-    ? loginMutation.error.message.includes("429")
-      ? "試行回数が多すぎます。しばらく待ってから再度お試しください。"
-      : "IDまたはパスワードが正しくありません。"
+    ? describeAdminLoginError(loginMutation.error)
     : null;
 
   return (

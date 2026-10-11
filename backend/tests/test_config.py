@@ -45,3 +45,23 @@ def test_development_allows_default_secrets() -> None:
 def test_environment_is_case_insensitive() -> None:
     with pytest.raises(ValidationError, match="INGEST_API_KEY"):
         _make(environment=" Production ")
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    ["CHANGE_ME_STRONG_RANDOM_KEY", "change_me_x", "Change-This-Please", "", "  "],
+)
+def test_production_rejects_placeholder_ingest_key(placeholder: str) -> None:
+    with pytest.raises(ValidationError, match="INGEST_API_KEY"):
+        _make(environment="production", ingest_api_key=placeholder)
+
+
+def test_production_multi_tenant_rejects_placeholder_jwt_secret() -> None:
+    with pytest.raises(ValidationError, match="JWT_SECRET"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            auth_mode=AuthMode.MULTI_TENANT,
+            ingest_api_key="x" * 32,
+            jwt_secret="CHANGE_ME_STRONG_RANDOM_SECRET",
+        )

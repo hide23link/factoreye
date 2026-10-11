@@ -12,6 +12,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_SECRET = "change-this-in-production"
 
 
+def is_placeholder_secret(value: str) -> bool:
+    """配布物のひな形の値（change-this-... や CHANGE_ME_...）か空かどうか。大小文字は区別しない。"""
+    v = value.strip().lower()
+    return v == "" or v.startswith(("change-this", "change_me", "change-me"))
+
+
 class AuthMode(StrEnum):
     """認証の動作モード。環境変数 AUTH_MODE で切り替える。
 
@@ -79,9 +85,10 @@ class Settings(BaseSettings):
             used, name = self.jwt_secret, "JWT_SECRET"
         else:
             used, name = self.ingest_api_key, "INGEST_API_KEY"
-        if used == DEFAULT_SECRET:
+        if is_placeholder_secret(used):
             raise ValueError(
-                f"{name} が既定値のままです。ENVIRONMENT=production では必ず変更してください"
+                f"{name} が既定値（または CHANGE_ME などのひな形の値）のままです。"
+                "ENVIRONMENT=production では必ず変更してください"
             )
         return self
 

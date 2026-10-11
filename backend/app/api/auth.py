@@ -14,8 +14,9 @@ from uuid import UUID
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import EmailStr, Field
-from sqlmodel import select
+from pydantic import EmailStr, Field, field_validator
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth as auth_utils
@@ -35,6 +36,11 @@ _bearer = HTTPBearer()
 # ── スキーマ ──────────────────────────────────────────────────
 
 
+def _normalize_email_input(value: object) -> object:
+    """メールの入力を、形式の検証より前に正規化する（前後の空白・大文字小文字）。"""
+    return auth_utils.normalize_email(value) if isinstance(value, str) else value
+
+
 class RegisterRequest(CamelModel):
     """新規登録の入力。メール・パスワード（8 文字以上）・ワークスペースの名前。"""
 
@@ -42,12 +48,16 @@ class RegisterRequest(CamelModel):
     password: str = Field(min_length=8, max_length=100)
     workspace_name: str = Field(min_length=1, max_length=100)
 
+    _normalize_email = field_validator("email", mode="before")(_normalize_email_input)
+
 
 class LoginRequest(CamelModel):
     """ログインの入力。"""
 
     email: EmailStr
     password: str
+
+    _normalize_email = field_validator("email", mode="before")(_normalize_email_input)
 
 
 class TokenResponse(CamelModel):
@@ -133,30 +143,38 @@ async def register(
     _require_multi_tenant()
 
     # 重複チェック
-    existing = await session.exec(select(User).where(User.email == body.email))
+    # 正規化導入前から DB にある、大文字を含むメールとも突き合わせるため lower() で比べる
+    existing = await session.exec(select(User).where(func.lower(User.email) == body.email))
     if existing.first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already registered")
 
-    user = User(email=body.email, password_hash=auth_utils.hash_password(body.password))
-    session.add(user)
-    await session.flush()  # user.id を確定させてから workspace に使う
+    try:
+        user = User(email=body.email, password_hash=auth_utils.hash_password(body.password))
+        session.add(user)
+        await session.flush()  # user.id を確定させてから workspace に使う
 
-    workspace = Workspace(name=body.workspace_name, owner_id=user.id)
-    session.add(workspace)
-    await session.flush()
+        workspace = Workspace(name=body.workspace_name, owner_id=user.id)
+        session.add(workspace)
+        await session.flush()
 
-    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
-    user_id, workspace_id = user.id, workspace.id
-    raw, token_hash = auth_utils.create_refresh_token()
-    session.add(
-        RefreshToken(
-            user_id=user_id,
-            workspace_id=workspace_id,
-            token_hash=token_hash,
-            expires_at=auth_utils.refresh_token_expiry(),
+        # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
+        user_id, workspace_id = user.id, workspace.id
+        raw, token_hash = auth_utils.create_refresh_token()
+        session.add(
+            RefreshToken(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                token_hash=token_hash,
+                expires_at=auth_utils.refresh_token_expiry(),
+            )
         )
-    )
-    await session.commit()
+        await session.commit()
+    except IntegrityError:
+        # 同時登録で、上の事前確認をすり抜けて users.email の一意制約に当たった場合
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="email already registered"
+        ) from None
 
     return TokenResponse(
         access_token=auth_utils.create_access_token(user_id, workspace_id),
@@ -178,8 +196,11 @@ async def login(
     """
     _require_multi_tenant()
 
-    result = await session.exec(select(User).where(User.email == body.email))
+    result = await session.exec(select(User).where(func.lower(User.email) == body.email))
     user = result.first()
+    if user is None:
+        # 未登録でも bcrypt の照合を走らせ、応答時間で登録の有無を推測させない
+        auth_utils.verify_password(body.password, auth_utils.DUMMY_PASSWORD_HASH)
     if user is None or not auth_utils.verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

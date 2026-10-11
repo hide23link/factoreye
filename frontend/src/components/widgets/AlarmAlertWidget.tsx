@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
+import { ErrorNotice } from "../ErrorNotice";
 
 /** 一覧に出す件数の上限（状態ごと）。新しい順に取る。全件は取らない（応答が大きくなり、サーバーの負荷になるため）。 */
 const ALERT_LIMIT = 100;
@@ -14,8 +15,18 @@ const ALERT_LIMIT = 100;
 export function AlarmAlertWidget() {
   // 確認済み（acknowledged）は「対応中」なだけで解決はしていないため、active と
   // 合わせて表示する。しきい値内に戻って status=resolved になったら自然に消える
-  const { data: activeData, isLoading: activeLoading } = useAlarms("active", ALERT_LIMIT);
-  const { data: ackedData, isLoading: ackedLoading } = useAlarms("acknowledged", ALERT_LIMIT);
+  const {
+    data: activeData,
+    isLoading: activeLoading,
+    isError: activeError,
+    refetch: refetchActive,
+  } = useAlarms("active", ALERT_LIMIT);
+  const {
+    data: ackedData,
+    isLoading: ackedLoading,
+    isError: ackedError,
+    refetch: refetchAcked,
+  } = useAlarms("acknowledged", ALERT_LIMIT);
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
 
@@ -26,6 +37,17 @@ export function AlarmAlertWidget() {
     },
   });
 
+  if ((!activeData && activeError) || (!ackedData && ackedError)) {
+    return (
+      <ErrorNotice
+        message="アラームを取得できませんでした。"
+        onRetry={() => {
+          void refetchActive();
+          void refetchAcked();
+        }}
+      />
+    );
+  }
   if (activeLoading || ackedLoading || !activeData || !ackedData) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
