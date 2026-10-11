@@ -23,7 +23,7 @@ docker compose up -d --build
 
 LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` を作り（[`.env.example`](.env.example) を参照）、`VITE_API_URL` と `FRONTEND_URL` をホストの IP アドレスに変更します。
 
-本番で使う前に、`INGEST_API_KEY` と `JWT_SECRET` を必ず変更してください。
+本番で使う前に、`INGEST_API_KEY` を必ず変更してください（`ENVIRONMENT=production` では、既定値のままだと起動しません）。SaaS モード（`AUTH_MODE=multi_tenant`）では、`JWT_SECRET` も変更します。環境変数の一覧は [`docs/architecture.md`](docs/architecture.md) §11 を参照してください。
 
 ---
 
@@ -33,7 +33,9 @@ LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` �
 - **アラーム**: 上限・下限 × 軽故障・重故障の 4 項目のしきい値、不感帯、確認（ack）
 - **通知**: Discord（重故障は通常送信、軽故障はサイレント）、重故障の再通知
 - **Webhook**: `reading.received` と `alarm.triggered` のイベントを任意の URL へ送信
-- **ダッシュボード**: 12 列グリッドでの自由な配置。グラフ・比較グラフ・最新値・アラーム一覧・生産数の各ウィジェット
+- **ダッシュボード**: 12 列グリッドでの自由な配置。グラフ・比較グラフ・最新値・アラーム一覧・生産数の各ウィジェット。グラフの時間範囲は、プリセット・任意の期間・前後への移動・拡大縮小・ドラッグで操作できる
+- **データ移行**: 設定画面の「データ移行」から、ワークスペース（SaaS）または全データ（self-hosted）を書き出し、self-hosted へ取り込む
+- **SaaS モード**: `AUTH_MODE=multi_tenant`（メール + パスワード、ワークスペース単位の分離、Free Tier、管理者画面 `/admin`）。詳細は [`docs/architecture.md`](docs/architecture.md) §10
 - **公式クライアント**: Arduino / M5Stack（`clients/arduino-m5stack/`）、Raspberry Pi（`clients/raspberry-pi/`）
 - **テスト用エミュレータ**: `tools/factory-emulator/`（手動操作画面つき）
 - **復旧ツール**: `tools/recovery/`。バックアップを今の DB と見比べて閲覧・CSV 書き出し・書き戻しをする Web 画面（本体とは独立）
@@ -63,6 +65,9 @@ docs/       仕様書と設計判断の記録
 ```bash
 cd backend
 pip install -r requirements.txt
+# PostgreSQL を別途用意し、接続先を指定する（例は backend/.env.example）
+export DATABASE_URL=postgresql+asyncpg://factoreye:password@localhost:5432/factoreye
+alembic upgrade head   # テーブルを作る（アプリは起動時に作らない。Docker は起動時に自動で実行する）
 uvicorn app.main:app --reload
 ```
 
@@ -71,8 +76,8 @@ uvicorn app.main:app --reload
 ```bash
 pip install -r requirements-dev.txt
 pytest
-mypy app
-ruff check app tests
+mypy .
+ruff check .
 pip-audit
 ```
 

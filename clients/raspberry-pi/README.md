@@ -1,6 +1,6 @@
 # raspberry-pi-rest-adapter（Raspberry Pi 用 Pythonクライアント）
 
-Raspberry PiのGPIO/1-Wire/I2Cセンサーの値を、FactorEyeの
+Raspberry PiのGPIO/1-Wireセンサーの値を、FactorEyeの
 [センサーIngest API](../../docs/architecture.md)（`POST /api/ingest/readings`）へ
 送るための最小クライアントです。[M5Stack向けArduinoライブラリ](../arduino-m5stack/)と
 同じ設計方針（Ambientライブラリ風のシンプルな呼び出し、指数バックオフ、オフラインバッファ）
@@ -53,8 +53,8 @@ raspberry-pi/
   （呼び出し元のループをブロックしない）
 - バッファが満杯のときは最も古い値から捨てられる
 
-この挙動は `docs/architecture.md` §5 センサーの取り込み の
-「デバイス側リトライ（指数バックオフ）」の仕様に準拠しており、M5Stack向けArduinoライブラリ
+この挙動は `docs/architecture.md` §9 デバイス連携 の
+「送信失敗時の再試行（デバイス側）」の仕様に準拠しており、M5Stack向けArduinoライブラリ
 と同じ挙動です。
 
 `client.pending_count` で現在バッファに溜まっている未送信件数を取得できます。
@@ -78,7 +78,7 @@ python3 -m unittest tests.test_factoreye_client -v
 
 pytestやモックサーバー用の追加ライブラリは不要（`http.server`で自前のモックを起動する）。
 
-## 制限事項（Phase 0）
+## 制限事項
 
 - タイムスタンプは送信しません。FactorEyeバックエンドは受信時刻を採用し、デバイス側の
   時刻は信頼しない設計のためです（`docs/architecture.md` 参照）。
@@ -88,4 +88,4 @@ pytestやモックサーバー用の追加ライブラリは不要（`http.serve
 
 ## ライセンス
 
-MIT（`LICENSE`参照）。REST（JSON）でデータを送るため、Webhook 連携とも併用できます（`docs/architecture.md` §9）。
+MIT（`LICENSE`参照）。

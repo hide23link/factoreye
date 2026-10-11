@@ -36,7 +36,7 @@ flowchart LR
     Backend -->|"1秒毎のバッチ書き込み"| DB
     Backend -->|"アラーム通知"| Discord
     Backend -->|"イベント通知（Webhook）"| Hooks
-    Frontend -->|"REST（5秒ポーリング）"| Backend
+    Frontend -->|"REST（ポーリング）"| Backend
 ```
 
 | レイヤー | 技術 |
@@ -48,7 +48,7 @@ flowchart LR
 
 **復旧ツール**: `tools/recovery/`。バックアップの確認・比較・書き出し・書き戻しを行う、本体とは別のプログラム（§11.1）。
 
-**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（frontend は nginx で静的配信。判断は [decisions.md](decisions.md)、サイズは §14）。
+**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432（postgres は `127.0.0.1` だけに公開し、LAN には出さない）。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（frontend は nginx で静的配信。判断とサイズは [decisions.md](decisions.md)）。
 
 ---
 
@@ -72,7 +72,8 @@ flowchart LR
 
 ## 4. REST API
 
-認証欄の「APIキー」は `X-API-Key` ヘッダー（§5）。「JWT」は `AUTH_MODE=multi_tenant` 時のみ必要なもの。
+認証欄の「APIキー」は `X-API-Key` ヘッダー（§5）。「JWT」は `AUTH_MODE=multi_tenant`（SaaS）時のみ必要なもの。
+**認証欄が「なし」の API も、SaaS では JWT が必須**（なければ 401）。SaaS で JWT が要らないのは、`/health`、`/api/ingest/readings`（本文の `ingestKey` で識別）、`/api/auth/*`、`/api/settings/migration/status` だけ。管理者 API（`/api/admin/*`）は利用者の JWT ではなく、管理者トークンで認可する（§10）。self-hosted は取り込み以外に認証がない（§11）。
 
 | Method | Path | 内容 | 認証 |
 |---|---|---|---|
@@ -95,7 +96,7 @@ flowchart LR
 | GET / POST | `/api/settings/webhooks` | Webhook 購読の一覧・作成 | なし |
 | PUT / DELETE | `/api/settings/webhooks/{id}` | Webhook 購読の更新・削除 | なし |
 | GET | `/api/settings/migration/status` | 移行機能の状態（書き出し・取り込みのどちらが使えるか） | なし |
-| GET | `/api/settings/migration/export` | ワークスペースを書き出す（SaaS のみ。404 は self-hosted） | JWT |
+| GET | `/api/settings/migration/export` | ワークスペースを書き出す（SaaS は自分のワークスペース、self-hosted は全データ。§10.1） | なし |
 | POST | `/api/settings/migration/import?dry_run=&with_notifications=` | 書き出しファイル（gzip の本文）を取り込む（self-hosted のみ。404 は SaaS） | なし |
 | POST | `/api/auth/register` `/login` `/refresh` `/logout` | 認証（SaaS のみ） | なし |
 | GET | `/api/me` | 自分のユーザーとワークスペース（SaaS のみ） | JWT |
@@ -124,7 +125,7 @@ flowchart LR
 ```json
 { "ingestKey": "sensor-001", "value": 23.5 }
 ```
-バッチは `readings` 配列（各要素に `value` と任意の `timestamp`）で送る。`value` も `readings` も無い場合は 400。
+バッチは `readings` 配列（各要素に `value` と任意の `timestamp`）で送る。`readings` は 1 リクエストあたり 1,000 件まで。`value` も `readings` も無い場合、1,001 件以上の場合、`value` が NaN・Infinity の場合は 400。
 
 ### 応答
 | 状況 | HTTP |
@@ -207,7 +208,7 @@ Zapier・Make・n8n などのノーコード自動化サービスへ、イベン
 ## 8. ダッシュボード
 
 - 12 列グリッドで自由に配置・サイズ変更できる（画面幅に応じて列数が変わる）。配置はサーバーに保存する
-- 画面は **5 秒間隔のポーリング**で更新する（WebSocket は使わない）
+- 画面は**ポーリング**で更新する（WebSocket は使わない）。センサー値・アラーム・ダッシュボードの中身は 5 秒ごと、グラフ（`SensorGraph`・`MultiSensorComparison`）の直近モードは 30 秒ごとに取り直す
 - ウィジェット種別:
 
 | 種別 | 内容 |
@@ -225,7 +226,7 @@ Zapier・Make・n8n などのノーコード自動化サービスへ、イベン
 Grafana と同じように、グラフの表示する時間範囲を操作できる。
 
 **表示範囲の 2 つのモード**
-- **直近モード**: 「直近 N 分／時間／日」。右端は常に現在時刻。5 秒ごとの更新で右端が進む
+- **直近モード**: 「直近 N 分／時間／日」。右端は常に現在時刻。30 秒ごとの更新で右端が進む
 - **固定モード**: 開始と終了を指定した期間。更新しても範囲は変わらない（過去の期間を見るため）
 
 **操作**
@@ -273,7 +274,8 @@ Grafana と同じように、グラフの表示する時間範囲を操作でき
 
 ### 認証
 - メール + パスワード（bcrypt）+ JWT
-- アクセストークン 15 分、リフレッシュトークン 30 日（DB に保存し、使うたびにローテーション。旧トークンは即時失効）
+- アクセストークン 15 分、リフレッシュトークン 30 日が既定（`JWT_ACCESS_EXPIRE_MINUTES`・`JWT_REFRESH_EXPIRE_DAYS` で変更できる）。リフレッシュトークンは DB に保存し、使うたびにローテーション。旧トークンは即時失効
+- 登録は 1 分あたり 10 回、ログインは 1 分あたり 20 回まで（IP ごと）
 - 全データはワークスペース単位で分離する
 
 ### Free Tier の制限
@@ -283,10 +285,11 @@ Grafana と同じように、グラフの表示する時間範囲を操作でき
 
 ### 管理者画面（`/admin`）
 SaaS の運用者向け。一般ユーザーのログイン画面とは別物です。
-- 管理者アカウントは DB に入れず、サーバーのテキストファイル（`admin/admins.txt`、`ID:bcryptハッシュ` の 1 行 1 件）で管理する。追加・パスワード変更・削除は `app.admin_cli` で行う。ファイルは都度読み直すため、再起動なしで反映される
-- 管理者トークンは 60 分で、リフレッシュはできない。ログインは 1 分あたり 5 回まで
+- 管理者アカウントは DB に入れず、サーバーのテキストファイル（既定 `admin/admins.txt`。`ADMIN_CREDENTIALS_FILE` で変更。`ID:bcryptハッシュ` の 1 行 1 件）で管理する。追加・パスワード変更・削除は `app.admin_cli` で行う。ファイルは都度読み直すため、再起動なしで反映される
+- 管理者トークンは 60 分（既定。`ADMIN_ACCESS_EXPIRE_MINUTES`）で、リフレッシュはできない。ログインは 1 分あたり 5 回まで
 - トークンは `sessionStorage` に保存する（タブを閉じると消える）
 - 機能: 件数・DB 使用量の確認、ユーザー一覧・詳細、メール・プラン・パスワードの変更（パスワード変更で既存のリフレッシュトークンを全て失効）、ユーザーの削除（関連データを全て削除）
+- 利用者として閲覧する機能: ユーザーの詳細から、そのユーザーのワークスペースを、本人の画面で開く（`POST /api/admin/users/{id}/impersonate`）。専用のトークンは 15 分（既定。`IMPERSONATION_EXPIRE_MINUTES`）で、リフレッシュはできない。開始と、閲覧中の書き込み（GET / HEAD / OPTIONS 以外）は、管理者 ID とともにサーバーのログへ残す
 - 管理者ファイルは DB バックアップに含まれないため、別途保管が必要
 - 取り込みのレート制限の解除（画面上部のカード）: 「60 分だけ解除」で制限を外し、期限（既定 60 分・最長 240 分）を過ぎると自動で既定の制限に戻る。「今すぐ制限を戻す」で即時に戻す。解除・停止は管理者 ID とともにサーバーのログへ残す。状態はメモリのみ（再起動すると制限あり＝既定に戻る）。API は `GET` / `PUT /api/admin/ingest-limit`
 
@@ -326,61 +329,18 @@ SaaS（マルチテナント）の1ワークスペース、または OSS（self-
 DB に接続できない場合は `status` が `degraded` になる。
 
 ### バックアップ
-- `infra/backup.sh` が PostgreSQL を `pg_dump` で取得する。cron で毎日 3 時に実行する想定
-- 保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。各ファイルの隣に sha256 を書く。復元は `infra/restore.sh`
-- 設定ファイル（`.env`・管理者ファイルなど）も、暗号化して保存できる（`BACKUP_PASSPHRASE_FILE`）
-- 本番の外の控え: 別のマシン（Tailscale 経由で到達できるもの）から取りに行く（`infra/offsite-pull.sh`、読むだけの鍵）。S3 に送る方法（`infra/offsite-s3.sh`、追加だけの権限）も用意している
-- バックアップのファイルは権限 640 で作り、書き込み中は `.partial-*` に書いてから名前を変える（書きかけを外部の取得や復旧ツールが拾わないように）
+- `infra/backup.sh` が PostgreSQL を `pg_dump` で取得する。cron で毎日 3 時に実行する想定。保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。復元は `infra/restore.sh`
+- 設定ファイル（`.env`・管理者ファイルなど）の暗号化保存、本番の外の控え（`infra/offsite-pull.sh`・`infra/offsite-s3.sh`）、バックアップのファイルの権限と書き込み中の扱い（sha256・権限 640・`.partial-*`）は [`infra/README.md`](../infra/README.md) に書く
 - 中身の確認・比較・書き出し・書き戻しは、復旧ツール（§11.1）
-- 手順は [`infra/README.md`](../infra/README.md)
 
 ### 11.1 復旧ツール（`tools/recovery/`）
 
-停電による DB の破損や、不正アクセスによるプログラムの破壊から復旧するための Web 画面。FactorEye 本体（backend）に依存せず、Docker があればどこでも動く（本番のホスト・ラズパイ・Mac）。違いは設定（`.env`）だけ。
+停電による DB の破損や、不正アクセスによるプログラムの破壊から復旧するための Web 画面。FactorEye 本体（backend）に依存せず、Docker があればどこでも動く。違いは設定（`.env`）だけ。
 
-| 機能 | 内容 |
-|---|---|
-| バックアップの一覧・検証 | 読み込み元はディレクトリか S3（`BACKUP_SOURCE`）。sha256（`.sha256`）と gzip を確かめてから、コンテナ内の作業用の Postgres に展開する。書き戻しの直前の控えも一覧に出す |
-| 比較 | バックアップと今の DB の件数・スキーマの版・ワークスペースの増減（今の DB で消えたものを先に表示） |
-| 閲覧・書き出し | 種類（測定値・アラームなど）・ワークスペース・期間で絞って表示し、CSV に書き出す。パスワードのハッシュなどは伏せる |
-| 書き戻し | 選んだワークスペースについて、今の DB に**無い行だけ**を足す。今ある行は変えない・消さない |
-
-**画面**: 「書き戻す」（①バックアップを選ぶ → ②戻すものを選ぶ → ③内容を確認 → ④書き戻す）と「データを見る・書き出す」の 2 つのタブ。全体に Basic 認証。待ち受けは既定で 127.0.0.1（SSH のトンネルか Tailscale で開く）。
-
-**展開の安全策**（バックアップは、乗っ取られた本番で書き換えられている前提で扱う。`.sha256` も一緒に作り直せるため）:
-- psql のメタコマンドを止める（乱数の鍵で `\restrict`、行頭のメタコマンドは拒否）
-- 管理者ではないロール（`bk_restorer`）で流し込む。所有者が管理者のロールになっているバックアップは展開しない
-- psql と作業用の Postgres に、秘密の環境変数を渡さない
-- 一時的な名前（`bktmp_*`）で展開し、成功してから `bk_*` に変える
-
-**書き戻しの規則**:
-- 試行と実行は同じ処理。試行は最後に取り消す（件数・外部キー・一意制約の違反が、実行前に分かる）
-- 実行は、画面で確認した件数と、実行の直前の試行の件数が一致したときだけ。直前に今の DB を `pg_dump` で控え（`before-merge-<日時>.sql.gz`）、1 トランザクションで書き込む
-- 同じ行の判定は主キー。測定値は DB を作り直すと連番が重なるため（センサー, 時刻）で判定する
-- 発生中のアラームは、今の DB の同じセンサーにも発生中のものがあれば、解除済みにして戻す（発生中はセンサーごとに 1 つが前提）
-- ログインの状態（`refresh_tokens`）は戻さない
-- バックアップと今の DB のスキーマの版（`alembic_version`）が違うときは書き戻さない
-
-**OSS 版 ⇄ SaaS 版**: 所属を付け替えて書き戻せる。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須。空の SaaS 版は、中身から OSS 版と見分けられないため）。
-
-| バックアップ → 今の DB | 書き戻し方 |
-|---|---|
-| 同じ版どうし | 元と同じ所属のまま入れる |
-| OSS 版 → SaaS 版 | 書き戻し先のワークスペースを選び、そのワークスペースのものとして入れる。ユーザー・ワークスペースの行は入れない |
-| SaaS 版 → OSS 版 | OSS 版のデータ（`workspace_id` が NULL）として入れる。ユーザー・ワークスペースの行は入れない。通知設定は、OSS 版が読む id=1 の 1 行にする（既にあれば入れない） |
-
-センサーの ID と取り込みキーは保つ（機器の設定を変えずに送り続けられる）。SaaS → OSS のワークスペース単位の移し替えは、§10.1 のデータ移行でもできる（通知設定の上書きの指定など、移行に特化した機能はそちら）。
-
-**設定**（主なもの。全体は [`tools/recovery/README.md`](../tools/recovery/README.md)）:
-
-| 変数 | 内容 |
-|---|---|
-| `RECOVERY_PASSWORD` | 画面の Basic 認証（12 文字以上、必須） |
-| `BACKUP_SOURCE` / `BACKUP_DIR` | 読み込み元（ディレクトリか `s3://…`）。ディレクトリは読み取り専用でコンテナに見せる |
-| `TARGET_DATABASE_URL` | 今の DB（読み取り専用で接続。DB 側も読み取り専用のロールにする） |
-| `TARGET_WRITE_DATABASE_URL` | 書き戻しに使う接続。無ければ書き戻しは使えない |
-| `TARGET_MODE` | 今の DB が `saas` か `oss` か |
-| `BACKUP_GID` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |
+- バックアップ（ディレクトリか S3）の一覧・検証、今の DB との比較、閲覧・CSV の書き出し、書き戻し（今の DB に**無い行だけ**を足す。今ある行は変えない・消さない）ができる
+- バックアップは、乗っ取られた本番で書き換えられている前提で展開する（`.sha256` も一緒に作り直せるため）。管理者ではないロールで流し込み、psql のメタコマンドを止める
+- OSS 版 ⇄ SaaS 版は、所属を付け替えて書き戻せる。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須）。SaaS → OSS のワークスペース単位の移し替えは、§10.1 のデータ移行でもできる（通知設定の上書きの指定など、移行に特化した機能はそちら）
+- 書き戻しの規則・展開の安全策・設定の一覧・起動手順は [`tools/recovery/README.md`](../tools/recovery/README.md) を正とする
 
 ### 設定（環境変数）
 | 変数 | 既定 | 内容 |
@@ -393,6 +353,14 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `AUTH_MODE` | `disabled` | `multi_tenant` で SaaS モード |
 | `INGEST_RATE_LIMIT` | `100/minute` | 取り込みの制限。`off` で解除（管理画面からの期限付き解除は §10） |
 | `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Webhook の社内ネットワーク送信を許可（§7） |
+| `JWT_ACCESS_EXPIRE_MINUTES` | `15` | アクセストークンの有効期限（分）（§10） |
+| `JWT_REFRESH_EXPIRE_DAYS` | `30` | リフレッシュトークンの有効期限（日） |
+| `ADMIN_ACCESS_EXPIRE_MINUTES` | `60` | 管理者トークンの有効期限（分） |
+| `IMPERSONATION_EXPIRE_MINUTES` | `15` | 管理者が利用者として閲覧するときのトークンの有効期限（分） |
+| `ADMIN_CREDENTIALS_FILE` | `admin/admins.txt` | 管理者アカウントのファイル |
+| `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（ブラウザから見える API のアドレスと、画面の認証モード）。変えるにはビルドし直す |
+
+環境変数の例は、リポジトリ直下の `.env.example`（docker compose 用）、`backend/.env.example`（`uvicorn` を直接起動する場合）、`infra/cloud/.env.cloud.example`（クラウド版）。
 
 ### セキュリティ上の前提
 - self-hosted の API は取り込み以外に認証がない。**インターネットに直接公開しない**（ネットワーク境界で守る）
@@ -407,7 +375,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 |---|---|---|
 | Backend | pytest（PostgreSQL に接続）・mypy（strict）・ruff | `backend/` で実行（§12.1 の注意） |
 | Frontend | Vitest・typecheck・ESLint | `frontend/` で実行 |
-| E2E | Playwright（セットアップウィザード、アラームの発生と確認） | スタック起動後に `e2e/` で実行 |
+| E2E | Playwright（セットアップウィザード、アラームの発生と確認、データ移行画面） | スタック起動後に `e2e/` で実行 |
 
 ### 12.1 テスト用 DB についての注意
 backend のテストは、テストごとにすべてのテーブルを作り直し、終了時に削除する。**`DATABASE_URL` を開発用・本番用の DB に向けてはいけない**。テスト専用の DB（例: `factoreye_test`）を指定すること。CI は専用の PostgreSQL を都度起動するため、この問題は起きない。
@@ -427,12 +395,3 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - 測定値の一覧（`readings`）は、列だけを読むようにしたが、読み出す件数（`limit`）そのものは減らしていない。グラフは `downsampled` を使う（§8）
 - 復旧ツール（§11.1）: DB を丸ごと戻す機能は無い（`infra/restore.sh` を使う）。スキーマの版が違うバックアップは書き戻せない（古い版を新しい版に上げてから書き戻す機能は無い）。書き戻しで SaaS の Free Tier のセンサー数の上限は確かめない。書き戻しは閲覧と同じ認証で使える
 - 本番の外への控え（`offsite-s3.sh`）は、実機での確認がまだ（`offsite-pull.sh` は実機で確認済み）
-
----
-
-## 14. 更新履歴
-
-| 日付 | 変更 |
-|---|---|
-| 2026-10-08 | 復旧ツール（§11.1）を追加。バックアップに sha256・設定ファイルの暗号化保存・本番の外への控えを追加（§11）。本番（SaaS）と OSS 版で、作成 → バックアップ → 削除 → 書き戻しの訓練を行い、両方向（OSS → SaaS、SaaS → OSS）も確認 |
-| 2026-10-06 | Docker イメージを軽量化（§2）。frontend は Vite preview をやめ nginx で静的配信（428 MB → 63 MB）。backend は多段ビルドと、開発用依存（`requirements-dev.txt`）の分離（421 MB → 283 MB）。テスト（201 件）・mypy・ruff は Python 3.12 で通過 |

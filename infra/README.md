@@ -1,6 +1,6 @@
 # バックアップ・リストア
 
-`docs/architecture.md` §11 運用（バックアップ） の実装。PostgreSQLを`pg_dump`で日次バックアップし、
+[`docs/architecture.md`](../docs/architecture.md) §11 運用（バックアップ）の実装。PostgreSQLを`pg_dump`で日次バックアップし、
 7日より古いファイルは自動削除する。各ファイルの隣に sha256（`.sha256`）を書く。
 
 - 設定ファイル（`.env`・管理者ファイル・cloudflared の設定）も、暗号化して一緒に保存できる（下の「設定ファイルの控え」）
@@ -67,13 +67,7 @@ docker compose exec postgres psql -U factoreye factoreye -c 'SELECT version_num 
 COMPOSE_PROJECT_NAME=factoreye-restore-drill docker compose down -v
 ```
 
-2026-10-08 に Mac で実施:
-1. 本番の控え（ラズパイ経由で取得、0 件の時点のもの）を復元し、12 テーブル・スキーマ版・
-   `factoreye_readonly` の権限が復元されることを確認
-2. センサー 1 個・測定値 3 件を作って取ったバックアップで、同じ手順を実施。値（11.5/12.5/13.5）
-   まで完全に一致して復元されることを確認。この過程で、後片付け（`down -v`）を忘れて前の
-   試行のボリュームが残ったまま復元すると `type already exists` 等のエラーになることも確認した
-   （空の DB を前提にする `restore.sh` の設計どおり、安全側に失敗する）
+復元後は、テーブル数・スキーマ版・件数に加えて、`factoreye_readonly` の権限が復元されることも確かめる。後片付け（`down -v`）を忘れて前の試行のボリュームが残ったまま復元すると、`type already exists` 等のエラーになる（空の DB を前提にする `restore.sh` の設計どおり、安全側に失敗する）。
 
 ## 設定ファイルの控え
 
@@ -168,5 +162,6 @@ LAN と Tailscale だけに許可しているため。LAN 上の別サブネッ�
 
 - このスクリプトはcompose project名に依存しない（`docker compose exec <service名>`を使うため、
   ディレクトリ名やランナーの構成に依存しない）
+- バックアップのファイルは、書き込み中は `.partial-*` に書いてから名前を変える（書きかけを外部の取得や復旧ツールが拾わないように）。
 - バックアップのファイルは、ほかの利用者が読めない権限（640）で作る（復旧ツールはグループの権限で読む）。`backups/`は
   `.gitignore`済みでリポジトリにはコミットされない

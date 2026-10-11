@@ -18,7 +18,7 @@ FactorEye への貢献に興味を持っていただきありがとうござい�
 4. **テストを通す**（[README](README.md#開発環境) の手順と同じ）:
    ```bash
    # backend
-   cd backend && pytest && mypy app && ruff check app tests && pip-audit
+   cd backend && pytest && mypy . && ruff check . && pip-audit
 
    # frontend
    cd frontend && npm run test && npm run typecheck && npm run lint
