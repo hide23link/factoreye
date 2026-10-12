@@ -24,7 +24,7 @@ from app.config import AuthMode, settings
 from app.db.models import RefreshToken, User, Workspace
 from app.db.session import get_session
 from app.rate_limit import limiter
-from app.schemas import CamelModel
+from app.schemas import CamelModel, check_password_bytes
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -49,6 +49,8 @@ class RegisterRequest(CamelModel):
     workspace_name: str = Field(min_length=1, max_length=100)
 
     _normalize_email = field_validator("email", mode="before")(_normalize_email_input)
+    # bcrypt は 72 バイトまで。ログインの入力にはかけない（長すぎる場合は 401 にそろえる）
+    _check_password_bytes = field_validator("password")(check_password_bytes)
 
 
 class LoginRequest(CamelModel):

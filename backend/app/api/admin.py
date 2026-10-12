@@ -46,7 +46,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.rate_limit import limiter
-from app.schemas import CamelModel
+from app.schemas import CamelModel, check_password_bytes
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger(__name__)
@@ -124,6 +124,9 @@ class AdminUserUpdate(CamelModel):
     plan: Literal["free", "pro"] | None = None
     # 指定時はパスワードを再設定し、既存のリフレッシュトークンを全て失効させる
     password: str | None = Field(default=None, min_length=8, max_length=100)
+
+    # bcrypt は 72 バイトまで（超えたら 422）
+    _check_password_bytes = field_validator("password")(check_password_bytes)
 
 
 class IngestLimitStatus(CamelModel):

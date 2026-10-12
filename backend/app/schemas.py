@@ -15,11 +15,29 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
+from pydantic_core import PydanticCustomError
 
+from app.auth import MAX_PASSWORD_BYTES
 from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached, WebhookEventType
 
 # 取り込み 1 リクエストあたりの測定値の最大件数
 MAX_READINGS_PER_REQUEST = 1000
+
+
+def check_password_bytes(value: str | None) -> str | None:
+    """パスワードが UTF-8 で 72 バイト以下かを確かめる（超えたら 422 になる）。
+
+    文字数ではなくバイト数で数える（日本語は 1 文字 3 バイトなので 24 文字まで）。
+    エラーに入力の値は含めない。
+    """
+    if value is not None and len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise PydanticCustomError(
+            "password_too_long",
+            "パスワードは {max_bytes} バイト以内にしてください"
+            "（日本語は 1 文字 3 バイトで、24 文字まで）",
+            {"max_bytes": MAX_PASSWORD_BYTES},
+        )
+    return value
 
 
 class CamelModel(BaseModel):

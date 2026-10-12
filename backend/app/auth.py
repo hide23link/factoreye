@@ -19,6 +19,9 @@ import jwt
 
 from app.config import settings
 
+# bcrypt が受け付けるパスワードの最大バイト数（UTF-8）。超える入力は bcrypt が ValueError を出す
+MAX_PASSWORD_BYTES = 72
+
 
 def hash_password(plain: str) -> str:
     """パスワードを bcrypt でハッシュ化する（ソルト付き。保存するのはこの結果だけ）。"""
@@ -26,8 +29,24 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """入力されたパスワードが、保存されたハッシュと一致するかを確かめる。"""
-    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+    """入力されたパスワードが、保存されたハッシュと一致するかを確かめる。
+
+    一致しない入力は False にする。bcrypt に渡すと例外（500）になる、次の 2 つも含む。
+    - 72 バイトを超える入力（登録できないので、一致しえない）
+    - UTF-8 にできない文字（孤立サロゲート）を含む入力
+    どちらも、先頭 72 バイト（または代用の入力）で照合を 1 回走らせて結果を捨て、
+    他の失敗と時間をそろえる。
+    """
+    hashed_bytes = hashed.encode("ascii")
+    try:
+        data = plain.encode("utf-8")
+    except UnicodeEncodeError:
+        _bcrypt.checkpw(b"\x00", hashed_bytes)
+        return False
+    if len(data) > MAX_PASSWORD_BYTES:
+        _bcrypt.checkpw(data[:MAX_PASSWORD_BYTES], hashed_bytes)
+        return False
+    return _bcrypt.checkpw(data, hashed_bytes)
 
 
 # bcrypt は 1 回 200ms 前後の CPU 処理。async def の中で直接呼ぶとイベントループが止まり、
