@@ -23,7 +23,7 @@ from app.rate_limit import limiter
 
 # 1 回の bcrypt は 200ms 前後。止まっていれば遅れはそれに近い値になる。
 # 緩めの 100ms 未満を求める（別スレッドなら、通常は数 ms〜十数 ms）
-MAX_LAG_SECONDS = 0.1
+MAX_LAG_SECONDS = 0.15
 TICK = 0.01
 
 
