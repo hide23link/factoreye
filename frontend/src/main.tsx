@@ -5,13 +5,17 @@
  * - 全体で1つの QueryClient（データ取得のキャッシュ）を共有する
  */
 import { QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
-import { AdminApp } from "./components/admin/AdminApp";
+import { ChunkErrorBoundary } from "./components/ChunkErrorBoundary";
 import "./index.css";
+import { lazyNamed } from "./lib/lazyWithRetry";
 import { queryClient } from "./queryClient";
+
+// 管理者画面は、/admin を開いた時だけ読み込む
+const AdminApp = lazyNamed(() => import("./components/admin/AdminApp"), "AdminApp");
 
 // index.html の <div id="root"> を探す。無ければ画面を作れないので、ここで止める
 const rootElement = document.getElementById("root");
@@ -25,7 +29,15 @@ const isAdminPath = window.location.pathname === "/admin" || window.location.pat
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      {isAdminPath ? <AdminApp /> : <App />}
+      {isAdminPath ? (
+        <ChunkErrorBoundary>
+          <Suspense fallback={<p className="p-4 text-sm text-gray-400">読み込み中...</p>}>
+            <AdminApp />
+          </Suspense>
+        </ChunkErrorBoundary>
+      ) : (
+        <App />
+      )}
     </QueryClientProvider>
   </StrictMode>,
 );

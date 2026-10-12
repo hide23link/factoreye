@@ -6,20 +6,30 @@
  * - SaaS（multi_tenant）: 起動時に保存されたリフレッシュトークンで復元を試み、
  *   復元できなければログイン画面を表示する
  */
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
-import { DashboardView } from "./components/DashboardView";
-import { SettingsPage } from "./components/SettingsPage";
-import { SetupWizard } from "./components/SetupWizard";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
-import { LegalPage, type LegalKind } from "./components/LegalPage";
+import type { LegalKind } from "./components/LegalPage";
+import { ChunkErrorBoundary } from "./components/ChunkErrorBoundary";
+import { lazyNamed } from "./lib/lazyWithRetry";
+
+// 画面ごとに分割し、開いた時に読み込む（ダッシュボードのグラフ用ライブラリ recharts などを初期ロードから外す）
+const DashboardView = lazyNamed(() => import("./components/DashboardView"), "DashboardView");
+const SettingsPage = lazyNamed(() => import("./components/SettingsPage"), "SettingsPage");
+const SetupWizard = lazyNamed(() => import("./components/SetupWizard"), "SetupWizard");
+const LegalPage = lazyNamed(() => import("./components/LegalPage"), "LegalPage");
+
+/** 遅延読み込み中の表示。他の「読み込み中」と同じ見た目にする。 */
+function PageFallback() {
+  return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
+}
 
 // ログイン無しで読める公開の文書（パスと画面の対応）
 const LEGAL_PATHS: Record<string, LegalKind> = { "/privacy": "privacy", "/terms": "terms" };
@@ -185,14 +195,19 @@ function AppShell() {
         </div>
       </header>
       <main className="pb-20 sm:pb-0">
-        {view === "settings" && <SettingsPage />}
-        {view === "wizard" && <SetupWizard />}
-        {view === "main" &&
-          (selectedDashboardId ? (
-            <DashboardView dashboardId={selectedDashboardId} />
-          ) : (
-            <DashboardListPage />
-          ))}
+        {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key） */}
+        <ChunkErrorBoundary key={view}>
+          <Suspense fallback={<PageFallback />}>
+            {view === "settings" && <SettingsPage />}
+            {view === "wizard" && <SetupWizard />}
+            {view === "main" &&
+              (selectedDashboardId ? (
+                <DashboardView dashboardId={selectedDashboardId} />
+              ) : (
+                <DashboardListPage />
+              ))}
+          </Suspense>
+        </ChunkErrorBoundary>
       </main>
       <BottomNav />
     </div>
@@ -250,7 +265,13 @@ function App() {
   // 公開の文書（プライバシーポリシー・利用規約）は、ログインの状態に関係なく表示する
   const legalKind = LEGAL_PATHS[window.location.pathname];
   if (legalKind) {
-    return <LegalPage kind={legalKind} />;
+    return (
+      <ChunkErrorBoundary>
+        <Suspense fallback={<PageFallback />}>
+          <LegalPage kind={legalKind} />
+        </Suspense>
+      </ChunkErrorBoundary>
+    );
   }
 
   // multi-tenant かつセッション復元中
