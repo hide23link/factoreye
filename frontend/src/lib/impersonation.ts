@@ -5,6 +5,8 @@
  *   新しいタブは、開いた時点の sessionStorage の写しを受け取るので、そこから読む
  * - 期限（短い）を過ぎたものは使わない。リフレッシュトークンは扱わない
  * - 利用者本人のログイン（localStorage のリフレッシュトークン）とは、別の鍵で保存する
+ *
+ * 【誰が使うか】App.tsx（読む）、AdminUserModal.tsx（書く）、useAuthStore.ts。
  */
 
 const KEY = "factoreye_impersonation";

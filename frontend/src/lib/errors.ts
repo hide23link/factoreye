@@ -3,6 +3,8 @@
  *
  * ApiError は、HTTP の状態コード（status）を持つ。画面は、メッセージの文字列ではなく status で判断する。
  * message は従来どおり「METHOD path failed: status 本文」の形（ログ・開発者向け。利用者には出さない）。
+ *
+ * 【誰が使うか】lib/api.ts（ApiError を投げる）と、エラーを画面に出す components/（文言への変換）。
  */
 
 /** API が失敗の状態コード（4xx / 5xx）で応答したときの例外。 */

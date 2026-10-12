@@ -1,6 +1,9 @@
 /**
  * 管理者の一覧画面。上部に全体の件数と DB の使用量、下に利用者の一覧（検索つき）を出す。
  * 行を選ぶと、利用者の詳細（AdminUserModal）を開く。
+ *
+ * 【誰が使うか】AdminApp.tsx が、管理者トークンがあるときに出す。
+ * 【引数（props）】token=管理者トークン、onAuthError=トークンが失効（401）したときの処理（ログアウトさせる）。
  */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -83,7 +86,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
       <div className="mb-3 flex items-center gap-3">
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(event) => setQuery(event.target.value)}
           placeholder="メール・ワークスペース名で検索"
           className="w-full max-w-xs rounded border border-gray-300 px-2 py-1.5 text-sm"
         />

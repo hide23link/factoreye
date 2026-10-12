@@ -1,6 +1,8 @@
 /**
  * アラームの一覧と、確認（既読）の操作。
  * 状態（発生中・確認済み・解決済み・すべて）で絞り込める。既定は「発生中」。
+ *
+ * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";

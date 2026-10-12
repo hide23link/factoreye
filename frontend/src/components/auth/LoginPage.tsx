@@ -2,6 +2,9 @@
  * SaaS 版の入口の画面。「新規登録」と「ログイン」の2つのタブを持つ。
  * 成功するとトークンを保存し、利用者の情報を読み込んでから、画面の本体へ進む。
  * self-hosted では表示されない（App.tsx で SaaS のときだけ使う）。
+ *
+ * 【誰が使うか】App.tsx が、SaaS 版でログインしていないときに出す。
+ * 【引数（props）】onAuthenticated = ログイン・登録に成功したときに呼ぶ処理。
  */
 import { useState } from "react";
 
@@ -48,7 +51,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
           type="email"
           required
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(event) => setEmail(event.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="you@example.com"
           autoComplete="email"
@@ -63,7 +66,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
           type="password"
           required
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(event) => setPassword(event.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="••••••••"
           autoComplete="current-password"
@@ -119,7 +122,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           type="email"
           required
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(event) => setEmail(event.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="you@example.com"
           autoComplete="email"
@@ -134,7 +137,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           type="text"
           required
           value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
+          onChange={(event) => setWorkspaceName(event.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="田中工場"
         />
@@ -150,7 +153,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           required
           minLength={8}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(event) => setPassword(event.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="••••••••"
           autoComplete="new-password"

@@ -4,6 +4,9 @@
  * 表示する時間範囲は、ダッシュボードで 1 つだけ持つ（useTimeRangeStore）。
  * センサーごとに間引いたデータを取り（useQueries）、区間の開始時刻をそろえて1本の表にしてから描く。
  * 同じ範囲・同じ区間数で取るので、時間軸はすべてのセンサーで一致する。
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "MultiSensorComparison" のときに出す。
+ * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
  */
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";

@@ -5,6 +5,9 @@
  * - 今: 右端を現在時刻にして、直近モードに戻す
  * - ＋・－: 範囲の幅を半分・2 倍にする
  * - 期間: プリセット、または開始と終了を入力した任意の期間
+ *
+ * 【誰が使うか】DashboardView.tsx が、画面の上部に置く。引数（props）はない
+ * （表示範囲は、useTimeRangeStore に直接読み書きする）。
  */
 import { useState } from "react";
 
@@ -128,7 +131,7 @@ export function TimeRangeControls() {
       <select
         aria-label="表示期間"
         value={presetKeyOf(range) ?? "custom"}
-        onChange={(e) => {
+        onChange={(event) => {
           const preset = PRESETS.find((p) => p.key === e.target.value);
           if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
         }}
@@ -156,7 +159,7 @@ export function TimeRangeControls() {
               type="datetime-local"
               aria-label="開始"
               value={customFrom || toLocalInput(bounds.from)}
-              onChange={(e) => setCustomFrom(e.target.value)}
+              onChange={(event) => setCustomFrom(event.target.value)}
               className="rounded border border-gray-300 px-1 py-0.5"
             />
           </label>
@@ -166,7 +169,7 @@ export function TimeRangeControls() {
               type="datetime-local"
               aria-label="終了"
               value={customTo || toLocalInput(bounds.to)}
-              onChange={(e) => setCustomTo(e.target.value)}
+              onChange={(event) => setCustomTo(event.target.value)}
               className="rounded border border-gray-300 px-1 py-0.5"
             />
           </label>

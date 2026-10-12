@@ -1,6 +1,8 @@
 /**
  * バックエンドの接続状態（/health の結果）を持つストア。
  * 画面の上部の表示（HealthBadge）が、この値を読む。
+ *
+ * 【誰が使うか】App.tsx の HealthBadge（画面の上部の接続表示）。
  */
 import { create } from "zustand";
 

@@ -3,6 +3,9 @@
  * - 稼働中か停止中か: 直近の生産数（測定値）が、しきい値（onThreshold）を超えているか
  * - 直近 1 時間と本日の累計: 測定値の合計（集計 API を使う）
  * - 目標達成率: 本日の累計 ÷ 本日の目標（dailyTarget）
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "ProductionStatus" のときに出す。
+ * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
  */
 import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
 import type { Widget } from "../../types";

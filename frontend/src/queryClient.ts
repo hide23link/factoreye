@@ -3,6 +3,8 @@
  *
  * - staleTime 2 秒: 取得したデータを2秒は新しいものとして扱い、同じ要求を連続で送らない
  * - retry 1: 失敗したら1回だけ再試行する（通信の一時的な失敗を吸収する）
+ *
+ * 【誰が使うか】main.tsx が、QueryClientProvider に渡す（全体で1つ）。
  */
 import { QueryClient } from "@tanstack/react-query";
 

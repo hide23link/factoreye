@@ -3,6 +3,9 @@
  *
  * ⚠️ 本文は草案。法務の確認と、運営者（事業者）の情報の記入が済むまで、公開しないこと。
  * 「要確認」と書かれた箇所は、確定していない内容。
+ *
+ * 【誰が使うか】App.tsx が、URL が /privacy か /terms のときに出す。
+ * 【引数（props）】kind = "privacy"（プライバシーポリシー）か "terms"（利用規約）。
  */
 
 export type LegalKind = "privacy" | "terms";

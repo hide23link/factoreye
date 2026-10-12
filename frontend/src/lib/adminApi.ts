@@ -1,5 +1,6 @@
 // 管理者API（/api/admin）のクライアント。通常ユーザーの lib/api.ts とは別管理。
 // トークンは呼び出し側（管理者ストア）が持ち、ここでは保存しない。
+// 【誰が使うか】管理者画面（AdminLoginPage、AdminUsersPage、AdminUserModal、IngestLimitCard）。
 import { API_BASE_URL } from "./api";
 
 /** 管理者 API の失敗（HTTP の状態コードを持つ）。画面は status で、失効（401）などを判断する。 */

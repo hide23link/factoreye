@@ -1,6 +1,8 @@
 /**
  * 画面の状態（どの画面を見ているか、どのダッシュボードを選んでいるか、追加画面を開いているか）。
  * zustand（小さな状態管理ライブラリ）のストア。画面のどこからでも、同じ状態を読み書きできる。
+ *
+ * 【誰が使うか】App.tsx（メニュー）、DashboardListPage、DashboardView、SetupWizard。
  */
 import { create } from "zustand";
 

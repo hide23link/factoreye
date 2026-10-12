@@ -2,6 +2,8 @@
  * Discord 通知の設定パネル。
  * 重故障と軽故障の送信先（Webhook URL）、有効/無効、重故障の再通知（間隔）を編集して保存する。
  * 入力欄は、サーバーの値で初期化したあとは、利用者の編集を優先する（保存するまでサーバーには送らない）。
+ *
+ * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -79,7 +81,7 @@ export function NotificationSettingsPanel() {
             <input
               type="url"
               value={webhookUrlCritical}
-              onChange={(e) => setWebhookUrlCritical(e.target.value)}
+              onChange={(event) => setWebhookUrlCritical(event.target.value)}
               placeholder="https://discord.com/api/webhooks/..."
               className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
@@ -90,7 +92,7 @@ export function NotificationSettingsPanel() {
               <input
                 type="checkbox"
                 checked={repeatEnabled}
-                onChange={(e) => setRepeatEnabled(e.target.checked)}
+                onChange={(event) => setRepeatEnabled(event.target.checked)}
                 className="h-4 w-4 rounded border-gray-300"
               />
               重故障が解決しないまま一定時間が経過したら再通知する
@@ -102,7 +104,7 @@ export function NotificationSettingsPanel() {
                 min={1}
                 value={repeatIntervalMinutes}
                 disabled={!repeatEnabled}
-                onChange={(e) => setRepeatIntervalMinutes(Number(e.target.value))}
+                onChange={(event) => setRepeatIntervalMinutes(Number(event.target.value))}
                 className="w-20 rounded border border-gray-300 px-2 py-1 disabled:bg-gray-100 disabled:text-gray-400"
               />
               <span>分</span>
@@ -117,7 +119,7 @@ export function NotificationSettingsPanel() {
             <input
               type="url"
               value={webhookUrlWarning}
-              onChange={(e) => setWebhookUrlWarning(e.target.value)}
+              onChange={(event) => setWebhookUrlWarning(event.target.value)}
               placeholder="https://discord.com/api/webhooks/..."
               className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
@@ -130,7 +132,7 @@ export function NotificationSettingsPanel() {
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
+              onChange={(event) => setEnabled(event.target.checked)}
               className="h-4 w-4 rounded border-gray-300"
             />
             通知を有効にする

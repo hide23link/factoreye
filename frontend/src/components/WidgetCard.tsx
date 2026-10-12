@@ -2,6 +2,9 @@
  * ダッシュボードに置かれた1つのウィジェットの枠。
  * 種類に応じた中身（WidgetBody）を選び、編集（WidgetFormModal）と削除の操作を付ける。
  * ドラッグで位置を変えられるように、つまみ（widget-drag-handle）を表示する。
+ *
+ * 【誰が使うか】DashboardView.tsx が、ウィジェットの数だけ並べる。
+ * 【引数（props）】widget = このウィジェット、dashboard = 属するダッシュボード（どちらも DashboardView が渡す）。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useState } from "react";

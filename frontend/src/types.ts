@@ -3,6 +3,8 @@
  *
  * 注意: JSON の項目名は camelCase（例: ingestKey）。バックエンドの snake_case（ingest_key）とは、
  * バックエンドの CamelModel（app/schemas.py）が変換している。ここでは camelCase で書く。
+ *
+ * 【誰が使うか】lib/api.ts と、各画面・ウィジェット。バックエンドの schemas.py（API の入出力の形）と対応する。
  */
 
 // ---- Auth (Phase 0.5) ----

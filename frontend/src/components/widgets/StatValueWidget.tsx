@@ -1,6 +1,9 @@
 /**
  * 最新値を大きく表示するウィジェット（Grafana の Stat パネルを参考にした）。
  * センサーのしきい値を超えると、背景と文字の色を変える。下部には直近の推移（スパークライン）を出す。
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "StatValue" のときに出す。
+ * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
  */
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 

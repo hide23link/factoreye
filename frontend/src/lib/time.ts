@@ -6,6 +6,8 @@
  *
  * @param ms 表示する時刻（ミリ秒の Unix 時刻）
  * @param timeRangeHours グラフの表示範囲（時間）
+ *
+ * 【誰が使うか】SensorGraphWidget と MultiSensorComparisonWidget（グラフの横軸の文字）。
  */
 export function formatChartTime(ms: number, timeRangeHours: number): string {
   return timeRangeHours > 24

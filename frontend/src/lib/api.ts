@@ -5,6 +5,9 @@
  * - request: 通常の呼び出し。JWT（ログイン）を自動で付け、401 なら一度だけ再発行して再試行する
  * - rawFetch: 認証もリトライもしない、素の呼び出し（再発行そのものに使う）
  * 応答が失敗（HTTP エラー）のときは、例外（Error）を投げる。呼び出し側（React Query 等）が受け止める。
+ *
+ * 【誰が使うか】各画面・ウィジェット（components/）と、hooks/queries.ts が呼ぶ。
+ * バックエンドの URL は、backend/app/api/ の各ファイルの冒頭の「呼ばれ方」と対応している。
  */
 import type {
   Alarm,

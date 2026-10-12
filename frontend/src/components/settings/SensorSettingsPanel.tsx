@@ -2,6 +2,8 @@
  * センサーの管理パネル。一覧（編集・有効/無効・削除）と、新規登録のフォームを持つ。
  *
  * 閾値（しきい値）は空欄なら「なし」（判定しない）。Free Tier の上限に達すると、案内を出す。
+ *
+ * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -31,7 +33,7 @@ function thresholdInput(
       type="number"
       placeholder={placeholder}
       value={value}
-      onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+      onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
       className="w-16 rounded border border-gray-300 px-1.5 py-1 text-sm"
     />
   );
@@ -117,7 +119,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           <td className="p-2">
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(event) => setName(event.target.value)}
               className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
             />
           </td>
@@ -125,7 +127,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           <td className="p-2">
             <input
               value={unit}
-              onChange={(e) => setUnit(e.target.value)}
+              onChange={(event) => setUnit(event.target.value)}
               list="unit-presets"
               className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
             />
@@ -149,7 +151,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
               type="number"
               min={0}
               value={deadBand}
-              onChange={(e) => setDeadBand(e.target.value === "" ? "" : Number(e.target.value))}
+              onChange={(event) => setDeadBand(event.target.value === "" ? "" : Number(event.target.value))}
               className="w-14 rounded border border-gray-300 px-1.5 py-1 text-sm"
             />
           </td>
@@ -275,7 +277,7 @@ export function SensorSettingsPanel() {
           名前
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(event) => setName(event.target.value)}
             placeholder="圧力計A-1"
             className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
           />
@@ -284,7 +286,7 @@ export function SensorSettingsPanel() {
           Ingest Key
           <input
             value={ingestKey}
-            onChange={(e) => setIngestKey(e.target.value)}
+            onChange={(event) => setIngestKey(event.target.value)}
             className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
           />
         </label>
@@ -292,7 +294,7 @@ export function SensorSettingsPanel() {
           単位
           <input
             value={unit}
-            onChange={(e) => setUnit(e.target.value)}
+            onChange={(event) => setUnit(event.target.value)}
             list="unit-presets"
             className="mt-1 block w-20 rounded border border-gray-300 px-2 py-1 text-sm"
           />

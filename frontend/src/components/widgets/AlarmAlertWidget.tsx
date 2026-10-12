@@ -1,6 +1,8 @@
 /**
  * 発生中のアラームを一覧にして、確認（既読）できるウィジェット。
  * 発生中（active）と、確認済み（acknowledged）を並べて出す。解決すると自然に一覧から消える。
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "AlarmAlert" のときに出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 

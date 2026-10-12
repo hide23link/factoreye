@@ -2,6 +2,10 @@
  * ウィジェットの追加・編集の小窓。
  * 種類を選ぶと、その種類に必要な項目（センサー、グラフの色、表示範囲、しきい値など）だけを出す。
  * 送信すると、追加は新しい位置（一番下）に、編集は既存の位置のまま保存する。
+ *
+ * 【誰が使うか】DashboardView.tsx（追加）と WidgetCard.tsx（編集）。
+ * 【引数（props）】dashboard = 追加・編集する先のダッシュボード、widget = 編集するウィジェット
+ * （省略すると追加になる）、onClose = 閉じるときの処理。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -183,7 +187,7 @@ export function WidgetFormModal({
           種類
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as WidgetType)}
+            onChange={(event) => setType(event.target.value as WidgetType)}
             disabled={isEdit}
             className="mt-1 w-full rounded border border-gray-300 px-2 py-1 disabled:bg-gray-100"
           >
@@ -200,7 +204,7 @@ export function WidgetFormModal({
             センサー
             <select
               value={sensorId}
-              onChange={(e) => setSensorId(e.target.value)}
+              onChange={(event) => setSensorId(event.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
             >
               <option value="">選択してください</option>
@@ -222,7 +226,7 @@ export function WidgetFormModal({
                   <input
                     type="checkbox"
                     checked={sensorIds.includes(s.id)}
-                    onChange={(e) =>
+                    onChange={(event) =>
                       setSensorIds((prev) =>
                         e.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id),
                       )
@@ -241,7 +245,7 @@ export function WidgetFormModal({
               グラフ種類
               <select
                 value={graphType}
-                onChange={(e) =>
+                onChange={(event) =>
                   setGraphType(e.target.value as NonNullable<WidgetConfig["graphType"]>)
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
@@ -298,7 +302,7 @@ export function WidgetFormModal({
                         min={0}
                         max={255}
                         value={rgb[i]}
-                        onChange={(e) => {
+                        onChange={(event) => {
                           const next: [number, number, number] = [...rgb];
                           next[i] = Number(e.target.value);
                           setRgb(next);
@@ -331,7 +335,7 @@ export function WidgetFormModal({
                   type="number"
                   placeholder="自動"
                   value={yAxisMin}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     setYAxisMin(e.target.value === "" ? "" : Number(e.target.value))
                   }
                   className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
@@ -343,7 +347,7 @@ export function WidgetFormModal({
                   type="number"
                   placeholder="自動"
                   value={yAxisMax}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     setYAxisMax(e.target.value === "" ? "" : Number(e.target.value))
                   }
                   className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
@@ -360,7 +364,7 @@ export function WidgetFormModal({
               <input
                 type="number"
                 value={onThreshold}
-                onChange={(e) =>
+                onChange={(event) =>
                   setOnThreshold(e.target.value === "" ? "" : Number(e.target.value))
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
@@ -373,7 +377,7 @@ export function WidgetFormModal({
                 placeholder="未設定（達成率を表示しない）"
                 min={0}
                 value={dailyTarget}
-                onChange={(e) =>
+                onChange={(event) =>
                   setDailyTarget(e.target.value === "" ? "" : Number(e.target.value))
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
@@ -393,7 +397,7 @@ export function WidgetFormModal({
                   step={0.5}
                   placeholder={String(DEFAULT_TIME_RANGE_HOURS)}
                   value={timeRangeHours}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     setTimeRangeHours(e.target.value === "" ? "" : Number(e.target.value))
                   }
                   className="w-20 rounded border border-gray-300 px-2 py-1"
@@ -408,7 +412,7 @@ export function WidgetFormModal({
                 min={0}
                 max={6}
                 value={decimals}
-                onChange={(e) =>
+                onChange={(event) =>
                   setDecimals(e.target.value === "" ? "" : Number(e.target.value))
                 }
                 className="mt-1 w-20 rounded border border-gray-300 px-2 py-1"
