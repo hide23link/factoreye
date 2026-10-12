@@ -238,6 +238,11 @@
 - **理由**: 開発用依存（mypy・pytest など）が約 100 MB を占めていた。多段ビルドと依存の分離で、イメージは 421 MB → 283 MB になった。`python:3.12-alpine` も試したところ 177 MB まで減ったが、musl 上での性能と挙動を確認できていないため採用しない（起動と `/health` の確認までは通過）
 - **影響**: CI（backend-test）と README のチェック手順は `requirements-dev.txt` を入れる。Alpine に変える場合は、性能の計測（py-spy など）から行う
 
+### 2026-10-12 — 復旧ツールのイメージから JIT と Perl を外し、各イメージから pip を外す
+- **判断**: recovery は、postgresql-15 が引く LLVM（JIT）と z3、管理スクリプト用の Perl を、`dpkg --purge --force-depends` と `llvmjit.so` の削除で外す。作業用の Postgres は `jit=off` で起動する（`entrypoint.sh`）。依存は多段ビルドで venv に入れ、pip は venv から外す（backend も同様）。backend は `uvicorn[standard]` をやめ、使う uvloop・httptools だけを入れる（websockets・watchfiles・PyYAML は不要）。pydantic の二重指定と、pydantic-settings が引く python-dotenv の明示指定も整理した
+- **理由**: 実測（Mac arm64）で recovery は 512 MB → 299 MB（libllvm14 100 MB、libz3 21 MB、Perl 約 47 MB、pip 13 MB）。backend は 289 MB → 273 MB。本番（amd64）の recovery は 718 MB だったので、同程度の割合で減る見込み。作業用の DB は initdb・pg_ctl・psql・pg_dump を直接呼ぶだけで、JIT と Perl のスクリプトは使わない。クライアント・サーバーとも本番と同じ 15 系のまま（15.19）。recovery のテスト 72 件（作業用 Postgres への展開・書き戻しを含む）と、コンテナの起動・`/api/info` への認証つき応答、backend のテスト 300 件・ruff・mypy・`alembic upgrade head`・`/health` を確認した
+- **影響**: recovery のイメージには apt の整合が崩れた状態（`dpkg --purge --force-depends`）が残るので、イメージの中で `apt` を使う作業はしない。Postgres を上げるときは、`llvmjit.so` の削除と `jit=off` が引き続き要るかを確認する。frontend は、未使用の依存が無く、イメージは dist を置くだけなので変更なし（バンドルの 785 KB の大半は recharts。遅延読み込みは別の判断）
+
 ## 運用上の注意
 
 これまでの作業で起きた問題から、次の注意を守ること。
