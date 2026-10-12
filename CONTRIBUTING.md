@@ -38,6 +38,7 @@ FactorEye への貢献に興味を持っていただきありがとうござい�
 - **Frontend**: TypeScript（`strict: true`）/ React 18。`any` は使わない（`unknown` を使う）。
 - **命名**: backend は `snake_case`（ファイル）/ `PascalCase`（クラス）、frontend は `kebab-case`（ファイル）/ `PascalCase`（コンポーネント）。
 - **コメント**: 「何を」ではなくコードから読み取れない「なぜ」を書く。
+- **理解しやすさ**: コードを修正・追加するときは、読んで意図が分かる形（分かりやすい命名・小さな関数・「なぜ」のコメント）にする。詳細は ecopower リポジトリ `guidelines/03-development-standards.md` の「理解しやすさ」を参照。
 - DB スキーマの変更は Alembic マイグレーションで行い、破壊的変更は [`CHANGELOG.md`](CHANGELOG.md) の「Removed」に明記する。
 
 ## 依存関係の追加
