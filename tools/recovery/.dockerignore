@@ -5,7 +5,6 @@ tests
 .pytest_cache
 .ruff_cache
 .venv
-tests
 requirements-dev.txt
 README.md
 docker-compose*.yml

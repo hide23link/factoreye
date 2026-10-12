@@ -1,7 +1,6 @@
 # FactorEye 復旧ツール。作業用の Postgres を同じコンテナに入れ、Docker さえあれば
 # どこでも（本番の LXC・ラズパイ・Mac）同じように動くようにする。
-# Postgres は本番（postgres:15）と同じ 15 系。新しい版のダンプは古い版に流し込めないため、
-# 本番の Postgres を上げたら、ここも合わせて上げる。
+
 # ビルド段: 依存だけを venv に入れる（pip 自体は実行に要らないので venv から外す）
 FROM python:3.12-slim-bookworm AS builder
 WORKDIR /app
@@ -10,6 +9,8 @@ RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
     /opt/venv/bin/pip uninstall -y pip
 
+# 実行段: Postgres は本番（postgres:15）と同じ 15 系。新しい版のダンプは古い版に流し込めないため、
+# 本番の Postgres を上げたら、ここも合わせて上げる。
 FROM python:3.12-slim-bookworm
 
 # Debian のパッケージは、入れた時点で既定のクラスタを作ってしまうため止める（作業用の DB は entrypoint が作る）
