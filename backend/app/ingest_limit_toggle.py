@@ -31,7 +31,7 @@ def current(now: datetime | None = None) -> BypassState:
     return _state
 
 
-def is_bypassed(now: datetime | None = None) -> bool:
+def is_limit_off(now: datetime | None = None) -> bool:
     """今、取り込みの制限を外してよいか。"""
     return current(now).until is not None
 

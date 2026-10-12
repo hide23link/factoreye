@@ -61,8 +61,8 @@ def test_enable_sets_a_deadline_and_is_bypassed_until_it_passes() -> None:
     now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
     ingest_limit_toggle.enable(ADMIN_ID, 60, now=now)
 
-    assert ingest_limit_toggle.is_bypassed(now + timedelta(minutes=59))
-    assert not ingest_limit_toggle.is_bypassed(now + timedelta(minutes=60))
+    assert ingest_limit_toggle.is_limit_off(now + timedelta(minutes=59))
+    assert not ingest_limit_toggle.is_limit_off(now + timedelta(minutes=60))
 
 
 def test_expired_state_reports_no_bypass() -> None:
@@ -79,7 +79,7 @@ def test_disable_clears_the_bypass() -> None:
     ingest_limit_toggle.enable(ADMIN_ID, 60)
     ingest_limit_toggle.disable()
 
-    assert not ingest_limit_toggle.is_bypassed()
+    assert not ingest_limit_toggle.is_limit_off()
 
 
 # ── 取り込み API の制限（解除中は通す、解除後は元に戻る） ─────
@@ -94,7 +94,7 @@ def limited_route() -> Callable[..., Any]:
     # 制限は 1 回だけ付ける（テストごとに付けると、slowapi の登録が重なって数え方が崩れる）
     original = settings.ingest_rate_limit
     settings.ingest_rate_limit = TEST_LIMIT
-    wrapped = ingest._ingest_rate_limit(_limited_endpoint)
+    wrapped = ingest.limit_ingest_rate(_limited_endpoint)
     settings.ingest_rate_limit = original
     return wrapped
 
@@ -137,7 +137,7 @@ async def _plain_handler(request: Request) -> dict[str, str]:
 def test_env_off_returns_the_handler_unwrapped() -> None:
     # 環境変数が off のときは、管理画面の状態に関係なく、ラップせずに元の関数を返す
     settings.ingest_rate_limit = "off"
-    assert ingest._ingest_rate_limit(_plain_handler) is _plain_handler
+    assert ingest.limit_ingest_rate(_plain_handler) is _plain_handler
 
 
 # ── 管理者 API ───────────────────────────────────────────────
@@ -208,4 +208,4 @@ async def test_put_rejects_out_of_range_minutes(admin_api: httpx.AsyncClient, mi
     )
 
     assert response.status_code == 422
-    assert ingest_limit_toggle.is_bypassed() is False
+    assert ingest_limit_toggle.is_limit_off() is False
