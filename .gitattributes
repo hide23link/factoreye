@@ -1,0 +1,8 @@
+# 改行コードの正規化（Windows / Mac 両方で開発するため）
+* text=auto
+
+# Linux / Docker 内で実行されるものは常に LF
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
