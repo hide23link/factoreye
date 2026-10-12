@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Suspense } from "react";
+import { Component, Suspense, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChunkErrorBoundary } from "../components/ChunkErrorBoundary";
@@ -64,6 +64,15 @@ describe("importWithRetry", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
+  it("sessionStorage が例外を投げる環境では、再読み込みせずエラーを投げる", async () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    await expect(importWithRetry(() => Promise.reject(chunkError()))).rejects.toThrow(/dynamically imported/);
+    expect(reload).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("チャンク以外のエラーは、再読み込みせずに投げる", async () => {
     await expect(importWithRetry(() => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
     expect(reload).not.toHaveBeenCalled();
@@ -124,5 +133,64 @@ describe("lazyNamed と ChunkErrorBoundary", () => {
     // 「再試行」ボタンは、利用者の操作で再読み込みする
     await user.click(screen.getByRole("button", { name: "再試行" }));
     expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("失敗（再読み込み）→ 再読み込み後に成功 → 印が消える、を lazyNamed 経由で通す", async () => {
+    let attempt = 0;
+    const factory = () =>
+      ++attempt === 1 ? Promise.reject(chunkError()) : Promise.resolve({ Hello });
+    const Lazy1 = lazyNamed(factory as () => Promise<{ Hello: typeof Hello }>, "Hello");
+    const first = render(
+      <ChunkErrorBoundary>
+        <Suspense fallback={<p>読み込み中...</p>}>
+          <Lazy1 />
+        </Suspense>
+      </ChunkErrorBoundary>,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(RELOAD_FLAG_KEY)).not.toBeNull();
+    first.unmount();
+
+    // 再読み込み後を模す: 新しい lazy で、今度は成功する
+    const Lazy2 = lazyNamed(factory as () => Promise<{ Hello: typeof Hello }>, "Hello");
+    render(
+      <ChunkErrorBoundary>
+        <Suspense fallback={<p>読み込み中...</p>}>
+          <Lazy2 />
+        </Suspense>
+      </ChunkErrorBoundary>,
+    );
+    expect(await screen.findByText("こんにちは")).toBeInTheDocument();
+    expect(sessionStorage.getItem(RELOAD_FLAG_KEY)).toBeNull();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("チャンク以外のエラー（boom）は、読み込み失敗の案内にせず、上へ投げ直す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const Lazy = lazyNamed(
+      (() => Promise.reject(new Error("boom"))) as () => Promise<{ Hello: typeof Hello }>,
+      "Hello",
+    );
+    class Upper extends Component<{ children: ReactNode }, { msg: string | null }> {
+      state = { msg: null as string | null };
+      static getDerivedStateFromError(e: Error) {
+        return { msg: e.message };
+      }
+      render() {
+        return this.state.msg ? <p>上位: {this.state.msg}</p> : this.props.children;
+      }
+    }
+    render(
+      <Upper>
+        <ChunkErrorBoundary>
+          <Suspense fallback={<p>読み込み中...</p>}>
+            <Lazy />
+          </Suspense>
+        </ChunkErrorBoundary>
+      </Upper>,
+    );
+    expect(await screen.findByText("上位: boom")).toBeInTheDocument();
+    expect(screen.queryByText(/読み込みに失敗/)).not.toBeInTheDocument();
   });
 });

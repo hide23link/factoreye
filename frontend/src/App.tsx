@@ -195,8 +195,8 @@ function AppShell() {
         </div>
       </header>
       <main className="pb-20 sm:pb-0">
-        {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key） */}
-        <ChunkErrorBoundary key={view}>
+        {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。一覧と詳細の行き来も含む） */}
+        <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>
           <Suspense fallback={<PageFallback />}>
             {view === "settings" && <SettingsPage />}
             {view === "wizard" && <SetupWizard />}
