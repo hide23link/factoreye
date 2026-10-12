@@ -151,7 +151,8 @@ async def register(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already registered")
 
     try:
-        user = User(email=body.email, password_hash=auth_utils.hash_password(body.password))
+        password_hash = await auth_utils.hash_password_async(body.password)
+        user = User(email=body.email, password_hash=password_hash)
         session.add(user)
         await session.flush()  # user.id を確定させてから workspace に使う
 
@@ -200,10 +201,11 @@ async def login(
 
     result = await session.exec(select(User).where(func.lower(User.email) == body.email))
     user = result.first()
-    if user is None:
-        # 未登録でも bcrypt の照合を走らせ、応答時間で登録の有無を推測させない
-        auth_utils.verify_password(body.password, auth_utils.DUMMY_PASSWORD_HASH)
-    if user is None or not auth_utils.verify_password(body.password, user.password_hash):
+    # 未登録でも bcrypt の照合（ダミーのハッシュ）を走らせ、応答時間で登録の有無を推測させない。
+    # 照合は別スレッドで実行する（イベントループを止めない）
+    stored_hash = user.password_hash if user is not None else auth_utils.DUMMY_PASSWORD_HASH
+    password_ok = await auth_utils.verify_password_async(body.password, stored_hash)
+    if user is None or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid email or password",
