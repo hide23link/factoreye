@@ -91,22 +91,20 @@ def _still_breached_with_dead_band(
 async def evaluate_alarms(
     session: AsyncSession,
     pending: "list[PendingReading]",
+    sensors_by_id: Mapping[UUID, Sensor],
     notif_settings_by_workspace: Mapping[UUID | None, NotificationSettings],
 ) -> list[AlarmNotification]:
     """新規に発火したAlarmの通知用データを返す（ORMオブジェクトはセッション終了後に参照できないため）。
 
     再通知の間隔は、センサーのワークスペースの通知設定に従う（設定が無いワークスペースは再通知しない）。
-    処理に必要なデータは、最初にまとめて読む（センサーと、発生中のアラーム）。
-    1件ずつ DB を読みに行かないようにして、受信の多い時もまとめて処理できるようにする。
+    センサーは、呼び出し側（flush）が1回だけ読んだものを受け取る（ここでは読み直さない。
+    sensors_by_id に無いセンサーの測定値は、削除済みとして何もしない）。
+    発生中のアラームは、最初にまとめて読む。1件ずつ DB を読みに行かないようにして、
+    受信の多い時もまとめて処理できるようにする。
     """
     sensor_ids = {p.sensor_id for p in pending}
     if not sensor_ids:
         return []
-
-    sensors_result = await session.exec(
-        select(Sensor).where(Sensor.id.in_(sensor_ids))  # type: ignore[attr-defined]
-    )
-    sensors_by_id = {s.id: s for s in sensors_result.all()}
 
     # 発生中（解決していない）のアラームを、センサーごとに1件だけ持つ辞書にする。
     # 同じセンサーに発生中のアラームは同時に1件だけ、という前提で扱う
