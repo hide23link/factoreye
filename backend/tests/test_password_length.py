@@ -178,3 +178,46 @@ def test_main_app_registers_the_validation_handler() -> None:
     from app.main import app
 
     assert app.exception_handlers[RequestValidationError] is validation_error_handler
+
+
+
+
+async def test_login_with_lone_surrogate_is_401_like_wrong_password(
+    api: httpx.AsyncClient,
+) -> None:
+    email = _email()
+    assert (await _register(api, email, "password123")).status_code == 201
+    body = '{"email": "%s", "password": "\\ud800x"}'
+    headers = {"Content-Type": "application/json"}
+    bad = await api.post("/api/auth/login", content=body % email, headers=headers)
+    wrong = await api.post("/api/auth/login", json={"email": email, "password": "wrongpass1"})
+    unknown = await api.post("/api/auth/login", content=body % _email(), headers=headers)
+    assert bad.status_code == wrong.status_code == unknown.status_code == 401
+    assert bad.json() == wrong.json() == unknown.json()
+
+
+def test_verify_admin_with_lone_surrogate_is_false() -> None:
+    """管理者ログインの照合（既知の ID・未知の ID）は、例外にせず False を返す。"""
+    assert admin_accounts.verify_admin(ADMIN_ID, "\ud800x") is False
+    assert admin_accounts.verify_admin("ghost", "\ud800x") is False
+
+
+async def test_admin_login_with_lone_surrogate_is_not_500(api: httpx.AsyncClient) -> None:
+    # 管理者ログインの入力は長さの制約があり、孤立サロゲートは入力の検証で 422 になる
+    # （パスワードは応答に含まれない）。500 にならないことを確かめる
+    resp = await api.post(
+        "/api/admin/login",
+        content='{"adminId": "admin", "password": "\\ud800x"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 422
+    assert "input" not in resp.text
+
+
+async def test_register_with_lone_surrogate_stays_422(api: httpx.AsyncClient) -> None:
+    resp = await api.post(
+        "/api/auth/register",
+        content='{"email": "s@example.com", "password": "\\ud800xxxxxxxx", "workspaceName": "W"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 422
