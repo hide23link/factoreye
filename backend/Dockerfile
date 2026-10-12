@@ -6,7 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
+    /opt/venv/bin/pip uninstall -y pip
 
 # 実行段: venvと本体コードだけを持つ
 FROM python:3.12-slim

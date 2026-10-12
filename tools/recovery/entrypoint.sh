@@ -14,7 +14,7 @@ if [ -z "${SCRATCH_DSN:-}" ]; then
   # 秘密の環境変数（TARGET_DATABASE_URL・AWS の鍵・RECOVERY_PASSWORD）を Postgres に渡さない。
   # 展開するバックアップは、乗っ取られた本番で書き換えられている前提で扱うため
   env -i PATH="$PATH" LANG=C.UTF-8 pg_ctl -D "$DATA" -l /var/lib/recovery/scratch-pg.log -w \
-    -o "-c listen_addresses='' -k $SOCK" start
+    -o "-c jit=off -c listen_addresses='' -k $SOCK" start
   export SCRATCH_DSN="postgresql://recovery@/postgres?host=$SOCK"
 fi
 
