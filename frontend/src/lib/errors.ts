@@ -44,7 +44,7 @@ export function describeAuthError(err: unknown, kind: "login" | "register"): str
   if (status === 409) return "このメールアドレスは、すでに登録されています。";
   if (status === 422) {
     return kind === "register"
-      ? "入力内容を確認してください（メールアドレスの形式、パスワードは8文字以上）。"
+      ? "入力内容を確認してください（メールアドレスの形式、パスワードは8文字以上、72バイト以内。日本語は24文字まで）。"
       : "メールアドレスの形式を確認してください。";
   }
   return commonMessage(status);

@@ -23,7 +23,7 @@ describe("describeAuthError", () => {
       "メールアドレスまたはパスワードが正しくありません。",
     );
     expect(describeAuthError(new ApiError(409, "x"), "register")).toMatch(/すでに登録/);
-    expect(describeAuthError(new ApiError(422, "x"), "register")).toMatch(/8文字以上/);
+    expect(describeAuthError(new ApiError(422, "x"), "register")).toMatch(/8文字以上、72バイト以内/);
     expect(describeAuthError(new ApiError(429, "x"), "login")).toMatch(/試行回数/);
     expect(describeAuthError(new ApiError(500, "x"), "login")).toMatch(/サーバーで問題/);
     expect(describeAuthError(new TypeError("Failed to fetch"), "login")).toMatch(/接続できませんでした/);
