@@ -26,7 +26,7 @@ from typing import Any
 from uuid import UUID, uuid4  # id に使う、重ならない長い番号
 
 # Index = 検索を速くする索引、JSONB = PostgreSQL の JSON 型（設定を柔軟に保存する）
-from sqlalchemy import Column, Index, column, func, text
+from sqlalchemy import Column, Enum, Index, column, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 # Field = 列の細かい指定、Relationship = テーブル同士の関係
@@ -46,8 +46,8 @@ class AlarmStatus(StrEnum):
     RESOLVED = "resolved"
 
 
-class ThresholdBreached(StrEnum):
-    """どちら側のしきい値を超えたか。下限（min）か上限（max）。"""
+class MinMax(StrEnum):
+    """どちら側のしきい値を超えたか。下限（min）か上限（max）。（旧名 ThresholdBreached）"""
 
     MIN = "min"
     MAX = "max"
@@ -161,7 +161,10 @@ class Alarm(SQLModel, table=True):
     acknowledged_by: str | None = Field(default=None, max_length=100)
     value: float
     status: AlarmStatus = Field(default=AlarmStatus.ACTIVE)
-    threshold_breached: ThresholdBreached
+    # DB 上の型の名前は、旧クラス名の "thresholdbreached" のまま（変えると既存 DB と合わない）
+    threshold_breached: MinMax = Field(
+        sa_column=Column(Enum(MinMax, name="thresholdbreached"), nullable=False)
+    )
     severity: AlarmSeverity = Field(default=AlarmSeverity.CRITICAL)
     # 重故障の再通知（NotificationSettings.critical_repeat_enabled）の間隔判定に使う。
     # 通知を送るたび（初回発火・重要度変化・再通知）に更新する

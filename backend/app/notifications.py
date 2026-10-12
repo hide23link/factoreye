@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.db.models import AlarmSeverity, ThresholdBreached
+from app.db.models import AlarmSeverity, MinMax
 from app.webhooks import assert_webhook_url_allowed, describe_send_error, redact_url
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 # 重要度ごとの表示（絵文字と日本語の名前）
 _SEVERITY_LABEL = {AlarmSeverity.CRITICAL: ("🚨", "重故障"), AlarmSeverity.WARNING: ("⚠️", "軽故障")}
 # しきい値のどちら側を超えたかの表示
-_DIRECTION_LABEL = {ThresholdBreached.MAX: "上限超過", ThresholdBreached.MIN: "下限未達"}
+_DIRECTION_LABEL = {MinMax.MAX: "上限超過", MinMax.MIN: "下限未達"}
 
 
 def _format_jst(moment: datetime) -> str:
@@ -53,7 +53,7 @@ class AlarmNotification:
     sensor_name: str
     sensor_unit: str
     value: float
-    threshold_breached: ThresholdBreached
+    threshold_breached: MinMax
     severity: AlarmSeverity
     # 重故障の再通知（NotificationSettings.critical_repeat_enabled）で送られた通知かどうか。
     # triggered_atは元の発生時刻のまま（再通知のたびに更新はしない）

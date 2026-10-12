@@ -23,7 +23,7 @@ from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
 from app.auth import MAX_PASSWORD_BYTES
-from app.db.models import AlarmSeverity, AlarmStatus, ThresholdBreached, WebhookEventType
+from app.db.models import AlarmSeverity, AlarmStatus, MinMax, WebhookEventType
 
 # 取り込み 1 リクエストあたりの測定値の最大件数
 MAX_READINGS_PER_REQUEST = 1000
@@ -213,7 +213,7 @@ class AlarmRead(CamelModel):
     acknowledged_by: str | None
     value: float
     status: AlarmStatus
-    threshold_breached: ThresholdBreached
+    threshold_breached: MinMax
     severity: AlarmSeverity
 
 

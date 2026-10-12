@@ -27,9 +27,9 @@ from app.db.models import (
     Alarm,
     AlarmSeverity,
     AlarmStatus,
+    MinMax,
     NotificationSettings,
     Sensor,
-    ThresholdBreached,
 )
 from app.notifications import AlarmNotification
 
@@ -45,24 +45,24 @@ if TYPE_CHECKING:
 
 def _check_threshold(
     sensor: Sensor, value: float
-) -> tuple[ThresholdBreached, AlarmSeverity] | None:
+) -> tuple[MinMax, AlarmSeverity] | None:
     """重故障（より極端な値）を優先して判定し、無ければ軽故障を判定する。"""
     if sensor.threshold_max_critical is not None and value > sensor.threshold_max_critical:
-        return ThresholdBreached.MAX, AlarmSeverity.CRITICAL
+        return MinMax.MAX, AlarmSeverity.CRITICAL
     if sensor.threshold_min_critical is not None and value < sensor.threshold_min_critical:
-        return ThresholdBreached.MIN, AlarmSeverity.CRITICAL
+        return MinMax.MIN, AlarmSeverity.CRITICAL
     if sensor.threshold_max_warning is not None and value > sensor.threshold_max_warning:
-        return ThresholdBreached.MAX, AlarmSeverity.WARNING
+        return MinMax.MAX, AlarmSeverity.WARNING
     if sensor.threshold_min_warning is not None and value < sensor.threshold_min_warning:
-        return ThresholdBreached.MIN, AlarmSeverity.WARNING
+        return MinMax.MIN, AlarmSeverity.WARNING
     return None
 
 
 def _threshold_value(
-    sensor: Sensor, breached: ThresholdBreached, severity: AlarmSeverity
+    sensor: Sensor, breached: MinMax, severity: AlarmSeverity
 ) -> float | None:
     """発生時に超えたしきい値の数値を返す（解除の判定に使う）。設定が無ければ None。"""
-    if breached == ThresholdBreached.MAX:
+    if breached == MinMax.MAX:
         return (
             sensor.threshold_max_critical
             if severity == AlarmSeverity.CRITICAL
@@ -76,7 +76,7 @@ def _threshold_value(
 
 
 def _still_breached_with_dead_band(
-    sensor: Sensor, value: float, breached: ThresholdBreached, severity: AlarmSeverity
+    sensor: Sensor, value: float, breached: MinMax, severity: AlarmSeverity
 ) -> bool:
     """不感帯を考慮した解除判定。発生時に使った閾値まで戻っただけでは解除しない
     （閾値 ∓ 不感帯を超えて戻るまで「まだ発生中」とみなし、チラつきを防ぐ）。"""
@@ -84,7 +84,7 @@ def _still_breached_with_dead_band(
     if threshold is None:
         return False
     band = sensor.threshold_dead_band
-    if breached == ThresholdBreached.MAX:
+    if breached == MinMax.MAX:
         return value > threshold - band
     return value < threshold + band
 
