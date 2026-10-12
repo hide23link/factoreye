@@ -65,6 +65,30 @@ describe("ProductionStatusWidget", () => {
     expect(await screen.findByText("300")).toBeInTheDocument();
   });
 
+  it("測定値は最新の 1 件だけを取りに行く（limit=1）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
+    vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 0, count: 0 });
+
+    renderWithQueryClient(<ProductionStatusWidget widget={makeWidget()} />);
+
+    await screen.findByText("停止中");
+    expect(api.fetchSensorReadings).toHaveBeenCalledWith("s1", expect.any(String), 1);
+  });
+
+  it("1 件だけでも、しきい値以下なら停止中、超えれば稼働中（件数が少なくても判定は同じ）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue({
+      readings: [{ id: 1, sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      total: 1,
+    });
+    vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 0, count: 0 });
+
+    renderWithQueryClient(<ProductionStatusWidget widget={makeWidget({ onThreshold: 5 })} />);
+
+    expect(await screen.findByText("停止中")).toBeInTheDocument();
+  });
+
   it("dailyTarget未設定時は達成率を表示しない", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });

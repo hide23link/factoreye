@@ -23,6 +23,9 @@ import {
 // 画面を更新する間隔（ミリ秒）。ポーリング（一定間隔で取り直す）の周期
 export const POLL_INTERVAL_MS = 5000;
 
+// 測定値の履歴の既定の取得件数（グラフ・スパークライン用）
+export const DEFAULT_READINGS_LIMIT = 500;
+
 // グラフの直近モードで、表示の範囲とデータを動かす間隔（ミリ秒）。
 // 5 秒ごとに全グラフを描き直すと見にくいため、30 秒ごとにまとめて動かす
 export const LIVE_CHART_INTERVAL_MS = 30000;
@@ -68,14 +71,19 @@ export const useMigrationStatus = () =>
   useQuery({ queryKey: ["migration-status"], queryFn: fetchMigrationStatus, staleTime: Infinity });
 
 /**
- * 1センサーの測定値の履歴（既定は直近 1 時間）。sensorId が無いときは取りに行かない。
+ * 1センサーの測定値の履歴（既定は直近 1 時間、最大 limit 件・新しい順）。sensorId が無いときは取りに行かない。
  */
-export const useSensorReadings = (sensorId: string | null, hours = 1) =>
+export const useSensorReadings = (
+  sensorId: string | null,
+  hours = 1,
+  limit = DEFAULT_READINGS_LIMIT,
+) =>
   useQuery({
-    queryKey: ["readings", sensorId, hours],
+    // limit が違う取得（最新 1 件だけ／グラフ用）のキャッシュが混ざらないよう、キーに含める
+    queryKey: ["readings", sensorId, hours, limit],
     queryFn: () => {
       const from = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-      return fetchSensorReadings(sensorId as string, from);
+      return fetchSensorReadings(sensorId as string, from, limit);
     },
     enabled: sensorId !== null,
     refetchInterval: POLL_INTERVAL_MS,

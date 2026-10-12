@@ -227,8 +227,12 @@ export const deleteSensor = (id: string) =>
 // ── Readings ──────────────────────────────────────────────────
 // 測定値の履歴と集計（グラフ・累計に使う）
 
-export const fetchSensorReadings = (sensorId: string, from?: string) => {
-  const params = new URLSearchParams({ limit: "500" });
+export const fetchSensorReadings = (
+  sensorId: string,
+  from?: string,
+  limit = 500, // 既定はグラフ・スパークライン用。最新 1 件だけ要る呼び出しは 1 にする
+) => {
+  const params = new URLSearchParams({ limit: String(limit) });
   if (from) params.set("from", from);
   return request<{ readings: Reading[]; total: number }>(
     `/api/sensors/${sensorId}/readings?${params.toString()}`,
