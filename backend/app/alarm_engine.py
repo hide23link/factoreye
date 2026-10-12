@@ -1,11 +1,17 @@
-"""アラーム評価エンジン: batch flush内でReading INSERT直後に閾値比較・dedupe・解除判定。
+"""アラーム評価エンジン: 測定値がしきい値を超えたかを見て、アラームを発生・解除する。
 
 docs/architecture.md §6 アラーム評価 参照。
 
-全体の流れ（1回の flush で、受信した測定値を1件ずつ見る）:
+【誰が・いつ呼ぶか】evaluate_alarms は、ingest_buffer.py の flush_once が、1秒ごとに1回呼ぶ。
+渡すもの: DB との会話（session）、この回に書く測定値（pending）、センサーの一覧（sensors_by_id）、
+          通知の設定（notice_settings_by_workspace）。
+返すもの: 通知を送るべきアラームのリスト（送るのは呼んだ側。ここでは送らない）。
+
+【流れ】1回の flush で、受信した測定値を1件ずつ見る:
 1. 測定値がしきい値を超えたか（_check_threshold）
 2. 超えていて、まだ発生中のアラームがなければ、新規に作る（通知もする）
-3. 超えていて、発生中のアラームがあれば、重要度の変化や再通知の条件だけを見る（dedupe）
+3. 超えていて、発生中のアラームがあれば、重要度の変化や再通知の条件だけを見る
+   （同じ状態が続くだけなら何もしない。通知を重ねないため）
 4. 超えていなくても、不感帯の範囲内なら解除しない（_still_breached_with_dead_band）
 5. それ以外は、発生中のアラームを解除する
 """
@@ -92,7 +98,7 @@ async def evaluate_alarms(
     session: AsyncSession,
     pending: "list[PendingReading]",
     sensors_by_id: Mapping[UUID, Sensor],
-    notif_settings_by_workspace: Mapping[UUID | None, NotificationSettings],
+    notice_settings_by_workspace: Mapping[UUID | None, NotificationSettings],
 ) -> list[AlarmNotification]:
     """新規に発火したAlarmの通知用データを返す（ORMオブジェクトはセッション終了後に参照できないため）。
 
@@ -102,7 +108,7 @@ async def evaluate_alarms(
     発生中のアラームは、最初にまとめて読む。1件ずつ DB を読みに行かないようにして、
     受信の多い時もまとめて処理できるようにする。
     """
-    sensor_ids = {p.sensor_id for p in pending}
+    sensor_ids = {reading.sensor_id for reading in pending}
     if not sensor_ids:
         return []
 
@@ -118,38 +124,38 @@ async def evaluate_alarms(
 
     notifications: list[AlarmNotification] = []
 
-    for p in pending:
+    for reading in pending:
         # 測定値の順に、判定する。センサーが削除されていれば、何もしない
-        sensor = sensors_by_id.get(p.sensor_id)
+        sensor = sensors_by_id.get(reading.sensor_id)
         if sensor is None:
             continue
-        notif_settings = notif_settings_by_workspace.get(sensor.workspace_id)
+        notice_settings = notice_settings_by_workspace.get(sensor.workspace_id)
 
-        breach = _check_threshold(sensor, p.value)
-        existing = open_alarms.get(p.sensor_id)
+        breach = _check_threshold(sensor, reading.value)
+        existing = open_alarms.get(reading.sensor_id)
 
         if breach is not None:
             breached, severity = breach
             if existing is None:
                 alarm = Alarm(
-                    sensor_id=p.sensor_id,
-                    value=p.value,
+                    sensor_id=reading.sensor_id,
+                    value=reading.value,
                     threshold_breached=breached,
                     severity=severity,
-                    triggered_at=p.recorded_at,
-                    last_notified_at=p.recorded_at,
+                    triggered_at=reading.recorded_at,
+                    last_notified_at=reading.recorded_at,
                 )
                 session.add(alarm)
-                open_alarms[p.sensor_id] = alarm
+                open_alarms[reading.sensor_id] = alarm
                 # sensor.name/unitはセッションがまだ開いている今のうちにプレーン値へ退避する
                 notifications.append(
                     AlarmNotification(
                         sensor_name=sensor.name,
                         sensor_unit=sensor.unit,
-                        value=p.value,
+                        value=reading.value,
                         threshold_breached=breached,
                         severity=severity,
-                        triggered_at=p.recorded_at,
+                        triggered_at=reading.recorded_at,
                         sensor_id=sensor.id,
                         workspace_id=sensor.workspace_id,
                     )
@@ -157,41 +163,41 @@ async def evaluate_alarms(
             elif existing.severity != severity:
                 # 同じ発生中アラームのまま重要度が変化（軽故障→重故障 or 逆）。
                 # 新規アラームは作らず重要度を更新し、重要度が変わったこと自体を再通知する
-                existing.value = p.value
+                existing.value = reading.value
                 existing.severity = severity
                 existing.threshold_breached = breached
-                existing.last_notified_at = p.recorded_at
+                existing.last_notified_at = reading.recorded_at
                 session.add(existing)
                 notifications.append(
                     AlarmNotification(
                         sensor_name=sensor.name,
                         sensor_unit=sensor.unit,
-                        value=p.value,
+                        value=reading.value,
                         threshold_breached=breached,
                         severity=severity,
-                        triggered_at=p.recorded_at,
+                        triggered_at=reading.recorded_at,
                         sensor_id=sensor.id,
                         workspace_id=sensor.workspace_id,
                     )
                 )
             elif (
                 severity == AlarmSeverity.CRITICAL
-                and notif_settings is not None
-                and notif_settings.critical_repeat_enabled
+                and notice_settings is not None
+                and notice_settings.critical_repeat_enabled
                 and existing.last_notified_at is not None
-                and p.recorded_at - existing.last_notified_at
-                >= timedelta(minutes=notif_settings.critical_repeat_interval_minutes)
+                and reading.recorded_at - existing.last_notified_at
+                >= timedelta(minutes=notice_settings.critical_repeat_interval_minutes)
             ):
                 # 重故障が未解決のまま設定時間を超えて継続している。再通知する
                 # （元のtriggered_atは変えず、いつ最初に発生したかが分かるようにする）
-                existing.value = p.value
-                existing.last_notified_at = p.recorded_at
+                existing.value = reading.value
+                existing.last_notified_at = reading.recorded_at
                 session.add(existing)
                 notifications.append(
                     AlarmNotification(
                         sensor_name=sensor.name,
                         sensor_unit=sensor.unit,
-                        value=p.value,
+                        value=reading.value,
                         threshold_breached=breached,
                         severity=severity,
                         triggered_at=existing.triggered_at,
@@ -203,13 +209,13 @@ async def evaluate_alarms(
             # それ以外（重要度不変・再通知条件も満たさない）は何もしない（dedupe）
         elif existing is not None:
             if _still_breached_with_dead_band(
-                sensor, p.value, existing.threshold_breached, existing.severity
+                sensor, reading.value, existing.threshold_breached, existing.severity
             ):
                 # 不感帯の範囲内（閾値付近で値が揺れている）。まだ解除しない
                 continue
-            existing.resolved_at = p.recorded_at
+            existing.resolved_at = reading.recorded_at
             existing.status = AlarmStatus.RESOLVED
             session.add(existing)
-            del open_alarms[p.sensor_id]
+            del open_alarms[reading.sensor_id]
 
     return notifications

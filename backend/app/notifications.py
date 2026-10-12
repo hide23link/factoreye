@@ -8,6 +8,11 @@ Webhook URL・有効/無効はSettings画面からDB（NotificationSettings）�
 通知内容はORMオブジェクトではなくプレーンなdataclassで受け取る: 送信はDBセッション終了後に
 バックグラウンドタスクとして実行されるため、detachされたORMインスタンスの遅延属性アクセスは
 DetachedInstanceErrorになる（セッションが閉じた後にSensor/Alarmの属性へアクセスできない）。
+
+【誰が・いつ呼ぶか】send_alarm_discord は、ingest_buffer.py の flush_once が、アラームを DB に
+確定（commit）した後に、バックグラウンドで呼ぶ（結果は待たない）。
+渡すもの: webhook_url（Discord の送信先 URL）、notification（通知の内容 AlarmNotification）。
+失敗しても例外は出さず、ログに残すだけ。
 """
 import logging
 from dataclasses import dataclass
@@ -35,9 +40,9 @@ _SEVERITY_LABEL = {AlarmSeverity.CRITICAL: ("🚨", "重故障"), AlarmSeverity.
 _DIRECTION_LABEL = {ThresholdBreached.MAX: "上限超過", ThresholdBreached.MIN: "下限未達"}
 
 
-def _format_jst(dt: datetime) -> str:
+def _format_jst(moment: datetime) -> str:
     """ISO 8601のUTC表記は読みにくいため、日本時間の短い表記にする（例: 10月2日 21時41分）。"""
-    local = dt.astimezone(_JST)
+    local = moment.astimezone(_JST)
     return f"{local.month}月{local.day}日 {local.hour}時{local.minute:02d}分"
 
 
@@ -89,12 +94,12 @@ async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) 
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
             response = await client.post(webhook_url, json=body)
             response.raise_for_status()
-    except Exception as exc:
+    except Exception as error:
         # 通知失敗でingest/flushパイプラインを落とさない。
         # Discord の URL はトークンを含む秘密なので、例外の本文・トレースバックは出さない
         logger.warning(
             "failed to send alarm discord notification for sensor %s to %s: %s",
             notification.sensor_name,
             redact_url(webhook_url),
-            describe_send_error(exc),
+            describe_send_error(error),
         )
