@@ -1,16 +1,17 @@
 # 本番イメージ（Dockerfile）と実行時に必要な依存のみ。開発・CI用は requirements-dev.txt
 fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
+# uvicorn[standard] のうち、使うもの（uvloop・httptools）だけ入れる。websockets・watchfiles・PyYAML は使わない
+uvicorn>=0.32.0
+uvloop>=0.21.0
+httptools>=0.6.4
 sqlmodel>=0.0.22
 sqlalchemy[asyncio]>=2.0.35
 asyncpg>=0.30.0
 psycopg[binary]>=3.2.0
 alembic>=1.13.3
-pydantic>=2.9.0
 pydantic[email]>=2.9.0
 pydantic-settings>=2.5.0
 slowapi>=0.1.9
-python-dotenv>=1.0.0
 httpx>=0.27.0
 PyJWT>=2.9.0
 bcrypt>=4.0.0
