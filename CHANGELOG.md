@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **コードの読みやすさを改善（動作は変えていない）**: backend・frontend・tools/recovery・loadtest の各ファイルの冒頭に、「誰が・いつ呼ぶか」「引数は誰が渡すか」「処理の流れ」を追加した。略語の名前（`exc`・`p`・`s` など）を役割の分かる名前に直した。`ThresholdBreached` は `MinMax` に改名した（DB の型名 `thresholdbreached`・列名・API・Webhook は変更なし）。方針は ecopower の `guidelines/03-development-standards.md`「理解しやすさ」に従う
 - **画面の初期の読み込みを軽くした**: 画面（ダッシュボード・設定・セットアップガイド・管理者画面・規約）と、グラフのウィジェットを、開いた時に読み込むようにした。ダッシュボード以外を開く場合の初期の転送量は、785 KB（gzip 232 KB）→ 203 KB（gzip 65 KB）。デプロイ直後に古い画面を開いていても、読み込みに失敗した時は 1 回だけ自動で再読み込みし、それでも失敗すれば再読み込みの案内を出す
 
 ### Added
