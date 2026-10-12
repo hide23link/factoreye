@@ -228,7 +228,7 @@ export function WidgetFormModal({
                     checked={sensorIds.includes(s.id)}
                     onChange={(event) =>
                       setSensorIds((prev) =>
-                        e.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id),
+                        event.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id),
                       )
                     }
                   />
@@ -246,7 +246,7 @@ export function WidgetFormModal({
               <select
                 value={graphType}
                 onChange={(event) =>
-                  setGraphType(e.target.value as NonNullable<WidgetConfig["graphType"]>)
+                  setGraphType(event.target.value as NonNullable<WidgetConfig["graphType"]>)
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               >
@@ -304,7 +304,7 @@ export function WidgetFormModal({
                         value={rgb[i]}
                         onChange={(event) => {
                           const next: [number, number, number] = [...rgb];
-                          next[i] = Number(e.target.value);
+                          next[i] = Number(event.target.value);
                           setRgb(next);
                           setColor(rgbToHex(...next));
                         }}
@@ -336,7 +336,7 @@ export function WidgetFormModal({
                   placeholder="自動"
                   value={yAxisMin}
                   onChange={(event) =>
-                    setYAxisMin(e.target.value === "" ? "" : Number(e.target.value))
+                    setYAxisMin(event.target.value === "" ? "" : Number(event.target.value))
                   }
                   className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
                 />
@@ -348,7 +348,7 @@ export function WidgetFormModal({
                   placeholder="自動"
                   value={yAxisMax}
                   onChange={(event) =>
-                    setYAxisMax(e.target.value === "" ? "" : Number(e.target.value))
+                    setYAxisMax(event.target.value === "" ? "" : Number(event.target.value))
                   }
                   className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
                 />
@@ -365,7 +365,7 @@ export function WidgetFormModal({
                 type="number"
                 value={onThreshold}
                 onChange={(event) =>
-                  setOnThreshold(e.target.value === "" ? "" : Number(e.target.value))
+                  setOnThreshold(event.target.value === "" ? "" : Number(event.target.value))
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
@@ -378,7 +378,7 @@ export function WidgetFormModal({
                 min={0}
                 value={dailyTarget}
                 onChange={(event) =>
-                  setDailyTarget(e.target.value === "" ? "" : Number(e.target.value))
+                  setDailyTarget(event.target.value === "" ? "" : Number(event.target.value))
                 }
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
@@ -398,7 +398,7 @@ export function WidgetFormModal({
                   placeholder={String(DEFAULT_TIME_RANGE_HOURS)}
                   value={timeRangeHours}
                   onChange={(event) =>
-                    setTimeRangeHours(e.target.value === "" ? "" : Number(e.target.value))
+                    setTimeRangeHours(event.target.value === "" ? "" : Number(event.target.value))
                   }
                   className="w-20 rounded border border-gray-300 px-2 py-1"
                 />
@@ -413,7 +413,7 @@ export function WidgetFormModal({
                 max={6}
                 value={decimals}
                 onChange={(event) =>
-                  setDecimals(e.target.value === "" ? "" : Number(e.target.value))
+                  setDecimals(event.target.value === "" ? "" : Number(event.target.value))
                 }
                 className="mt-1 w-20 rounded border border-gray-300 px-2 py-1"
               />

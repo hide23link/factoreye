@@ -1,4 +1,7 @@
-"""起動の入口: `uvicorn --factory recovery.main:build`"""
+"""起動の入口: `uvicorn --factory recovery.main:build`
+
+【誰が・いつ呼ぶか】tools/recovery/entrypoint.sh が、コンテナの起動時に呼ぶ（引数はない）。
+"""
 
 from fastapi import FastAPI
 

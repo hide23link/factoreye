@@ -15,8 +15,8 @@ SSRF対策: 利用者が指定したURLへサーバー側から送信するた�
 【誰が・いつ呼ぶか】
 - send_webhook(url, payload): ingest_buffer.py が、測定値の受信・アラーム発生のたびに、
   バックグラウンドで呼ぶ（結果は待たない）。payload = 送る内容（dict）。失敗してもログだけ。
-- check_webhook_url / assert_webhook_url_allowed: api/webhooks.py と api/settings.py が、送信先の URL を
-  登録するときに呼ぶ（危険な URL は 400 で断る）。send_webhook も、送る直前に呼ぶ。
+- check_webhook_url / assert_webhook_url_allowed: api/webhooks.py と api/settings.py が、
+  送信先の URL を登録するときに呼ぶ（危険な URL は 400 で断る）。send_webhook も、送る直前に呼ぶ。
 - close_client: main.py が、アプリの停止時に呼ぶ。
 """
 

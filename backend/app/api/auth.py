@@ -7,7 +7,8 @@
   POST /api/auth/logout    → リフレッシュトークン失効
   GET  /api/me             → 現在のユーザー + ワークスペース情報
 
-【呼ばれ方】画面のログイン・ログアウトが呼ぶ。本文は JSON（例: {"email": "...", "password": "..."}）。
+【呼ばれ方】画面のログイン・ログアウトが呼ぶ。
+本文は JSON（例: {"email": "...", "password": "..."}）。
 アクセストークンは短い期限（15分）、リフレッシュトークンは長い期限（30日）。詳細は app/auth.py。
 """
 from datetime import UTC, datetime

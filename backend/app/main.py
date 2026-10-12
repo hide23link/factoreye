@@ -29,6 +29,7 @@ from sqlalchemy import text
 from starlette.responses import Response
 
 from app import webhooks as webhooks_sender
+
 # app/api/ の中の、API の窓口（ルーター）を読み込む。1つの窓口が、1種類のデータを担当する。
 # ここで読み込んだだけでは使えない。下の app.include_router(...) で登録して、はじめて使える
 from app.api import (
@@ -43,6 +44,7 @@ from app.api import (
     webhooks,  # Webhook（外部サービスへの通知先）の登録・変更・削除
     widgets,  # ダッシュボードの部品（グラフや数値の表示）の変更・削除
 )
+
 # settings は、下の app.config の settings（環境変数の設定）と名前がぶつかるので、別名にしている
 from app.api import settings as alert_settings  # Discord 通知の設定を見る・変える
 from app.auth import decode_access_token

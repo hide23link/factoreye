@@ -10,7 +10,8 @@ Phase 1: WebhookSubscription（Pluginシステムを廃止し、拡張はWebhook
 
 【このファイルは何か】DB のテーブルの設計図。関数を呼ぶファイルではなく、他のファイルが
 `from app.db.models import Sensor` のように読み込んで使う。1つの class ＝ 1つのテーブル、
-class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic のマイグレーション（backend/alembic/）も作る。
+class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic のマイグレーション
+（backend/alembic/）も作る。
 
 【テーブルのつながり】
 - Sensor ─┬─ Reading（測定値）   ─ センサーを消すと、一緒に消える
@@ -20,13 +21,16 @@ class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic の�
 - User ─ Workspace（SaaS のみ）。workspace_id が NULL の行は、self-hosted のデータ
 """
 from datetime import UTC, datetime
-from enum import StrEnum  # 決まった文字列だけを選べる型（下の AlarmStatus など）
+from enum import StrEnum  # 決まった文字列だけを選べる型（AlarmStatus など）
 from typing import Any
 from uuid import UUID, uuid4  # id に使う、重ならない長い番号
 
-from sqlalchemy import Column, Index, column, func, text  # インデックス（検索を速くする索引）などの道具
-from sqlalchemy.dialects.postgresql import JSONB  # PostgreSQL の JSON 型（設定を柔軟に保存する）
-from sqlmodel import Field, Relationship, SQLModel  # Field=列の細かい指定、Relationship=テーブル同士の関係
+# Index = 検索を速くする索引、JSONB = PostgreSQL の JSON 型（設定を柔軟に保存する）
+from sqlalchemy import Column, Index, column, func, text
+from sqlalchemy.dialects.postgresql import JSONB
+
+# Field = 列の細かい指定、Relationship = テーブル同士の関係
+from sqlmodel import Field, Relationship, SQLModel
 
 
 def _utcnow() -> datetime:

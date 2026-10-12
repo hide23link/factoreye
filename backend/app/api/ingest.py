@@ -8,7 +8,8 @@
         {"ingestKey": "line1-temp", "value": 23.5}                      ← 1件
         {"ingestKey": "line1-temp", "readings": [{"value": 23.5}, ...]} ← まとめて複数件
     返事: 202 {"accepted": 件数}
-    失敗: 400 本文が間違い / 401 鍵が違う / 403 センサーが無効 / 404 ingestKey が未登録 / 429 送りすぎ
+    失敗: 400 本文が間違い / 401 鍵が違う / 403 センサーが無効
+          / 404 ingestKey が未登録 / 429 送りすぎ
 
 【引数】ingest_readings の request と session は、呼び出す人が渡すものではない。
 FastAPI が、リクエストを受けるたびに自動で用意して渡す（session は Depends の指定どおり）。

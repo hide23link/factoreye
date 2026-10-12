@@ -132,7 +132,7 @@ export function TimeRangeControls() {
         aria-label="表示期間"
         value={presetKeyOf(range) ?? "custom"}
         onChange={(event) => {
-          const preset = PRESETS.find((p) => p.key === e.target.value);
+          const preset = PRESETS.find((p) => p.key === event.target.value);
           if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
         }}
         className="rounded border border-gray-300 px-2 py-1"

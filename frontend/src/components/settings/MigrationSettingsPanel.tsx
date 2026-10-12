@@ -152,7 +152,7 @@ function ImportSection() {
           type="checkbox"
           checked={withNotifications}
           onChange={(event) => {
-            setWithNotifications(e.target.checked);
+            setWithNotifications(event.target.checked);
             setPreview(null);
           }}
           className="mt-0.5"

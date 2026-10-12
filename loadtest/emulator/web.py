@@ -11,6 +11,8 @@
   POST /api/cleanup         負荷テスト用ユーザーの削除（管理者ID/パスワードを body で渡す）
 
 既定では 127.0.0.1 にだけ待ち受ける。ネットワークに公開しないこと（誰でも負荷をかけられてしまう）。
+
+【誰が使うか】__main__.py が起動する（python -m emulator）。
 """
 from pathlib import Path
 
