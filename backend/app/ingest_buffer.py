@@ -140,18 +140,15 @@ async def _load_webhook_subscriptions(
 
 
 async def _dispatch_reading_webhooks(
-    session: AsyncSession, pending: list[PendingReading]
+    session: AsyncSession,
+    pending: list[PendingReading],
+    workspace_by_sensor: dict[UUID, UUID | None],
 ) -> None:
     """測定値を受信したとき（reading.received）の Webhook を、購読者へ送る。
 
     送信先は、センサーのワークスペースの購読に従う（ワークスペースごとに分ける）。
+    センサーとワークスペースの対応は、flush の最初に読んだものを使う（読み直さない）。
     """
-    sensor_ids = {p.sensor_id for p in pending}
-    sensors_result = await session.exec(
-        select(Sensor.id, Sensor.workspace_id).where(col(Sensor.id).in_(sensor_ids))
-    )
-    workspace_by_sensor: dict[UUID, UUID | None] = dict(sensors_result.all())
-
     subs_by_workspace = await _load_webhook_subscriptions(
         session, WebhookEventType.READING_RECEIVED, set(workspace_by_sensor.values())
     )
@@ -250,9 +247,12 @@ async def flush_once() -> int:
 
     async with AsyncSession(engine) as session:
         try:
-            pending, discord_jobs, notifications = await _write_and_evaluate(
-                session, pending
-            )
+            (
+                pending,
+                discord_jobs,
+                notifications,
+                workspace_by_sensor,
+            ) = await _write_and_evaluate(session, pending)
         except BaseException:
             # CancelledError（停止時）も含めて戻す。戻さないと取り出した分が消える
             await buffer.requeue(pending)
@@ -262,7 +262,7 @@ async def flush_once() -> int:
 
         # 汎用Webhook配信はDiscord専用通知の有効/無効フラグとは独立に動く
         # （セッションがまだ開いているうちに購読先を引いておく）
-        await _dispatch_reading_webhooks(session, pending)
+        await _dispatch_reading_webhooks(session, pending, workspace_by_sensor)
         if notifications:
             await _dispatch_alarm_webhooks(session, notifications)
 
@@ -274,16 +274,28 @@ async def flush_once() -> int:
 
 async def _write_and_evaluate(
     session: AsyncSession, pending: list[PendingReading]
-) -> tuple[list[PendingReading], list[tuple[str, AlarmNotification]], list[AlarmNotification]]:
-    """測定値の書き込み・アラーム評価・commit までを行う。戻り値の測定値は、実際に書いたもの。"""
-    # 通知設定はワークスペースごとに持つ（Settings画面から変更）。センサーのワークスペースに
-    # 対応する設定を使う。重故障の再通知判定にも使うためevaluate_alarms呼び出し前に取得する
+) -> tuple[
+    list[PendingReading],
+    list[tuple[str, AlarmNotification]],
+    list[AlarmNotification],
+    dict[UUID, UUID | None],
+]:
+    """測定値の書き込み・アラーム評価・commit までを行う。
+
+    戻り値は、実際に書いた測定値、Discord の送信ジョブ、アラーム通知、
+    センサーID→ワークスペースIDの対応（commit 後の Webhook 配信で使う。プレーン値）。
+    """
+    # この flush で使うセンサーは、ここで1回だけ読み、保存・アラーム評価・通知設定・
+    # Webhook 配信で共有する（読み直さない）。読むのは受信した測定値のセンサーだけで、
+    # 削除済みのものは結果に含まれない
     sensors_result = await session.exec(
-        select(Sensor.id, Sensor.workspace_id).where(
-            col(Sensor.id).in_({p.sensor_id for p in pending})
-        )
+        select(Sensor).where(col(Sensor.id).in_({p.sensor_id for p in pending}))
     )
-    workspace_by_sensor: dict[UUID, UUID | None] = dict(sensors_result.all())
+    sensors_by_id: dict[UUID, Sensor] = {s.id: s for s in sensors_result.all()}
+    # commit するとセンサーの属性が期限切れになるため、commit 後に使う分はプレーン値で持つ
+    workspace_by_sensor: dict[UUID, UUID | None] = {
+        sid: s.workspace_id for sid, s in sensors_by_id.items()
+    }
 
     # 受信から flush までの間に削除されたセンサーの値は捨てる。残すと外部キー違反で
     # バッチ全体が失敗し、再試行のたびに失敗し続けて、他のセンサーの値も書けなくなる
@@ -293,7 +305,7 @@ async def _write_and_evaluate(
             "dropped %d readings for deleted sensors", len(pending) - len(existing)
         )
     if not existing:
-        return [], [], []
+        return [], [], [], {}
 
     session.add_all(
         [
@@ -304,7 +316,9 @@ async def _write_and_evaluate(
     settings_by_workspace = await _load_notification_settings(
         session, set(workspace_by_sensor.values())
     )
-    notifications = await evaluate_alarms(session, existing, settings_by_workspace)
+    notifications = await evaluate_alarms(
+        session, existing, sensors_by_id, settings_by_workspace
+    )
     # 送信先（重故障・軽故障で別々のURL）を、セッションがまだ開いている今のうちに
     # プレーン値へ退避する。有効フラグがオフのワークスペースは送らない
     discord_jobs: list[tuple[str, AlarmNotification]] = []
@@ -320,7 +334,7 @@ async def _write_and_evaluate(
             discord_jobs.append((url, notification))
     # ここで初めて確定する。これより前に失敗した場合、測定値もアラームも残らない
     await session.commit()
-    return existing, discord_jobs, notifications
+    return existing, discord_jobs, notifications, workspace_by_sensor
 
 
 async def flush_loop() -> None:
