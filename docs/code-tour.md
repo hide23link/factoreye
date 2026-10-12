@@ -86,7 +86,7 @@ sequenceDiagram
     API->>Buf: PendingReading を追加
     API-->>機器: 202 Accepted（まだ DB には入っていない）
     loop 1秒ごと
-        Loop->>Buf: drain（全部取り出す）
+        Loop->>Buf: take_all（全部取り出す）
         Loop->>DB: Reading をまとめて INSERT
         Loop->>DB: アラーム評価（alarm_engine）
         Loop->>DB: commit（ここで確定）
@@ -104,12 +104,12 @@ sequenceDiagram
 2. **バッファ**（`ingest_buffer.py` の `IngestBuffer`）
    - メモリ上のリスト。複数のリクエストが同時に入れても壊れないよう `lock` で守る。
    - 最大 1 秒分は、サーバーが落ちると失われうる（許容している）。
-   - DB が止まって書けないときは、`requeue` で戻して次回に再試行する（上限 10 万件、超えたら古いものから捨てる）。
+   - DB が止まって書けないときは、`put_back` で戻して次回に再試行する（上限 10 万件、超えたら古いものから捨てる）。
 3. **flush**（`flush_once`、1 秒ごとに `flush_loop` が呼ぶ）
    - `Reading` を INSERT → `evaluate_alarms` でアラーム評価 → **commit**。
    - **commit の後**に、Webhook と Discord を送る。送信に失敗しても、DB は確定済みなので巻き戻らない。
    - commit 前に失敗したら、値をバッファに戻す。commit 後は戻さない（二重に書かないため）。
-4. **送信**（`_fire_and_forget`）
+4. **送信**（`run_in_background`）
    - 結果を待たずに、バックグラウンドで送る。遅い送信先が、書き込みを止めないようにしている。
 
 ---

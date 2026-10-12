@@ -144,7 +144,7 @@ async def test_flush_once_with_empty_buffer_returns_zero() -> None:
     assert await flush_once() == 0
 
 
-async def test_flush_failure_requeues_readings_for_retry(
+async def test_flush_failure_puts_back_readings_for_retry(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # commit 前に失敗しても値は消えず、次の flush で書かれる
@@ -188,7 +188,7 @@ async def test_flush_drops_readings_of_deleted_sensor_without_blocking_others(
     assert body["total"] == 1
 
 
-async def test_requeue_keeps_order_and_drops_oldest_over_capacity(
+async def test_put_back_keeps_order_and_drops_oldest_over_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(ingest_buffer, "MAX_PENDING_READINGS", 3)
@@ -200,9 +200,9 @@ async def test_requeue_keeps_order_and_drops_oldest_over_capacity(
 
     await buf.add(reading(3.0))
     await buf.add(reading(4.0))
-    await buf.requeue([reading(1.0), reading(2.0)])
+    await buf.put_back([reading(1.0), reading(2.0)])
 
-    assert [p.value for p in await buf.drain()] == [2.0, 3.0, 4.0]
+    assert [p.value for p in await buf.take_all()] == [2.0, 3.0, 4.0]
 
 
 async def test_shutdown_flushes_remaining_readings(client: httpx.AsyncClient) -> None:
