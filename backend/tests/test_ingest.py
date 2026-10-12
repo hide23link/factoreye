@@ -14,7 +14,7 @@ import app.ingest_buffer as ingest_buffer
 import app.main as main_module
 from app.config import settings
 from app.ingest_buffer import IngestBuffer, PendingReading, flush_once
-from app.main import app, lifespan
+from app.main import app, start_and_stop
 
 VALID_HEADERS = {"X-API-Key": settings.ingest_api_key}
 
@@ -215,7 +215,7 @@ async def test_shutdown_flushes_remaining_readings(client: httpx.AsyncClient) ->
     )
     assert resp.status_code == 202
 
-    async with lifespan(app):
+    async with start_and_stop(app):
         pass
 
     body = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
@@ -229,7 +229,7 @@ async def test_shutdown_continues_when_final_flush_fails(
         raise RuntimeError("db unavailable")
 
     monkeypatch.setattr(main_module, "flush_once", _fail)
-    async with lifespan(app):
+    async with start_and_stop(app):
         pass
 
 

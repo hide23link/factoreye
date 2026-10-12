@@ -225,7 +225,7 @@ erDiagram
 
 ## 9. 起動と常駐タスク
 
-`main.py` の `lifespan` が、起動時に 2 つの常駐タスクを始め、終了時に止めます。
+`main.py` の `start_and_stop` が、起動時に 2 つの常駐タスクを始め、終了時に止めます。
 
 1. `flush_loop`: 1 秒ごとにバッファを DB に書く（§3）
 2. `purge_loop`: 毎日 UTC 03:00 に古いデータを消す（SaaS のみ意味がある）

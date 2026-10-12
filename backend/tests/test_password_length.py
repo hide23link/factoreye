@@ -25,7 +25,7 @@ from app.config import AuthMode, settings
 from app.db.models import User
 from app.db.session import engine
 from app.rate_limit import limiter
-from app.validation import validation_error_handler
+from app.validation import handle_input_error
 
 ADMIN_ID = "admin"
 ADMIN_PASSWORD = "adminpass123"
@@ -56,7 +56,7 @@ def _env(tmp_path: Path) -> Generator[None, None, None]:
 async def api() -> AsyncGenerator[httpx.AsyncClient, None]:
     test_app = FastAPI()
     test_app.state.limiter = limiter
-    test_app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
+    test_app.add_exception_handler(RequestValidationError, handle_input_error)  # type: ignore[arg-type]
     test_app.include_router(auth_module.router)
     test_app.include_router(admin_module.router)
     async with httpx.AsyncClient(
@@ -177,7 +177,7 @@ async def test_admin_password_change_over_72_bytes_is_422_without_echo(
 def test_main_app_registers_the_validation_handler() -> None:
     from app.main import app
 
-    assert app.exception_handlers[RequestValidationError] is validation_error_handler
+    assert app.exception_handlers[RequestValidationError] is handle_input_error
 
 
 

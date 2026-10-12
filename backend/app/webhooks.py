@@ -146,7 +146,7 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def close_client() -> None:
-    """共有のクライアントを閉じる（app/main.py の lifespan の終了時に呼ぶ）。"""
+    """共有のクライアントを閉じる（app/main.py の start_and_stop の終了時に呼ぶ）。"""
     global _client
     if _client is not None:
         await _client.aclose()

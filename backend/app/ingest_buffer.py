@@ -338,7 +338,7 @@ async def _write_and_evaluate(
 
 
 async def flush_loop() -> None:
-    """常駐タスク（app/main.py の lifespan で起動する）。
+    """常駐タスク（app/main.py の start_and_stop で起動する）。
 
     FLUSH_INTERVAL_SECONDS 毎にバッファを DB へ書き込み続ける。
     """
