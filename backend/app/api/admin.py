@@ -239,7 +239,9 @@ async def admin_login(
     body: AdminLoginRequest,
 ) -> AdminTokenResponse:
     # ID・パスワードのどちらが違うかは区別しない（管理者IDの存在を漏らさない）
-    if not admin_accounts.verify_admin(body.admin_id, body.password):
+    if not await auth_utils.run_blocking_auth(
+        admin_accounts.verify_admin, body.admin_id, body.password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid id or password",
@@ -446,7 +448,7 @@ async def update_user(
         user.email = body.email
 
     if body.password is not None:
-        user.password_hash = auth_utils.hash_password(body.password)
+        user.password_hash = await auth_utils.hash_password_async(body.password)
         # 再設定後は既存のログイン（リフレッシュトークン）を全て無効化する
         tokens = (
             await session.exec(select(RefreshToken).where(RefreshToken.user_id == user.id))

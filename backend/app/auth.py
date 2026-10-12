@@ -7,8 +7,10 @@
   SHA-256 のハッシュだけを DB に保存する
 - 管理者トークン: 管理者 API 専用。wid を持たないので、通常の API には使えない
 """
+import asyncio
 import hashlib
 import secrets
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -26,6 +28,31 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     """入力されたパスワードが、保存されたハッシュと一致するかを確かめる。"""
     return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+
+
+# bcrypt は 1 回 200ms 前後の CPU 処理。async def の中で直接呼ぶとイベントループが止まり、
+# 同じプロセスの取り込みや /health まで待たされる。別スレッドで実行する（GIL は解放される）。
+# 認証の連打で、既定のスレッドプールを埋めて他の to_thread を飢えさせないよう、同時実行数を絞る
+_AUTH_CONCURRENCY = 4
+_auth_semaphore = asyncio.Semaphore(_AUTH_CONCURRENCY)
+
+
+async def run_blocking_auth[**P, R](
+    func: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """bcrypt を使う同期関数を、イベントループを止めずに実行する（同時実行数に上限あり）。"""
+    async with _auth_semaphore:
+        return await asyncio.to_thread(func, *args, **kwargs)
+
+
+async def hash_password_async(plain: str) -> str:
+    """hash_password を別スレッドで実行する。"""
+    return await run_blocking_auth(hash_password, plain)
+
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    """verify_password を別スレッドで実行する。"""
+    return await run_blocking_auth(verify_password, plain, hashed)
 
 
 def create_access_token(user_id: UUID, workspace_id: UUID) -> str:
