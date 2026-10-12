@@ -2,6 +2,9 @@
 
 制限は「利用者（接続元）ごと」に数える。制限を超えると 429 を返す。
 取り込み API（api/ingest.py）と、認証 API（api/auth.py・管理者ログイン）に付けている。
+
+【誰が使うか】`limiter` を、api/ の各ファイルが「回数の制限を付ける印」として使う。
+main.py が、アプリに1つだけ登録する（429 のエラー応答もここで決まる）。
 """
 from fastapi import Request
 from slowapi import Limiter

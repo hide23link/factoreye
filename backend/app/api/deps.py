@@ -4,6 +4,9 @@ FastAPI の Depends（依存関係）として、各 API から使い回す認�
 - verify_ingest_api_key: 取り込み API の認証（self-hosted の X-API-Key）
 - get_current_workspace_id: SaaS の利用者のワークスペース（JWT から取り出す）
 - require_admin: 管理者 API の認可（管理者トークン＋管理者ファイルの存在確認）
+
+【使い方】各 API の引数に `Depends(...)` と書くだけ。FastAPI が、その API の処理に入る前に
+自動で呼ぶ。認証に失敗したら 401 を返し、処理には入らない。
 """
 import hmac
 from typing import Annotated

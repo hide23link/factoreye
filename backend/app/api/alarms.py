@@ -1,6 +1,13 @@
 """アラームAPI: 一覧/詳細/確認（ACK）。評価エンジン本体は app.alarm_engine。
 
 DELETE は提供しない（Alarmは監査ログのため追記専用、docs参照）。
+
+【呼ばれ方】画面（ブラウザ）が呼ぶ。
+- GET   /api/alarms?status=active&sensor_id=...&limit=50&offset=0  → アラームの一覧（新しい順）
+- GET   /api/alarms/{alarm_id}                                     → 1件
+- PATCH /api/alarms/{alarm_id}/ack  本文: {"acknowledgedBy": "名前"} → 確認済みにする
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 from datetime import UTC, datetime
 from typing import Annotated

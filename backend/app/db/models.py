@@ -7,18 +7,30 @@ FactorEye データモデル
 Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget
 Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
 Phase 1: WebhookSubscription（Pluginシステムを廃止し、拡張はWebhookに統一。Phase 2参照）
+
+【このファイルは何か】DB のテーブルの設計図。関数を呼ぶファイルではなく、他のファイルが
+`from app.db.models import Sensor` のように読み込んで使う。1つの class ＝ 1つのテーブル、
+class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic のマイグレーション（backend/alembic/）も作る。
+
+【テーブルのつながり】
+- Sensor ─┬─ Reading（測定値）   ─ センサーを消すと、一緒に消える
+          ├─ Alarm（アラーム）   ─ 同上
+          └─ Widget（画面の部品） ─ 消えても残る（sensor_id が空になる）
+- Dashboard ─ Widget
+- User ─ Workspace（SaaS のみ）。workspace_id が NULL の行は、self-hosted のデータ
 """
 from datetime import UTC, datetime
-from enum import StrEnum
+from enum import StrEnum  # 決まった文字列だけを選べる型（下の AlarmStatus など）
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4  # id に使う、重ならない長い番号
 
-from sqlalchemy import Column, Index, column, func, text
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import Column, Index, column, func, text  # インデックス（検索を速くする索引）などの道具
+from sqlalchemy.dialects.postgresql import JSONB  # PostgreSQL の JSON 型（設定を柔軟に保存する）
+from sqlmodel import Field, Relationship, SQLModel  # Field=列の細かい指定、Relationship=テーブル同士の関係
 
 
 def _utcnow() -> datetime:
+    """今の時刻（UTC＝世界標準時）。created_at などの、初期値に使う。"""
     return datetime.now(UTC)
 
 
@@ -272,6 +284,8 @@ class WebhookEventType(StrEnum):
 
 
 class WebhookSubscription(SQLModel, table=True):
+    """Webhook の購読（どのイベントを、どの URL に送るか）。1イベント×1URL で1行。"""
+
     __tablename__ = "webhook_subscriptions"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -290,6 +304,8 @@ class WebhookSubscription(SQLModel, table=True):
 # NotificationSettings（self-hosted は id=1 の1行、SaaS はワークスペースごとに1行）
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):
+    """Discord 通知の設定。アラーム発生時に、どの URL に送るか・再通知するか。"""
+
     __tablename__ = "notification_settings"
     # ワークスペースごとに1行まで（NULL = self-hosted の行は id=1 の1行）
     __table_args__ = (

@@ -1,6 +1,16 @@
 """ダッシュボード管理API（一覧/作成/詳細/更新/削除）とウィジェット追加。
 
 ウィジェットの更新/削除は app.api.widgets（/api/widgets/:id、dashboard非依存）。
+
+【呼ばれ方】画面が呼ぶ（ダッシュボード ＝ ウィジェットを並べた1つの画面）。
+- GET    /api/dashboards                       → 一覧
+- POST   /api/dashboards  本文: {"name": "工場A"} → 作る
+- GET    /api/dashboards/{dashboard_id}        → 1件（ウィジェット付き）
+- PUT    /api/dashboards/{dashboard_id}        → 変えたい項目だけ更新
+- DELETE /api/dashboards/{dashboard_id}        → 削除（行は残る。論理削除）
+- POST   /api/dashboards/{dashboard_id}/widgets → ウィジェットを追加
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 from datetime import UTC, datetime
 from typing import Annotated
@@ -56,7 +66,7 @@ def _to_detail(dashboard: Dashboard, widgets: list[Widget]) -> DashboardDetail:
         layout_config=dashboard.layout_config,
         created_at=dashboard.created_at,
         updated_at=dashboard.updated_at,
-        widgets=[WidgetRead.model_validate(w) for w in widgets],
+        widgets=[WidgetRead.model_validate(widget) for widget in widgets],
     )
 
 

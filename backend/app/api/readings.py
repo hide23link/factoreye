@@ -2,6 +2,11 @@
 
 画面は数秒ごとにこの API を呼んで、新しい測定値を取り直す。
 件数は limit で制限する（既定 1000、最大 10000）。
+
+【呼ばれ方】GET /api/readings?sensor_id=<センサーのID>&limit=500
+  sensor_id と limit は省略できる。返事: {"readings": [...新しい順...], "total": 件数}
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者の
+ワークスペース。self-hosted では None）は、FastAPI が Depends で自動で渡す。
 """
 from typing import Annotated
 from uuid import UUID
@@ -40,5 +45,5 @@ async def list_readings(
     result = await session.exec(query)
     readings = list(result.all())
     return ReadingListResponse(
-        readings=[ReadingRead.model_validate(r) for r in readings], total=len(readings)
+        readings=[ReadingRead.model_validate(reading) for reading in readings], total=len(readings)
     )

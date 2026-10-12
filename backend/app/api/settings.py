@@ -2,6 +2,12 @@
 
 self-hosted: workspace_id IS NULL の行（id=1）
 multi-tenant: ワークスペースごとの行を自動作成
+
+【呼ばれ方】画面の「設定」が呼ぶ。
+- GET /api/settings/notifications  → 今の通知設定
+- PUT /api/settings/notifications  本文: 変えたい項目だけ（例: {"enabled": false}）
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 from typing import Annotated
 from uuid import UUID
@@ -72,10 +78,10 @@ async def update_notification_settings(
         if url:
             try:
                 await assert_webhook_url_allowed(url)
-            except UnsafeWebhookUrl as exc:
+            except UnsafeWebhookUrl as error:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-                ) from exc
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+                ) from error
 
     settings_row = await _get_notification_settings(session, workspace_id)
     apply_update(

@@ -1,4 +1,8 @@
-"""応答の共通処理。"""
+"""応答の共通処理。
+
+【誰が使うか】api/ の sensors.py・alarms.py・dashboards.py・settings.py・webhooks.py・widgets.py が、
+応答を返すときに呼ぶ（return json_response(モデル) のように使う）。
+"""
 from collections.abc import Mapping, Sequence
 
 from fastapi import Response

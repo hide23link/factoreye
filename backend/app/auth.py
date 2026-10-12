@@ -6,6 +6,9 @@
 - リフレッシュトークン: アクセストークンを再発行するための長い期限（既定 30 日）。生の値は保存せず、
   SHA-256 のハッシュだけを DB に保存する
 - 管理者トークン: 管理者 API 専用。wid を持たないので、通常の API には使えない
+
+【誰が使うか】api/auth.py（登録・ログイン）、api/admin.py（管理者ログイン）、
+api/deps.py（トークンの確認）が、`from app import auth as auth_utils` として呼ぶ。
 """
 import asyncio
 import hashlib

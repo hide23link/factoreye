@@ -8,6 +8,11 @@ Python/DB側はsnake_case（PEP 8）のまま、alias_generatorで変換する�
 - ...Update: 更新の入力。すべて省略可。送られた項目だけ変える（部分更新）
 - ...Read: 応答（出力）。DB のモデルから作る（from_attributes=True）
 - ...List / ...Response: 一覧の応答（件数の total を含む）
+
+【誰が使うか】api/ の各ファイルが、「受け取る形（...Create / ...Update）」と
+「返す形（...Read）」として使う。FastAPI が、届いた JSON を、ここの形に合うか検査して渡す。
+合わなければ、api/ の処理に入る前に 422 のエラーになる。
+DB のテーブルの設計図は、db/models.py（ここは API の入出力の形だけ）。
 """
 from datetime import datetime
 from typing import Any

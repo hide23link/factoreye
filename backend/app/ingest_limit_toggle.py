@@ -4,6 +4,10 @@
 - 解除は期限付き。期限を過ぎると自動で制限が戻る（解除したまま忘れないため）
 - 単一インスタンス前提（レート制限のカウントと同じ前提）
 - INGEST_RATE_LIMIT=off（環境変数）は、この仕組みより優先される
+
+【誰が使うか】
+- enable / disable: api/admin.py が、管理者が「制限を外す／戻す」を押したときに呼ぶ
+- is_limit_off: api/ingest.py が、リクエストのたびに呼ぶ（今、制限を外してよいか）
 """
 
 from dataclasses import dataclass

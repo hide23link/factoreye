@@ -1,10 +1,14 @@
-"""入力の検証エラー（422）の応答を整える。"""
+"""入力の検証エラー（422）の応答を整える。
+
+【誰が呼ぶか】main.py が、`app.add_exception_handler` で登録する。入力が決まりに合わなかった
+とき（例: 必須の項目がない）に、FastAPI が自動で handle_input_error を呼ぶ。
+"""
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
-async def handle_input_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def handle_input_error(request: Request, error: RequestValidationError) -> JSONResponse:
     """422 の応答から、入力の値（input）と付帯情報（ctx）を取り除く。
 
     FastAPI の既定は、各エラーに送られた値をそのまま入れる。パスワードの検証に失敗すると、
@@ -12,6 +16,6 @@ async def handle_input_error(request: Request, exc: RequestValidationError) -> J
     利用者向けの文（msg）だけを返す。
     """
     errors = [
-        {"type": err["type"], "loc": list(err["loc"]), "msg": err["msg"]} for err in exc.errors()
+        {"type": err["type"], "loc": list(err["loc"]), "msg": err["msg"]} for err in error.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": errors})

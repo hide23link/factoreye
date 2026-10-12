@@ -2,6 +2,15 @@
 
 docs/architecture.md §7 通知 参照。配信本体（app.webhooks.send_webhook）の
 呼び出しはapp.ingest_buffer側の責務であり、ここは設定のCRUDのみを扱う。
+（CRUD ＝ 作る・読む・更新する・削除する）
+
+【呼ばれ方】画面の「設定」が呼ぶ。
+- GET    /api/settings/webhooks                     → 購読の一覧
+- POST   /api/settings/webhooks  本文: {"eventType": "alarm.triggered", "url": "https://..."}
+- PUT    /api/settings/webhooks/{subscription_id}   → URL・有効/無効を変える
+- DELETE /api/settings/webhooks/{subscription_id}   → 削除
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 
 from typing import Annotated
@@ -32,10 +41,10 @@ async def _ensure_safe_url(url: str) -> None:
     """
     try:
         await assert_webhook_url_allowed(url)
-    except UnsafeWebhookUrl as exc:
+    except UnsafeWebhookUrl as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
 
 
 async def _get_owned_subscription(

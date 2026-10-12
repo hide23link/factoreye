@@ -2,6 +2,12 @@
 
 - engine: DB への接続の入口。接続は「プール」で使い回す（毎回つなぎ直さない）
 - get_session: API の処理ごとに1つのセッションを渡す依存関係（FastAPI の Depends で使う）
+
+【誰が使うか】
+- get_session: api/ の各ファイルが、`session = Depends(get_session)` と書くと、FastAPI が
+  リクエストごとに呼んで、できた session を引数に入れる（自分で呼ぶ必要はない）
+- engine: ingest_buffer.py（flush のとき）、main.py（/health と停止時）が、直接使う
+- セッション ＝ DB との会話1回分。処理が終わったら閉じる
 """
 from collections.abc import AsyncGenerator
 
