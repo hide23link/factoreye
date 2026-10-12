@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **画面の初期の読み込みを軽くした**: 画面（ダッシュボード・設定・セットアップガイド・管理者画面・規約）と、グラフのウィジェットを、開いた時に読み込むようにした。ダッシュボード以外を開く場合の初期の転送量は、785 KB（gzip 232 KB）→ 203 KB（gzip 65 KB）。デプロイ直後に古い画面を開いていても、読み込みに失敗した時は 1 回だけ自動で再読み込みし、それでも失敗すれば再読み込みの案内を出す
+
 ### Added
 - **データ移行: self-hosted（OSS 版）にも書き出しを追加**: 「設定」→「データ移行」の書き出しが、SaaS だけでなく self-hosted（OSS 版）でも使えるようになった。self-hosted は全データ（`workspace_id` が NULL）を書き出す。既存の「取り込み」と組み合わせ、OSS → OSS（別サーバーへの移行・バックアップ）がアプリ内だけで完結する。OSS → SaaS は引き続き復旧ツールを使う
 - **復旧ツール: OSS 版 ⇄ SaaS 版の書き戻し**: OSS 版のバックアップを SaaS 版のワークスペースへ、SaaS 版のワークスペースを OSS 版のデータとして書き戻せる。センサーの ID と取り込みキーは保つ。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須）

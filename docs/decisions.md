@@ -243,6 +243,13 @@
 - **理由**: 実測（Mac arm64）で recovery は 512 MB → 299 MB（libllvm14 100 MB、libz3 21 MB、Perl 約 47 MB、pip 13 MB）。backend は 289 MB → 273 MB。本番（amd64）の recovery は 718 MB だったので、同程度の割合で減る見込み。作業用の DB は initdb・pg_ctl・psql・pg_dump を直接呼ぶだけで、JIT と Perl のスクリプトは使わない。クライアント・サーバーとも本番と同じ 15 系のまま（15.19）。recovery のテスト 72 件（作業用 Postgres への展開・書き戻しを含む）と、コンテナの起動・`/api/info` への認証つき応答、backend のテスト 300 件・ruff・mypy・`alembic upgrade head`・`/health` を確認した
 - **影響**: recovery のイメージには apt の整合が崩れた状態（`dpkg --purge --force-depends`）が残るので、イメージの中で `apt` を使う作業はしない。Postgres を上げるときは、`llvmjit.so` の削除と `jit=off` が引き続き要るかを確認する。frontend は、未使用の依存が無く、イメージは dist を置くだけなので変更なし（バンドルの 785 KB の大半は recharts。遅延読み込みは別の判断）
 
+## フロントエンド
+
+### 2026-10-12 — 画面ごとに遅延読み込みし、vendor を分け、デプロイ後のチャンク失敗は 1 回だけ再読み込みする
+- **判断**: ダッシュボード（`DashboardView`）・設定・セットアップガイド・管理者画面（`AdminApp`）・規約（`LegalPage`）と、recharts を使うウィジェット 3 種（`SensorGraph`・`MultiSensorComparison`・`StatValue`）を `React.lazy` で分ける。ログイン画面・ダッシュボード一覧・小さなウィジェット（`AlarmAlert`・`ProductionStatus`）は、初期表示に要る、または小さい（分けても往復が増えるだけ）ので分けない。`manualChunks` で `vendor-react`（react・react-dom・scheduler）と `vendor-charts`（recharts と d3 など推移的依存）を分ける。`index.html` は `Cache-Control: no-cache`（nginx.conf）。動的 import の失敗は、`lib/lazyWithRetry.ts` が 1 回だけ自動で再読み込みする（`sessionStorage` の印。読み込みに成功したら消す）。それでも失敗したら `ChunkErrorBoundary` が再読み込みの案内（`ErrorNotice`）を出す（チャンク以外のエラーは案内にせず、上へ投げ直す）。Suspense の fallback は既存の「読み込み中...」と同じ見た目
+- **理由**: 実測（`npm run build`）で、単一チャンク 785 KB（gzip 232 KB）が、初期ロード（index + vendor-react）203 KB（gzip 65 KB）になった。内訳は index 60 KB・vendor-react 143 KB・DashboardView 98 KB・vendor-charts 419 KB（gzip 120 KB）・設定 26 KB・管理者 18 KB・ウィザード 8 KB。recharts（vendor-charts）は、グラフ系のウィジェットが画面に出る時だけ読み込まれる。vendor を分けると、アプリの更新で再取得されるのは index 側（60 KB）などになり、react と recharts は再訪時に再取得されない。デプロイのたびにチャンクのハッシュが変わるため、古い `index.html` を持つブラウザは、消えたチャンクを要求して失敗する（nginx は `/assets/` に 404 を返す。これは正しい）。`index.html` をキャッシュさせず、残った失敗は再読み込みで新しい `index.html` に切り替える
+- **影響**: 画面を初めて開く時に、小さな読み込み待ちが 1 回入る（以後はキャッシュ）。新しい画面を足す時は、`lazyNamed` で分け、`Suspense` と `ChunkErrorBoundary` で囲む。自動の再読み込みはタブごとに 1 回（読み込みに成功したら、次のデプロイでまた 1 回）。ブラウザでの実画面確認と e2e は、この変更では行っていない（`vite preview` の配信と単体テストのみ）
+
 ## 運用上の注意
 
 これまでの作業で起きた問題から、次の注意を守ること。

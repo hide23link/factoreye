@@ -60,6 +60,44 @@ describe("WidgetCard", () => {
     expect(screen.getByLabelText("ウィジェットを削除")).toBeInTheDocument();
   });
 
+  it("遅延読み込みのウィジェット（StatValue）は、読み込み中の表示のあと、中身を表示する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([
+      {
+        id: "s1",
+        name: "冷蔵庫温度",
+        ingestKey: "fridge-temp",
+        unit: "°C",
+        thresholdMinWarning: null,
+        thresholdMinCritical: null,
+        thresholdMaxWarning: null,
+        thresholdMaxCritical: null,
+        thresholdDeadBand: 0,
+        enabled: true,
+        createdAt: "2024-01-01T00:00:00.000Z",
+        updatedAt: "2024-01-01T00:00:00.000Z",
+      },
+    ]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue({
+      readings: [{ id: 1, sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      total: 1,
+    });
+
+    renderWithQueryClient(
+      <WidgetCard
+        widget={makeWidget({
+          type: "StatValue",
+          sensorId: "s1",
+          config: { timeRangeHours: 1, decimals: 1 },
+        })}
+        dashboard={dashboard}
+      />,
+    );
+
+    // 枠は先に出て、中身は読み込み後に出る
+    expect(screen.getByLabelText("ウィジェットを編集")).toBeInTheDocument();
+    expect(await screen.findByText("冷蔵庫温度")).toBeInTheDocument();
+  });
+
   it("削除ボタンを押すとdeleteWidgetを呼ぶ", async () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });

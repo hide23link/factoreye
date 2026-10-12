@@ -4,18 +4,25 @@
  * ドラッグで位置を変えられるように、つまみ（widget-drag-handle）を表示する。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 import { deleteWidget } from "../lib/api";
 import { describeActionError } from "../lib/errors";
+import { lazyNamed } from "../lib/lazyWithRetry";
 import type { DashboardDetail, Widget } from "../types";
+import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { WidgetFormModal } from "./WidgetFormModal";
 import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
-import { MultiSensorComparisonWidget } from "./widgets/MultiSensorComparisonWidget";
 import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
-import { SensorGraphWidget } from "./widgets/SensorGraphWidget";
-import { StatValueWidget } from "./widgets/StatValueWidget";
+
+// グラフ系のウィジェット（recharts を使う）は、画面に出る時に読み込む
+const SensorGraphWidget = lazyNamed(() => import("./widgets/SensorGraphWidget"), "SensorGraphWidget");
+const MultiSensorComparisonWidget = lazyNamed(
+  () => import("./widgets/MultiSensorComparisonWidget"),
+  "MultiSensorComparisonWidget",
+);
+const StatValueWidget = lazyNamed(() => import("./widgets/StatValueWidget"), "StatValueWidget");
 
 /** ウィジェットの種類（type）に応じて、中身の部品を切り替える。未知の種類は注意文を出す。 */
 function WidgetBody({ widget }: { widget: Widget }) {
@@ -90,7 +97,11 @@ export function WidgetCard({
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-hidden">
-        <WidgetBody widget={widget} />
+        <ChunkErrorBoundary>
+          <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
+            <WidgetBody widget={widget} />
+          </Suspense>
+        </ChunkErrorBoundary>
       </div>
 
       {isConfirmingDelete && (
