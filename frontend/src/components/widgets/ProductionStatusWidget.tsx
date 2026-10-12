@@ -8,6 +8,9 @@ import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../..
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 
+// 稼働判定に使うのは最新の 1 件だけなので、1 件だけ取る
+const LATEST_ONLY = 1;
+
 // queryKeyが毎レンダー変わって無駄に再フェッチされないよう、分単位に丸めた境界を使う
 // （「直近1時間」「本日累計」は数十秒のズレが出ても実用上問題にならない）
 function startOfCurrentMinute(offsetMs = 0): string {
@@ -26,7 +29,11 @@ function startOfTodayLocal(): string {
 /** 生産状況のウィジェット本体。 */
 export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const { data, isLoading, isError, refetch } = useSensorReadings(widget.sensorId, 1);
+  const { data, isLoading, isError, refetch } = useSensorReadings(
+    widget.sensorId,
+    1,
+    LATEST_ONLY,
+  );
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   const lastHourFrom = startOfCurrentMinute(60 * 60 * 1000);
