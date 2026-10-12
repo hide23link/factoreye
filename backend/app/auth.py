@@ -17,6 +17,9 @@ import jwt
 
 from app.config import settings
 
+# bcrypt が受け付けるパスワードの最大バイト数（UTF-8）。超える入力は bcrypt が ValueError を出す
+MAX_PASSWORD_BYTES = 72
+
 
 def hash_password(plain: str) -> str:
     """パスワードを bcrypt でハッシュ化する（ソルト付き。保存するのはこの結果だけ）。"""
@@ -24,8 +27,16 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """入力されたパスワードが、保存されたハッシュと一致するかを確かめる。"""
-    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+    """入力されたパスワードが、保存されたハッシュと一致するかを確かめる。
+
+    72 バイトを超える入力は登録できないので、一致しない（False）。bcrypt に渡すと ValueError
+    になる（500）ため、先頭 72 バイトで照合を 1 回走らせて結果を捨て、他の失敗と時間をそろえる。
+    """
+    data = plain.encode("utf-8")
+    if len(data) > MAX_PASSWORD_BYTES:
+        _bcrypt.checkpw(data[:MAX_PASSWORD_BYTES], hashed.encode("ascii"))
+        return False
+    return _bcrypt.checkpw(data, hashed.encode("ascii"))
 
 
 def create_access_token(user_id: UUID, workspace_id: UUID) -> str:

@@ -21,6 +21,7 @@ from typing import Any
 
 import jwt
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -47,6 +48,7 @@ from app.db.session import engine
 from app.ingest_buffer import flush_loop, flush_once
 from app.purge import purge_loop
 from app.rate_limit import limiter
+from app.validation import validation_error_handler
 
 
 @asynccontextmanager
@@ -120,6 +122,9 @@ async def log_impersonated_writes(
 app.state.limiter = limiter
 # slowapiのハンドラ型はStarletteの例外ハンドラ型と厳密には一致しない（ライブラリ側のstub起因）
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+# 422 の応答に、送られた値（パスワードなど）を含めない
+app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
 
 # CORS: 明示的にFRONTEND_URLのみ許可（`*`禁止、docs/architecture.md §11 運用）
 app.add_middleware(
