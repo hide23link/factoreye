@@ -1,5 +1,6 @@
 """認証API テスト（AUTH_MODE=multi_tenant）。"""
 from collections.abc import AsyncGenerator, Generator
+from typing import Any
 
 import httpx
 import pytest
@@ -288,6 +289,45 @@ async def test_register_concurrent_unique_violation_returns_409(
     monkeypatch.setattr(AsyncSession, "flush", boom)
     resp = await auth_client.post("/api/auth/register", json={
         "email": "race@example.com", "password": "password123", "workspaceName": "W",
+    })
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "email already registered"
+
+
+async def test_register_case_variant_blocked_by_db_when_precheck_bypassed(
+    auth_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 事前確認をすり抜けた同時登録を再現する。lower(email) の一意インデックスが DB 側で拒否し、
+    # 既存の IntegrityError の処理で 409 になる（大文字を含む既存アカウントとの重複も同様）
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app import auth as auth_utils
+    from app.db.models import User, Workspace
+    from app.db.session import engine
+
+    async with AsyncSession(engine) as session:
+        user = User(
+            email="Race@Example.com", password_hash=auth_utils.hash_password("password123")
+        )
+        session.add(user)
+        await session.flush()
+        session.add(Workspace(name="W", owner_id=user.id))
+        await session.commit()
+
+    original_exec = AsyncSession.exec
+
+    class _Empty:
+        def first(self) -> None:
+            return None
+
+    async def skip_precheck(self: AsyncSession, statement: Any, *a: Any, **kw: Any) -> Any:
+        if "lower(" in str(statement):
+            return _Empty()
+        return await original_exec(self, statement, *a, **kw)
+
+    monkeypatch.setattr(AsyncSession, "exec", skip_precheck)
+    resp = await auth_client.post("/api/auth/register", json={
+        "email": "race@example.com", "password": "password123", "workspaceName": "W2",
     })
     assert resp.status_code == 409
     assert resp.json()["detail"] == "email already registered"

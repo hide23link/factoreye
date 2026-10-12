@@ -75,3 +75,69 @@ def test_migrations_downgrade_and_upgrade_again(migrated_db: tuple[str, str]) ->
     _alembic(async_url, "downgrade", "-1")
     _alembic(async_url, "upgrade", "head")
     assert _insert_settings_without_id(sync_url) == 2
+
+
+# ── lower(email) の一意インデックス（a7b8c9d0e1f2） ──────────────
+
+_BEFORE_EMAIL_LOWER = "f6a7b8c9d0e1"
+
+
+def _alembic_fail(url: str, *args: str) -> str:
+    env = {**os.environ, "DATABASE_URL": url}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
+        cwd=_BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    return result.stderr
+
+
+def _insert_user(sync_url: str, email: str) -> None:
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute("INSERT INTO users (id, email, password_hash, created_at) "
+                     "VALUES (gen_random_uuid(), %s, 'x', now())", (email,))
+
+
+def _index_names(sync_url: str) -> set[str]:
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        rows = conn.execute("SELECT indexname FROM pg_indexes WHERE tablename = 'users'").fetchall()
+    return {r[0] for r in rows}
+
+
+def test_email_lower_index_upgrade_fails_on_case_duplicates(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    _alembic(async_url, "downgrade", _BEFORE_EMAIL_LOWER)
+    assert "ix_users_email_lower" not in _index_names(sync_url)
+    _insert_user(sync_url, "Dup@Example.com")
+    _insert_user(sync_url, "dup@example.com")
+    _insert_user(sync_url, "unique@example.com")
+
+    stderr = _alembic_fail(async_url, "upgrade", "head")
+    # どのメールが重複かが分かる。重複していないメールは出さない
+    assert "Dup@Example.com" in stderr and "dup@example.com" in stderr
+    assert "unique@example.com" not in stderr
+    assert "ix_users_email_lower" not in _index_names(sync_url)  # 何も作られていない
+
+    # 重複を解消すれば成功し、DB 側で大文字小文字違いの重複が拒否される
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute("DELETE FROM users WHERE email = 'Dup@Example.com'")
+    _alembic(async_url, "upgrade", "head")
+    assert {"ix_users_email_lower", "ix_users_email"} <= _index_names(sync_url)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_user(sync_url, "DUP@example.com")
+
+
+def test_email_lower_index_downgrade_drops_only_lower_index(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    assert {"ix_users_email_lower", "ix_users_email"} <= _index_names(sync_url)
+    _alembic(async_url, "downgrade", _BEFORE_EMAIL_LOWER)
+    names = _index_names(sync_url)
+    assert "ix_users_email_lower" not in names
+    assert "ix_users_email" in names

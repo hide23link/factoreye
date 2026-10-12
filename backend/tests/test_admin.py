@@ -345,3 +345,36 @@ async def test_patch_email_unique_violation_returns_409(
     )
     assert resp.status_code == 409
     assert resp.json()["detail"] == "email already exists"
+
+
+async def test_patch_email_case_variant_blocked_by_db_returns_409(
+    api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 事前確認をすり抜けても、lower(email) の一意インデックスが DB 側で拒否し、409 になる
+    from typing import Any
+
+    headers = await _admin_login(api)
+    # 正規化の導入前に作られた、大文字を含む既存アカウント
+    async with AsyncSession(engine) as session:
+        session.add(User(email="Taken@Example.com", password_hash="x"))
+        await session.commit()
+    await _register(api, "other@example.com")
+    user_id = await _user_id("other@example.com")
+
+    original_exec = AsyncSession.exec
+
+    class _Empty:
+        def first(self) -> None:
+            return None
+
+    async def skip_precheck(self: AsyncSession, statement: Any, *a: Any, **kw: Any) -> Any:
+        if "lower(" in str(statement):
+            return _Empty()
+        return await original_exec(self, statement, *a, **kw)
+
+    monkeypatch.setattr(AsyncSession, "exec", skip_precheck)
+    resp = await api.patch(
+        f"/api/admin/users/{user_id}", headers=headers, json={"email": "taken@example.com"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "email already exists"

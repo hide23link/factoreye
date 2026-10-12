@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, Index, text
+from sqlalchemy import Column, Index, column, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -211,6 +211,9 @@ class User(SQLModel, table=True):
     """
 
     __tablename__ = "users"
+    # lower(email) の一意インデックス（マイグレーション a7b8c9d0e1f2 と同じ）。
+    # `lower(email) = ...` の検索を速くし、大文字小文字だけが違う重複を DB 側でも防ぐ
+    __table_args__ = (Index("ix_users_email_lower", func.lower(column("email")), unique=True),)
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     email: str = Field(unique=True, max_length=254, index=True)
