@@ -381,6 +381,6 @@ async def test_startup_warns_only_when_keyless_ingest_is_active(
     monkeypatch.setattr(settings, "auth_mode", auth_mode)
     monkeypatch.setattr(settings, "ingest_auth", ingest_auth)
     with caplog.at_level(logging.WARNING, logger="app.main"):
-        async with lifespan(app):
+        async with start_and_stop(app):
             pass
     assert any("INGEST_AUTH=off" in r.getMessage() for r in caplog.records) is warns
