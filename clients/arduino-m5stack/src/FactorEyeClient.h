@@ -32,7 +32,8 @@ class FactorEyeClient {
   FactorEyeClient();
 
   // host: 例 "http://192.168.1.50:8000"（末尾スラッシュ不要）
-  // apiKey: backend の .env に設定した INGEST_API_KEY と同じ値
+  // apiKey: backend の .env に設定した INGEST_API_KEY と同じ値。空文字なら X-API-Key ヘッダーを付けずに送る
+  //         （キーなしで取り込みを受け付けるサーバー向け。キーが必要なサーバーでは 401 になる）
   void begin(const String& host, const String& apiKey);
 
   // ingestKey に対応するセンサーへ value を送信する。
