@@ -97,6 +97,11 @@ class FactorEyeClientTest(unittest.TestCase):
         self.assertEqual(req["api_key"], "test-api-key")
         self.assertEqual(req["body"], {"ingestKey": "sensor-1", "value": 42.0})
 
+    def test_empty_api_key_sends_no_header(self) -> None:
+        keyless = FactorEyeClient(self.client._host, "")
+        self.assertTrue(keyless.send("sensor-1", 1.0))
+        self.assertIsNone(self.mock.requests[-1]["api_key"])
+
     def test_send_failure_buffers_instead_of_raising(self) -> None:
         self.mock.next_status = 500
 

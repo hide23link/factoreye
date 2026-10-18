@@ -201,6 +201,8 @@ export function SetupWizard() {
           <p className="mb-3 text-sm text-gray-500">
             お使いの環境に合わせて下のコードを実行してください（<code>INGEST_API_KEY</code>
             はbackendの<code>.env</code>に設定した値に置き換えます）。受信すると自動で次へ進みます。
+            backend を <code>INGEST_AUTH=off</code>（キーなしの取り込み）で動かしている場合は、API キーは不要です
+            （curl は <code>X-API-Key</code> の行を外し、Arduino・Python は空文字 <code>&quot;&quot;</code> を渡します）。
           </p>
 
           <div className="mb-2 flex gap-1 border-b border-gray-200">

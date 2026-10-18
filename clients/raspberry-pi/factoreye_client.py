@@ -177,10 +177,13 @@ class FactorEyeClient:
             body = {"ingestKey": ingest_key, "readings": [{"value": v} for v in values]}
 
         data = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:  # 空なら付けない（キーなしで取り込みを受け付けるサーバー向け）
+            headers["X-API-Key"] = self._api_key
         request = urllib.request.Request(
             f"{self._host}/api/ingest/readings",
             data=data,
-            headers={"Content-Type": "application/json", "X-API-Key": self._api_key},
+            headers=headers,
             method="POST",
         )
         try:

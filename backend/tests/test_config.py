@@ -114,3 +114,16 @@ def test_multi_tenant_production_still_checks_jwt_secret_with_ingest_auth_off() 
             auth_mode=AuthMode.MULTI_TENANT,
             ingest_auth=IngestAuth.OFF,
         )
+
+
+def test_ingest_auth_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """環境変数 INGEST_AUTH から読める（docker-compose の environment はこの経路）。"""
+    monkeypatch.setenv("INGEST_AUTH", "off")
+    assert Settings(_env_file=None).ingest_auth == IngestAuth.OFF
+
+
+def test_empty_ingest_auth_is_an_error_not_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """空の値を黙って off（または既定）にしない（docker-compose の既定 key は別経路）。"""
+    monkeypatch.setenv("INGEST_AUTH", "")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

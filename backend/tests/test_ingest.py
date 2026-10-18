@@ -3,6 +3,7 @@
 docs/architecture.md §12 テスト のシナリオ（認証・不正ペイロード・
 高頻度バッチ）を実装に合わせて踏襲。Alarm評価・dedupeはSprint 4で追加。
 """
+import logging
 import time
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -340,3 +341,46 @@ async def test_ingest_auth_off_does_not_open_other_apis(
     monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
     resp = await client.get("/api/sensors")
     assert resp.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("auth_mode", "ingest_auth", "requires_key"),
+    [
+        (AuthMode.DISABLED, IngestAuth.KEY, True),
+        (AuthMode.DISABLED, IngestAuth.OFF, False),
+        (AuthMode.MULTI_TENANT, IngestAuth.KEY, False),
+        (AuthMode.MULTI_TENANT, IngestAuth.OFF, False),
+    ],
+)
+def test_ingest_requires_key_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    auth_mode: AuthMode,
+    ingest_auth: IngestAuth,
+    requires_key: bool,
+) -> None:
+    monkeypatch.setattr(settings, "auth_mode", auth_mode)
+    monkeypatch.setattr(settings, "ingest_auth", ingest_auth)
+    assert settings.ingest_requires_key is requires_key
+
+
+@pytest.mark.parametrize(
+    ("auth_mode", "ingest_auth", "warns"),
+    [
+        (AuthMode.DISABLED, IngestAuth.OFF, True),
+        (AuthMode.DISABLED, IngestAuth.KEY, False),
+        (AuthMode.MULTI_TENANT, IngestAuth.OFF, False),  # SaaS では INGEST_AUTH を使わない
+    ],
+)
+async def test_startup_warns_only_when_keyless_ingest_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    auth_mode: AuthMode,
+    ingest_auth: IngestAuth,
+    warns: bool,
+) -> None:
+    monkeypatch.setattr(settings, "auth_mode", auth_mode)
+    monkeypatch.setattr(settings, "ingest_auth", ingest_auth)
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        async with lifespan(app):
+            pass
+    assert any("INGEST_AUTH=off" in r.getMessage() for r in caplog.records) is warns
