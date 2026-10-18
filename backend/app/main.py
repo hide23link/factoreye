@@ -60,7 +60,7 @@ from app.validation import handle_input_error
 async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
     """アプリの起動から終了までの処理。
 
-    起動時: 取り込みのレート制限の状態を警告し、常駐タスク
+    起動時: 取り込みのレート制限の解除・キーなしの取り込みを警告し、常駐タスク
     （バッファ書き込み・古いデータの削除）を開始する。
     終了時: 常駐タスクを止め、バッファに残った測定値を書いてから、Webhook の送信用の接続と
     DB への接続プールを閉じる。
@@ -69,6 +69,11 @@ async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
     if settings.ingest_rate_limit.strip().lower() == "off":
         logger.warning(
             "INGEST_RATE_LIMIT=off: 取り込みのレート制限を解除しています（実機テスト用）"
+        )
+    if settings.auth_mode == AuthMode.DISABLED and not settings.ingest_requires_key:
+        logger.warning(
+            "INGEST_AUTH=off: 取り込みをキーなしで受け付けています。"
+            "取り込みの口を LAN などに限定してください"
         )
     flush_task = asyncio.create_task(flush_loop())
     purge_task = asyncio.create_task(purge_loop())

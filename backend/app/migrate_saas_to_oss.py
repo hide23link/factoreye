@@ -20,7 +20,8 @@ workspace_id が NULL の全データ（self-hosted には複数ワークスペ�
 移さないもの: ユーザー・リフレッシュトークン・ワークスペース（self-hosted は認証なし）。
 
 ID（UUID）と取り込みキー（ingest_key）はそのまま保つ。測定値の ID は移行先で振り直す。
-取り込みキーは移るが、self-hosted の取り込みは X-API-Key ヘッダー（INGEST_API_KEY）が必要。
+取り込みキーは移るが、self-hosted の取り込みは X-API-Key ヘッダー（INGEST_API_KEY）が必要
+（INGEST_AUTH=off のときは不要）。
 デバイス側の送信設定は別途変える必要がある。
 
 取り込みは1トランザクション。制約違反（同名センサー・同じ ID など）があれば

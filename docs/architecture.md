@@ -78,7 +78,7 @@ flowchart LR
 | Method | Path | 内容 | 認証 |
 |---|---|---|---|
 | GET | `/health` | 稼働確認。DB 接続状態を返す（`ok` / `degraded`） | なし |
-| POST | `/api/ingest/readings` | センサー値の取り込み（単発・バッチ） | APIキー（self-hosted） |
+| POST | `/api/ingest/readings` | センサー値の取り込み（単発・バッチ） | APIキー（self-hosted。`INGEST_AUTH=off` でなし） |
 | GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成 | なし |
 | GET / PUT / DELETE | `/api/sensors/{id}` | 詳細・更新・削除（物理削除） | なし |
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`） | なし |
@@ -118,7 +118,7 @@ flowchart LR
 ## 5. センサーの取り込み（Ingest）
 
 ### 認証
-- **self-hosted（`AUTH_MODE=disabled`）**: `X-API-Key` ヘッダーに `INGEST_API_KEY` を送る。不一致は 401
+- **self-hosted（`AUTH_MODE=disabled`）**: 既定（`INGEST_AUTH=key`）では、`X-API-Key` ヘッダーに `INGEST_API_KEY` を送る。不一致は 401。`INGEST_AUTH=off` のときは、キーなしで受け付ける（送られてきたヘッダーは無視する）。このとき、センサーは本文の `ingestKey` だけで識別されるので、`ingestKey` を知っていれば誰でも値を書ける。取り込みの口を LAN などに限定して使う。起動時に警告をログに出す。レート制限（IP ごと）は変わらないが、制限の鍵は `CF-Connecting-IP` ヘッダーを優先して読む（`app/rate_limit.py`）ので、backend に直接届く経路（プロキシを通らない LAN など）では、そのヘッダーを偽装して制限を避けられる。キーなしの運用では、取り込みの口の前に置くプロキシで `CF-Connecting-IP` を外すか、信頼できる経路に限る
 - **SaaS（`AUTH_MODE=multi_tenant`）**: ヘッダー不要。本文の `ingestKey`（センサー単位のキー）で識別する
 
 ### リクエスト
@@ -350,9 +350,10 @@ DB に接続できない場合は `status` が `degraded` になる。
 | 変数 | 既定 | 内容 |
 |---|---|---|
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では必ず変更する |
-| `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する |
+| `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する（`INGEST_AUTH=off` のときは使わない） |
+| `INGEST_AUTH` | `key` | 取り込みの認証（self-hosted）。`off` でキーなしで受け付ける（機器に API キーを入れない運用向け。`off` のときは `INGEST_API_KEY` の本番の検査をしない。SaaS では使わない） |
 | `JWT_SECRET` | `change-this-in-production` | JWT の署名鍵。本番では必ず変更する |
-| `ENVIRONMENT` | `development` | `production` で `/docs` を無効化。このとき `INGEST_API_KEY`（`AUTH_MODE=multi_tenant` なら `JWT_SECRET`）が既定値のままだと起動しない（大文字小文字は区別しない） |
+| `ENVIRONMENT` | `development` | `production` で `/docs` を無効化。このとき `INGEST_API_KEY`（`AUTH_MODE=multi_tenant` なら `JWT_SECRET`）が既定値のままだと起動しない（`INGEST_AUTH=off` なら `INGEST_API_KEY` は検査しない。大文字小文字は区別しない） |
 | `FRONTEND_URL` | `http://localhost:3001` | CORS の許可オリジン（`*` は使わない） |
 | `AUTH_MODE` | `disabled` | `multi_tenant` で SaaS モード |
 | `INGEST_RATE_LIMIT` | `100/minute` | 取り込みの制限。`off` で解除（管理画面からの期限付き解除は §10） |
@@ -394,7 +395,7 @@ backend のテストは、テストごとにすべてのテーブルを作り直
 - 管理画面: ユーザーのページング、管理者の画面からの追加・削除は未対応
 - 次の段階の候補: ルールベースの設定
 - 移行の制限: 同じワークスペースを、同じ DB に取り込み直すと失敗する（ID が重なるため。削除済みの行も残っているため同様）。取り込みファイルのサイズに上限はない
-- 移行後のデバイス: OSS 版ではデバイスの送信に `X-API-Key` ヘッダー（`INGEST_API_KEY`）が必要。SaaS 版の `ingestKey` だけの送信とは異なる（§10.1）
+- 移行後のデバイス: OSS 版ではデバイスの送信に `X-API-Key` ヘッダー（`INGEST_API_KEY`）が必要（`INGEST_AUTH=off` ならキーなし）。SaaS 版の `ingestKey` だけの送信とは異なる（§10.1）
 - 一覧の件数が増えると、`total` の集計（件数を数える処理）と、ページの読み出しの両方のコストが増える。数十万件規模では見直す
 - 測定値の一覧（`readings`）は、列だけを読むようにしたが、読み出す件数（`limit`）そのものは減らしていない。グラフは `downsampled` を使う（§8）
 - 復旧ツール（§11.1）: DB を丸ごと戻す機能は無い（`infra/restore.sh` を使う）。スキーマの版が違うバックアップは書き戻せない（古い版を新しい版に上げてから書き戻す機能は無い）。書き戻しで SaaS の Free Tier のセンサー数の上限は確かめない。書き戻しは閲覧と同じ認証で使える

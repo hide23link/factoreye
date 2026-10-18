@@ -176,7 +176,7 @@ FactorEyeClient::SendOutcome FactorEyeClient::_postReadings(const String& ingest
   HTTPClient http;
   http.begin(_host + "/api/ingest/readings");
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-API-Key", _apiKey);
+  if (!_apiKey.isEmpty()) http.addHeader("X-API-Key", _apiKey);  // キーなしで受け付けるサーバー向け（空なら送らない）
   // 応答ヘッダーのうち Retry-After だけ読めるようにする（POST の前に指定する）
   const char* headerKeys[] = {"Retry-After"};
   http.collectHeaders(headerKeys, 1);
