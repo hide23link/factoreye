@@ -27,12 +27,13 @@ _bearer = HTTPBearer(auto_error=False)
 async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) -> None:
     """Ingest エンドポイント認証。
     - AUTH_MODE=disabled (self-hosted): X-API-Key ヘッダーと .env の共有シークレットを比較
+      （INGEST_AUTH=off のときは比較しない。送られてきたヘッダーは無視する）
     - AUTH_MODE=multi_tenant (SaaS): センサーの ingest_key が body にあるのでヘッダー認証は不要
 
     比較が違えば 401。SaaS では、認証は本文の ingest_key（センサーごとの鍵）で行う。
     """
-    if settings.auth_mode == AuthMode.MULTI_TENANT:
-        return  # multi-tenant: body の ingest_key がセンサー単位の認証になる
+    if not settings.ingest_requires_key:
+        return  # SaaS または INGEST_AUTH=off: body の ingest_key がセンサー単位の識別になる
     # 比較にかかる時間からキーを推測されないよう、一定時間で比較する。
     # 文字列のままだと ASCII 以外で TypeError（500）になるため、バイト列にする
     if x_api_key is None or not hmac.compare_digest(

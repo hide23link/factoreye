@@ -4,6 +4,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://factoreye:password@postgres:5432/factoreye
       - INGEST_API_KEY=${INGEST_API_KEY:-change-this-in-production}
+      # 取り込みの認証。"off" でキーなしで受け付ける（機器に API キーを入れない運用。取り込みの口を LAN などに限定すること）
+      - INGEST_AUTH=${INGEST_AUTH:-key}
       - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで

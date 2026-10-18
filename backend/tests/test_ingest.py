@@ -12,7 +12,7 @@ import pytest
 
 import app.ingest_buffer as ingest_buffer
 import app.main as main_module
-from app.config import settings
+from app.config import AuthMode, IngestAuth, settings
 from app.ingest_buffer import IngestBuffer, PendingReading, flush_once
 from app.main import app, lifespan
 
@@ -280,3 +280,63 @@ async def test_non_finite_value_inside_readings_returns_400(
         content=b'{"ingestKey": "k", "readings": [{"value": 1}, {"value": NaN}]}',
     )
     assert resp.status_code == 400
+
+
+# ---- INGEST_AUTH（キーなしの取り込み） ----
+
+
+async def test_missing_api_key_returns_401_by_default(client: httpx.AsyncClient) -> None:
+    """既定（INGEST_AUTH=key）では、ヘッダーなしは 401（今までどおり）。"""
+    resp = await client.post(
+        "/api/ingest/readings", json={"ingestKey": "no-header-sensor", "value": 1.0}
+    )
+    assert resp.status_code == 401
+
+
+async def test_ingest_auth_off_accepts_requests_without_key(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    await _create_sensor(client, "keyless-sensor")
+
+    resp = await client.post(
+        "/api/ingest/readings", json={"ingestKey": "keyless-sensor", "value": 21.5}
+    )
+    assert resp.status_code == 202
+    assert resp.json()["accepted"] == 1
+
+
+async def test_ingest_auth_off_ignores_wrong_key(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """キーなしにしても、古い機器が送ってくるヘッダーで拒否しない（無視する）。"""
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    await _create_sensor(client, "keyless-with-header")
+
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers={"X-API-Key": "anything"},
+        json={"ingestKey": "keyless-with-header", "value": 1.0},
+    )
+    assert resp.status_code == 202
+
+
+async def test_ingest_auth_off_still_rejects_unknown_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """キーなしでも、センサーの ingestKey が未登録なら 404（識別は ingestKey で続く）。"""
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    resp = await client.post(
+        "/api/ingest/readings", json={"ingestKey": "unknown-keyless", "value": 1.0}
+    )
+    assert resp.status_code == 404
+
+
+async def test_ingest_auth_off_does_not_open_other_apis(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INGEST_AUTH=off は取り込みだけの設定。ほかの API の認証は変わらない（SaaS の JWT）。"""
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+    resp = await client.get("/api/sensors")
+    assert resp.status_code == 401

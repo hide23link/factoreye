@@ -2,13 +2,14 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import DEFAULT_SECRET, AuthMode, Settings
+from app.config import DEFAULT_SECRET, AuthMode, IngestAuth, Settings
 
 
 def _make(
     environment: str,
     auth_mode: AuthMode = AuthMode.DISABLED,
     ingest_api_key: str = DEFAULT_SECRET,
+    ingest_auth: str | IngestAuth = IngestAuth.KEY,
 ) -> Settings:
     # 開発者の .env を読まないよう、_env_file=None にする
     return Settings(
@@ -16,6 +17,7 @@ def _make(
         environment=environment,
         auth_mode=auth_mode,
         ingest_api_key=ingest_api_key,
+        ingest_auth=ingest_auth,
     )
 
 
@@ -64,4 +66,51 @@ def test_production_multi_tenant_rejects_placeholder_jwt_secret() -> None:
             auth_mode=AuthMode.MULTI_TENANT,
             ingest_api_key="x" * 32,
             jwt_secret="CHANGE_ME_STRONG_RANDOM_SECRET",
+        )
+
+
+# ---- INGEST_AUTH ----
+
+
+def test_ingest_auth_defaults_to_key() -> None:
+    s = _make(environment="development")
+    assert s.ingest_auth == IngestAuth.KEY
+    assert s.ingest_requires_key
+
+
+def test_ingest_auth_off_skips_key_check_in_production() -> None:
+    """キーなしにしたときは、INGEST_API_KEY が既定値でも本番で起動できる（キーを使わないため）。"""
+    s = _make(environment="production", ingest_auth=IngestAuth.OFF)
+    assert not s.ingest_requires_key
+
+
+def test_production_still_rejects_default_key_when_auth_is_key() -> None:
+    with pytest.raises(ValidationError, match="INGEST_API_KEY"):
+        _make(environment="production", ingest_auth=IngestAuth.KEY)
+
+
+def test_ingest_auth_is_case_insensitive() -> None:
+    assert _make(environment="development", ingest_auth=" OFF ").ingest_auth == IngestAuth.OFF
+
+
+def test_ingest_auth_rejects_typos() -> None:
+    """"of" などの誤字は、黙ってキーなし（または既定）にせず、起動時にエラーにする。"""
+    with pytest.raises(ValidationError):
+        _make(environment="development", ingest_auth="of")
+
+
+def test_multi_tenant_never_requires_key_header() -> None:
+    s = _make(
+        environment="development", auth_mode=AuthMode.MULTI_TENANT, ingest_auth=IngestAuth.KEY
+    )
+    assert not s.ingest_requires_key
+
+
+def test_multi_tenant_production_still_checks_jwt_secret_with_ingest_auth_off() -> None:
+    """INGEST_AUTH=off は SaaS の JWT_SECRET の検査を弱めない。"""
+    with pytest.raises(ValidationError, match="JWT_SECRET"):
+        _make(
+            environment="production",
+            auth_mode=AuthMode.MULTI_TENANT,
+            ingest_auth=IngestAuth.OFF,
         )

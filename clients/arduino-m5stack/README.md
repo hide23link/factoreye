@@ -42,6 +42,7 @@ void loop() {
 ### 2. APIキー
 
 `begin()` の第2引数は、backendの `.env` に設定した `INGEST_API_KEY` と同じ値を使います。
+backend を `INGEST_AUTH=off`（キーなしの取り込み）で動かしているときは、空文字（`""`）を渡します。そのときは `X-API-Key` ヘッダーを付けずに送ります。
 self-hosted運用ではインストールごとに1つの共有シークレットです。SaaS版へ送る場合、SaaSは
 `X-API-Key` ヘッダーを見ず、本文の `ingestKey` だけでセンサーを識別します（ここには任意の文字列を渡して構いません）。
 

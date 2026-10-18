@@ -30,6 +30,19 @@ class AuthMode(StrEnum):
     MULTI_TENANT = "multi_tenant"
 
 
+class IngestAuth(StrEnum):
+    """self-hosted（AUTH_MODE=disabled）の取り込みの認証。環境変数 INGEST_AUTH で切り替える。
+
+    SaaS（multi_tenant）では使わない（もともとヘッダー認証がなく、本文の ingestKey で識別する）。
+    """
+
+    # 既定: X-API-Key ヘッダーを INGEST_API_KEY と比べる（違えば 401）
+    KEY = "key"
+    # キーなしで受け付ける。誰でも、センサーの ingestKey を知っていれば値を書ける。
+    # 取り込みの口を LAN などに限定した上で使う（機器にキーを入れない運用向け）
+    OFF = "off"
+
+
 class Settings(BaseSettings):
     """設定の一覧。型が違う値（例: 数値の項目に文字列）は、起動時にエラーになる。"""
 
@@ -42,6 +55,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://factoreye:password@localhost:5432/factoreye"
     # self-hosted の取り込み用の共有キー（X-API-Key ヘッダーと比べる）。本番では必ず変える
     ingest_api_key: str = DEFAULT_SECRET
+    # 取り込みの認証（IngestAuth を参照）。"off" にするとキーなしで受け付ける。既定は "key"
+    ingest_auth: IngestAuth = IngestAuth.KEY
     # JWT（ログインのトークン）の署名に使う秘密の値。SaaS 版では必ず長い乱数に変える
     jwt_secret: str = DEFAULT_SECRET
     # 画面のアドレス。CORS で、この1つだけを許可する（ほかのサイトからの API 呼び出しを防ぐ）
@@ -72,17 +87,26 @@ class Settings(BaseSettings):
         """"Production" や前後の空白で、本番の判定をすり抜けないよう、小文字にそろえる。"""
         return value.strip().lower()
 
+    @field_validator("ingest_auth", mode="before")
+    @classmethod
+    def _normalize_ingest_auth(cls, value: object) -> object:
+        """"OFF" や前後の空白でも設定が通るよう、小文字にそろえる（誤字は起動時にエラー）。"""
+        return value.strip().lower() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def _reject_default_secrets_in_production(self) -> "Settings":
         """本番（ENVIRONMENT=production）で、公開されている既定の秘密値のまま起動させない。
 
         INGEST_API_KEY は self-hosted（disabled）で、JWT_SECRET は SaaS（multi_tenant）で使う。
         使わない側の値は検査しない（片方だけ変えた既存の構成を壊さないため）。
+        INGEST_AUTH=off のときは、INGEST_API_KEY を使わないので検査しない。
         """
         if self.environment != "production":
             return self
         if self.auth_mode == AuthMode.MULTI_TENANT:
             used, name = self.jwt_secret, "JWT_SECRET"
+        elif self.ingest_auth == IngestAuth.OFF:
+            return self
         else:
             used, name = self.ingest_api_key, "INGEST_API_KEY"
         if is_placeholder_secret(used):
@@ -91,6 +115,11 @@ class Settings(BaseSettings):
                 "ENVIRONMENT=production では必ず変更してください"
             )
         return self
+
+    @property
+    def ingest_requires_key(self) -> bool:
+        """取り込みで X-API-Key を確かめるか。self-hosted で INGEST_AUTH=key のときだけ True。"""
+        return self.auth_mode != AuthMode.MULTI_TENANT and self.ingest_auth == IngestAuth.KEY
 
     @property
     def debug(self) -> bool:
