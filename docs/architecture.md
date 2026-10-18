@@ -118,7 +118,7 @@ flowchart LR
 ## 5. センサーの取り込み（Ingest）
 
 ### 認証
-- **self-hosted（`AUTH_MODE=disabled`）**: 既定（`INGEST_AUTH=key`）では、`X-API-Key` ヘッダーに `INGEST_API_KEY` を送る。不一致は 401。`INGEST_AUTH=off` のときは、キーなしで受け付ける（送られてきたヘッダーは無視する）。このとき、センサーは本文の `ingestKey` だけで識別されるので、`ingestKey` を知っていれば誰でも値を書ける。取り込みの口を LAN などに限定して使う。起動時に警告をログに出す。レート制限（IP ごと）は変わらないが、制限の鍵は `CF-Connecting-IP` ヘッダーを優先して読む（`app/rate_limit.py`）ので、backend に直接届く経路（プロキシを通らない LAN など）では、そのヘッダーを偽装して制限を避けられる。キーなしの運用では、取り込みの口の前に置くプロキシで `CF-Connecting-IP` を外すか、信頼できる経路に限る
+- **self-hosted（`AUTH_MODE=disabled`）**: 既定（`INGEST_AUTH=key`）では、`X-API-Key` ヘッダーに `INGEST_API_KEY` を送る。不一致は 401。`INGEST_AUTH=off` のときは、キーなしで受け付ける（送られてきたヘッダーは無視する）。このとき、センサーは本文の `ingestKey` だけで識別されるので、`ingestKey` を知っていれば誰でも値を書ける。取り込みの口を LAN などに限定して使う。起動時に警告をログに出す。レート制限（IP ごと）は変わらないが、制限の鍵は `CF-Connecting-IP` ヘッダーを優先して読む（`app/rate_limit.py`）ので、backend に直接届く経路（プロキシを通らない LAN など）では、そのヘッダーを偽装して制限を避けられる。キーなしの運用では、取り込みの口の前に置くプロキシで `CF-Connecting-IP` を上書きするか、信頼できる経路に限る。LAN 向けの窓口（nginx）は `infra/lan-ingest/` にある
 - **SaaS（`AUTH_MODE=multi_tenant`）**: ヘッダー不要。本文の `ingestKey`（センサー単位のキー）で識別する
 
 ### リクエスト
