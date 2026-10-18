@@ -21,9 +21,9 @@ check() {
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$@" || true)
   if [[ "|$expected|" == *"|$code|"* ]]; then
-    echo "  OK  $name（$code）"
+    echo "  OK  ${name}（${code}）"
   else
-    echo "  NG  $name: $code（期待 $expected）"
+    echo "  NG  $name: ${code}（期待 ${expected}）"
     failures=$((failures + 1))
   fi
 }
@@ -36,7 +36,7 @@ code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:8000/he
 if [[ "$code" == "000" ]]; then
   echo "  OK  http://$HOST:8000 は届かない"
 else
-  echo "  NG  http://$HOST:8000 に直接届く（$code）。backend の 8000 は 127.0.0.1 だけに公開してください（README の「前提」）"
+  echo "  NG  http://$HOST:8000 に直接届く（${code}）。backend の 8000 は 127.0.0.1 だけに公開してください（README の「前提」）"
   failures=$((failures + 1))
 fi
 
