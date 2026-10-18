@@ -3,6 +3,8 @@
 # LAN の別のマシン（機器と同じ立場）から実行する。使い方:
 #   ./infra/lan-ingest/verify.sh http://192.168.0.72:8001            # 通す・断るの確認
 #   ./infra/lan-ingest/verify.sh http://192.168.0.72:8001 --rate-test  # さらに、レート制限が偽装で避けられないかを確認（約 1 分、制限を使い切る）
+# 注意: --rate-test のあと 1 分以内に、もう一度実行すると、取り込みの確認が 429 になって NG になる。
+#       取り込みの制限を解除している間（管理画面の解除、INGEST_RATE_LIMIT=off）は、--rate-test は NG になる。
 #
 # 取り込みの確認は、わざと壊した本文（{}）を送る。センサーは作らず、データも増えない。
 # 期待: backend に届いていれば 400（INGEST_AUTH=off）か 401（INGEST_AUTH=key）。届いていなければ 404・403・接続できない。
@@ -26,6 +28,18 @@ check() {
   fi
 }
 
+# バックエンドの 8000 が、LAN に直接出ていないこと（窓口を通らない経路があると、断る設定が意味をなくす）
+HOST="${BASE#*://}"
+HOST="${HOST%%[:/]*}"
+echo "窓口を通らない経路"
+code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$HOST:8000/health" || true)
+if [[ "$code" == "000" ]]; then
+  echo "  OK  http://$HOST:8000 は届かない"
+else
+  echo "  NG  http://$HOST:8000 に直接届く（$code）。backend の 8000 は 127.0.0.1 だけに公開してください（README の「前提」）"
+  failures=$((failures + 1))
+fi
+
 echo "通すもの"
 check "GET /health" "200" "$BASE/health"
 check "POST /api/ingest/readings（本文が空）が backend に届く" "400|401|422" \
@@ -40,6 +54,8 @@ check "PUT /api/admin/ingest-limit" "404" -X PUT -H "Content-Type: application/j
 check "GET /docs" "404" "$BASE/docs"
 check "GET /openapi.json" "404" "$BASE/openapi.json"
 check "GET /" "404" "$BASE/"
+check "末尾にスラッシュのある取り込みの URL" "404" -X POST -H "Content-Type: application/json" -d '{}' "$BASE/api/ingest/readings/"
+check "大文字の取り込みの URL" "404" -X POST -H "Content-Type: application/json" -d '{}' "$BASE/API/ingest/readings"
 check "POST /health" "403" -X POST "$BASE/health"
 big_body="$(mktemp)"
 trap 'rm -f "$big_body"' EXIT

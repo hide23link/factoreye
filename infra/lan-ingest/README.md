@@ -5,14 +5,16 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 `INGEST_AUTH=off`（キーなしの取り込み、[`docs/decisions.md`](../../docs/decisions.md) 2026-10-18）で動かすときの前提の窓口。
 
 ```
-機器 ──HTTP──▶ [窓口 nginx: LAN の IP:8001] ──▶ backend（コンテナの中の 8000。ホストには 127.0.0.1 だけ公開）
+機器 ──HTTP──▶ [窓口 nginx: LAN の IP:8001] ──▶ backend（コンテナの中の 8000）
 ```
+
+**前提: backend の 8000 を、LAN に公開していないこと。** 素の `docker-compose.yml` は 8000 を全インターフェースに公開する（`"8000:8000"`）ので、そのままでは窓口を通らずに、`/api/sensors` や `/api/admin/*` に直接届く（`CF-Connecting-IP` の偽装でレート制限も避けられる）。窓口を使うホストでは、8000 を `127.0.0.1:8000:8000` に絞る（ラズパイは、ホスト固有の設定で絞ってある）。`verify.sh` が、8000 に直接届かないことも確かめる。
 
 | | |
 |---|---|
 | 通す | `POST /api/ingest/readings`、`GET /health` |
 | 断る | それ以外はすべて（`/api/sensors`・`/api/admin/*`・`/docs`・`/` など → 404。通す URL に違うメソッド → 403） |
-| 受ける送信元 | 私設アドレス（10.x・172.16〜31.x・192.168.x）と 127.0.0.1 だけ。ルーターのポート転送などでインターネットから届いても 403 |
+| 受ける送信元 | 私設アドレス（10.x・172.16〜31.x・192.168.x）と 127.0.0.1 だけ。ルーターのポート転送などでインターネットから届いても、通す 2 つの URL は 403（それ以外の URL は 404、大きすぎる本文は 413。いずれも backend には届かない） |
 | 本文の上限 | 256KB（1,000 件のバッチで約 30KB） |
 | レート制限 | backend の `INGEST_RATE_LIMIT`（既定 100 回/分）を、**機器ごと**に数える。窓口が、機器の IP を `CF-Connecting-IP` として backend に渡す（機器が付けた値は捨てるので、偽装で避けられない） |
 
@@ -24,12 +26,12 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 
    ```bash
    cd ~/apps/factoreye
-   docker run --rm -v "$PWD/infra/lan-ingest/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t
+   docker run --rm -v "$PWD/infra/lan-ingest/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.30-alpine nginx -t
    ```
 
    `syntax is ok` と `test is successful` が出ればよい。
 
-2. 窓口を起動する（`LAN_INGEST_BIND` は、このホストの LAN の IP。必須。`0.0.0.0` にしない）:
+2. 窓口を起動する（`LAN_INGEST_BIND` は、このホストの LAN の IP。`0.0.0.0` にしない。未設定だと 127.0.0.1 になり、LAN の機器からは届かない）:
 
    ```bash
    LAN_INGEST_BIND=192.168.0.72 docker compose \
@@ -45,11 +47,9 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
    LAN_INGEST_BIND=192.168.0.72
    ```
 
-4. ファイアウォール（ufw など）を使っているなら、LAN から 8001 を許可する:
+   （区切りは Linux の `:`。Windows は `;`。窓口を持たない別のホストで同じ `.env` を使い回さない。`-f` を付けたコマンドは、`COMPOSE_FILE` より `-f` が優先される）
 
-   ```bash
-   sudo ufw allow from 192.168.0.0/24 to any port 8001 proto tcp
-   ```
+4. ファイアウォールについて: **Docker が公開したポートには、ufw のルールが効かない**（Docker が iptables に直接書くため）。ufw で許可・拒否しても意味がない。守っているのは、`LAN_INGEST_BIND`（開くインターフェース）と、nginx の送信元の制限（私設アドレスだけ）。LAN の中でさらに絞るなら、`DOCKER-USER` チェインに書く
 
 5. LAN の別のマシン（機器と同じ立場）から確かめる:
 
@@ -68,7 +68,7 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 docker compose -f docker-compose.yml -f infra/lan-ingest/docker-compose.lan-ingest.yml rm -sf lan-ingest
 ```
 
-`.env` に足した 2 行も消す。backend は影響を受けない。
+`.env` に足した 2 行も消す。backend は影響を受けない。ログは `docker compose -f docker-compose.yml -f infra/lan-ingest/docker-compose.lan-ingest.yml logs lan-ingest`（`COMPOSE_FILE` を `.env` に足していれば `docker compose logs lan-ingest`）。`/health` はログに残さない。ログは最大 30MB（10MB × 3）まで。
 
 ## 注意
 
