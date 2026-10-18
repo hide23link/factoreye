@@ -4,6 +4,9 @@
  * - データはキャッシュされ、同じ queryKey の画面どうしで共有される
  * - 変化が速いデータ（センサー値、アラーム、ダッシュボードの中身）は、POLL_INTERVAL_MS（5 秒）ごとに取り直す
  * - 変化の少ないデータ（通知設定、移行の状態など）は、取り直さない
+ *
+ * 【誰が使うか】各画面・ウィジェットが、`const { data } = useSensors()` のように呼ぶ。
+ * 引数があるものは、呼ぶ側が渡す（例: useDashboard(ダッシュボードの ID)）。取得の通信は lib/api.ts が行う。
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 

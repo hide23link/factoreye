@@ -217,7 +217,7 @@ async def test_each_alarm_is_sent_to_its_own_workspace_settings(session: AsyncSe
     )
 
     now = datetime.now(UTC)
-    await buffer.drain()  # 他のテストの残りを捨てる
+    await buffer.take_all()  # 他のテストの残りを捨てる
     await buffer.add(PendingReading(sensor_id=a.id, value=90, recorded_at=now))  # A: 重故障
     await buffer.add(PendingReading(sensor_id=b.id, value=60, recorded_at=now))  # B: 軽故障
     await buffer.add(PendingReading(sensor_id=c.id, value=90, recorded_at=now))  # C: 設定なし
@@ -242,7 +242,7 @@ async def test_disabled_workspace_settings_do_not_send(session: AsyncSession) ->
         session, ws, "停止中", threshold_max_warning=50, threshold_max_critical=80
     )
 
-    await buffer.drain()
+    await buffer.take_all()
     await buffer.add(PendingReading(sensor_id=sensor.id, value=90, recorded_at=datetime.now(UTC)))
     with patch("app.ingest_buffer.send_alarm_discord", new_callable=AsyncMock) as mock_send:
         await flush_once()
@@ -267,7 +267,7 @@ async def test_repeat_notification_follows_each_workspace_setting(session: Async
     )
 
     t0 = datetime.now(UTC)
-    await buffer.drain()
+    await buffer.take_all()
     await buffer.add(PendingReading(sensor_id=s_on.id, value=90, recorded_at=t0))
     await buffer.add(PendingReading(sensor_id=s_off.id, value=90, recorded_at=t0))
     with patch("app.ingest_buffer.send_alarm_discord", new_callable=AsyncMock):
@@ -275,7 +275,7 @@ async def test_repeat_notification_follows_each_workspace_setting(session: Async
 
     # 2分後も未解決のまま。再通知の間隔（1分）を超えるのは、再通知ありのワークスペースだけ
     t1 = t0 + timedelta(minutes=2)
-    await buffer.drain()
+    await buffer.take_all()
     await buffer.add(PendingReading(sensor_id=s_on.id, value=90, recorded_at=t1))
     await buffer.add(PendingReading(sensor_id=s_off.id, value=90, recorded_at=t1))
     with patch("app.ingest_buffer.send_alarm_discord", new_callable=AsyncMock) as mock_send:

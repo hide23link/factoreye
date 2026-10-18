@@ -8,6 +8,8 @@
  * どちらが使えるかは、バックエンドの状態（/api/settings/migration/status）で決まる。
  * OSS → SaaS（ワークスペースを選んでの取り込み）は、このパネルではなく復旧ツール
  * （tools/recovery/）で行う（ワークスペースの選択・Free Tier の確認が要るため）。
+ *
+ * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -141,7 +143,7 @@ function ImportSection() {
         type="file"
         aria-label="取り込むファイル"
         accept=".gz,application/gzip"
-        onChange={(e) => changeFile(e.target.files?.[0] ?? null)}
+        onChange={(event) => changeFile(event.target.files?.[0] ?? null)}
         className="block text-sm"
       />
 
@@ -149,8 +151,8 @@ function ImportSection() {
         <input
           type="checkbox"
           checked={withNotifications}
-          onChange={(e) => {
-            setWithNotifications(e.target.checked);
+          onChange={(event) => {
+            setWithNotifications(event.target.checked);
             setPreview(null);
           }}
           className="mt-0.5"

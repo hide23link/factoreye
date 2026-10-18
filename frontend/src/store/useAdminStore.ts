@@ -5,6 +5,8 @@
  * - 再読み込みしてもログインを保ったままになる（タブを閉じると消える）
  * - localStorage は使わない（ブラウザを閉じても残るため）
  * - トークンは 60 分で失効し、期限切れはサーバーが拒否する（画面は再ログインへ戻す）
+ *
+ * 【誰が使うか】AdminApp.tsx と AdminLoginPage.tsx。
  */
 import { create } from "zustand";
 

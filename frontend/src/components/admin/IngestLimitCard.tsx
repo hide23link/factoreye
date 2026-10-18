@@ -1,3 +1,10 @@
+/**
+ * 管理者画面の「取り込みのレート制限」の表示と、期限付きの解除の操作。
+ * 解除の状態は、バックエンド（app/ingest_limit_toggle.py）のメモリにあり、30秒ごとに取り直す。
+ *
+ * 【誰が使うか】AdminUsersPage.tsx が、画面の上部に置く。
+ * 【引数（props）】token=管理者トークン、onAuthError=トークンが失効（401）したときの処理。
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 

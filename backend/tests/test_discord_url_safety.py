@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.config import settings
-from app.db.models import AlarmSeverity, ThresholdBreached
+from app.db.models import AlarmSeverity, MinMax
 from app.notifications import AlarmNotification, send_alarm_discord
 from app.webhooks import send_webhook
 
@@ -21,7 +21,7 @@ def _notification() -> AlarmNotification:
         sensor_name="s",
         sensor_unit="C",
         value=1.0,
-        threshold_breached=ThresholdBreached.MAX,
+        threshold_breached=MinMax.MAX,
         severity=AlarmSeverity.CRITICAL,
         triggered_at=datetime.now(UTC),
     )

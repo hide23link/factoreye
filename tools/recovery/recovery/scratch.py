@@ -9,6 +9,8 @@ pg_dump の出力をそのまま正しく解釈できるのは Postgres だけ�
 - psql のメタコマンド（\\! など）を止める（\\restrict）
 - 管理者ではないロール（bk_restorer）で流し込む（COPY ... PROGRAM などを使えない）
 - psql に秘密の環境変数（TARGET_DATABASE_URL・AWS の鍵など）を渡さない
+
+【誰が使うか】app.py、main.py、snapshot.py が読み込む。
 """
 
 from __future__ import annotations

@@ -5,6 +5,10 @@
  * - self-hosted（VITE_AUTH_MODE が multi_tenant 以外）: ログイン無しで、すぐ画面を表示する
  * - SaaS（multi_tenant）: 起動時に保存されたリフレッシュトークンで復元を試み、
  *   復元できなければログイン画面を表示する
+ *
+ * 【誰が使うか】main.tsx が、通常の画面として描画する（/admin 以外のとき）。引数（props）はない。
+ * 【画面の切り替え】ルーター（URL で画面を替える道具）は使わず、useUiStore の view を見て、
+ * ダッシュボード・設定・セットアップガイドのどれを出すかを選ぶ。
  */
 import { Suspense, useEffect } from "react";
 

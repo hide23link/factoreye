@@ -5,6 +5,8 @@
 - 設定変更: 閲覧の合間に一定確率でセンサーのしきい値を書き換える（更新系の負荷）
 
 シナリオ（Runner.scenario）は毎回参照するので、画面から変えた値はすぐ反映される。
+
+【誰が使うか】runner.py が読み込む。
 """
 import asyncio
 import random

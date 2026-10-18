@@ -2,6 +2,8 @@
  * Webhook 連携の設定パネル。
  * 購読（イベントの種類と送信先 URL）の一覧・追加・有効/無効の切り替え・削除を行う。
  * 送信先の URL は、バックエンドで安全性（https・公開アドレス）を検査される。
+ *
+ * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -130,7 +132,7 @@ function AddWebhookForm() {
         タイミング
         <select
           value={eventType}
-          onChange={(e) => setEventType(e.target.value as WebhookEventType)}
+          onChange={(event) => setEventType(event.target.value as WebhookEventType)}
           className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
         >
           {Object.entries(EVENT_LABELS).map(([value, label]) => (
@@ -145,7 +147,7 @@ function AddWebhookForm() {
         <input
           type="url"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={(event) => setUrl(event.target.value)}
           placeholder="https://hooks.zapier.com/..."
           className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
         />

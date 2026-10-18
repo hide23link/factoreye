@@ -2,6 +2,9 @@
 
 使い方: 各項目は、同じ名前の環境変数（大文字、例: database_url → DATABASE_URL）で上書きできる。
 値は起動時に1回だけ読まれ、`settings` という1つのオブジェクトとして全体で共有される。
+
+【誰が使うか】他のファイルが `from app.config import settings` と書いて、`settings.database_url`
+のように読む。設定を変えるには、環境変数（docker-compose.yml の environment や .env）を変える。
 """
 from enum import StrEnum
 
@@ -14,8 +17,8 @@ DEFAULT_SECRET = "change-this-in-production"
 
 def is_placeholder_secret(value: str) -> bool:
     """配布物のひな形の値（change-this-... や CHANGE_ME_...）か空かどうか。大小文字は区別しない。"""
-    v = value.strip().lower()
-    return v == "" or v.startswith(("change-this", "change_me", "change-me"))
+    text = value.strip().lower()
+    return text == "" or text.startswith(("change-this", "change_me", "change-me"))
 
 
 class AuthMode(StrEnum):

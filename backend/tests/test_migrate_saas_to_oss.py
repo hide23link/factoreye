@@ -23,10 +23,10 @@ from app.db.models import (
     Alarm,
     AlarmSeverity,
     Dashboard,
+    MinMax,
     NotificationSettings,
     Reading,
     Sensor,
-    ThresholdBreached,
     User,
     WebhookEventType,
     WebhookSubscription,
@@ -78,7 +78,7 @@ async def saas_data(alembic_table: None) -> AsyncGenerator[dict[str, UUID], None
             Alarm(
                 sensor_id=sensor.id,
                 value=90.0,
-                threshold_breached=ThresholdBreached.MAX,
+                threshold_breached=MinMax.MAX,
                 severity=AlarmSeverity.CRITICAL,
             )
         )

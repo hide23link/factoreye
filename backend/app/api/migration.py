@@ -9,6 +9,8 @@
 self-hosted の書き出し・取り込みは、他の書き込みAPIと同じく認証がない
 （ネットワーク境界で守る前提。元々 GET /api/sensors 等でも全データが読めるため、
 書き出しを足しても新たな漏えいにはならない）。
+
+【引数】workspace_id（SaaS のとき、ログイン中のワークスペース）は、FastAPI が Depends で自動で渡す。
 """
 
 import os
@@ -69,9 +71,9 @@ async def export_my_workspace(
     path = _new_temp_file()
     try:
         await export_workspace(engine, workspace_id, path)
-    except MigrationError as exc:
+    except MigrationError as error:
         path.unlink(missing_ok=True)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from None
     except BaseException:
         path.unlink(missing_ok=True)
         raise
@@ -102,12 +104,12 @@ async def import_workspace(
         counts = await import_bundle(
             engine, path, dry_run=dry_run, with_notifications=with_notifications
         )
-    except MigrationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except IntegrityError as exc:
+    except MigrationError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    except IntegrityError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"取り込みを中止しました（何も残していません）: {integrity_message(exc)}",
+            detail=f"取り込みを中止しました（何も残していません）: {integrity_message(error)}",
         ) from None
     finally:
         path.unlink(missing_ok=True)

@@ -3,6 +3,8 @@
  *
  * バックエンドは上限を超えると HTTP 402 を返す（backend/app/api/sensors.py）。
  * 上限の数（10）は、バックエンドの値と必ず一致させること。
+ *
+ * 【誰が使うか】SensorSettingsPanel、SetupWizard、管理者画面（AdminUsersPage、AdminUserModal）。
  */
 
 // 無料枠でのセンサーの上限数（バックエンドの _FREE_TIER_SENSOR_LIMIT と同じ値）

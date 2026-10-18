@@ -4,6 +4,9 @@
  * 表示する時間範囲は、ダッシュボードで 1 つだけ持つ（useTimeRangeStore）。
  * 範囲が長くても重くならないよう、生データではなく間引いたデータ（区間ごとの平均）を描く。
  * グラフ上でドラッグすると、その期間に拡大する。
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "SensorGraph" のときに出す。
+ * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
  */
 import type { ReactNode } from "react";
 import {

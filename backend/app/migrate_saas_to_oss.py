@@ -113,9 +113,9 @@ def _decode(table: sa.Table, name: str, value: Any) -> Any:
     return value
 
 
-def integrity_message(exc: IntegrityError) -> str:
+def integrity_message(error: IntegrityError) -> str:
     """制約違反の理由（どの ID・どの制約が重複したか）を、ドライバ固有の包み物を外して返す。"""
-    orig = exc.orig
+    orig = error.orig
     cause = getattr(orig, "__cause__", None)
     return str(cause if cause is not None else orig)
 
@@ -411,11 +411,11 @@ async def _import_lines(
                 await _insert_batch(conn, tables[current], pending)
             except IntegrityError:
                 raise  # 制約違反（同じ ID など）は呼び出し側で 409 として扱う
-            except DBAPIError as exc:
+            except DBAPIError as error:
                 # 型が合わない値（例: 数値の列に文字列）などは、利用者が直せる理由として返す
                 raise MigrationError(
                     f"書き出しファイルの値が移行先の形式と合いません（{current}）: "
-                    f"{getattr(exc, 'orig', exc)}"
+                    f"{getattr(error, 'orig', error)}"
                 ) from None
             counts[current] += len(pending)
             pending.clear()
@@ -483,9 +483,9 @@ async def _run_import(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             with_notifications=args.with_notifications,
         )
-    except IntegrityError as exc:
+    except IntegrityError as error:
         print(
-            f"取り込みを中止しました（何も残していません）: {integrity_message(exc)}",
+            f"取り込みを中止しました（何も残していません）: {integrity_message(error)}",
             file=sys.stderr,
         )
         return 1
@@ -535,8 +535,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export":
             return asyncio.run(_run_export(args))
         return asyncio.run(_run_import(args))
-    except MigrationError as exc:
-        print(f"移行を中止しました: {exc}", file=sys.stderr)
+    except MigrationError as error:
+        print(f"移行を中止しました: {error}", file=sys.stderr)
         return 1
 
 

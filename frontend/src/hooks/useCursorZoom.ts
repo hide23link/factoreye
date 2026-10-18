@@ -7,6 +7,8 @@
  *
  * カーソルの時刻は getAnchor で返す（useDragSelect の hoverTime）。
  * ホイールのイベントを止めるため、React の onWheel ではなく、要素に直接 passive: false で付ける。
+ *
+ * 【誰が使うか】SensorGraphWidget と MultiSensorComparisonWidget が、グラフの枠に付ける。
  */
 import { useCallback, useEffect, useRef } from "react";
 

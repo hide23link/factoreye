@@ -3,6 +3,8 @@
  *
  * 注意: JSON の項目名は camelCase（例: ingestKey）。バックエンドの snake_case（ingest_key）とは、
  * バックエンドの CamelModel（app/schemas.py）が変換している。ここでは camelCase で書く。
+ *
+ * 【誰が使うか】lib/api.ts と、各画面・ウィジェット。バックエンドの schemas.py（API の入出力の形）と対応する。
  */
 
 // ---- Auth (Phase 0.5) ----
@@ -77,7 +79,7 @@ export interface ReadingAggregate {
 // アラームの状態（発生中・確認済み・解除済み）
 export type AlarmStatus = "active" | "acknowledged" | "resolved";
 // どちら側のしきい値を超えたか（下限・上限）
-export type ThresholdBreached = "min" | "max";
+export type MinMax = "min" | "max";
 // 重要度（軽故障・重故障）。画面の表示や、通知の送り先に使う
 export type AlarmSeverity = "warning" | "critical";
 
@@ -91,7 +93,7 @@ export interface Alarm {
   acknowledgedBy: string | null;
   value: number;
   status: AlarmStatus;
-  thresholdBreached: ThresholdBreached;
+  thresholdBreached: MinMax;
   severity: AlarmSeverity;
 }
 

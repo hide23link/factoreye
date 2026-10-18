@@ -15,7 +15,7 @@ import app.ingest_buffer as ingest_buffer
 import app.main as main_module
 from app.config import AuthMode, IngestAuth, settings
 from app.ingest_buffer import IngestBuffer, PendingReading, flush_once
-from app.main import app, lifespan
+from app.main import app, start_and_stop
 
 VALID_HEADERS = {"X-API-Key": settings.ingest_api_key}
 
@@ -145,7 +145,7 @@ async def test_flush_once_with_empty_buffer_returns_zero() -> None:
     assert await flush_once() == 0
 
 
-async def test_flush_failure_requeues_readings_for_retry(
+async def test_flush_failure_puts_back_readings_for_retry(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # commit 前に失敗しても値は消えず、次の flush で書かれる
@@ -189,7 +189,7 @@ async def test_flush_drops_readings_of_deleted_sensor_without_blocking_others(
     assert body["total"] == 1
 
 
-async def test_requeue_keeps_order_and_drops_oldest_over_capacity(
+async def test_put_back_keeps_order_and_drops_oldest_over_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(ingest_buffer, "MAX_PENDING_READINGS", 3)
@@ -201,9 +201,9 @@ async def test_requeue_keeps_order_and_drops_oldest_over_capacity(
 
     await buf.add(reading(3.0))
     await buf.add(reading(4.0))
-    await buf.requeue([reading(1.0), reading(2.0)])
+    await buf.put_back([reading(1.0), reading(2.0)])
 
-    assert [p.value for p in await buf.drain()] == [2.0, 3.0, 4.0]
+    assert [p.value for p in await buf.take_all()] == [2.0, 3.0, 4.0]
 
 
 async def test_shutdown_flushes_remaining_readings(client: httpx.AsyncClient) -> None:
@@ -216,7 +216,7 @@ async def test_shutdown_flushes_remaining_readings(client: httpx.AsyncClient) ->
     )
     assert resp.status_code == 202
 
-    async with lifespan(app):
+    async with start_and_stop(app):
         pass
 
     body = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
@@ -230,7 +230,7 @@ async def test_shutdown_continues_when_final_flush_fails(
         raise RuntimeError("db unavailable")
 
     monkeypatch.setattr(main_module, "flush_once", _fail)
-    async with lifespan(app):
+    async with start_and_stop(app):
         pass
 
 

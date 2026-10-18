@@ -2,6 +2,15 @@
 
 SaaS（multi_tenant）では、各 API が「自分のワークスペースのセンサーだけ」を扱うように絞る。
 他人のセンサーは 404 で返す（存在そのものを知らせないため）。
+
+【呼ばれ方】画面が呼ぶ（/api/sensors）。
+- GET/POST /api/sensors、GET/PUT/DELETE /api/sensors/{sensor_id}
+- GET /api/sensors/{sensor_id}/readings              → 測定値の履歴
+- GET /api/sensors/{sensor_id}/readings/aggregate     → 期間の合計と件数
+- GET /api/sensors/{sensor_id}/readings/downsampled   → グラフ用に間引いた値（downsample ＝ 間引き）
+
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 import hashlib
 from collections import OrderedDict
@@ -153,12 +162,12 @@ async def create_sensor(
     session.add(sensor)
     try:
         await session.commit()
-    except IntegrityError as exc:
+    except IntegrityError as error:
         # 同時に作成された場合は DB の一意制約で弾かれる（500 にせず 409 を返す）
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="name or ingestKey already in use"
-        ) from exc
+        ) from error
     await session.refresh(sensor)
     return sensor
 
@@ -208,11 +217,11 @@ async def update_sensor(
     session.add(sensor)
     try:
         await session.commit()
-    except IntegrityError as exc:
+    except IntegrityError as error:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="name already in use"
-        ) from exc
+        ) from error
     await session.refresh(sensor)
     return sensor
 

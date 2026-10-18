@@ -1,4 +1,11 @@
-"""ウィジェット更新・削除API（追加は app.api.dashboards の POST /api/dashboards/:id/widgets）。"""
+"""ウィジェット更新・削除API（追加は app.api.dashboards の POST /api/dashboards/:id/widgets）。
+
+【呼ばれ方】画面のダッシュボードが呼ぶ（ウィジェット ＝ グラフや数値の表示部品）。
+- PUT    /api/widgets/{widget_id}  本文: 変えたい項目だけ（位置・サイズ・センサー・設定）
+- DELETE /api/widgets/{widget_id}
+【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
+self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
+"""
 from typing import Annotated
 from uuid import UUID
 

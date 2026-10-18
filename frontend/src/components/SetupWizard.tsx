@@ -3,6 +3,8 @@
  * 1. センサーを登録する 2. テストデータを送る（デバイスの代わりに、コードを実行する）
  * 3. データを受信したことを確かめる 4. ダッシュボードを作って、グラフを表示する
  * 2 のデータを受信すると、自動で次の段階へ進む（画面を取り直して確かめる）。
+ *
+ * 【誰が使うか】App.tsx が、メニューで「セットアップガイド」を選んだときに出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -164,7 +166,7 @@ export function SetupWizard() {
               名前
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(event) => setName(event.target.value)}
                 className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
               />
             </label>
@@ -172,7 +174,7 @@ export function SetupWizard() {
               Ingest Key（デバイスが送信時に使う識別子）
               <input
                 value={ingestKey}
-                onChange={(e) => setIngestKey(e.target.value)}
+                onChange={(event) => setIngestKey(event.target.value)}
                 className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
               />
             </label>
@@ -180,7 +182,7 @@ export function SetupWizard() {
               単位
               <input
                 value={unit}
-                onChange={(e) => setUnit(e.target.value)}
+                onChange={(event) => setUnit(event.target.value)}
                 className="mt-1 block w-24 rounded border border-gray-300 px-2 py-1"
               />
             </label>

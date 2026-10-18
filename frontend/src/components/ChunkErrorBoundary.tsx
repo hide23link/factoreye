@@ -3,6 +3,9 @@
  * 再読み込みの案内を出す。自動の再読み込みは lib/lazyWithRetry.ts が 1 回だけ行うので、ここへ来るのは、それでも失敗した場合。
  * チャンクの読み込み失敗以外のエラー（描画のエラーなど）は案内に置き換えず、境界より上へ投げ直す
  * （上位の境界は無いので、従来どおりの挙動になる）。
+ *
+ * 【誰が使うか】App.tsx、main.tsx、WidgetCard.tsx が、遅延読み込みする部品を包む。
+ * 【引数】children（中に入れる部品）だけ。呼ぶ側が <ChunkErrorBoundary>...</ChunkErrorBoundary> と書く。
  */
 import { Component, type ReactNode } from "react";
 

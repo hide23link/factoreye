@@ -5,6 +5,9 @@
 通ってしまい、保存で失敗（500・誤った 409）したり、null が保存されて以降の取得が壊れたりした。
 ここで、null を許さない項目への null は 422 にする。null を許す項目（説明・センサーの紐付け・
 閾値など）は、null で消せる。
+
+【誰が呼ぶか】センサー・ダッシュボード・ウィジェット・Webhook などの更新 API（PUT）が、
+`apply_update(今のデータ, 届いた入力, non_nullable=...)` と呼ぶ。
 """
 from datetime import UTC, datetime
 from typing import Any

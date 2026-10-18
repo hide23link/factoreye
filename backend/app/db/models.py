@@ -7,18 +7,34 @@ FactorEye データモデル
 Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget
 Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
 Phase 1: WebhookSubscription（Pluginシステムを廃止し、拡張はWebhookに統一。Phase 2参照）
+
+【このファイルは何か】DB のテーブルの設計図。関数を呼ぶファイルではなく、他のファイルが
+`from app.db.models import Sensor` のように読み込んで使う。1つの class ＝ 1つのテーブル、
+class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic のマイグレーション
+（backend/alembic/）も作る。
+
+【テーブルのつながり】
+- Sensor ─┬─ Reading（測定値）   ─ センサーを消すと、一緒に消える
+          ├─ Alarm（アラーム）   ─ 同上
+          └─ Widget（画面の部品） ─ 消えても残る（sensor_id が空になる）
+- Dashboard ─ Widget
+- User ─ Workspace（SaaS のみ）。workspace_id が NULL の行は、self-hosted のデータ
 """
 from datetime import UTC, datetime
-from enum import StrEnum
+from enum import StrEnum  # 決まった文字列だけを選べる型（AlarmStatus など）
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4  # id に使う、重ならない長い番号
 
-from sqlalchemy import Column, Index, column, func, text
+# Index = 検索を速くする索引、JSONB = PostgreSQL の JSON 型（設定を柔軟に保存する）
+from sqlalchemy import Column, Enum, Index, column, func, text
 from sqlalchemy.dialects.postgresql import JSONB
+
+# Field = 列の細かい指定、Relationship = テーブル同士の関係
 from sqlmodel import Field, Relationship, SQLModel
 
 
 def _utcnow() -> datetime:
+    """今の時刻（UTC＝世界標準時）。created_at などの、初期値に使う。"""
     return datetime.now(UTC)
 
 
@@ -30,8 +46,8 @@ class AlarmStatus(StrEnum):
     RESOLVED = "resolved"
 
 
-class ThresholdBreached(StrEnum):
-    """どちら側のしきい値を超えたか。下限（min）か上限（max）。"""
+class MinMax(StrEnum):
+    """どちら側のしきい値を超えたか。下限（min）か上限（max）。（旧名 ThresholdBreached）"""
 
     MIN = "min"
     MAX = "max"
@@ -145,7 +161,10 @@ class Alarm(SQLModel, table=True):
     acknowledged_by: str | None = Field(default=None, max_length=100)
     value: float
     status: AlarmStatus = Field(default=AlarmStatus.ACTIVE)
-    threshold_breached: ThresholdBreached
+    # DB 上の型の名前は、旧クラス名の "thresholdbreached" のまま（変えると既存 DB と合わない）
+    threshold_breached: MinMax = Field(
+        sa_column=Column(Enum(MinMax, name="thresholdbreached"), nullable=False)
+    )
     severity: AlarmSeverity = Field(default=AlarmSeverity.CRITICAL)
     # 重故障の再通知（NotificationSettings.critical_repeat_enabled）の間隔判定に使う。
     # 通知を送るたび（初回発火・重要度変化・再通知）に更新する
@@ -272,6 +291,8 @@ class WebhookEventType(StrEnum):
 
 
 class WebhookSubscription(SQLModel, table=True):
+    """Webhook の購読（どのイベントを、どの URL に送るか）。1イベント×1URL で1行。"""
+
     __tablename__ = "webhook_subscriptions"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -290,6 +311,8 @@ class WebhookSubscription(SQLModel, table=True):
 # NotificationSettings（self-hosted は id=1 の1行、SaaS はワークスペースごとに1行）
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):
+    """Discord 通知の設定。アラーム発生時に、どの URL に送るか・再通知するか。"""
+
     __tablename__ = "notification_settings"
     # ワークスペースごとに1行まで（NULL = self-hosted の行は id=1 の1行）
     __table_args__ = (

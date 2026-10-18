@@ -7,7 +7,7 @@ Webhook URL・有効/無効のDB設定からの読み出しはapp.ingest_buffer�
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.db.models import AlarmSeverity, ThresholdBreached
+from app.db.models import AlarmSeverity, MinMax
 from app.notifications import AlarmNotification, send_alarm_discord
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/xxx/yyy"
@@ -18,7 +18,7 @@ def _sample_notification(severity: AlarmSeverity, is_repeat: bool = False) -> Al
         sensor_name="テストセンサー",
         sensor_unit="C",
         value=99.9,
-        threshold_breached=ThresholdBreached.MAX,
+        threshold_breached=MinMax.MAX,
         severity=severity,
         triggered_at=datetime.now(UTC),
         is_repeat=is_repeat,

@@ -2,6 +2,8 @@
 
 FactorEye の backend のコードには依存しない（backend が壊れていても使えるように）。
 テーブルの構成は Alembic の版ごとに違いうるため、実在するテーブルと列を DB から調べて使う。
+
+【誰が使うか】app.py、compare.py、merge.py が読み込む。
 """
 
 from __future__ import annotations

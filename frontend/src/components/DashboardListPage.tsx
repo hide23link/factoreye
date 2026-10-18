@@ -1,6 +1,8 @@
 /**
  * ダッシュボードの一覧画面。名前を入れて新しく作れる。
  * 1つもまだ無いときは、セットアップガイドへの案内を出す。
+ *
+ * 【誰が使うか】App.tsx が、ダッシュボードを選んでいないときに出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -42,7 +44,7 @@ export function DashboardListPage() {
         <input
           type="text"
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          onChange={(event) => setNewName(event.target.value)}
           placeholder="新しいダッシュボード名"
           className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
         />

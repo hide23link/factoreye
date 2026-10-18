@@ -1,6 +1,10 @@
 /**
  * 利用者の詳細と編集の小窓（管理者用）。
  * メール・プラン・パスワードを変えられる。削除は、確認用のメールを入力したときだけ実行できる（誤操作の防止）。
+ *
+ * 【誰が使うか】AdminUsersPage.tsx が、一覧の行を選んだときに出す。
+ * 【引数（props）】token=管理者トークン、userId=開く利用者の ID、onClose=閉じる、
+ * onChanged=変更・削除したあとに一覧を取り直す、onAuthError=トークンが失効（401）したときの処理。
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -211,7 +215,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                   メールアドレス
                   <input
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(event) => setEmail(event.target.value)}
                     className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
                   />
                 </label>
@@ -219,7 +223,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                   プラン
                   <select
                     value={plan}
-                    onChange={(e) => setPlan(e.target.value as "free" | "pro")}
+                    onChange={(event) => setPlan(event.target.value as "free" | "pro")}
                     className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
                   >
                     <option value="free">free</option>
@@ -231,7 +235,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                   <input
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
                     className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
                   />
@@ -266,7 +270,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   value={confirmEmail}
-                  onChange={(e) => setConfirmEmail(e.target.value)}
+                  onChange={(event) => setConfirmEmail(event.target.value)}
                   placeholder={detail.data.email}
                   className="w-full max-w-xs rounded border border-red-300 px-2 py-1.5 text-sm"
                 />

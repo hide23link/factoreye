@@ -1,4 +1,7 @@
-"""計測。リクエスト名ごとに件数・エラー数・レイテンシ（p50/p95/p99）を集計する。"""
+"""計測。リクエスト名ごとに件数・エラー数・レイテンシ（p50/p95/p99）を集計する。
+
+【誰が使うか】api_client.py、runner.py が読み込む。
+"""
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field

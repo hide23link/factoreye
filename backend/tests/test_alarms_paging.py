@@ -5,7 +5,7 @@ from uuid import UUID
 import httpx
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db.models import Alarm, AlarmStatus, ThresholdBreached
+from app.db.models import Alarm, AlarmStatus, MinMax
 from app.db.session import engine
 
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -38,7 +38,7 @@ async def _add_alarms(
                 triggered_at=BASE_TIME + timedelta(minutes=offset),
                 value=50.0,
                 status=status,
-                threshold_breached=ThresholdBreached.MAX,
+                threshold_breached=MinMax.MAX,
             )
             session.add(alarm)
             ids.append(alarm.id)

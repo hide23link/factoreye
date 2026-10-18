@@ -11,6 +11,13 @@ SSRF対策: 利用者が指定したURLへサーバー側から送信するた�
 リダイレクトは追わない（httpxの既定どおり）。公開URLから内部へ転送されるのを防ぐため。
 
 検証の流れ: URL の形（https）→ ホスト名を IP に解決 → すべての IP が公開アドレスか を確かめる。
+
+【誰が・いつ呼ぶか】
+- send_webhook(url, payload): ingest_buffer.py が、測定値の受信・アラーム発生のたびに、
+  バックグラウンドで呼ぶ（結果は待たない）。payload = 送る内容（dict）。失敗してもログだけ。
+- check_webhook_url / assert_webhook_url_allowed: api/webhooks.py と api/settings.py が、
+  送信先の URL を登録するときに呼ぶ（危険な URL は 400 で断る）。send_webhook も、送る直前に呼ぶ。
+- close_client: main.py が、アプリの停止時に呼ぶ。
 """
 
 import asyncio
@@ -87,10 +94,10 @@ def check_webhook_url(url: str) -> None:
 
     try:
         addresses = _addresses_for_host(host)
-    except socket.gaierror as exc:
-        raise UnsafeWebhookUrl("ホスト名を解決できません") from exc
+    except socket.gaierror as error:
+        raise UnsafeWebhookUrl("ホスト名を解決できません") from error
 
-    if not addresses or not all(_is_public_address(a) for a in addresses):
+    if not addresses or not all(_is_public_address(address) for address in addresses):
         raise UnsafeWebhookUrl(
             "社内ネットワーク・ループバックなど公開されていない宛先は指定できません"
         )
@@ -120,16 +127,16 @@ def redact_url(url: str) -> str:
     return f"{parsed.scheme}://{host}/..."
 
 
-def describe_send_error(exc: BaseException) -> str:
+def describe_send_error(error: BaseException) -> str:
     """送信失敗の理由を、URL を含まない短い文字列にする。
 
     httpx の例外メッセージ（`... for url '...'`）やトレースバックは URL を含むので使わない。
     """
-    if isinstance(exc, httpx.HTTPStatusError):
-        return f"HTTP {exc.response.status_code}"
-    if isinstance(exc, UnsafeWebhookUrl):
-        return f"unsafe url ({exc})"
-    return type(exc).__name__
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"HTTP {error.response.status_code}"
+    if isinstance(error, UnsafeWebhookUrl):
+        return f"unsafe url ({error})"
+    return type(error).__name__
 
 
 def _get_client() -> httpx.AsyncClient:
@@ -146,7 +153,7 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def close_client() -> None:
-    """共有のクライアントを閉じる（app/main.py の lifespan の終了時に呼ぶ）。"""
+    """共有のクライアントを閉じる（app/main.py の start_and_stop の終了時に呼ぶ）。"""
     global _client
     if _client is not None:
         await _client.aclose()
@@ -186,11 +193,11 @@ async def send_webhook(url: str, payload: dict[str, Any]) -> None:
             await assert_webhook_url_allowed(url)
             response = await _get_client().post(url, json=payload)
             response.raise_for_status()
-    except Exception as exc:
+    except Exception as error:
         # 通知失敗でingest/flushパイプラインを落とさない（send_alarm_discordと同方針）
         # 例外の本文・トレースバックは URL（秘密）を含み得るので出さない
         logger.warning(
-            "failed to send webhook to %s: %s", redact_url(url), describe_send_error(exc)
+            "failed to send webhook to %s: %s", redact_url(url), describe_send_error(error)
         )
     finally:
         _pending_sends -= 1

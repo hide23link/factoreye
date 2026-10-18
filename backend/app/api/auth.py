@@ -6,6 +6,10 @@
   POST /api/auth/refresh   → リフレッシュトークンでアクセストークン更新
   POST /api/auth/logout    → リフレッシュトークン失効
   GET  /api/me             → 現在のユーザー + ワークスペース情報
+
+【呼ばれ方】画面のログイン・ログアウトが呼ぶ。
+本文は JSON（例: {"email": "...", "password": "..."}）。
+アクセストークンは短い期限（15分）、リフレッシュトークンは長い期限（30日）。詳細は app/auth.py。
 """
 from datetime import UTC, datetime
 from typing import Annotated
@@ -107,7 +111,7 @@ async def _get_current_user_workspace(
 ) -> tuple[User, Workspace]:
     """アクセストークンから、利用者とワークスペースを取り出す。無効なら 401。"""
     _require_multi_tenant()
-    exc = HTTPException(
+    error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
@@ -115,17 +119,17 @@ async def _get_current_user_workspace(
     try:
         payload = auth_utils.decode_access_token(credentials.credentials)
     except jwt.PyJWTError:
-        raise exc from None
+        raise error from None
 
     user_id = payload.get("sub")
     workspace_id = payload.get("wid")
     if not user_id or not workspace_id:
-        raise exc
+        raise error
 
     user = await session.get(User, UUID(user_id))
     workspace = await session.get(Workspace, UUID(workspace_id))
     if user is None or workspace is None:
-        raise exc
+        raise error
 
     return user, workspace
 

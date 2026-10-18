@@ -6,6 +6,8 @@
  * - 範囲はダッシュボードの設定（サーバー側）には保存しないが、最後に見ていた範囲は
  *   この端末の localStorage に残す。次に開いたとき、URL に指定が無ければそれを使う
  *   （毎回「直近 1 時間」に戻ると不便、という利用者の要望のため）
+ *
+ * 【誰が使うか】DashboardView、TimeRangeControls、グラフ系の2つのウィジェット。
  */
 import { create } from "zustand";
 

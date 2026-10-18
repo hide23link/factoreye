@@ -5,6 +5,9 @@ Reading は self-hosted（workspace_id IS NULL のセンサー）を対象外と
 
 なぜ SaaS だけか: OSS（self-hosted）の利用者は、測定値を無期限に残すかどうかを自分で決める。
 SaaS の無料枠では、保存量を一定に保つため、古い測定値を消す。
+
+【誰が・いつ呼ぶか】purge_loop を、main.py が、起動時に1回だけ起動する（止まるまで動き続ける）。
+毎日1回、古いデータを消す。引数はない。
 """
 import asyncio
 import logging

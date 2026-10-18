@@ -5,6 +5,8 @@
  * 消えた古いチャンクを要求すると、動的 import が失敗する。その場合は 1 回だけ自動で再読み込みし、
  * 新しい index.html を取り直す。再読み込みしても失敗するなら、エラーを投げて ChunkErrorBoundary に表示させる
  * （再読み込みの繰り返しにはならない）。
+ *
+ * 【誰が使うか】main.tsx、App.tsx、WidgetCard.tsx が、`lazyNamed(() => import(...), "名前")` と書く。
  */
 import { lazy, type ComponentType } from "react";
 

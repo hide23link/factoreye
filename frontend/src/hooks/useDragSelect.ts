@@ -3,6 +3,8 @@
  *
  * 横軸が時刻（ミリ秒）の折れ線・棒・面グラフで使う。マウスを押した位置から離した位置までを、
  * 選択の範囲として onSelect に渡す。離したときの幅が短すぎる（1 秒未満）場合は、選択しない。
+ *
+ * 【誰が使うか】SensorGraphWidget と MultiSensorComparisonWidget が、グラフに付ける。
  */
 import { useRef, useState } from "react";
 

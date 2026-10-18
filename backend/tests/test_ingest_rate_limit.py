@@ -19,16 +19,16 @@ def restore_limit() -> object:
 
 def test_off_mode_does_not_wrap_the_handler(restore_limit: object) -> None:
     settings.ingest_rate_limit = "off"
-    assert ingest._ingest_rate_limit(_handler) is _handler
+    assert ingest.limit_ingest_rate(_handler) is _handler
 
 
 @pytest.mark.parametrize("value", ["OFF", " Off "])
 def test_off_is_case_and_space_insensitive(restore_limit: object, value: str) -> None:
     settings.ingest_rate_limit = value
-    assert ingest._ingest_rate_limit(_handler) is _handler
+    assert ingest.limit_ingest_rate(_handler) is _handler
 
 
 def test_limit_mode_wraps_the_handler(restore_limit: object) -> None:
     settings.ingest_rate_limit = "100/minute"
-    wrapped = ingest._ingest_rate_limit(_handler)
+    wrapped = ingest.limit_ingest_rate(_handler)
     assert wrapped is not _handler

@@ -384,11 +384,11 @@ async def get_user(
                 .order_by(col(Sensor.name))
             )
         ).all()
-        sensor_ids = [s.id for s in sensor_rows]
+        sensor_ids = [sensor.id for sensor in sensor_rows]
         reading_by_sensor: dict[UUID, tuple[int, datetime | None]] = {}
         alarm_by_sensor: dict[UUID, int] = {}
         if sensor_ids:
-            r_rows = await session.exec(
+            reading_rows = await session.exec(
                 select(
                     col(Reading.sensor_id),
                     func.count(col(Reading.id)),
@@ -397,28 +397,28 @@ async def get_user(
                 .where(col(Reading.sensor_id).in_(sensor_ids))
                 .group_by(col(Reading.sensor_id))
             )
-            for sid, count, last_at in r_rows.all():
+            for sid, count, last_at in reading_rows.all():
                 reading_by_sensor[sid] = (count, last_at)
-            a_rows = await session.exec(
+            alarm_rows = await session.exec(
                 select(col(Alarm.sensor_id), func.count(col(Alarm.id)))
                 .where(col(Alarm.sensor_id).in_(sensor_ids))
                 .where(col(Alarm.status) == AlarmStatus.ACTIVE)
                 .group_by(col(Alarm.sensor_id))
             )
-            for sid, count in a_rows.all():
+            for sid, count in alarm_rows.all():
                 alarm_by_sensor[sid] = count
 
-        for s in sensor_rows:
-            stat: tuple[int, datetime | None] = reading_by_sensor.get(s.id, (0, None))
+        for sensor in sensor_rows:
+            stat: tuple[int, datetime | None] = reading_by_sensor.get(sensor.id, (0, None))
             sensors.append(
                 AdminSensorSummary(
-                    id=s.id,
-                    name=s.name,
-                    unit=s.unit,
-                    enabled=s.enabled,
+                    id=sensor.id,
+                    name=sensor.name,
+                    unit=sensor.unit,
+                    enabled=sensor.enabled,
                     reading_count=stat[0],
                     last_reading_at=stat[1],
-                    active_alarm_count=alarm_by_sensor.get(s.id, 0),
+                    active_alarm_count=alarm_by_sensor.get(sensor.id, 0),
                 )
             )
 

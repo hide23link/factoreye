@@ -2,6 +2,8 @@
  * 管理者のログイン画面（管理者 ID とパスワード）。
  * 失敗の理由は、状態コードで区別する（401 は ID・パスワードの誤り、429 は試行回数の超過、それ以外は接続・サーバーの問題）。
  * パスワードは、送信のあと必ず画面から消す（再表示しない）。
+ *
+ * 【誰が使うか】AdminApp.tsx が、管理者トークンが無いときに出す。引数（props）はない。
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -44,7 +46,7 @@ export function AdminLoginPage() {
           管理者ID
           <input
             value={adminId}
-            onChange={(e) => setAdminId(e.target.value)}
+            onChange={(event) => setAdminId(event.target.value)}
             autoComplete="username"
             className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
@@ -54,7 +56,7 @@ export function AdminLoginPage() {
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"
             className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />

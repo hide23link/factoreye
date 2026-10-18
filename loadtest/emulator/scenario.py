@@ -1,6 +1,8 @@
 """負荷テストのシナリオ（想定の設定値）。Web画面から実行中に変更できる。
 
 既定値は「同時 20〜50 ユーザー、センサーは 5 秒ごとに送信」の想定。
+
+【誰が使うか】runner.py、vuser.py、web.py が読み込む。
 """
 from dataclasses import asdict, dataclass, fields, replace
 from urllib.parse import urlparse

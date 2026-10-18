@@ -5,6 +5,8 @@
  * - absolute（固定モード）: 開始と終了を指定した期間。更新しても動かない
  *
  * 画面（React）に依存しない純粋な関数だけを置く。テストしやすくするため。
+ *
+ * 【誰が使うか】useTimeRangeStore.ts、TimeRangeControls.tsx、グラフ系の2つのウィジェット。
  */
 
 export type TimeRange =

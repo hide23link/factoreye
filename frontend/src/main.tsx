@@ -3,6 +3,8 @@
  *
  * - 通常の画面（App）と、管理者の画面（AdminApp、/admin 配下）の2つを、URL の先頭で振り分ける
  * - 全体で1つの QueryClient（データ取得のキャッシュ）を共有する
+ *
+ * 【誰が・いつ呼ぶか】ブラウザが index.html を開くと、最初に実行される（自分で呼ぶことはない）。
  */
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, Suspense } from "react";

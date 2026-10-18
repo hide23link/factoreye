@@ -3,6 +3,9 @@
  * ウィジェットを、ドラッグ・リサイズで並べ替えられる格子（react-grid-layout）に置く。
  * 動かし終えたら、位置とサイズの変化だけをサーバーへ保存する。
  * 上部には、名前と説明の編集（設定）、ウィジェットの追加、ダッシュボードの削除を置く。
+ *
+ * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
+ * 【引数（props）】dashboardId = 表示するダッシュボードの ID（App.tsx が渡す）。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -244,7 +247,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
               名前
               <input
                 value={editName}
-                onChange={(e) => setEditName(e.target.value)}
+                onChange={(event) => setEditName(event.target.value)}
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
             </label>
@@ -252,7 +255,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
               説明
               <textarea
                 value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
+                onChange={(event) => setEditDescription(event.target.value)}
                 rows={2}
                 className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
               />
