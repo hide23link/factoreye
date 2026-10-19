@@ -8,7 +8,7 @@
 """
 from enum import StrEnum
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 配布物に書かれている既定の秘密値（本番では使えない）
@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     admin_credentials_file: str = "admin/admins.txt"
     # 取り込みのIP別レート制限（例: 100/minute）。"off" で解除（実機・負荷テスト用）
     ingest_rate_limit: str = "100/minute"
+    # 未登録の ingestKey が来たとき、センサーを自動で作る（self-hosted だけ。SaaS では使えない）。
+    # 既定は off（打ち間違いの ID が、黙ってゴミのセンサーを作らないため）。on にすると、
+    # 機器がセンサーを画面で登録しなくても、送り始められる
+    ingest_auto_create: bool = False
+    # 自動で作ってよいセンサーの上限（センサー全体の数）。
+    # LAN の誰かに大量に作られて、一覧が埋まるのを防ぐ
+    ingest_auto_create_max_sensors: int = Field(default=100, ge=1, le=10000)
     # Webhook送信先に社内ネットワーク（プライベートIP・http）を許可する。既定は禁止（SSRF対策）。
     # 社内LANの自動化基盤（n8n等）へ送る自己ホスト利用者だけ true にする
     webhook_allow_private_networks: bool = False
@@ -118,6 +125,16 @@ class Settings(BaseSettings):
                 "ENVIRONMENT=production では必ず変更してください"
             )
         return self
+
+    @property
+    def ingest_auto_create_active(self) -> bool:
+        """未登録の ingestKey のセンサーを、自動で作るか。
+        self-hosted で INGEST_AUTO_CREATE=on のときだけ True。
+
+        SaaS では、ingestKey だけでは、どのワークスペースに作るかが決まらないので、
+        使えない（常に False）。
+        """
+        return self.ingest_auto_create and self.auth_mode != AuthMode.MULTI_TENANT
 
     @property
     def ingest_requires_key(self) -> bool:

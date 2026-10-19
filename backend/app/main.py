@@ -75,6 +75,13 @@ async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
             "INGEST_AUTH=off: 取り込みをキーなしで受け付けています。"
             "取り込みの口を LAN などに限定してください"
         )
+    if settings.ingest_auto_create_active:
+        logger.warning(
+            "INGEST_AUTO_CREATE=on: 未登録の ingestKey のセンサーを自動で作ります（最大 %d 個）",
+            settings.ingest_auto_create_max_sensors,
+        )
+    elif settings.ingest_auto_create:
+        logger.warning("INGEST_AUTO_CREATE=on は、SaaS（multi_tenant）では使えません。無視します")
     flush_task = asyncio.create_task(flush_loop())
     purge_task = asyncio.create_task(purge_loop())
     yield

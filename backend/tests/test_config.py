@@ -127,3 +127,28 @@ def test_empty_ingest_auth_is_an_error_not_off(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("INGEST_AUTH", "")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+# ---- INGEST_AUTO_CREATE ----
+
+
+def test_auto_create_is_off_by_default() -> None:
+    s = _make(environment="development")
+    assert not s.ingest_auto_create and not s.ingest_auto_create_active
+    assert s.ingest_auto_create_max_sensors == 100
+
+
+def test_auto_create_is_active_only_for_self_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INGEST_AUTO_CREATE", "true")
+    assert Settings(_env_file=None).ingest_auto_create_active
+    monkeypatch.setenv("AUTH_MODE", "multi_tenant")
+    assert not Settings(_env_file=None).ingest_auto_create_active  # SaaS では使えない
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "10001", "abc"])
+def test_auto_create_max_sensors_must_be_in_range(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    monkeypatch.setenv("INGEST_AUTO_CREATE_MAX_SENSORS", bad)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

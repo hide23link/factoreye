@@ -3,6 +3,7 @@
 docs/architecture.md §12 テスト のシナリオ（認証・不正ペイロード・
 高頻度バッチ）を実装に合わせて踏襲。Alarm評価・dedupeはSprint 4で追加。
 """
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -384,3 +385,193 @@ async def test_startup_warns_only_when_keyless_ingest_is_active(
         async with start_and_stop(app):
             pass
     assert any("INGEST_AUTH=off" in r.getMessage() for r in caplog.records) is warns
+
+
+# ---- INGEST_AUTO_CREATE（未登録の ingestKey のセンサーを自動で作る） ----
+
+
+async def _sensors(client: httpx.AsyncClient) -> list[dict[str, object]]:
+    return list((await client.get("/api/sensors")).json())
+
+
+async def _ingest(client: httpx.AsyncClient, key: str, value: float = 1.0, **extra: str) -> int:
+    """取り込みを 1 回送って、ステータスコードを返す。extra は name・unit など、本文に足す項目。"""
+    body = {"ingestKey": key, "value": value, **extra}
+    return (await client.post("/api/ingest/readings", json=body)).status_code
+
+
+def _auto_create_on(monkeypatch: pytest.MonkeyPatch, max_sensors: int = 100) -> None:
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    monkeypatch.setattr(settings, "ingest_auto_create", True)
+    monkeypatch.setattr(settings, "ingest_auto_create_max_sensors", max_sensors)
+
+
+async def test_unknown_key_is_404_and_creates_nothing_by_default(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """既定（INGEST_AUTO_CREATE=off）では、未登録の ingestKey は 404 で、センサーは増えない。"""
+    monkeypatch.setattr(settings, "ingest_auth", IngestAuth.OFF)
+    assert await _ingest(client, "typo-key", name="x", unit="C") == 404
+    assert await _sensors(client) == []
+
+
+async def test_auto_create_makes_sensor_with_name_and_unit(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    resp = await client.post(
+        "/api/ingest/readings",
+        json={"ingestKey": "atom-b665-temp", "value": 26.5, "name": "ATOM 温度", "unit": "℃"},
+    )
+    assert resp.status_code == 202
+    sensors = await _sensors(client)
+    assert len(sensors) == 1
+    sensor = sensors[0]
+    assert sensor["name"] == "ATOM 温度"
+    assert (sensor["ingestKey"], sensor["unit"]) == ("atom-b665-temp", "℃")
+    assert sensor["enabled"] is True
+    # 値も保存される（作ったあと、そのまま取り込む）
+    await flush_once()
+    readings = (await client.get(f"/api/sensors/{sensors[0]['id']}/readings")).json()
+    assert [r["value"] for r in readings["readings"]] == [26.5]
+
+
+async def test_auto_create_defaults_name_to_key_and_unit_to_dash(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    resp = await client.post("/api/ingest/readings", json={"ingestKey": "plain-key", "value": 1.0})
+    assert resp.status_code == 202
+    sensor = (await _sensors(client))[0]
+    assert (sensor["name"], sensor["unit"]) == ("plain-key", "-")
+
+
+async def test_auto_create_does_not_overwrite_registered_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """登録済みのセンサーは、本文の name・unit で上書きしない。"""
+    _auto_create_on(monkeypatch)
+    await _create_sensor(client, "registered-key")  # 名前は sensor-registered-key、単位は C
+    resp = await client.post(
+        "/api/ingest/readings",
+        json={"ingestKey": "registered-key", "value": 1.0, "name": "別の名前", "unit": "kg"},
+    )
+    assert resp.status_code == 202
+    sensors = await _sensors(client)
+    assert len(sensors) == 1
+    assert (sensors[0]["name"], sensors[0]["unit"]) == ("sensor-registered-key", "C")
+
+
+async def test_auto_create_appends_key_when_name_is_taken(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    for key in ("first-key", "second-key"):
+        resp = await client.post(
+            "/api/ingest/readings", json={"ingestKey": key, "value": 1.0, "name": "温度"}
+        )
+        assert resp.status_code == 202
+    names = sorted(str(s["name"]) for s in await _sensors(client))
+    assert names == ["温度", "温度 (second-key)"]
+
+
+@pytest.mark.parametrize("key", ["with space", "日本語", "a/b", "semi;colon", "x" * 65, 'q"uote'])
+async def test_auto_create_rejects_bad_keys(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    _auto_create_on(monkeypatch)
+    resp = await client.post("/api/ingest/readings", json={"ingestKey": key, "value": 1.0})
+    assert resp.status_code == 400
+    assert await _sensors(client) == []
+
+
+async def test_auto_create_stops_at_the_limit(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch, max_sensors=2)
+    for key in ("a-1", "a-2"):
+        assert await _ingest(client, key) == 202
+    assert await _ingest(client, "a-3") == 403
+    assert len(await _sensors(client)) == 2
+    # 上限に達しても、登録済みのセンサーへの送信は続けられる
+    assert await _ingest(client, "a-1", 2.0) == 202
+
+
+async def test_auto_create_does_not_revive_a_disabled_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    sensor_id = await _create_sensor(client, "disabled-key")
+    disabled = await client.put(f"/api/sensors/{sensor_id}", json={"enabled": False})
+    assert disabled.status_code == 200
+    assert await _ingest(client, "disabled-key") == 403
+    assert len(await _sensors(client)) == 1
+
+
+async def test_auto_create_recreates_a_deleted_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """削除したセンサーも、次の送信で、また作られる（止めるなら INGEST_AUTO_CREATE を off）。"""
+    _auto_create_on(monkeypatch)
+    await client.post("/api/ingest/readings", json={"ingestKey": "comes-back", "value": 1.0})
+    sensor = (await _sensors(client))[0]
+    assert (await client.delete(f"/api/sensors/{sensor['id']}")).status_code == 204
+    assert await _sensors(client) == []
+    assert await _ingest(client, "comes-back") == 202
+    assert len(await _sensors(client)) == 1
+
+
+async def test_auto_create_is_ignored_in_multi_tenant(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SaaS では、ingestKey だけでは、どのワークスペースかが決まらないので、自動で作らない。"""
+    _auto_create_on(monkeypatch)
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+    resp = await client.post("/api/ingest/readings", json={"ingestKey": "saas-key", "value": 1.0})
+    assert resp.status_code == 404
+
+
+async def test_auto_create_with_key_auth_still_requires_the_key(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INGEST_AUTH=key のままなら、自動で作る前に、キーを確かめる（キーなしでは作れない）。"""
+    monkeypatch.setattr(settings, "ingest_auto_create", True)
+    resp = await client.post("/api/ingest/readings", json={"ingestKey": "no-key", "value": 1.0})
+    assert resp.status_code == 401
+    assert await _sensors(client) == []
+    resp = await client.post(
+        "/api/ingest/readings", headers=VALID_HEADERS, json={"ingestKey": "with-key", "value": 1.0}
+    )
+    assert resp.status_code == 202
+
+
+async def test_auto_create_concurrent_requests_make_one_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同じ新しい ingestKey が同時に来ても、センサーは 1 つだけ作る（500 にならない）。"""
+    _auto_create_on(monkeypatch)
+    codes = await asyncio.gather(*[_ingest(client, "same-key", float(i)) for i in range(5)])
+    assert list(codes) == [202] * 5
+    assert len(await _sensors(client)) == 1
+
+
+async def test_auto_create_startup_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _auto_create_on(monkeypatch, max_sensors=7)
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        async with start_and_stop(app):
+            pass
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("INGEST_AUTO_CREATE=on" in m and "7" in m for m in messages)
+
+
+async def test_auto_create_warns_that_multi_tenant_ignores_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _auto_create_on(monkeypatch)
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        async with start_and_stop(app):
+            pass
+    assert any("SaaS" in r.getMessage() and "無視" in r.getMessage() for r in caplog.records)

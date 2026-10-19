@@ -134,6 +134,10 @@ class IngestRequest(CamelModel):
     ingest_key: str = Field(min_length=1, max_length=100)
     value: float | None = Field(default=None, allow_inf_nan=False)
     timestamp: datetime | None = None
+    # センサーを自動で作るとき（INGEST_AUTO_CREATE=on）だけ使う、名前と単位。
+    # 登録済みのセンサーには、使わない（上書きしない）
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    unit: str | None = Field(default=None, min_length=1, max_length=20)
     # 1 リクエストの件数に上限を付ける（巨大なバッチで受信バッファを使い切られないため）
     readings: list[ReadingIn] | None = Field(default=None, max_length=MAX_READINGS_PER_REQUEST)
 

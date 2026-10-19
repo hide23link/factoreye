@@ -46,6 +46,18 @@ backend を `INGEST_AUTH=off`（キーなしの取り込み）で動かしてい
 self-hosted運用ではインストールごとに1つの共有シークレットです。SaaS版へ送る場合、SaaSは
 `X-API-Key` ヘッダーを見ず、本文の `ingestKey` だけでセンサーを識別します（ここには任意の文字列を渡して構いません）。
 
+### センサーの自動登録（任意）
+
+backend を `INGEST_AUTO_CREATE=on`（self-hosted だけ）で動かしているときは、FactorEye の画面でセンサーを登録しなくても、送り始められます。名前と単位を、`setSensorInfo` で結びつけます:
+
+```cpp
+factoreye.begin("http://192.168.1.50:8000", "");
+factoreye.setSensorInfo("atom-temp-1", "ATOM 温度", "℃");  // 未登録なら、この名前・単位で作られる
+factoreye.send("atom-temp-1", 25.3);
+```
+
+名前と単位は、最初に送信が成功するまでの間だけ、本文に付きます（最大 16 個まで結びつけられます）。自動で作らない backend では、登録済みのセンサーは上書きされず、未登録の ID は、今までどおり 404 です。`ingestKey` は、英数字と `.` `_` `-` だけ・64 文字までにしてください。
+
 ### 3. 送信の挙動（オフライン対応）
 
 `send(ingestKey, value)` は以下のように動きます:
