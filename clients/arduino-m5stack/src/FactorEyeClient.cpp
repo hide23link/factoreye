@@ -18,6 +18,43 @@ void FactorEyeClient::begin(const String& host, const String& apiKey) {
 // 未送信の件数（画面のデバッグ表示用）
 size_t FactorEyeClient::pendingCount() const { return _bufferCount; }
 
+// ingestKey に、名前と単位を結びつける。同じ ingestKey を呼び直したら、上書きする。
+void FactorEyeClient::setSensorInfo(const String& ingestKey, const String& name, const String& unit) {
+  SensorInfo* info = _findSensorInfo(ingestKey);
+  if (info == nullptr) {
+    if (_sensorInfoCount >= kSensorInfoCapacity) return;  // 上限（16 個）を超えた分は、名前を付けずに送る
+    info = &_sensorInfo[_sensorInfoCount++];
+    info->ingestKey = ingestKey;
+  }
+  info->name = name;
+  info->unit = unit;
+  info->confirmed = false;
+}
+
+FactorEyeClient::SensorInfo* FactorEyeClient::_findSensorInfo(const String& ingestKey) {
+  for (size_t i = 0; i < _sensorInfoCount; i++) {
+    if (_sensorInfo[i].ingestKey == ingestKey) return &_sensorInfo[i];
+  }
+  return nullptr;
+}
+
+// JSON の文字列に入れられるよう、" と \ と制御文字を直す（名前・単位は、人が決めた文字なので）
+static String escapeJson(const String& text) {
+  String result;
+  for (size_t i = 0; i < text.length(); i++) {
+    char c = text[i];
+    if (c == '"' || c == '\\') {
+      result += '\\';
+      result += c;
+    } else if ((uint8_t)c < 0x20) {
+      result += ' ';
+    } else {
+      result += c;  // UTF-8 の日本語は、そのまま通す
+    }
+  }
+  return result;
+}
+
 // 値を送る。流れ: バックオフ中ならバッファへ入れて戻る。そうでなければ、同じセンサーの溜まった値と今回の値を
 // まとめて1回の POST で送る。成功なら送った分をバッファから消す。失敗なら今回の値をバッファに残す。
 bool FactorEyeClient::send(const String& ingestKey, float value) {
@@ -49,6 +86,10 @@ bool FactorEyeClient::send(const String& ingestKey, float value) {
   unsigned long retryAfterMs = 0;
   SendOutcome outcome = _postReadings(ingestKey, values, count, &retryAfterMs);
 
+  if (outcome == kOutcomeOk) {
+    SensorInfo* info = _findSensorInfo(ingestKey);
+    if (info != nullptr) info->confirmed = true;  // 登録できたので、以後は名前と単位を付けない
+  }
   if (outcome == kOutcomeOk || outcome == kOutcomeDrop) {
     if (outcome == kOutcomeDrop) {
       // 再送しても成功しない内容（400・422 など）。溜まっていた分も同じバッチなので、まとめて捨てる
@@ -160,12 +201,19 @@ FactorEyeClient::SendOutcome FactorEyeClient::_postReadings(const String& ingest
     return kOutcomeRetry;
   }
 
+  // 自動で作るときの、名前と単位（結びつけてあって、まだ送信が成功していないときだけ付ける）
+  String extra;
+  SensorInfo* info = _findSensorInfo(ingestKey);
+  if (info != nullptr && !info->confirmed) {
+    extra = ",\"name\":\"" + escapeJson(info->name) + "\",\"unit\":\"" + escapeJson(info->unit) + "\"";
+  }
+
   // 本文の JSON を組み立てる（1件なら value、複数件なら readings の配列）
   String body;
   if (count == 1) {
-    body = "{\"ingestKey\":\"" + ingestKey + "\",\"value\":" + String(values[0], 6) + "}";
+    body = "{\"ingestKey\":\"" + ingestKey + "\"" + extra + ",\"value\":" + String(values[0], 6) + "}";
   } else {
-    body = "{\"ingestKey\":\"" + ingestKey + "\",\"readings\":[";
+    body = "{\"ingestKey\":\"" + ingestKey + "\"" + extra + ",\"readings\":[";
     for (size_t i = 0; i < count; i++) {
       if (i > 0) body += ",";
       body += "{\"value\":" + String(values[i], 6) + "}";

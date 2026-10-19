@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **画面の初期の読み込みを軽くした**: 画面（ダッシュボード・設定・セットアップガイド・管理者画面・規約）と、グラフのウィジェットを、開いた時に読み込むようにした。ダッシュボード以外を開く場合の初期の転送量は、785 KB（gzip 232 KB）→ 203 KB（gzip 65 KB）。デプロイ直後に古い画面を開いていても、読み込みに失敗した時は 1 回だけ自動で再読み込みし、それでも失敗すれば再読み込みの案内を出す
 
 ### Added
+- **未登録の ingestKey のセンサーを自動で作る設定**（`INGEST_AUTO_CREATE=on`、self-hosted だけ。既定 off）: 機器が本文に付けた `name`・`unit` で作る。`ingestKey` は英数字と `. _ -` で 64 文字まで、センサーの総数は `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）まで。名前・単位は、拒否せずに整える（制御文字などを除く）。名前が重なるときは、候補を順に試す。作る処理は、advisory lock で 1 つずつ行う。SaaS では無視する。`ingestKey` に NUL を含む取り込みは、500 ではなく 400 にした。Arduino の `FactorEyeClient` に `setSensorInfo`（名前と単位を結びつける）を追加
 - **LAN 向けの取り込み専用の窓口**（`infra/lan-ingest/`）: nginx で、`POST /api/ingest/readings` と `GET /health` だけを LAN に通す（それ以外は 404）。私設アドレスからだけ受け、機器の IP を `CF-Connecting-IP` として backend に渡す（機器ごとにレート制限を数え、偽装を防ぐ）。`INGEST_AUTH=off` で動かすときの前提の窓口。確認用の `verify.sh` つき
 - **self-hosted の取り込みをキーなしにできる設定**（`INGEST_AUTH=off`、既定 `key`）: 機器に API キーを入れない運用向け。`off` のときは `X-API-Key` を確かめず、`ingestKey` だけでセンサーを識別する（`INGEST_API_KEY` は使わず、本番の既定値の検査もしない）。起動時に警告を出す。取り込みの口を LAN などに限定して使う。Arduino の `FactorEyeClient` は、API キーが空なら `X-API-Key` を付けずに送る
 - **データ移行: self-hosted（OSS 版）にも書き出しを追加**: 「設定」→「データ移行」の書き出しが、SaaS だけでなく self-hosted（OSS 版）でも使えるようになった。self-hosted は全データ（`workspace_id` が NULL）を書き出す。既存の「取り込み」と組み合わせ、OSS → OSS（別サーバーへの移行・バックアップ）がアプリ内だけで完結する。OSS → SaaS は引き続き復旧ツールを使う

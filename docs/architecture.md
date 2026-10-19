@@ -125,16 +125,20 @@ flowchart LR
 ```json
 { "ingestKey": "sensor-001", "value": 23.5 }
 ```
+**センサーの自動登録（self-hosted だけ）**: `INGEST_AUTO_CREATE=on` のとき、未登録の `ingestKey` は 404 にせず、センサーを自動で作る。本文に `"name"`・`"unit"` を付けると、その名前・単位で作る（付けなければ、名前は `ingestKey`、単位は `-`）。登録済みのセンサーは、`name`・`unit` で上書きしない。決まり: `ingestKey` は、英数字と `.` `_` `-` だけ・64 文字まで（違えば 400。末尾の改行も不可）／センサーの総数（無効なものも数える）が `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）に達したら、作らない（403）／`name`・`unit` は、拒否せずに整える（制御文字・NUL・表示の向きを変える文字を除き、前後の空白を削り、名前は 100 文字・単位は 20 文字に切る。空なら、名前は `ingestKey`、単位は `-`）。登録済みのセンサーでは、`name`・`unit` を見ない（変な値でも 400 にならない）／名前が重なるときは、「名前 (ingestKey)」→ `ingestKey` → 乱数つき、の順に使う／作る処理は、PostgreSQL の advisory lock で、同時に 1 つずつ行うので、同時に大量に来ても、上限を超えず、同じ `ingestKey` も 1 つだけ作る。**既定は off**。on の間は、打ち間違いの ID でも、センサーができる。削除したセンサーも、次の送信で、また作られる。**SaaS（`multi_tenant`）では使えない**（`ingestKey` だけでは、どのワークスペースかが決まらないため。無視する）。起動時に警告をログに出す。
 バッチは `readings` 配列（各要素に `value` と任意の `timestamp`）で送る。`readings` は 1 リクエストあたり 1,000 件まで。`value` も `readings` も無い場合、1,001 件以上の場合、`value` が NaN・Infinity の場合は 400。
 
 ### 応答
 | 状況 | HTTP |
 |---|---|
 | 受理（バッファに追加） | 202 |
-| JSON 不正・形式不正 | 400 |
+| JSON 不正・形式不正（`ingestKey` に NUL を含む場合も） | 400 |
+| `INGEST_AUTO_CREATE=on` で、未登録の `ingestKey` が、英数字と `. _ -` の 64 文字までに合わない | 400 |
 | APIキーが不正 | 401 |
-| `ingestKey` が存在しない | 404 |
+| `ingestKey` が存在しない（自動登録が off、または SaaS） | 404 |
 | センサーが無効 | 403 |
+| 自動登録で、センサーの総数（無効なものも数える）が `INGEST_AUTO_CREATE_MAX_SENSORS` に達している | 403 |
+| 自動登録で、名前の候補がすべて重なった（まれ） | 409 |
 | 取り込み制限超過（IP ごと） | 429 |
 
 ### 時刻
@@ -351,6 +355,8 @@ DB に接続できない場合は `status` が `degraded` になる。
 |---|---|---|
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では必ず変更する |
 | `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する（`INGEST_AUTH=off` のときは使わない） |
+| `INGEST_AUTO_CREATE` | `false` | 未登録の `ingestKey` のセンサーを、自動で作る（self-hosted だけ。§5）。SaaS では無視する |
+| `INGEST_AUTO_CREATE_MAX_SENSORS` | `100` | 自動で作ってよい、センサー全体の数の上限（1〜10000） |
 | `INGEST_AUTH` | `key` | 取り込みの認証（self-hosted）。`off` でキーなしで受け付ける（機器に API キーを入れない運用向け。`off` のときは `INGEST_API_KEY` の本番の検査をしない。SaaS では使わない） |
 | `JWT_SECRET` | `change-this-in-production` | JWT の署名鍵。本番では必ず変更する |
 | `ENVIRONMENT` | `development` | `production` で `/docs` を無効化。このとき `INGEST_API_KEY`（`AUTH_MODE=multi_tenant` なら `JWT_SECRET`）が既定値のままだと起動しない（`INGEST_AUTH=off` なら `INGEST_API_KEY` は検査しない。大文字小文字は区別しない） |

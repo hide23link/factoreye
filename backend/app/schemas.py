@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
@@ -134,8 +134,22 @@ class IngestRequest(CamelModel):
     ingest_key: str = Field(min_length=1, max_length=100)
     value: float | None = Field(default=None, allow_inf_nan=False)
     timestamp: datetime | None = None
+    # センサーを自動で作るとき（INGEST_AUTO_CREATE=on）だけ使う、名前と単位。
+    # 登録済みのセンサーには、使わない（上書きしない）
+    # ここでは検査しない（登録済みのセンサーへの送信を、名前の不正で 400 にしないため）。
+    # 自動で作るときに、ingest.py の clean_text で、整えてから使う
+    name: str | None = Field(default=None, max_length=1000)
+    unit: str | None = Field(default=None, max_length=1000)
     # 1 リクエストの件数に上限を付ける（巨大なバッチで受信バッファを使い切られないため）
     readings: list[ReadingIn] | None = Field(default=None, max_length=MAX_READINGS_PER_REQUEST)
+
+    @field_validator("ingest_key")
+    @classmethod
+    def _reject_nul(cls, value: str) -> str:
+        """NUL 文字（\\x00）は、DB が受け付けず、500 になるので、ここで 400 にする。"""
+        if "\x00" in value:
+            raise PydanticCustomError("invalid_ingest_key", "ingestKey must not contain NUL")
+        return value
 
     def to_readings(self) -> list[ReadingIn]:
         """3通りの書き方を、ReadingIn のリストに統一して返す。"""

@@ -45,6 +45,12 @@ class FactorEyeClient {
   // 現在リングバッファに溜まっている未送信件数（Serial表示等のデバッグ用）。
   size_t pendingCount() const;
 
+  // ingestKey に、センサーの名前と単位を結びつける（最大 16 個）。
+  // backend が INGEST_AUTO_CREATE=on（self-hosted）のとき、未登録の ingestKey は、この名前・単位でセンサーが自動で作られる。
+  // 名前と単位は、最初に送信が成功するまでの間だけ、本文に付ける（成功したら、登録済みなので付けない）。
+  // 自動で作らない backend では、無視される（付けても、登録済みのセンサーは上書きされない）。
+  void setSensorInfo(const String& ingestKey, const String& name, const String& unit);
+
  private:
   // 未送信の1件（どのセンサーの、どの値か）
   struct BufferedReading {
@@ -59,8 +65,19 @@ class FactorEyeClient {
   // 401・403・404（設定の誤り）で保持する、1センサーあたりの最大件数（超えたら古い値から捨てる）
   static const size_t kHoldPerKeyLimit = 10;
 
+  // ingestKey ごとの、名前と単位（自動で作るときだけ使う）
+  struct SensorInfo {
+    String ingestKey;
+    String name;
+    String unit;
+    bool confirmed;  // 送信が成功したか（成功したら、名前と単位は付けない）
+  };
+  static const size_t kSensorInfoCapacity = 16;
+
   String _host;
   String _apiKey;
+  SensorInfo _sensorInfo[kSensorInfoCapacity];
+  size_t _sensorInfoCount = 0;
   BufferedReading _buffer[kBufferCapacity];
   size_t _bufferCount;
   uint8_t _consecutiveFailures;
@@ -70,6 +87,7 @@ class FactorEyeClient {
   enum SendOutcome { kOutcomeOk, kOutcomeRetry, kOutcomeHold, kOutcomeDrop };
 
   // 以下は内部の処理（外から直接は使わない）
+  SensorInfo* _findSensorInfo(const String& ingestKey);
   void _pushToBuffer(const String& ingestKey, float value);
   void _removeBufferedFor(const String& ingestKey);
   void _trimBufferedFor(const String& ingestKey, size_t limit);
