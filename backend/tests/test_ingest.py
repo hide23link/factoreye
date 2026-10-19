@@ -394,9 +394,21 @@ async def _sensors(client: httpx.AsyncClient) -> list[dict[str, object]]:
     return list((await client.get("/api/sensors")).json())
 
 
-async def _ingest(client: httpx.AsyncClient, key: str, value: float = 1.0, **extra: str) -> int:
-    """取り込みを 1 回送って、ステータスコードを返す。extra は name・unit など、本文に足す項目。"""
-    body = {"ingestKey": key, "value": value, **extra}
+async def _ingest(
+    client: httpx.AsyncClient,
+    key: str,
+    value: float = 1.0,
+    /,
+    *,
+    name: str | None = None,
+    unit: str | None = None,
+) -> int:
+    """取り込みを 1 回送って、ステータスコードを返す。name・unit は、自動で作るときに使う項目。"""
+    body: dict[str, object] = {"ingestKey": key, "value": value}
+    if name is not None:
+        body["name"] = name
+    if unit is not None:
+        body["unit"] = unit
     return (await client.post("/api/ingest/readings", json=body)).status_code
 
 
@@ -618,7 +630,13 @@ async def test_bad_name_or_unit_never_breaks_a_registered_sensor(
     """登録済みのセンサーへの送信は、name・unit が変でも、400 にならない（無視する）。"""
     _auto_create_on(monkeypatch)
     await _create_sensor(client, "old-key")
-    for extra in ({"name": ""}, {"unit": "u" * 21}, {"name": "x" * 101}, {"name": "\x00"}):
+    extras: list[dict[str, str]] = [
+        {"name": ""},
+        {"unit": "u" * 21},
+        {"name": "x" * 101},
+        {"name": "\x00"},
+    ]
+    for extra in extras:
         assert await _ingest(client, "old-key", **extra) == 202
 
 
