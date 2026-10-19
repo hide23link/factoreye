@@ -475,7 +475,13 @@ async def test_auto_create_appends_key_when_name_is_taken(
     assert names == ["温度", "温度 (second-key)"]
 
 
-@pytest.mark.parametrize("key", ["with space", "日本語", "a/b", "semi;colon", "x" * 65, 'q"uote'])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "with space", "日本語", "a/b", "semi;colon", "x" * 65, 'q"uote',
+        "abc\n", "abc\r\n", "１２", "a\x00b",
+    ],
+)
 async def test_auto_create_rejects_bad_keys(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
@@ -575,3 +581,111 @@ async def test_auto_create_warns_that_multi_tenant_ignores_it(
         async with start_and_stop(app):
             pass
     assert any("SaaS" in r.getMessage() and "無視" in r.getMessage() for r in caplog.records)
+
+
+async def test_auto_create_cleans_name_and_unit(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """名前・単位は、拒否せずに整える（制御文字・NUL・RTL を除き、空白を削り、長さを切る）。"""
+    _auto_create_on(monkeypatch)
+    dirty_name = "  温度\n\x00\u202e計\r  "
+    assert await _ingest(client, "clean-1", name=dirty_name, unit="\u202a℃\n") == 202
+    sensor = (await _sensors(client))[0]
+    assert (sensor["name"], sensor["unit"]) == ("温度計", "℃")
+
+
+async def test_auto_create_falls_back_to_defaults_for_blank_text(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    assert await _ingest(client, "blank-1", name="  \n ", unit="\x00") == 202
+    sensor = (await _sensors(client))[0]
+    assert (sensor["name"], sensor["unit"]) == ("blank-1", "-")
+
+
+async def test_auto_create_truncates_long_name_and_unit(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    assert await _ingest(client, "long-1", name="あ" * 150, unit="u" * 40) == 202
+    sensor = (await _sensors(client))[0]
+    assert (sensor["name"], sensor["unit"]) == ("あ" * 100, "u" * 20)
+
+
+async def test_bad_name_or_unit_never_breaks_a_registered_sensor(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """登録済みのセンサーへの送信は、name・unit が変でも、400 にならない（無視する）。"""
+    _auto_create_on(monkeypatch)
+    await _create_sensor(client, "old-key")
+    for extra in ({"name": ""}, {"unit": "u" * 21}, {"name": "x" * 101}, {"name": "\x00"}):
+        assert await _ingest(client, "old-key", **extra) == 202
+
+
+async def test_auto_create_log_cannot_be_forged(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """name に改行を入れても、ログは 1 行のまま（偽のログ行を作らせない）。"""
+    _auto_create_on(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="app.api.ingest"):
+        assert await _ingest(client, "log-1", name="a\nWARNING fake line") == 202
+    messages = [r.getMessage() for r in caplog.records if "auto-created" in r.getMessage()]
+    assert len(messages) == 1 and "\n" not in messages[0]
+
+
+async def test_auto_create_name_collision_with_long_names(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """100 文字ちょうどの名前が重なっても、(ingestKey) を残して、重ならない名前で作る。"""
+    _auto_create_on(monkeypatch)
+    name = "あ" * 100
+    assert await _ingest(client, "dup-a", name=name) == 202
+    assert await _ingest(client, "dup-b", name=name) == 202
+    names = [str(s["name"]) for s in await _sensors(client)]
+    assert len(set(names)) == 2 and all(len(n) <= 100 for n in names)
+    assert any(n.endswith("(dup-b)") for n in names)
+
+
+async def test_auto_create_name_collision_with_the_suffixed_name(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """「T (k2)」という名前が、すでにあっても、k2 のセンサーは作れる（次の候補を使う）。"""
+    _auto_create_on(monkeypatch)
+    assert await _ingest(client, "other", name="T (k2)") == 202
+    assert await _ingest(client, "first", name="T") == 202
+    # 「T」も「T (k2)」も使用済みなので、3 つ目の候補（ingestKey）を使う
+    assert await _ingest(client, "k2", name="T") == 202
+    assert len({str(s["name"]) for s in await _sensors(client)}) == 3
+
+
+async def test_auto_create_same_name_different_keys_concurrently(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同じ名前で、別の ingestKey が同時に来ても、全部作れる（409 にならない）。"""
+    _auto_create_on(monkeypatch)
+    codes = await asyncio.gather(
+        *[_ingest(client, f"same-name-{i}", name="温度") for i in range(10)]
+    )
+    assert list(codes) == [202] * 10
+    assert len(await _sensors(client)) == 10
+
+
+async def test_auto_create_limit_holds_under_concurrency(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同時に大量に来ても、上限（ここでは 3）を超えて作らない。"""
+    _auto_create_on(monkeypatch, max_sensors=3)
+    codes = await asyncio.gather(*[_ingest(client, f"race-{i}") for i in range(30)])
+    assert sorted(codes).count(202) == 3 and sorted(codes).count(403) == 27
+    assert len(await _sensors(client)) == 3
+
+
+async def test_auto_create_with_readings_array(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto_create_on(monkeypatch)
+    readings = [{"value": 1.0}, {"value": 2.0}]
+    body = {"ingestKey": "batch-1", "name": "バッチ", "unit": "個", "readings": readings}
+    resp = await client.post("/api/ingest/readings", json=body)
+    assert resp.status_code == 202 and resp.json()["accepted"] == 2
+    assert (await _sensors(client))[0]["name"] == "バッチ"

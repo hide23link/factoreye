@@ -121,7 +121,7 @@
 - **影響**: `off` では、`ingestKey` を知っていれば誰でも値を書ける（ほかの API は変わらない）。取り込みの口を LAN などに限定して使う。起動時に警告をログに出す。IP ごとのレート制限は残るが、鍵は `CF-Connecting-IP` を優先して読むので、プロキシを通らず直接届く経路ではヘッダーの偽装で避けられる（口の前のプロキシで外す）。誤字（`of` など）は起動時にエラーにする。機器側は、`FactorEyeClient`（Arduino）が、キーが空なら `X-API-Key` を付けない
 
 ### 2026-10-19 — self-hosted は、未登録の ingestKey のセンサーを自動で作れる（`INGEST_AUTO_CREATE=on`）。SaaS は対象外
-- **判断**: 環境変数 `INGEST_AUTO_CREATE`（既定 `false`）が on のとき、self-hosted の取り込みで、未登録の `ingestKey` を 404 にせず、センサーを自動で作る。機器が本文に付けた `name`・`unit` を使う。作るのは、`ingestKey` が英数字と `. _ -` で 64 文字まで、かつセンサーの総数が `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）未満のときだけ。SaaS（`multi_tenant`）では使えず、無視する
+- **判断**: 環境変数 `INGEST_AUTO_CREATE`（既定 `false`）が on のとき、self-hosted の取り込みで、未登録の `ingestKey` を 404 にせず、センサーを自動で作る。機器が本文に付けた `name`・`unit` を使う。作るのは、`ingestKey` が英数字と `. _ -` で 64 文字まで、かつセンサーの総数（無効なものも数える）が `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）未満のときだけ。`name`・`unit` は、拒否せず、制御文字などを除いて整える（機器が 4xx で値を捨てないため）。作る処理は、advisory lock で 1 つずつ行う（上限を同時に超えられない）。SaaS（`multi_tenant`）では使えず、無視する
 - **理由**: 機器を増やすたびに、FactorEye の画面でセンサーを登録するのが手間（M5Stack の複数台・複数のセンサー）。SaaS は、取り込みが `ingestKey` だけでワークスペースを決めるので、未登録のキーからは、作る先が決まらない。使うには、ワークスペース単位の機器登録用のキーが要る（別の設計）
 - **影響**: on の間は、打ち間違いの ID でも、センサーが増える（上限で止まる）。削除したセンサーも、次の送信で、また作られる。`INGEST_AUTH=off` と組み合わせると、LAN の誰でも、上限までセンサーを作れる（取り込みの口を LAN に限定する）。`ingestKey` を作る文字・長さは、通常の登録（`SensorCreate`）より厳しい。起動時に警告を出す。Arduino の `FactorEyeClient` は、`setSensorInfo` で名前と単位を結びつけ、最初に送信が成功するまで、本文に付ける
 
