@@ -53,7 +53,10 @@ interface EditorState {
   startEditing: (options?: { focusName?: boolean }) => void;
   clearFocusName: () => void;
   stopEditing: () => void;
+  /** ウィジェットを選ぶ（強調するだけ。設定パネルは開かない） */
   select: (id: string | null) => void;
+  /** ウィジェットを選び、その設定パネルを開く（ウィジェット内の設定ボタン） */
+  openSettings: (id: string) => void;
   setShelfOpen: (open: boolean) => void;
   /** 棚の位置を変える。persist=false は移動の途中（保存は、動かし終えたときに 1 回） */
   setShelfPos: (pos: WindowPosition | null, options?: { persist?: boolean }) => void;
@@ -116,12 +119,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       history: [],
       toast: null,
     }),
-  // ウィジェットを選んだら、その設定が見えるよう、設定パネルを開く
+  // 選ぶだけでは、設定パネルは開かない（ウィジェット内の設定ボタンで開く）。すでに開いていれば、選んだものの設定に切り替わる
+  select: (id) => set(id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, focusName: false }),
   // 狭い画面では、棚とパネルの両方を開くと、キャンバスが見えなくなるので、片方だけにする
-  select: (id) =>
-    set((s) =>
-      id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, panelOpen: true, focusName: false, shelfOpen: isNarrow() ? false : s.shelfOpen },
-    ),
+  openSettings: (id) =>
+    set((s) => ({ selectedWidgetId: id, panelOpen: true, focusName: false, shelfOpen: isNarrow() ? false : s.shelfOpen })),
   setShelfOpen: (open) => set((s) => ({ shelfOpen: open, panelOpen: open && isNarrow() ? false : s.panelOpen })),
   setShelfPos: (pos, options) => {
     set({ shelfPos: pos });

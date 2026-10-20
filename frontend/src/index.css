@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ウィジェットの大きさ変更: 左右・下の端は辺の全体をつかめるようにする（角は既定の 20px の目印のまま） */
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-e,
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-w {
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  height: auto;
+  margin: 0;
+  transform: none;
+}
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 10px;
+  margin: 0;
+  transform: none;
+}
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after,
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-w::after,
+.layout > .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after {
+  display: none;
+}
+.layout > .react-grid-item:hover > .react-resizable-handle.react-resizable-handle-e,
+.layout > .react-grid-item:hover > .react-resizable-handle.react-resizable-handle-w,
+.layout > .react-grid-item:hover > .react-resizable-handle.react-resizable-handle-s {
+  background: rgba(37, 99, 235, 0.25);
+}
