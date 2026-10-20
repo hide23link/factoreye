@@ -19,6 +19,7 @@ import {
   scheduleFromConfig,
   totalWorkMinutes,
 } from "../../lib/production-plan";
+import { useEditorStore } from "../../store/useEditorStore";
 import { widgetLabel } from "../../lib/widget-catalog";
 import type { DashboardDetail, Sensor, Widget, WidgetConfig } from "../../types";
 import { NumberField, Section, Segmented, Toggle } from "./controls";
@@ -48,6 +49,14 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
           <h3 className="text-[15px] font-bold">{widgetLabel(widget.type)}の設定</h3>
           <p className="text-xs text-gray-500">変更はすぐ画面に反映されます</p>
         </div>
+        <button
+          type="button"
+          aria-label="設定パネルを閉じる"
+          onClick={() => useEditorStore.getState().setPanelOpen(false)}
+          className="h-6 w-6 shrink-0 rounded text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
       </div>
       <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
         <TypeSettings widget={widget} actions={actions} />

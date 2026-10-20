@@ -64,8 +64,16 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
 
   return (
     <>
-      <div className="border-b border-gray-200 px-3.5 py-3">
+      <div className="flex items-center justify-between border-b border-gray-200 px-3.5 py-3">
         <h3 className="text-[15px] font-bold">ダッシュボードの設定</h3>
+        <button
+          type="button"
+          aria-label="設定パネルを閉じる"
+          onClick={() => useEditorStore.getState().setPanelOpen(false)}
+          className="h-6 w-6 shrink-0 rounded text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
       </div>
       <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
         <Section title="名前">
