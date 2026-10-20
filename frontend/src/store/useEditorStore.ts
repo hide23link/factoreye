@@ -42,6 +42,8 @@ interface EditorState {
   pushHistory: (snapshot: Widget[]) => void;
   /** 一番新しい記録を取り出す（無ければ null） */
   popHistory: () => Widget[] | null;
+  /** 指定した記録だけを捨てる（失敗した操作の記録を消す。その間に別の記録が積まれていても、巻き込まない） */
+  discardHistory: (snapshot: Widget[]) => void;
   showToast: (message: string, action?: EditorToast["action"]) => void;
   clearToast: () => void;
   reset: () => void;
@@ -68,6 +70,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ history: history.slice(0, -1) });
     return history[history.length - 1];
   },
+  discardHistory: (snapshot) => set((s) => ({ history: s.history.filter((h) => h !== snapshot) })),
   showToast: (message, action) => set({ toast: { id: nextToastId++, message, action } }),
   clearToast: () => set({ toast: null }),
   reset: () =>

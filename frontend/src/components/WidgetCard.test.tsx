@@ -138,7 +138,7 @@ describe("WidgetCard", () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.deleteWidget).mockResolvedValue(undefined);
 
-    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={{ ...dashboard, widgets: [makeWidget()] }} />);
 
     await user.click(screen.getByLabelText("ウィジェットを削除"));
 
@@ -154,7 +154,7 @@ describe("WidgetCard", () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.deleteWidget).mockRejectedValue(new Error("network"));
 
-    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={{ ...dashboard, widgets: [makeWidget()] }} />);
 
     await user.click(screen.getByLabelText("ウィジェットを削除"));
 

@@ -32,12 +32,8 @@ interface SectionProps {
   actions: Actions;
 }
 
-/** 設定の一部だけを変える。undefined を渡した項目は「未指定」に戻す（設定から取り除く） */
-const changeConfig = (actions: Actions, widget: Widget, change: Partial<WidgetConfig>) => {
-  const merged = { ...widget.config, ...change };
-  const config = Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
-  return actions.patch(widget, { config });
-};
+/** 設定の一部だけを変える（最新の設定に重ねて保存する。undefined の項目は未指定に戻す） */
+const changeConfig = (actions: Actions, widget: Widget, change: Partial<WidgetConfig>) => actions.patchConfig(widget, change);
 
 export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboard: DashboardDetail }) {
   const actions = useWidgetActions(dashboard);
@@ -132,18 +128,24 @@ const RANGE_OPTIONS = [
 function GraphSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const config = widget.config;
-  // 縦軸を手動にしたが、まだ値を入れていない間も、入力欄を出し続けるための状態
-  const [manualAxis, setManualAxis] = useState(config.yAxisMin !== undefined || config.yAxisMax !== undefined);
+  // 縦軸は、値があれば手動。値を入れる前でも入力欄を出し続けるため、「手動にした」操作だけ覚えておく
+  // （ウィジェットを切り替えたときは、SettingsPanel の key で作り直されるので、前のウィジェットの状態は引き継がない）
+  const [pickedManual, setPickedManual] = useState(false);
+  const manualAxis = pickedManual || config.yAxisMin !== undefined || config.yAxisMax !== undefined;
 
-  const removeAt = (index: number) => {
-    const keep = ids.map((_, i) => i).filter((i) => i !== index);
-    void actions.patch(widget, graphSensorPatch(widget, keep.map((i) => ids[i]), keep));
-  };
-  const recolor = (index: number) => {
-    const colors = ids.map((_, i) => graphColor(widget, i));
-    colors[index] = nextGraphColor(colors[index]);
-    void changeConfig(actions, widget, { colors });
-  };
+  // どちらも最新のウィジェットから作る（連続で押したときに、古い表示のまま上書きしないため）
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+    });
+  const recolor = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const colors = graphSensorIds(latest).map((_, i) => graphColor(latest, i));
+      colors[index] = nextGraphColor(colors[index]);
+      return { config: { ...latest.config, colors } };
+    });
   const axisChange = (key: "yAxisMin" | "yAxisMax", value: number | null) =>
     changeConfig(actions, widget, { [key]: value ?? undefined });
 
@@ -186,7 +188,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
           label="自動で合わせる"
           checked={!manualAxis}
           onChange={(auto) => {
-            setManualAxis(!auto);
+            setPickedManual(!auto);
             if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined });
           }}
         />
@@ -276,10 +278,13 @@ function ProductionPlanSettings({ widget, actions }: SectionProps) {
 
   // 開始を終了以降にしたときは、終了を開始の1時間後に直す（稼働時間が 0 になるのを防ぐ）
   const changeStart = (hour: number) =>
-    changeConfig(actions, widget, {
-      workStartHour: hour,
-      workEndHour: Math.max(schedule.endHour, hour + 1),
-    });
+    actions.patchFromLatest(widget, (latest) => ({
+      config: {
+        ...latest.config,
+        workStartHour: hour,
+        workEndHour: Math.max(scheduleFromConfig(latest.config).endHour, hour + 1),
+      },
+    }));
 
   return (
     <>

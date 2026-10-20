@@ -10,7 +10,11 @@
  */
 import { useState } from "react";
 
-import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
+import { useQuery } from "@tanstack/react-query";
+
+import { useSensors } from "../../hooks/queries";
+import { useInView } from "../../hooks/useInView";
+import { fetchSensorReadings, fetchSensorReadingsAggregate } from "../../lib/api";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import { classifySeverity } from "../../lib/severity";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
@@ -121,13 +125,30 @@ function startOfToday(): string {
 // 行の推移線に使う点の数と、取る期間（時間）
 const SPARK_POINTS = 36;
 const SPARK_HOURS = 6;
+// 行の値を取り直す間隔（ミリ秒）。棚は参考表示なので、ウィジェットの 5 秒より長くする
+const SHELF_REFRESH_MS = 30_000;
 
 function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
   const setDragging = useEditorStore((s) => s.setDragging);
   const kind = guessSensorKind(sensor);
-  const { data } = useSensorReadings(sensor.id, SPARK_HOURS, SPARK_POINTS);
+  // 画面に見えている行だけ取得する（センサーが多くても、全行を取りに行かない）
+  const { ref, inView } = useInView<HTMLLIElement>();
+  const { data } = useQuery({
+    queryKey: ["shelf-readings", sensor.id],
+    queryFn: () => {
+      const from = new Date(Date.now() - SPARK_HOURS * 60 * 60 * 1000).toISOString();
+      return fetchSensorReadings(sensor.id, from, SPARK_POINTS);
+    },
+    enabled: inView,
+    refetchInterval: inView ? SHELF_REFRESH_MS : false,
+  });
   // 生産数は「いまの値」より本日の累計のほうが意味があるため、累計を出す
-  const { data: today } = useSensorReadingsAggregate(kind === "count" ? sensor.id : null, startOfToday());
+  const { data: today } = useQuery({
+    queryKey: ["shelf-today", sensor.id],
+    queryFn: () => fetchSensorReadingsAggregate(sensor.id, startOfToday()),
+    enabled: inView && kind === "count",
+    refetchInterval: inView ? SHELF_REFRESH_MS : false,
+  });
 
   const newestFirst = data?.readings ?? [];
   const latest = newestFirst[0]?.value;
@@ -160,6 +181,7 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
 
   return (
     <li
+      ref={ref}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", sensor.name);

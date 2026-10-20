@@ -21,7 +21,7 @@ import { WidgetSettings } from "./WidgetSettings";
 export function SettingsPanel({ dashboard }: { dashboard: DashboardDetail }) {
   const selectedId = useEditorStore((s) => s.selectedWidgetId);
   const widget = dashboard.widgets.find((w) => w.id === selectedId);
-  return widget ? <WidgetSettings widget={widget} dashboard={dashboard} /> : <DashboardSettings dashboard={dashboard} />;
+  return widget ? <WidgetSettings key={widget.id} widget={widget} dashboard={dashboard} /> : <DashboardSettings dashboard={dashboard} />;
 }
 
 function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {

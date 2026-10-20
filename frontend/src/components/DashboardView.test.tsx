@@ -257,7 +257,7 @@ describe("DashboardView", () => {
       await waitFor(() =>
         expect(api.addWidget).toHaveBeenCalledWith(
           "d1",
-          expect.objectContaining({ type: "ProductionPlan", gridWidth: 6, gridHeight: 9, config: { dailyTarget: 1000 } }),
+          expect.objectContaining({ type: "ProductionPlan", gridWidth: 6, gridHeight: 9, config: {} }),
         ),
       );
     });
@@ -312,6 +312,42 @@ describe("DashboardView", () => {
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
 
       expect(screen.getByRole("button", { name: "↶ 元に戻す" })).toBeDisabled();
+    });
+
+    it("画面に見えていないセンサー行は、データを取りに行かない", async () => {
+      const user = userEvent.setup();
+      // 何も画面に入らない IntersectionObserver
+      class NeverVisible {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+      vi.stubGlobal("IntersectionObserver", NeverVisible);
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await screen.findByText("乾燥炉 温度");
+
+      expect(api.fetchSensorReadings).not.toHaveBeenCalled();
+      expect(api.fetchSensorReadingsAggregate).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it("Delete で選択中のウィジェットを削除するが、Backspace では削除しない", async () => {
+      const user = userEvent.setup();
+      const widget = makeWidget({ id: "w1", type: "AlarmAlert" });
+      vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [widget] });
+      vi.mocked(api.deleteWidget).mockResolvedValue(undefined);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+
+      await user.keyboard("{Backspace}");
+      expect(api.deleteWidget).not.toHaveBeenCalled();
+      await user.keyboard("{Delete}");
+      await waitFor(() => expect(api.deleteWidget).toHaveBeenCalledWith("w1"));
     });
 
     describe("ドラッグ＆ドロップ", () => {

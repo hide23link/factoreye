@@ -1,10 +1,11 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
+import { act, renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
 import { GRAPH_COLORS } from "../../lib/graph-config";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor, Widget } from "../../types";
+import { SettingsPanel } from "./SettingsPanel";
 import { WidgetSettings } from "./WidgetSettings";
 
 vi.mock("../../lib/api", () => ({
@@ -192,5 +193,24 @@ describe("WidgetSettings: アラーム一覧", () => {
     const w = widget("AlarmAlert");
     renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
     expect(screen.getByText(/設定する項目はありません/)).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPanel: ウィジェットの切り替え", () => {
+  it("縦軸を手動にしたあと別のウィジェットを選んでも、前の状態を引き継がない", async () => {
+    const user = userEvent.setup();
+    const a = widget("SensorGraph", { id: "a", sensorId: "s1" });
+    const b = widget("SensorGraph", { id: "b", sensorId: "s2" });
+    const dashboard: DashboardDetail = { ...dashboardOf(a), widgets: [a, b] };
+    useEditorStore.getState().select("a");
+    renderWithQueryClient(<SettingsPanel dashboard={dashboard} />);
+
+    await user.click(screen.getByRole("switch", { name: "自動で合わせる" }));
+    expect(screen.getByRole("spinbutton", { name: "縦軸の最小" })).toBeInTheDocument();
+
+    act(() => useEditorStore.getState().select("b"));
+
+    expect(screen.queryByRole("spinbutton", { name: "縦軸の最小" })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "自動で合わせる" })).toBeChecked();
   });
 });

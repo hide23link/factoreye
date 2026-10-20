@@ -6,7 +6,7 @@
  * - 左: センサー／ウィジェットの棚（ドラッグ、または「＋」で追加）
  * - 中央: 格子（見出しをつかんで移動、右下で大きさを変える）
  * - 右: 設定パネル（ウィジェットを選ぶとその設定、未選択ならダッシュボードの名前・説明）
- * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除。
+ * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除（Backspace は誤操作しやすいので使わない）。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
  * 【引数（props）】dashboardId = 表示するダッシュボードの ID（App.tsx が渡す）。
@@ -136,7 +136,7 @@ function LoadedDashboard({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         void actions.undo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && store.selectedWidgetId) {
+      } else if (e.key === "Delete" && store.selectedWidgetId) {
         const widget = dashboard.widgets.find((w) => w.id === store.selectedWidgetId);
         if (widget) {
           e.preventDefault();
