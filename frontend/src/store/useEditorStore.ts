@@ -38,6 +38,9 @@ interface EditorState {
   shelfOpen: boolean;
   // センサー棚（動かせる窓）の位置。null は既定の場所（左上に固定）。保存は localStorage
   shelfPos: ShelfPosition | null;
+  // 棚をつかんで動かしている最中か（その間は、設定パネルのためのスクロールをしない）
+  shelfMoving: boolean;
+  setShelfMoving: (moving: boolean) => void;
   panelOpen: boolean;
   partsOpen: boolean;
   // 設定パネルのダッシュボード名の入力欄に、フォーカスを移す（新しく作った直後に、名前をすぐ付けられるように）
@@ -75,6 +78,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedWidgetId: null,
   shelfOpen: false,
   shelfPos: null,
+  shelfMoving: false,
+  setShelfMoving: (moving) => set({ shelfMoving: moving }),
   panelOpen: false,
   partsOpen: false,
   focusName: false,

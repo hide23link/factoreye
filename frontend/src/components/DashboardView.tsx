@@ -255,10 +255,17 @@ function LoadedDashboard({
   const placement = slot.placement;
   const shelfPos = useEditorStore((s) => s.shelfPos);
   // 画面が小さくなって、動かした棚が画面の外になったら、位置を捨てて既定の場所に戻す
+  // 画面の幅・高さ（変わったら、棚の位置と下寄せの切り替えを描き直す）
+  const [, setViewportTick] = useState(0);
   useEffect(() => {
     const onResize = () => {
+      setViewportTick((n) => n + 1);
       const pos = useEditorStore.getState().shelfPos;
-      if (pos && !isShelfPositionInside(pos, window.innerWidth, window.innerHeight)) useEditorStore.getState().setShelfPos(null);
+      // 表示だけ既定の場所に戻し、保存した位置は残す（ズーム・タブレットの回転・仮想キーボードで、保存が消えないように。
+      // 画面が元の大きさに戻った次の編集で、保存した位置が画面内なら復元される）
+      if (pos && !isShelfPositionInside(pos, window.innerWidth, window.innerHeight)) {
+        useEditorStore.getState().setShelfPos(null, { persist: false });
+      }
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -266,13 +273,16 @@ function LoadedDashboard({
   // 棚の矩形（画面上）。動かしていなければ既定の場所（左上に固定、下まで）。狭い画面は、動かした位置を使わない
   const narrowNow = window.innerWidth < NARROW_VIEWPORT;
   const movedShelf = shelfPos && !narrowNow ? shelfPos : null;
-  const shelfHeight = movedShelf ? Math.max(160, Math.min(window.innerHeight * 0.75, window.innerHeight - movedShelf.y - 8)) : 0;
+  // 動かした棚の高さ。最初に動かしたときに急に縮まないよう、既定の位置の高さ（画面の高さ − 164）を上限にする
+  const shelfHeight = movedShelf ? Math.max(160, Math.min(window.innerHeight - 164, window.innerHeight - movedShelf.y - 8)) : 0;
   const shelfRect: ViewRect | null = !shelfOpen
     ? null
     : movedShelf
       ? { left: movedShelf.x, top: movedShelf.y, right: movedShelf.x + SHELF_WIDTH_PX, bottom: movedShelf.y + shelfHeight }
       : { left: 8, top: drawerTop, right: 8 + SHELF_WIDTH_PX, bottom: window.innerHeight - (narrowNow ? BOTTOM_NAV_HEIGHT + 8 : 8) };
-  const shelfKey = shelfRect ? `${shelfRect.left},${shelfRect.top},${shelfRect.right},${shelfRect.bottom}` : "closed";
+  // 既定の位置の棚は、上端が時間の操作に追従してスクロールで変わる。それを鍵に含めると、スクロールのたびに
+  // 設定パネルの位置が測り直されて切り替わるので、既定の位置は「default」とだけ区別する
+  const shelfKey = !shelfRect ? "closed" : movedShelf ? `${shelfRect.left},${shelfRect.top},${shelfRect.right},${shelfRect.bottom}` : "default";
   const placementKey = `${selectedWidgetId}:${selectedWidget?.gridColumn}:${selectedWidget?.gridWidth}:${selectedWidget?.gridRow}:${selectedWidget?.gridHeight}:${shelfKey}:${panelOpen}`;
   useLayoutEffect(() => {
     if (!editing || !panelOpen) return;
@@ -302,7 +312,8 @@ function LoadedDashboard({
   // 下に出すときは、ウィジェットが下の窓（画面の高さの 45%）より上に見えるようスクロールする。
   // 窓の分の余白（ページの下の padding）が付いたあとでないと、ページが短くてスクロールできないため、placement が決まってから行う
   useLayoutEffect(() => {
-    if (!editing || !panelOpen || placement !== "bottom" || !selectedWidgetId) return;
+    // 棚を動かしている最中は、スクロールしない（動かすたびに画面が動かないように）
+    if (!editing || !panelOpen || placement !== "bottom" || !selectedWidgetId || useEditorStore.getState().shelfMoving) return;
     const el = document.querySelector<HTMLElement>(`[data-widget-id="${selectedWidgetId}"]`);
     const box = el?.getBoundingClientRect();
     // 窓の上端 = 画面の高さ − 窓の高さ（45%）− 窓の下の余白（狭い画面は下部ナビの分）

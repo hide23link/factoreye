@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { act, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
 import { useEditorStore } from "../store/useEditorStore";
+import * as panelPlacement from "../lib/panel-placement";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Sensor, Widget } from "../types";
 import { DashboardView } from "./DashboardView";
@@ -470,12 +471,15 @@ describe("DashboardView", () => {
 
     describe("設定パネルの位置（選んだウィジェットを覆わない）", () => {
       /** 画面の幅 1280px で、widget の id ごとに画面上の位置を返すようにする（jsdom には寸法が無いため） */
+      // widget 以外の要素（時間の操作など）の矩形の下端。スクロールの模擬で変える
+      let otherBottom = 0;
       function mockWidgetRects(rects: Record<string, [number, number]>) {
+        otherBottom = 100;
         Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
         Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
         vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
           const range = rects[this.dataset.widgetId ?? ""];
-          if (!range) return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
+          if (!range) return { left: 0, right: 0, top: otherBottom - 40, bottom: otherBottom, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
           return { left: range[0], right: range[1], top: 200, bottom: 420, width: range[1] - range[0], height: 220, x: range[0], y: 200, toJSON() {} };
         });
       }
@@ -569,6 +573,31 @@ describe("DashboardView", () => {
         // 右は棚と重なるので、左端に出る
         expect(panel).toHaveAttribute("data-placement", "left");
         expect(panel.style.left).toBe("8px");
+      });
+
+      it("既定の位置の棚は、スクロールで窓の上端が変わっても、設定パネルの位置を測り直さない（切り替わらない）", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ wide: [16, 1264] });
+        const wide = makeWidget({ id: "wide", type: "AlarmAlert", gridColumn: 1, gridWidth: 12 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [wide] });
+        const spy = vi.spyOn(panelPlacement, "choosePanelSlot");
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(screen.getByRole("button", { name: "センサー" }));
+        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await waitFor(() => expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom"));
+        const calls = spy.mock.calls.length;
+
+        // スクロール: 時間の操作の位置が変わり、窓の上端（drawerTop）が変わる
+        otherBottom = -300;
+        act(() => {
+          window.dispatchEvent(new Event("scroll"));
+        });
+        await new Promise((r) => setTimeout(r, 80));
+
+        expect(spy.mock.calls.length).toBe(calls);
+        expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom");
       });
 
       it("ドラッグ中は棚を隠すが、設定パネルは隠さず、パネルの枠にセンサーを置ける", async () => {
@@ -712,6 +741,68 @@ describe("DashboardView", () => {
 
         await waitFor(() => expect(aside().style.left).toBe("8px"));
         expect(useEditorStore.getState().shelfPos).toBeNull();
+        // 表示だけ既定に戻す。保存した位置は消さない（ズームや回転で一時的に画面が狭くなっただけかもしれない）
+        expect(JSON.parse(window.localStorage.getItem("factoreye.sensorShelfPosition")!)).toEqual({ x: 1400, y: 220 });
+      });
+
+      it("画面が元の大きさに戻ったあとの編集では、保存した位置が復元される", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 1400, y: 220 }));
+        const user = await openEditor();
+        Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+        await waitFor(() => expect(aside().style.left).toBe("8px"));
+
+        Object.defineProperty(window, "innerWidth", { value: 1700, configurable: true });
+        await user.click(screen.getByRole("button", { name: "✓ 編集を終わる" }));
+        await user.click(screen.getByRole("button", { name: "✎ 編集する" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+
+        expect(leftOf()).toBe(1400);
+      });
+
+      it("640px 未満に縮めたら、すぐに下寄せの固定に切り替わる", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 400, y: 220 }));
+        await openEditor();
+        expect(leftOf()).toBe(400);
+
+        Object.defineProperty(window, "innerWidth", { value: 600, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+
+        await waitFor(() => expect(aside().style.left).toBe("8px"));
+        expect(aside().style.bottom).not.toBe("");
+      });
+
+      it("つかんだポインター以外（タッチの 2 本目の指）の動きは無視し、取り消し（pointercancel）でも保存する", async () => {
+        await openEditor();
+        const send = (type: "pointerDown" | "pointerMove" | "pointerCancel", id: number, x: number, y: number) => {
+          const event = createEvent[type](handle());
+          Object.defineProperty(event, "pointerId", { value: id });
+          Object.defineProperty(event, "clientX", { value: x });
+          Object.defineProperty(event, "clientY", { value: y });
+          fireEvent(handle(), event);
+        };
+        send("pointerDown", 1, 100, 100);
+        send("pointerMove", 2, 400, 400); // 別の指
+        expect([leftOf(), topOf()]).toEqual([8, 156]); // 別の指では動かない（既定の位置のまま）
+        send("pointerMove", 1, 130, 120);
+        expect(leftOf()).toBe(30);
+        send("pointerCancel", 2, 0, 0); // 別の指の取り消しでは終わらない
+        expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
+        send("pointerCancel", 1, 130, 120);
+        expect(JSON.parse(window.localStorage.getItem("factoreye.sensorShelfPosition")!)).toEqual({ x: 30, y: 20 });
+      });
+
+      it("最初に動かしたとき、棚の高さが急に縮まない（既定の位置の高さ以下）", async () => {
+        await openEditor();
+        pointer("pointerDown", 100, 100);
+        pointer("pointerMove", 100, 100);
+        pointer("pointerUp", 100, 100);
+        expect(Number.parseInt(aside().style.height, 10)).toBeLessThanOrEqual(window.innerHeight - 164);
+        expect(Number.parseInt(aside().style.height, 10)).toBeGreaterThanOrEqual(window.innerHeight - 164 - 8);
       });
 
       it("localStorage が使えなくても、動かせる（保存されないだけ）", async () => {

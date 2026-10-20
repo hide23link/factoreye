@@ -35,7 +35,7 @@ export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const setShelfPos = useEditorStore((s) => s.setShelfPos);
   const shelfPos = useEditorStore((s) => s.shelfPos);
   // 移動の途中の状態（つかんだ位置と、そのときの窓の位置）
-  const drag = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const drag = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
   const movable = () => window.innerWidth >= NARROW_VIEWPORT;
   /** いまの窓の位置（動かしたことが無ければ、既定の場所の実測値） */
@@ -44,6 +44,14 @@ export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
     if (stored) return stored;
     const box = header.closest("aside")?.getBoundingClientRect();
     return { x: box?.left ?? 8, y: box?.top ?? 0 };
+  };
+  /** 移動を終える。つかんだポインターのときだけ、位置を 1 回保存する */
+  const finishDrag = (pointerId: number) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== pointerId) return;
+    drag.current = null;
+    useEditorStore.getState().setShelfMoving(false);
+    setShelfPos(useEditorStore.getState().shelfPos);
   };
   const clampToViewport = (pos: ShelfPosition) => clampShelfPosition(pos, window.innerWidth, window.innerHeight);
 
@@ -57,23 +65,19 @@ export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
         onPointerDown={(e) => {
           if (!movable() || e.button > 0 || (e.target as HTMLElement).closest("button")) return;
           const origin = currentOrigin(e.currentTarget);
-          drag.current = { startX: e.clientX, startY: e.clientY, originX: origin.x, originY: origin.y };
+          useEditorStore.getState().setShelfMoving(true);
+          drag.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, originX: origin.x, originY: origin.y };
           e.currentTarget.setPointerCapture?.(e.pointerId);
         }}
         onPointerMove={(e) => {
           const d = drag.current;
-          if (!d) return;
+          // つかんだ指・ポインター以外（タッチの 2 本目の指など）の動きは無視する
+          if (!d || e.pointerId !== d.pointerId) return;
           setShelfPos(clampToViewport({ x: d.originX + e.clientX - d.startX, y: d.originY + e.clientY - d.startY }), { persist: false });
         }}
-        onPointerUp={() => {
-          if (!drag.current) return;
-          drag.current = null;
-          // 動かし終えたときに、1 回だけ保存する
-          setShelfPos(useEditorStore.getState().shelfPos);
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-        }}
+        onPointerUp={(e) => finishDrag(e.pointerId)}
+        // 取り消し（システムの割り込みなど）でも、動かし終えたときと同じに保存する
+        onPointerCancel={(e) => finishDrag(e.pointerId)}
         onKeyDown={(e) => {
           const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
           if (!delta || !movable() || e.target !== e.currentTarget) return;
