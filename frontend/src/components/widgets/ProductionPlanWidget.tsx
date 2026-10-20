@@ -173,9 +173,9 @@ function ProductionPlanView({ title, unit, summary, show }: ViewProps) {
           {showForecast && (
             <Kpi
               label="終業時の見込み"
-              value={formatNumber(summary.forecast)}
-              note={`(${Math.round(summary.forecastPercent)}%)`}
-              tone={forecastTone(summary.forecastPercent)}
+              value={summary.forecast === null ? "—" : formatNumber(summary.forecast)}
+              note={summary.forecastPercent === null ? "始業直後は出しません" : `(${Math.round(summary.forecastPercent)}%)`}
+              tone={summary.forecastPercent === null ? undefined : forecastTone(summary.forecastPercent)}
             />
           )}
           {showUptime && (

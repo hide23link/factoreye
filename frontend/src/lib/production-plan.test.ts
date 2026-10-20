@@ -122,11 +122,19 @@ describe("summarizeProduction", () => {
     expect(summarizeProduction(1200, DEFAULT_SCHEDULE, missing, now).stopMinutes).toBe(10);
   });
 
-  it("始業前は、ペースが分からないので見込みは実績のまま・稼働率は null", () => {
+  it("始業前は、ペースが分からないので見込みは出さない（null）・稼働率も null", () => {
     const s = summarizeProduction(1200, DEFAULT_SCHEDULE, [], at(7));
-    expect(s.forecast).toBe(0);
+    expect(s.forecast).toBeNull();
+    expect(s.forecastPercent).toBeNull();
     expect(s.uptimePercent).toBeNull();
     expect(s.hours.every((h) => h.state !== "done")).toBe(true);
+  });
+
+  it("稼働が 30 分未満の間（始業直後）は見込みを出さず、30 分になったら出す", () => {
+    const early = summarizeProduction(1200, DEFAULT_SCHEDULE, steadyBuckets(at(8, 20)), at(8, 20));
+    expect(early.forecast).toBeNull();
+    const enough = summarizeProduction(1200, DEFAULT_SCHEDULE, steadyBuckets(at(8, 30)), at(8, 30));
+    expect(enough.forecast).not.toBeNull();
   });
 
   it("勤務時間の外の生産は実績に入れない", () => {

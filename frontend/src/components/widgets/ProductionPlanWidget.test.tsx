@@ -11,7 +11,9 @@ vi.mock("../../lib/api", () => ({
 
 // 現在時刻は 2024-01-01 13:20（ローカル）に固定する
 const NOW = new Date(2024, 0, 1, 13, 20, 0).getTime();
-vi.mock("../../hooks/useNow", () => ({ useNow: () => new Date(2024, 0, 1, 13, 20, 0).getTime() }));
+// テストごとに現在時刻を変えられるようにする（vi.mock は先頭に巻き上げられるため、vi.hoisted で値を用意する）
+const clock = vi.hoisted(() => ({ hour: 13, minute: 20 }));
+vi.mock("../../hooks/useNow", () => ({ useNow: () => new Date(2024, 0, 1, clock.hour, clock.minute, 0).getTime() }));
 
 import * as api from "../../lib/api";
 
@@ -73,6 +75,8 @@ function stubLayout(contentHeight: (el: HTMLElement) => number, boxHeight: numbe
 }
 
 beforeEach(() => {
+  clock.hour = 13;
+  clock.minute = 20;
   vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
   vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 600, buckets: steadyBuckets() });
 });
@@ -118,6 +122,18 @@ describe("ProductionPlanWidget", () => {
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 600, buckets: steadyBuckets().slice(0, 10) });
     renderWithQueryClient(<ProductionPlanWidget widget={makeWidget()} />);
     expect(await screen.findByText(/計画より .* 遅れ/)).toBeInTheDocument();
+  });
+
+  it("始業直後（稼働 30 分未満）は、見込みを「—」にして赤くしない", async () => {
+    clock.hour = 8;
+    clock.minute = 20;
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 600, buckets: [] });
+    renderWithQueryClient(<ProductionPlanWidget widget={makeWidget()} />);
+
+    const label = await screen.findByText("終業時の見込み");
+    const value = label.parentElement!.querySelector("b")!;
+    expect(value).toHaveTextContent("—");
+    expect(value.className).not.toMatch(/red|amber|green/);
   });
 
   it("表示項目を OFF にすると、その項目を出さない", async () => {

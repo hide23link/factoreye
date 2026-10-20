@@ -18,14 +18,25 @@ export const SENSOR_KIND_LABEL: Record<SensorKind, string> = {
   state: "稼働",
 };
 
-const STATE_NAME = /稼働|運転|状態|ステータス|run(ning)?\b|status/i;
-const COUNT_NAME = /生産|出来高|カウント|パルス|個数|count|pcs|production/i;
+const STATE_NAME = /稼働|運転|状態|ステータス|\brun(ning)?\b|\bstatus\b/i;
+const COUNT_NAME = /生産|出来高|カウント|パルス|個数|\bcount\b|\bpcs\b|\bproduction\b/i;
+// 「稼働時間」「稼働率」「運転電流」のように、稼働・生産という語を含んでいても、別の量を表す名前
+const OTHER_QUANTITY = /時間|率|電流|電圧|電力|温度|圧力|速度|回転|負荷|\b(time|rate|current|voltage|power|speed)\b/i;
 // 数える対象の単位。「個」「台」など
 const COUNT_UNITS = new Set(["個", "台", "本", "枚", "pcs", "個数", "回", "count"]);
+// 稼働（動いている=1／止まっている=0）の単位。空か、0/1 を表すもの
+const STATE_UNITS = new Set(["", "0/1", "on/off", "onoff", "bool"]);
 
-/** 名前と単位から、センサーの種類を推測する。稼働の名前を先に見る（「ライン1 稼働」を生産数と取り違えない） */
+/**
+ * 名前と単位から、センサーの種類を推測する。外れても困らないよう、迷うときは「計測値」にする。
+ * - 稼働: 名前が稼働・運転などで、単位が空か 0/1。別の量を表す名前（稼働時間・稼働率・運転電流など）は除く
+ * - 生産数: 単位が個・台など、または、名前が生産・出来高などで単位が空。別の量を表す名前は除く
+ */
 export function guessSensorKind(sensor: Pick<Sensor, "name" | "unit">): SensorKind {
-  if (STATE_NAME.test(sensor.name)) return "state";
-  if (COUNT_NAME.test(sensor.name) || COUNT_UNITS.has(sensor.unit.trim().toLowerCase())) return "count";
+  const unit = sensor.unit.trim().toLowerCase();
+  const nameIsOtherQuantity = OTHER_QUANTITY.test(sensor.name);
+  if (!nameIsOtherQuantity && STATE_NAME.test(sensor.name) && STATE_UNITS.has(unit)) return "state";
+  if (COUNT_UNITS.has(unit) && !nameIsOtherQuantity) return "count";
+  if (!nameIsOtherQuantity && COUNT_NAME.test(sensor.name) && unit === "") return "count";
   return "measure";
 }

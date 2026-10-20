@@ -41,6 +41,8 @@ export function bottomRow(widgets: Placed[]): number {
 /**
  * 希望の位置に、ほかのウィジェットと重ならないように置く場所を探す。
  * 希望の位置が空いていればそのまま。重なるときは、同じ列のまま下へずらして、最初に空く行にする。
+ * 最後に、上が空いていれば上へ詰める。格子（react-grid-layout の縦詰め）が表示のときに同じことをするため、
+ * 点線の枠・保存する位置・実際の表示がずれないようにする。
  * 横ははみ出さないよう、列を 1〜(12 − 幅 + 1) に収める。
  */
 export function findFreeSpot(widgets: Placed[], width: number, height: number, wantColumn: number, wantRow: number): GridRect {
@@ -49,7 +51,10 @@ export function findFreeSpot(widgets: Placed[], width: number, height: number, w
   const others = widgets.map(rectOf);
   for (let row = Math.max(Math.round(wantRow), 1); ; row += 1) {
     const candidate = { column, row, width: w, height };
-    if (!others.some((o) => overlaps(candidate, o))) return candidate;
+    if (others.some((o) => overlaps(candidate, o))) continue;
+    let top = row;
+    while (top > 1 && !others.some((o) => overlaps({ ...candidate, row: top - 1 }, o))) top -= 1;
+    return { ...candidate, row: top };
   }
 }
 

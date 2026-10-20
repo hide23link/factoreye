@@ -47,7 +47,7 @@ describe("buildTemplateWidgets", () => {
       ["SensorGraph", "c"],
     ]);
     expect(widgets[2].config).toMatchObject({ graphType: "bar" });
-    expect(widgets[0].config).toMatchObject({ dailyTarget: 1000 });
+    expect(widgets[0].config).not.toHaveProperty("dailyTarget"); // 目標は未設定で置く
   });
 
   it("合うセンサーが無いときは、センサー無しで置く", () => {

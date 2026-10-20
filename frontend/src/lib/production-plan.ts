@@ -94,8 +94,9 @@ export interface ProductionSummary {
   planNow: number;
   /** 実績 − 計画（正なら先行、負なら遅れ） */
   diff: number;
-  forecast: number;
-  forecastPercent: number;
+  /** 稼働が MIN_FORECAST_WORK_MINUTES 未満の間は、ペースが当てにならないので null */
+  forecast: number | null;
+  forecastPercent: number | null;
   /** 稼働時間のうち、ここまでに終わった 10 分区間の数が 0 のときは null */
   uptimePercent: number | null;
   stopMinutes: number;
@@ -103,6 +104,9 @@ export interface ProductionSummary {
   workHours: number;
   hours: HourRow[];
 }
+
+/** 見込みを出すのに必要な、稼働時間の最低ライン（分）。始業直後の数分のペースを終業まで延ばすと、極端な値になるため */
+export const MIN_FORECAST_WORK_MINUTES = 30;
 
 /** 時間帯（hour 時台）の状態。稼働時間が 0 なら休憩、今を過ぎていれば done、今を含めば now、先なら future */
 function hourState(hour: number, schedule: WorkSchedule, nowMinute: number): HourState {
@@ -132,9 +136,9 @@ export function summarizeProduction(
   const planNow = planUntil(target, schedule, nowMinute);
   const elapsedWork = workMinutesBetween(0, nowMinute, schedule);
   const remainingWork = totalWorkMinutes(schedule) - elapsedWork;
-  // 稼働時間がまだ 0 分（始業前）なら、ペースが分からないので、今の実績のまま
-  const paceRate = elapsedWork > 0 ? actual / elapsedWork : 0;
-  const forecast = actual + paceRate * remainingWork;
+  // 稼働がまだ短い（始業前・始業直後）と、ペースが当てにならないので、見込みは出さない
+  const forecast =
+    elapsedWork >= MIN_FORECAST_WORK_MINUTES ? actual + (actual / elapsedWork) * remainingWork : null;
 
   // 停止の判定: 終わった区間のうち、全体が稼働時間に入るものだけを数える（昼休みをまたぐ区間は除く）
   const countByStart = new Map(inWindow.map((b) => [b.startMinute, b.count]));
@@ -166,7 +170,7 @@ export function summarizeProduction(
     planNow,
     diff: actual - planNow,
     forecast,
-    forecastPercent: target > 0 ? (forecast / target) * 100 : 0,
+    forecastPercent: forecast !== null && target > 0 ? (forecast / target) * 100 : forecast === null ? null : 0,
     uptimePercent: judged > 0 ? Math.round((1 - stopped / judged) * 100) : null,
     stopMinutes: stopped * STOP_BUCKET_MINUTES,
     planPerHour: perHour,

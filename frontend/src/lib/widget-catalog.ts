@@ -65,7 +65,8 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     width: 6,
     height: 9,
     suitedSensor: "count",
-    defaultConfig: { dailyTarget: 1000 },
+    // 目標は未設定で置く（仮の数字が、実際の目標に見えないように）。設定するまでは、設定を促す表示になる
+    defaultConfig: {},
   },
 ];
 

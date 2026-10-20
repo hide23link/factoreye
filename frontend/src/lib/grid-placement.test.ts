@@ -19,8 +19,10 @@ describe("bottomRow", () => {
 });
 
 describe("findFreeSpot", () => {
-  it("空いていれば希望の位置", () => {
-    expect(findFreeSpot([], 4, 3, 5, 2)).toEqual({ column: 5, row: 2, width: 4, height: 3 });
+  it("空いていれば希望の位置（上が空いていれば、上へ詰める）", () => {
+    expect(findFreeSpot([widget(1, 1, 4, 1)], 4, 3, 5, 2)).toEqual({ column: 5, row: 1, width: 4, height: 3 });
+    // 真上にウィジェットがあれば、その下で止まる
+    expect(findFreeSpot([widget(5, 1, 4, 1)], 4, 3, 5, 4)).toEqual({ column: 5, row: 2, width: 4, height: 3 });
   });
 
   it("重なるときは、同じ列のまま下へずらす", () => {

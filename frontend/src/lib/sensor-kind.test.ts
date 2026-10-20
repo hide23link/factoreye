@@ -10,8 +10,16 @@ describe("guessSensorKind", () => {
     ["A", "pcs", "count"],
     ["ライン1 稼働", "", "state"],
     ["Line1 running", "", "state"],
-    ["稼働数", "個", "state"],
-  ] as const)("%s (%s) は %s", (name, unit, kind) => {
+    ["稼働数", "個", "count"],
+    ["ライン1 稼働", "0/1", "state"],
+    ["ライン1 稼働時間", "", "measure"],
+    ["ライン1 稼働時間", "h", "measure"],
+    ["稼働率", "%", "measure"],
+    ["モーター運転電流", "A", "measure"],
+    ["運転電流", "", "measure"],
+    ["生産速度", "個/分", "measure"],
+    ["生産時間", "", "measure"],
+    ["生産温度", "℃", "measure"],  ] as const)("%s (%s) は %s", (name, unit, kind) => {
     expect(guessSensorKind({ name, unit })).toBe(kind);
   });
 });
