@@ -1,8 +1,9 @@
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen, waitFor } from "../test/test-utils";
 import type { DashboardDetail, Widget } from "../types";
+import { useEditorStore } from "../store/useEditorStore";
 import { WidgetCard } from "./WidgetCard";
 
 vi.mock("../lib/api", () => ({
@@ -44,20 +45,52 @@ function makeWidget(overrides: Partial<Widget> = {}): Widget {
   };
 }
 
+beforeEach(() => useEditorStore.getState().reset());
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("WidgetCard", () => {
-  it("ドラッグハンドルと編集・削除ボタンを表示する", async () => {
+  it("閲覧中は、移動・複製・削除の操作を出さない", async () => {
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+
+    expect(await screen.findByText("現在アラームはありません")).toBeInTheDocument();
+    expect(screen.queryByLabelText("ドラッグして移動")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("ウィジェットを削除")).not.toBeInTheDocument();
+  });
+
+  it("編集中は、移動の見出しと複製・削除を出す", async () => {
+    useEditorStore.getState().startEditing();
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
 
     renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
 
     expect(screen.getByLabelText("ドラッグして移動")).toBeInTheDocument();
-    expect(screen.getByLabelText("ウィジェットを編集")).toBeInTheDocument();
+    expect(screen.getByLabelText("ウィジェットを複製")).toBeInTheDocument();
     expect(screen.getByLabelText("ウィジェットを削除")).toBeInTheDocument();
+  });
+
+  it("編集中にクリックすると選択され、Enter でも選択できる", async () => {
+    const user = userEvent.setup();
+    useEditorStore.getState().startEditing();
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+
+    const card = screen.getByRole("group", { name: "アラーム一覧" });
+    await user.click(card);
+    expect(useEditorStore.getState().selectedWidgetId).toBe("w1");
+
+    useEditorStore.getState().select(null);
+    card.focus();
+    await user.keyboard("{Enter}");
+    expect(useEditorStore.getState().selectedWidgetId).toBe("w1");
   });
 
   it("遅延読み込みのウィジェット（StatValue）は、読み込み中の表示のあと、中身を表示する", async () => {
@@ -94,12 +127,13 @@ describe("WidgetCard", () => {
     );
 
     // 枠は先に出て、中身は読み込み後に出る
-    expect(screen.getByLabelText("ウィジェットを編集")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "数値" })).toBeInTheDocument();
     expect(await screen.findByText("冷蔵庫温度")).toBeInTheDocument();
   });
 
-  it("削除ボタンを押すとdeleteWidgetを呼ぶ", async () => {
+  it("編集中に削除ボタンを押すと、確認なしで deleteWidget を呼び、「元に戻す」つきの通知を出す", async () => {
     const user = userEvent.setup();
+    useEditorStore.getState().startEditing();
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.deleteWidget).mockResolvedValue(undefined);
@@ -107,29 +141,15 @@ describe("WidgetCard", () => {
     renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
 
     await user.click(screen.getByLabelText("ウィジェットを削除"));
-    // 確認の小窓が出るまでは、削除しない
-    expect(api.deleteWidget).not.toHaveBeenCalled();
-    await user.click(await screen.findByRole("button", { name: "削除" }));
 
     await waitFor(() => expect(api.deleteWidget).toHaveBeenCalledWith("w1"));
-  });
-
-  it("削除の確認でキャンセルすると、deleteWidgetを呼ばない", async () => {
-    const user = userEvent.setup();
-    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
-    vi.mocked(api.fetchSensors).mockResolvedValue([]);
-
-    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
-
-    await user.click(screen.getByLabelText("ウィジェットを削除"));
-    await user.click(await screen.findByRole("button", { name: "キャンセル" }));
-
+    await waitFor(() => expect(useEditorStore.getState().toast?.action?.label).toBe("元に戻す"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(api.deleteWidget).not.toHaveBeenCalled();
   });
 
-  it("削除に失敗したとき、エラーを表示する", async () => {
+  it("削除に失敗したとき、理由を通知に出し、履歴に残さない", async () => {
     const user = userEvent.setup();
+    useEditorStore.getState().startEditing();
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.deleteWidget).mockRejectedValue(new Error("network"));
@@ -137,26 +157,30 @@ describe("WidgetCard", () => {
     renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
 
     await user.click(screen.getByLabelText("ウィジェットを削除"));
-    await user.click(await screen.findByRole("button", { name: "削除" }));
 
-    expect(await screen.findByText(/ウィジェットの削除に失敗しました/)).toBeInTheDocument();
+    await waitFor(() => expect(useEditorStore.getState().toast?.message).toMatch(/ウィジェットの削除に失敗しました/));
+    expect(useEditorStore.getState().history).toHaveLength(0);
   });
 
-  it("削除の通信中は、削除ボタンを押せない（二重に削除しない）", async () => {
+  it("複製すると、同じ設定で下に新しいウィジェットを作る", async () => {
     const user = userEvent.setup();
+    useEditorStore.getState().startEditing();
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
-    vi.mocked(api.deleteWidget).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.addWidget).mockResolvedValue(makeWidget({ id: "w2" }));
+    const widget = makeWidget({ gridWidth: 4, gridHeight: 4, config: { foo: 1 } as Widget["config"] });
 
-    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+    renderWithQueryClient(<WidgetCard widget={widget} dashboard={{ ...dashboard, widgets: [widget] }} />);
 
-    await user.click(screen.getByLabelText("ウィジェットを削除"));
-    await user.click(await screen.findByRole("button", { name: "削除" }));
+    await user.click(screen.getByLabelText("ウィジェットを複製"));
 
-    await waitFor(() => expect(screen.getByLabelText("ウィジェットを削除")).toBeDisabled());
-    await user.click(screen.getByLabelText("ウィジェットを削除"));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(api.deleteWidget).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(api.addWidget).toHaveBeenCalledWith(
+        "d1",
+        expect.objectContaining({ type: "AlarmAlert", gridColumn: 1, gridRow: 5, config: { foo: 1 } }),
+      ),
+    );
+    await waitFor(() => expect(useEditorStore.getState().selectedWidgetId).toBe("w2"));
   });
 
   it("不明なウィジェットタイプのとき未対応メッセージを表示する", () => {
