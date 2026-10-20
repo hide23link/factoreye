@@ -29,14 +29,19 @@ const HISTORY_LIMIT = 50;
 interface EditorState {
   editing: boolean;
   selectedWidgetId: string | null;
-  shelfTab: "sensor" | "widget";
+  // 左のセンサー棚・右の設定パネル・ウィジェットの部品バー（どれもキャンバスの上に重ねて出し、閉じられる）
+  shelfOpen: boolean;
+  panelOpen: boolean;
+  partsOpen: boolean;
   dragging: DragPayload | null;
   history: Widget[][];
   toast: EditorToast | null;
   startEditing: () => void;
   stopEditing: () => void;
   select: (id: string | null) => void;
-  setShelfTab: (tab: "sensor" | "widget") => void;
+  setShelfOpen: (open: boolean) => void;
+  setPanelOpen: (open: boolean) => void;
+  setPartsOpen: (open: boolean) => void;
   setDragging: (payload: DragPayload | null) => void;
   /** 操作の直前のウィジェット一覧を記録する */
   pushHistory: (snapshot: Widget[]) => void;
@@ -54,14 +59,37 @@ let nextToastId = 1;
 export const useEditorStore = create<EditorState>((set, get) => ({
   editing: false,
   selectedWidgetId: null,
-  shelfTab: "sensor",
+  shelfOpen: false,
+  panelOpen: false,
+  partsOpen: false,
   dragging: null,
   history: [],
   toast: null,
-  startEditing: () => set({ editing: true, selectedWidgetId: null }),
-  stopEditing: () => set({ editing: false, selectedWidgetId: null, dragging: null, history: [], toast: null }),
-  select: (id) => set({ selectedWidgetId: id }),
-  setShelfTab: (tab) => set({ shelfTab: tab }),
+  // 広い画面（1024px 以上）では、センサー棚を最初から出す。狭い画面では、キャンバスを隠さないよう閉じておく
+  startEditing: () =>
+    set({
+      editing: true,
+      selectedWidgetId: null,
+      shelfOpen: typeof window !== "undefined" && window.innerWidth >= 1024,
+      panelOpen: false,
+      partsOpen: false,
+    }),
+  stopEditing: () =>
+    set({
+      editing: false,
+      selectedWidgetId: null,
+      shelfOpen: false,
+      panelOpen: false,
+      partsOpen: false,
+      dragging: null,
+      history: [],
+      toast: null,
+    }),
+  // ウィジェットを選んだら、その設定が見えるよう、設定パネルを開く
+  select: (id) => set((s) => ({ selectedWidgetId: id, panelOpen: id === null ? s.panelOpen : true })),
+  setShelfOpen: (open) => set({ shelfOpen: open }),
+  setPanelOpen: (open) => set({ panelOpen: open }),
+  setPartsOpen: (open) => set({ partsOpen: open }),
   setDragging: (payload) => set({ dragging: payload }),
   pushHistory: (snapshot) => set((s) => ({ history: [...s.history, snapshot].slice(-HISTORY_LIMIT) })),
   popHistory: () => {
@@ -74,5 +102,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showToast: (message, action) => set({ toast: { id: nextToastId++, message, action } }),
   clearToast: () => set({ toast: null }),
   reset: () =>
-    set({ editing: false, selectedWidgetId: null, shelfTab: "sensor", dragging: null, history: [], toast: null }),
+    set({
+      editing: false,
+      selectedWidgetId: null,
+      shelfOpen: false,
+      panelOpen: false,
+      partsOpen: false,
+      dragging: null,
+      history: [],
+      toast: null,
+    }),
 }));

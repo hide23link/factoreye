@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
+import { describeActionError } from "../../lib/errors";
 import { ErrorNotice } from "../ErrorNotice";
 
 /** 一覧に出す件数の上限（状態ごと）。新しい順に取る。全件は取らない（応答が大きくなり、サーバーの負荷になるため）。 */
@@ -39,6 +40,8 @@ export function AlarmAlertWidget() {
     },
   });
 
+  const ackError = ackMutation.isError ? describeActionError(ackMutation.error, "アラームの確認") : null;
+
   if ((!activeData && activeError) || (!ackedData && ackedError)) {
     return (
       <ErrorNotice
@@ -63,6 +66,11 @@ export function AlarmAlertWidget() {
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto">
+      {ackError && (
+        <p role="alert" className="text-xs text-red-600">
+          {ackError}
+        </p>
+      )}
       {alarms.map((alarm) => {
         const sensor = sensors?.find((s) => s.id === alarm.sensorId);
         const isCritical = alarm.severity === "critical";

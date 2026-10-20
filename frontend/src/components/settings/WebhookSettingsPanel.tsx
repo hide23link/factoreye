@@ -14,7 +14,7 @@ import {
   deleteWebhookSubscription,
   updateWebhookSubscription,
 } from "../../lib/api";
-import { describeActionError } from "../../lib/errors";
+import { describeActionError, describeWebhookError } from "../../lib/errors";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ErrorNotice } from "../ErrorNotice";
 import type { WebhookEventType, WebhookSubscription } from "../../types";
@@ -41,7 +41,7 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
       invalidate();
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeWebhookError(e, "Webhook の切り替え")),
   });
 
   const deleteMutation = useMutation({
@@ -113,7 +113,7 @@ function AddWebhookForm() {
       setUrl("");
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeWebhookError(e, "Webhook の追加")),
   });
 
   return (

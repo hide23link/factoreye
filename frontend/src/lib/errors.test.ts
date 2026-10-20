@@ -6,6 +6,9 @@ import {
   describeActionError,
   describeAdminLoginError,
   describeAuthError,
+  describeSensorError,
+  describeNotificationError,
+  describeWebhookError,
   errorStatus,
 } from "./errors";
 
@@ -44,5 +47,23 @@ describe("describeActionError", () => {
   it("操作名を含めた文言にする", () => {
     expect(describeActionError(new ApiError(404, "x"), "ウィジェットの削除")).toMatch(/^ウィジェットの削除に失敗しました/);
     expect(describeActionError(new TypeError("x"), "保存")).toMatch(/接続できませんでした/);
+  });
+});
+
+describe("describeSensorError", () => {
+  it("409 は重複、422 は入力の確認、ほかは共通の文言（API の生のメッセージは出さない）", () => {
+    expect(describeSensorError(new ApiError(409, "POST /api/sensors failed: 409 {}"), "センサーの保存")).toContain("すでに使われています");
+    expect(describeSensorError(new ApiError(422, "x"), "センサーの保存")).toContain("入力内容");
+    const other = describeSensorError(new ApiError(500, "PUT /x failed: 500 trace"), "センサーの保存");
+    expect(other).toContain("サーバーで問題が起きました");
+    expect(other).not.toContain("failed");
+  });
+});
+
+describe("describeNotificationError / describeWebhookError", () => {
+  it("422 は URL の確認を促し、ほかは共通の文言（生のメッセージは出さない）", () => {
+    expect(describeNotificationError(new ApiError(422, "x"))).toContain("Webhook URL");
+    expect(describeWebhookError(new ApiError(422, "x"), "Webhook の追加")).toContain("https://");
+    expect(describeWebhookError(new Error("POST /x failed: 500"), "Webhook の追加")).not.toContain("failed:");
   });
 });

@@ -2,10 +2,12 @@
  * ダッシュボードの表示画面。
  * ウィジェットを 12 列の格子（react-grid-layout）に置く。
  *
- * 「編集する」を押すと編集モードになる:
- * - 左: センサー／ウィジェットの棚（ドラッグ、または「＋」で追加）
- * - 中央: 格子（見出しをつかんで移動、右下で大きさを変える）
+ * 「編集する」を押すと編集モードになる。閲覧と編集で、ウィジェットの位置・大きさ・ヘッダーの高さが変わらないよう、
+ * 格子（キャンバス）は両方のモードで同じ幅・同じ位置にし、編集用の窓はキャンバスの上に重ねて出す（どれも閉じられる）:
+ * - 左: センサー棚（ドラッグ、または「＋」で追加）
+ * - 上のバー: 「＋ ウィジェット」で種類の部品バーを開く（ドラッグ、またはクリックで追加）
  * - 右: 設定パネル（ウィジェットを選ぶとその設定、未選択ならダッシュボードの名前・説明）
+ * ウィジェットは、カードをつかんで移動、右下で大きさを変える。
  * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除（Backspace は誤操作しやすいので使わない）。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
@@ -26,6 +28,7 @@ import type { DashboardDetail, Widget } from "../types";
 import { DropSurface } from "./editor/DropSurface";
 import { EditorShelf } from "./editor/EditorShelf";
 import { EditorToast } from "./editor/EditorToast";
+import { WidgetPalette } from "./editor/WidgetPalette";
 import { SettingsPanel } from "./editor/SettingsPanel";
 import { ErrorNotice } from "./ErrorNotice";
 import { TimeRangeControls } from "./TimeRangeControls";
@@ -151,7 +154,8 @@ function LoadedDashboard({
   });
 
   const layout = dashboard.widgets.map(toLayoutItem);
-  // 編集中は、棚と設定パネルの分だけ格子が狭いので、常に 12 列の 1 つのレイアウトで扱う
+  // 閲覧と編集で、同じ幅・同じ列数にする（幅 768px 以上は 12 列で同じ）。
+  // 768px 未満では、閲覧は列を減らして詰め直すが、編集は位置が崩れないよう常に 12 列で扱う（保存する位置は 12 列の値のため）
   const gridProps = editing
     ? { layouts: { lg: layout }, breakpoints: EDIT_BREAKPOINTS, cols: EDIT_COLS }
     : {
@@ -190,6 +194,28 @@ function LoadedDashboard({
     </ResponsiveGridLayout>
   );
 
+  const store = useEditorStore.getState;
+  const shelfOpen = useEditorStore((s) => s.shelfOpen);
+  const panelOpen = useEditorStore((s) => s.panelOpen);
+  const partsOpen = useEditorStore((s) => s.partsOpen);
+  const dragging = useEditorStore((s) => s.dragging);
+
+  // ドラッグを始めたら、棚と部品バーを隠して、置き先のキャンバスを見せる（始めた直後に DOM を変えるとドラッグが
+  // 取り消されるブラウザがあるため、少し遅らせる）。設定パネルは、パネル内の枠にも置けるよう隠さない
+  const [hideWhileDragging, setHideWhileDragging] = useState(false);
+  useEffect(() => {
+    if (!dragging) {
+      setHideWhileDragging(false);
+      return;
+    }
+    const timer = setTimeout(() => setHideWhileDragging(true), 60);
+    return () => clearTimeout(timer);
+  }, [dragging]);
+  const hiddenClass = hideWhileDragging ? "pointer-events-none opacity-0" : "";
+
+  const drawerBase =
+    "fixed bottom-2 top-[156px] z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
+
   return (
     <div className="px-2 py-4 sm:p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -206,9 +232,40 @@ function LoadedDashboard({
             {dashboard.description && <p className="text-xs text-gray-400">{dashboard.description}</p>}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {editing ? (
             <>
+              <button
+                type="button"
+                aria-pressed={shelfOpen}
+                onClick={() => store().setShelfOpen(!shelfOpen)}
+                className={`rounded border px-3 py-1.5 text-sm ${shelfOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+              >
+                センサー
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-expanded={partsOpen}
+                  onClick={() => store().setPartsOpen(!partsOpen)}
+                  className={`rounded border px-3 py-1.5 text-sm ${partsOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+                >
+                  ＋ ウィジェット
+                </button>
+                {partsOpen && (
+                  <div className={`absolute right-0 top-full z-40 mt-1 transition-opacity ${hiddenClass}`}>
+                    <WidgetPalette dashboard={dashboard} />
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                aria-pressed={panelOpen}
+                onClick={() => store().setPanelOpen(!panelOpen)}
+                className={`rounded border px-3 py-1.5 text-sm ${panelOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+              >
+                設定
+              </button>
               <button
                 type="button"
                 disabled={historySize === 0}
@@ -219,7 +276,7 @@ function LoadedDashboard({
               </button>
               <button
                 type="button"
-                onClick={() => useEditorStore.getState().stopEditing()}
+                onClick={() => store().stopEditing()}
                 className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
               >
                 ✓ 編集を終わる
@@ -228,7 +285,7 @@ function LoadedDashboard({
           ) : (
             <button
               type="button"
-              onClick={() => useEditorStore.getState().startEditing()}
+              onClick={() => store().startEditing()}
               className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
             >
               ✎ 編集する
@@ -239,30 +296,25 @@ function LoadedDashboard({
 
       <TimeRangeControls />
 
-      {editing ? (
-        <div className="flex flex-col items-start gap-3 lg:flex-row">
-          <aside
-            aria-label="センサーとウィジェットの棚"
-            className="flex max-h-[calc(100vh-24px)] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-2 lg:w-[272px]"
-          >
-            <EditorShelf dashboard={dashboard} />
-          </aside>
-          <div className="min-w-0 flex-1 self-stretch">
-            <DropSurface dashboard={dashboard}>{grid}</DropSurface>
-          </div>
-          <aside
-            aria-label="設定パネル"
-            className="flex max-h-[calc(100vh-24px)] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-2 lg:w-[316px]"
-          >
-            <SettingsPanel dashboard={dashboard} />
-          </aside>
-        </div>
-      ) : dashboard.widgets.length === 0 ? (
+      {!editing && dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-400">
           まだウィジェットがありません。「編集する」を押して、センサーを置いてみましょう。
         </p>
       ) : (
-        grid
+        <DropSurface dashboard={dashboard} editing={editing}>
+          {grid}
+        </DropSurface>
+      )}
+
+      {editing && shelfOpen && (
+        <aside aria-label="センサー棚" className={`${drawerBase} left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}>
+          <EditorShelf dashboard={dashboard} />
+        </aside>
+      )}
+      {editing && panelOpen && (
+        <aside aria-label="設定パネル" className={`${drawerBase} right-2 w-[316px] max-w-[calc(100vw-1rem)]`}>
+          <SettingsPanel dashboard={dashboard} />
+        </aside>
       )}
 
       <EditorToast />

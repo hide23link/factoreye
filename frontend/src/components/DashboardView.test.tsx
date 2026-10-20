@@ -129,21 +129,35 @@ describe("DashboardView", () => {
   });
 
   describe("編集モード", () => {
-    it("「編集する」で、棚と設定パネルが出る。「編集を終わる」で消える", async () => {
+    it("「編集する」で、センサー棚が出る。設定パネルと部品バーは、ボタンで開閉できる。「編集を終わる」で全部消える", async () => {
       const user = userEvent.setup();
       vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
 
-      expect(screen.queryByRole("complementary", { name: "設定パネル" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "センサー棚" })).not.toBeInTheDocument();
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
 
-      expect(screen.getByRole("complementary", { name: "設定パネル" })).toBeInTheDocument();
+      // センサーとウィジェットは別の窓（タブで 1 つの窓に入れない）
+      expect(screen.getByRole("complementary", { name: "センサー棚" })).toBeInTheDocument();
+      expect(screen.queryByRole("tab")).not.toBeInTheDocument();
       expect(await screen.findByText("乾燥炉 温度")).toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "ウィジェットの種類" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "＋ ウィジェット" }));
+      expect(screen.getByRole("group", { name: "ウィジェットの種類" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      expect(screen.getByRole("complementary", { name: "設定パネル" })).toBeInTheDocument();
       expect(screen.getByText("ダッシュボードの設定")).toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "✓ 編集を終わる" }));
+      await user.click(screen.getByRole("button", { name: "センサー棚を閉じる" }));
+      expect(screen.queryByRole("complementary", { name: "センサー棚" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "設定パネルを閉じる" }));
       expect(screen.queryByRole("complementary", { name: "設定パネル" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "✓ 編集を終わる" }));
+      expect(screen.queryByRole("group", { name: "ウィジェットの種類" })).not.toBeInTheDocument();
     });
 
     it("名前を変えて入力欄を離れると、updateDashboard で保存する（保存ボタンは無い）", async () => {
@@ -153,6 +167,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
 
       const nameInput = screen.getByRole("textbox", { name: "名前" });
       await user.clear(nameInput);
@@ -171,12 +186,43 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
 
       await user.clear(screen.getByRole("textbox", { name: "名前" }));
       await user.tab();
 
       expect(api.updateDashboard).not.toHaveBeenCalled();
       expect(screen.getByRole("textbox", { name: "名前" })).toHaveValue("工場A");
+    });
+
+    it("名前を空にして離れると、理由を出して元の名前に戻す", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      await user.clear(screen.getByRole("textbox", { name: "名前" }));
+      await user.tab();
+
+      expect(screen.getByRole("alert")).toHaveTextContent("名前は空にできません");
+    });
+
+    it("名前の保存中は、入力した名前を表示し続ける（古い名前に一瞬戻らない）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      vi.mocked(api.updateDashboard).mockReturnValue(new Promise(() => {}));
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      const input = screen.getByRole("textbox", { name: "名前" });
+      await user.clear(input);
+      await user.type(input, "新しい名前");
+      await user.tab();
+
+      await waitFor(() => expect(api.updateDashboard).toHaveBeenCalled());
+      expect(screen.getByRole("textbox", { name: "名前" })).toHaveValue("新しい名前");
     });
 
     it("ダッシュボードの削除は、確認のあとで deleteDashboard を呼ぶ", async () => {
@@ -186,6 +232,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
 
       await user.click(screen.getByRole("button", { name: "このダッシュボードを削除" }));
       expect(api.deleteDashboard).not.toHaveBeenCalled();
@@ -251,7 +298,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-      await user.click(screen.getByRole("tab", { name: "ウィジェット" }));
+      await user.click(screen.getByRole("button", { name: "＋ ウィジェット" }));
       await user.click(screen.getByRole("button", { name: /生産管理/ }));
 
       await waitFor(() =>
@@ -312,6 +359,67 @@ describe("DashboardView", () => {
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
 
       expect(screen.getByRole("button", { name: "↶ 元に戻す" })).toBeDisabled();
+    });
+
+    describe("閲覧と編集で、画面の構造（位置・大きさに関わる部分）が変わらない", () => {
+      /** ウィジェットの枠と、格子を包む枠の「寸法に関わる」class を取り出す（編集専用の飾りは含めない） */
+      function layoutSignature(container: HTMLElement) {
+        const grid = container.querySelector(".layout") as HTMLElement;
+        const card = container.querySelector("[data-widget-id]") as HTMLElement;
+        const sizing = (el: HTMLElement) =>
+          el.className
+            .split(/\s+/)
+            // 選択の強調（色の変更と outline）・つかむ手の形は、寸法に影響しない
+            .filter((c) => !/^(widget-drag-handle|cursor-|touch-|active:|border-(blue|gray)-|outline)/.test(c))
+            .sort()
+            .join(" ");
+        return {
+          surface: sizing(grid.parentElement as HTMLElement),
+          card: sizing(card),
+          // カード直下の子（中身の包み）の数。編集で見出しの帯などが増えていないこと（飾りは absolute の 1 つだけ）
+          cardChildren: Array.from(card.children).filter((c) => !(c as HTMLElement).className.includes("absolute")).length,
+          gridChildren: grid.children.length,
+        };
+      }
+
+      it("格子を包む枠・ウィジェットの枠・中身の包みが、編集の前後で同じ。編集用の窓は画面に固定して重ねる", async () => {
+        const user = userEvent.setup();
+        const widget = makeWidget({ id: "w1", type: "AlarmAlert", gridWidth: 6, gridHeight: 5 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [widget] });
+
+        const { container } = renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await screen.findByRole("group", { name: "アラーム一覧" });
+        const before = layoutSignature(container);
+
+        await user.click(screen.getByRole("button", { name: "✎ 編集する" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+        await user.click(screen.getByRole("button", { name: "設定" }));
+        const after = layoutSignature(container);
+
+        expect(after).toEqual(before);
+        // 棚と設定パネルは、流れの中に置かず（キャンバスの幅を縮めない）、画面に固定して重ねる
+        expect(screen.getByRole("complementary", { name: "センサー棚" }).className).toContain("fixed");
+        expect(screen.getByRole("complementary", { name: "設定パネル" }).className).toContain("fixed");
+        // 編集用の飾り（複製・削除・つかむ目印）は、カードの中で absolute に重ねる
+        const delButton = screen.getByRole("button", { name: "ウィジェットを削除" });
+        expect(delButton.parentElement!.className).toContain("absolute");
+      });
+
+      it("編集中も、react-grid-layout の列数・余白・行の高さは閲覧と同じ（幅 768px 以上）", async () => {
+        const user = userEvent.setup();
+        const widget = makeWidget({ id: "w1", type: "AlarmAlert", gridColumn: 3, gridRow: 2, gridWidth: 6, gridHeight: 5 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [widget] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        const cell = async () => (await screen.findByRole("group", { name: "アラーム一覧" })).parentElement!;
+        const viewStyle = (await cell()).style.cssText;
+
+        await user.click(screen.getByRole("button", { name: "✎ 編集する" }));
+        const editStyle = (await cell()).style.cssText;
+
+        // transform（位置）と幅・高さが同じ
+        expect(editStyle).toBe(viewStyle);
+      });
     });
 
     it("画面に見えていないセンサー行は、データを取りに行かない", async () => {

@@ -2,7 +2,8 @@
  * ダッシュボードに置かれた1つのウィジェットの枠。
  * 種類に応じた中身（WidgetBody）を選んで出す。
  *
- * 編集モードのときだけ、見出し（つかんで移動）・複製・削除を出す。クリックで選択され、右の設定パネルに設定が出る。
+ * 編集モードのときだけ、右上に（つかむ目印・複製・削除）を重ねる。クリックで選択され、設定パネルに設定が出る。
+ * 編集の前後で、枠の大きさ・中身の位置が変わらないようにする（見出しの帯などを足さない）。
  * 編集中は、中身へのマウス操作（グラフのドラッグ選択など）を止める。クリックを「選択」に使い、移動と競合させないため。
  *
  * 【誰が使うか】DashboardView.tsx が、ウィジェットの数だけ並べる。
@@ -75,16 +76,25 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
             }
           : undefined
       }
-      className={`flex h-full flex-col overflow-hidden rounded-lg border bg-white shadow-sm ${
-        editing && selected ? "border-blue-600 ring-2 ring-blue-600" : "border-gray-200"
-      }`}
+      // 編集中も、枠の大きさ・余白・中身の位置は閲覧中と同じ（枠線は同じ太さで色だけ変える。選択の強調は outline で、寸法に影響しない）。
+      // 編集中は、カード全体をつかんで移動できる
+      className={`relative h-full overflow-hidden rounded-lg border bg-white p-3 shadow-sm ${
+        editing ? "widget-drag-handle cursor-grab touch-none active:cursor-grabbing" : ""
+      } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"}`}
     >
+      <div className={`h-full overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
+        <ChunkErrorBoundary>
+          <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
+            <WidgetBody widget={widget} />
+          </Suspense>
+        </ChunkErrorBoundary>
+      </div>
       {editing && (
-        <div className="widget-drag-handle flex h-8 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b border-gray-200 px-2 active:cursor-grabbing">
-          <span aria-label="ドラッグして移動" role="img" className="text-gray-400">
+        // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・複製・削除
+        <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white/90 px-0.5 shadow-sm">
+          <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-400">
             ⋮⋮
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-bold">{label}</span>
           <button
             type="button"
             aria-label="ウィジェットを複製"
@@ -111,13 +121,6 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
           </button>
         </div>
       )}
-      <div className={`min-h-0 flex-1 overflow-hidden p-3 ${editing ? "pointer-events-none" : ""}`}>
-        <ChunkErrorBoundary>
-          <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
-            <WidgetBody widget={widget} />
-          </Suspense>
-        </ChunkErrorBoundary>
-      </div>
     </div>
   );
 }

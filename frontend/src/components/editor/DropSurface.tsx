@@ -4,10 +4,12 @@
  * - 空きの上: 置く場所に点線の枠を出す（ほかのウィジェットと重なるときは、重ならない場所に出す）。
  *   ドロップすると、センサーなら種類に合うウィジェットを、ウィジェットの種類ならそれを新しく作る
  * - ウィジェットの上: 「このグラフに追加」（Shift を押しながらなら入れ替え）などを出す。ドロップでセンサーを割り当てる
- * 編集モードでは、列と行の目印（点）も描く。
+ * 編集モードでは、列と行の目印（点）も、格子の上に重ねて描く。
+ * 閲覧と編集で、格子の位置と大きさが変わらないよう、この枠は両方のモードで同じ構造・同じ余白にし、
+ * 編集専用の飾り（点・枠線・ヒント）は、寸法に影響しない重ね表示（absolute）にする。ドロップの処理は編集中だけ働く。
  *
- * 【誰が使うか】DashboardView（編集モードの格子）。
- * 【引数（props）】dashboard = 編集中のダッシュボード、children = 格子（react-grid-layout）。
+ * 【誰が使うか】DashboardView（閲覧・編集の両方の格子）。
+ * 【引数（props）】dashboard = 編集中のダッシュボード、editing = 編集中か、children = 格子（react-grid-layout）。
  */
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 
@@ -35,7 +37,15 @@ type Hover =
 
 const isGraph = (w: Widget) => w.type === "SensorGraph" || w.type === "MultiSensorComparison";
 
-export function DropSurface({ dashboard, children }: { dashboard: DashboardDetail; children: ReactNode }) {
+export function DropSurface({
+  dashboard,
+  editing,
+  children,
+}: {
+  dashboard: DashboardDetail;
+  editing: boolean;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const { width } = useElementSize(ref);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -126,17 +136,24 @@ export function DropSurface({ dashboard, children }: { dashboard: DashboardDetai
   return (
     <div
       ref={ref}
-      onDragOver={onDragOver}
-      onDragLeave={(e) => {
-        // ウィジェットなど内側の要素をまたいだだけのときは、点線を消さない
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(null);
-      }}
-      onDrop={onDrop}
-      className="relative min-h-[420px] rounded-lg pb-20 outline-dashed outline-1 outline-slate-300"
-      style={dotStyle}
+      onDragOver={editing ? onDragOver : undefined}
+      onDragLeave={
+        editing
+          ? (e) => {
+              // ウィジェットなど内側の要素をまたいだだけのときは、点線を消さない
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(null);
+            }
+          : undefined
+      }
+      onDrop={editing ? onDrop : undefined}
+      className="relative min-h-[420px] pb-20"
     >
+      {editing && (
+        // 列と行の目印と、キャンバスの縁。格子の下に敷く（寸法に影響しない）
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-lg outline-dashed outline-1 outline-slate-300" style={dotStyle} />
+      )}
       {children}
-      {dashboard.widgets.length === 0 && (
+      {editing && dashboard.widgets.length === 0 && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center p-4 text-center text-sm text-gray-500">
           <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white/70 px-5 py-4">
             <b className="text-base text-gray-900">ここにセンサーをドラッグしてみましょう</b>

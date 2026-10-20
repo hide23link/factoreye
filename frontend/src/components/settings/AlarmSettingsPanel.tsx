@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
+import { describeActionError } from "../../lib/errors";
 import type { AlarmStatus } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 
@@ -38,6 +39,7 @@ export function AlarmSettingsPanel() {
     mutationFn: (alarmId: string) => acknowledgeAlarm(alarmId, "admin"),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["alarms"] }),
   });
+  const ackError = ackMutation.isError ? describeActionError(ackMutation.error, "アラームの確認") : null;
 
   return (
     <div>
@@ -49,6 +51,7 @@ export function AlarmSettingsPanel() {
             key={tab.value}
             type="button"
             onClick={() => setStatusFilter(tab.value)}
+            aria-pressed={statusFilter === tab.value}
             className={
               statusFilter === tab.value
                 ? "rounded bg-gray-900 px-3 py-1 text-xs text-white"
@@ -59,6 +62,12 @@ export function AlarmSettingsPanel() {
           </button>
         ))}
       </div>
+
+      {ackError && (
+        <p role="alert" className="mb-2 text-sm text-red-600">
+          {ackError}
+        </p>
+      )}
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 

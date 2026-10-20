@@ -1,9 +1,7 @@
 /**
- * 編集モードの左の棚。「センサー」と「ウィジェット」の2つのタブ。
- *
- * - センサー: 検索と種類の絞り込み。ステータスの点・現在値・小さな推移線つき。
- *   画面にドラッグするか、行の「＋」ボタンで追加できる（ドラッグできない人・操作のための「＋」）
- * - ウィジェット: 種類をドラッグして置く。クリックでも追加できる
+ * 編集モードの左のセンサー棚。検索と種類の絞り込み。ステータスの点・現在値・小さな推移線つき。
+ * 画面にドラッグするか、行の「＋」ボタンで追加できる（ドラッグできない人・操作のための「＋」）。
+ * ウィジェットの種類は、別の窓（WidgetPalette）に分けてある。
  *
  * 【誰が使うか】DashboardView（編集モードのとき）。
  * 【引数（props）】dashboard = 編集中のダッシュボード。
@@ -18,35 +16,27 @@ import { fetchSensorReadings, fetchSensorReadingsAggregate } from "../../lib/api
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import { classifySeverity } from "../../lib/severity";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
-import { WIDGET_KINDS } from "../../lib/widget-catalog";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor } from "../../types";
-import { WidgetIcon } from "./WidgetIcon";
 
+/** センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。閉じるボタン付きの窓 */
 export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
-  const tab = useEditorStore((s) => s.shelfTab);
-  const setTab = useEditorStore((s) => s.setShelfTab);
-
+  const setShelfOpen = useEditorStore((s) => s.setShelfOpen);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="tablist" className="flex border-b border-gray-200">
-        {(["sensor", "widget"] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={`flex-1 border-b-2 px-2 py-2.5 text-sm font-semibold ${
-              tab === key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {key === "sensor" ? "センサー" : "ウィジェット"}
-          </button>
-        ))}
+      <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2.5">
+        <h2 className="text-sm font-bold">センサー</h2>
+        <button
+          type="button"
+          aria-label="センサー棚を閉じる"
+          onClick={() => setShelfOpen(false)}
+          className="h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
       </div>
       <div className="flex min-h-0 flex-col gap-2 overflow-auto p-2.5">
-        {tab === "sensor" ? <SensorShelf dashboard={dashboard} /> : <WidgetShelf dashboard={dashboard} />}
+        <SensorShelf dashboard={dashboard} />
       </div>
     </div>
   );
@@ -229,51 +219,5 @@ function Sparkline({ values, width = 40, height = 18 }: { values: number[]; widt
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
       <polyline fill="none" stroke="#6b7280" strokeWidth={1.4} points={points} />
     </svg>
-  );
-}
-
-function WidgetShelf({ dashboard }: { dashboard: DashboardDetail }) {
-  const setDragging = useEditorStore((s) => s.setDragging);
-  const actions = useWidgetActions(dashboard);
-
-  return (
-    <>
-      <p className="rounded-md bg-blue-50 px-2.5 py-2 text-xs text-gray-600">
-        部品をキャンバスにドラッグ。置いた場所に入ります。クリックでも追加できます。
-      </p>
-      <ul className="flex flex-col gap-1.5">
-        {WIDGET_KINDS.map((kind) => (
-          <li
-            key={kind.type}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("text/plain", kind.label);
-              e.dataTransfer.effectAllowed = "copy";
-              setDragging({ kind: "widgetType", type: kind.type });
-            }}
-            onDragEnd={() => setDragging(null)}
-          >
-            <button
-              type="button"
-              onClick={() => void actions.addByType(kind.type)}
-              className="flex w-full cursor-grab items-start gap-2.5 rounded-lg border border-gray-200 bg-white p-2 text-left hover:border-blue-500"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
-                <WidgetIcon type={kind.type} />
-              </span>
-              <span>
-                <b className="block text-sm">
-                  {kind.label}
-                  {kind.type === "ProductionPlan" && (
-                    <em className="ml-1.5 rounded bg-blue-600 px-1 py-px align-[1px] text-[10px] font-bold not-italic text-white">NEW</em>
-                  )}
-                </b>
-                <span className="text-xs text-gray-500">{kind.description}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
   );
 }

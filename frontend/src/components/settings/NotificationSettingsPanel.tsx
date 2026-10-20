@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 
 import { useNotificationSettings } from "../../hooks/queries";
 import { updateNotificationSettings } from "../../lib/api";
+import { describeNotificationError } from "../../lib/errors";
 import { ErrorNotice } from "../ErrorNotice";
 
 /** 通知設定パネル。 */
@@ -52,7 +53,7 @@ export function NotificationSettingsPanel() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeNotificationError(e)),
   });
 
   return (

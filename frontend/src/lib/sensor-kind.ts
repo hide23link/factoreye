@@ -5,7 +5,7 @@
  * 「生産管理には生産数のセンサー」といった案内のために、名前と単位から推測する。
  * 推測は案内にだけ使い、ウィジェットに置けるかどうかの制限には使わない（外れても困らないように）。
  *
- * 【誰が使うか】センサー棚（SensorShelf）、ダッシュボードの型（dashboard-templates）、センサーの割り当て（widget-sensors）。
+ * 【誰が使うか】センサー棚（SensorShelf）、センサーの割り当て（widget-sensors）。
  */
 import type { Sensor } from "../types";
 

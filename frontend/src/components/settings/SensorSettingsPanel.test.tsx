@@ -2,6 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
+import { ApiError } from "../../lib/errors";
 import type { Sensor } from "../../types";
 import { SensorSettingsPanel } from "./SensorSettingsPanel";
 
@@ -93,19 +94,113 @@ describe("SensorSettingsPanel", () => {
     expect(api.updateSensor).toHaveBeenCalledWith("s1", { enabled: false });
   });
 
-  it("削除は確認ダイアログでOKした場合のみdeleteSensorを呼ぶ", async () => {
+  it("削除は確認ダイアログで「削除」を押した場合のみ deleteSensor を呼ぶ", async () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(api.deleteSensor).mockResolvedValue(undefined);
     renderWithQueryClient(<SensorSettingsPanel />);
 
     const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
     await user.click(within(row).getByText("削除"));
     expect(api.deleteSensor).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent("元に戻せません");
 
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.mocked(api.deleteSensor).mockResolvedValue(undefined);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "キャンセル" }));
+    expect(api.deleteSensor).not.toHaveBeenCalled();
+
     await user.click(within(row).getByText("削除"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "削除" }));
     expect(api.deleteSensor).toHaveBeenCalledWith("s1");
+  });
+
+  it("未入力のまま追加を押すと、理由を表示する（黙って何も起きない状態にしない）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("名前を入力してください");
+    expect(api.createSensor).not.toHaveBeenCalled();
+  });
+
+  it("編集: 名前を空にして保存しようとすると理由を出し、保存しない。Enter で保存、Esc でキャンセルできる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.updateSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    const name = screen.getByRole("textbox", { name: "センサー名" });
+    await user.clear(name);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("名前を入力してください");
+    expect(api.updateSensor).not.toHaveBeenCalled();
+
+    await user.type(name, "圧力計B");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(api.updateSensor).toHaveBeenCalledWith("s1", expect.objectContaining({ name: "圧力計B" })));
+  });
+
+  it("編集: しきい値の大小が逆だと保存せず、理由を出す", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    await user.type(screen.getByRole("spinbutton", { name: "軽故障の上限" }), "20"); // 重故障の上限は 10
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("しきい値の大小");
+    expect(api.updateSensor).not.toHaveBeenCalled();
+  });
+
+  it("保存の失敗（409・500）は、API の生のメッセージではなく日本語で出す", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.updateSensor).mockRejectedValue(new ApiError(500, "PUT /api/sensors/s1 failed: 500 Traceback"));
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("センサーの保存に失敗しました");
+    expect(alert).not.toHaveTextContent("Traceback");
+  });
+
+  it("作成フォームの単位は、プルダウンで候補をすべて選べる（°C 以外も選べる）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    const select = screen.getByRole("combobox", { name: "単位" });
+    expect(within(select).getAllByRole("option").length).toBeGreaterThan(20);
+    await user.type(screen.getByLabelText("名前"), "圧力計A-1");
+    await user.selectOptions(select, "MPa");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    await waitFor(() => expect(api.createSensor).toHaveBeenCalledWith(expect.objectContaining({ unit: "MPa" })));
+  });
+
+  it("候補にない既存の単位（psi）は、編集しても消えず、そのまま保存できる", async () => {
+    const user = userEvent.setup();
+    const odd = { ...sensor, unit: "psi" };
+    vi.mocked(api.fetchSensors).mockResolvedValue([odd]);
+    vi.mocked(api.updateSensor).mockResolvedValue(odd);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    expect(screen.getByRole("textbox", { name: "単位（自由入力）" })).toHaveValue("psi");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(api.updateSensor).toHaveBeenCalledWith("s1", expect.objectContaining({ unit: "psi" })));
   });
 });
