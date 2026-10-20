@@ -212,14 +212,17 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
         ⋮⋮
       </span>
       <i aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+      {/* 名前は 1 行目に幅いっぱいで出し（長くても 2 行まで）、種類・推移線・値は 2 行目に並べる。名前が値に押されて切れないようにする */}
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 break-words text-sm font-semibold leading-tight" title={sensor.name}>{sensor.name}</div>
-        <div className="truncate text-[11px] text-gray-500">{SENSOR_KIND_LABEL[kind]}</div>
-      </div>
-      {kind !== "state" && <Sparkline values={series} />}
-      <div className="whitespace-nowrap text-right text-sm font-bold">
-        {shown}
-        {kind !== "state" && sensor.unit && <small className="ml-0.5 font-normal text-gray-500">{sensor.unit}</small>}
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <span className="min-w-0 shrink truncate text-[11px] text-gray-500">{SENSOR_KIND_LABEL[kind]}</span>
+          {kind !== "state" && <Sparkline values={series} />}
+          <span className="ml-auto whitespace-nowrap text-right text-sm font-bold">
+            {shown}
+            {kind !== "state" && sensor.unit && <small className="ml-0.5 font-normal text-gray-500">{sensor.unit}</small>}
+          </span>
+        </div>
       </div>
       <button
         type="button"

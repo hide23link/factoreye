@@ -55,6 +55,8 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   const selected = useEditorStore((s) => s.selectedWidgetId === widget.id);
   const select = useEditorStore((s) => s.select);
   const openSettings = useEditorStore((s) => s.openSettings);
+  // このウィジェットの設定パネルが開いているか（その場合は、設定ボタンをもう一度押すと閉じる）
+  const settingsShown = useEditorStore((s) => s.panelOpen && s.selectedWidgetId === widget.id);
   const actions = useWidgetActions(dashboard);
   const label = widgetLabel(widget.type);
 
@@ -99,12 +101,16 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
           <button
             type="button"
             aria-label="ウィジェットの設定"
-            title="設定"
+            aria-pressed={settingsShown}
+            title={settingsShown ? "設定を閉じる" : "設定"}
             onClick={(e) => {
               e.stopPropagation();
-              openSettings(widget.id);
+              if (settingsShown) useEditorStore.getState().setPanelOpen(false);
+              else openSettings(widget.id);
             }}
-            className="widget-no-drag h-6 w-6 rounded text-gray-500 hover:bg-blue-50 hover:text-blue-700"
+            className={`widget-no-drag h-6 w-6 rounded hover:bg-blue-50 hover:text-blue-700 ${
+              settingsShown ? "bg-blue-50 text-blue-700" : "text-gray-500"
+            }`}
           >
             ⚙
           </button>
