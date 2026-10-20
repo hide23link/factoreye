@@ -13,7 +13,7 @@
  * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
  * 【引数（props）】dashboardId = 表示するダッシュボードの ID（App.tsx が渡す）。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -21,6 +21,7 @@ import "react-resizable/css/styles.css";
 import { useDashboard } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
+import { choosePanelPlacement, leftPanelOffset, type PanelPlacement } from "../lib/panel-placement";
 import { useEditorStore } from "../store/useEditorStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -79,7 +80,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // 新しく作った直後は、そのまま編集モードで開く（開発時の StrictMode は、開く→捨てる→開く の順に動くため、
   // 「編集で開く」の指定はここで消さず、開くたびに読む）
   useEffect(() => {
-    if (useUiStore.getState().openInEditMode) useEditorStore.getState().startEditing();
+    if (useUiStore.getState().openInEditMode) useEditorStore.getState().startEditing({ focusName: true });
     return () => useEditorStore.getState().reset();
   }, [dashboardId]);
 
@@ -135,6 +136,8 @@ function LoadedDashboard({
     if (!editing) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return;
+      // 確認ダイアログの表示中は、キー操作を画面の裏のウィジェットに効かせない（Delete・Ctrl+Z）
+      if (document.querySelector('[role="dialog"]')) return;
       const store = useEditorStore.getState();
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -213,8 +216,64 @@ function LoadedDashboard({
   }, [dragging]);
   const hiddenClass = hideWhileDragging ? "pointer-events-none opacity-0" : "";
 
+  // 窓（棚・パネル）の上端は、時間の操作の下に合わせる（画面の幅で行数が変わっても、実測でずれない）。
+  // スクロールしてヘッダーが見えなくなれば、窓も上へ寄せる
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [drawerTop, setDrawerTop] = useState(156);
+  useEffect(() => {
+    if (!editing) return;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const bottom = controlsRef.current?.getBoundingClientRect().bottom ?? 148;
+        setDrawerTop(Math.max(8, Math.round(bottom + 8)));
+      });
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [editing]);
+
+  // 設定パネルは、選んだウィジェットを覆わない側に出す（右 → 左 → 下）。ウィジェットの位置は、選んだとき・画面の幅が
+  // 変わったとき・棚を開閉したときに測り直す。下に出すときは、ウィジェットが窓の上に見えるようスクロールする
+  const selectedWidgetId = useEditorStore((s) => s.selectedWidgetId);
+  const selectedWidget = dashboard.widgets.find((w) => w.id === selectedWidgetId);
+  const [placement, setPlacement] = useState<PanelPlacement>("right");
+  const placementKey = `${selectedWidgetId}:${selectedWidget?.gridColumn}:${selectedWidget?.gridWidth}:${selectedWidget?.gridRow}:${selectedWidget?.gridHeight}:${shelfOpen}:${panelOpen}`;
+  useLayoutEffect(() => {
+    if (!editing || !panelOpen) return;
+    const measure = () => {
+      const el = selectedWidgetId ? document.querySelector<HTMLElement>(`[data-widget-id="${selectedWidgetId}"]`) : null;
+      const box = el?.getBoundingClientRect();
+      const next = choosePanelPlacement({
+        widget: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom } : null,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        shelfOpen,
+        drawerTop,
+      });
+      setPlacement(next);
+      if (next === "bottom" && box) {
+        // 下の窓（画面の高さの 45%）より上に、ウィジェットの下端が来るようにする
+        const visibleBottom = window.innerHeight * 0.55 - 16;
+        if (box.bottom > visibleBottom) window.scrollBy({ top: box.bottom - visibleBottom });
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // drawerTop はスクロールで変わるが、測り直しはしない（スクロールのたびに窓が動かないように）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, placementKey]);
+
   const drawerBase =
-    "fixed bottom-2 top-[156px] z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
+    "fixed z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
 
   return (
     <div className="px-2 py-4 sm:p-4">
@@ -294,7 +353,9 @@ function LoadedDashboard({
         </div>
       </div>
 
-      <TimeRangeControls />
+      <div ref={controlsRef}>
+        <TimeRangeControls />
+      </div>
 
       {!editing && dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-400">
@@ -307,12 +368,29 @@ function LoadedDashboard({
       )}
 
       {editing && shelfOpen && (
-        <aside aria-label="センサー棚" className={`${drawerBase} left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}>
+        <aside
+          aria-label="センサー棚"
+          style={{ top: drawerTop }}
+          className={`${drawerBase} bottom-2 left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
+        >
           <EditorShelf dashboard={dashboard} />
         </aside>
       )}
       {editing && panelOpen && (
-        <aside aria-label="設定パネル" className={`${drawerBase} right-2 w-[316px] max-w-[calc(100vw-1rem)]`}>
+        <aside
+          aria-label="設定パネル"
+          data-placement={placement}
+          style={
+            placement === "bottom"
+              ? { height: "45vh" }
+              : placement === "left"
+                ? { top: drawerTop, left: leftPanelOffset(shelfOpen) }
+                : { top: drawerTop }
+          }
+          className={`${drawerBase} ${
+            placement === "bottom" ? "inset-x-2 bottom-2" : placement === "left" ? "bottom-2 w-[316px]" : "bottom-2 right-2 w-[316px]"
+          } max-w-[calc(100vw-1rem)]`}
+        >
           <SettingsPanel dashboard={dashboard} />
         </aside>
       )}

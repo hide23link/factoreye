@@ -1,8 +1,9 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
+import { act, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
 import { useEditorStore } from "../store/useEditorStore";
+import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Sensor, Widget } from "../types";
 import { DashboardView } from "./DashboardView";
 
@@ -129,6 +130,15 @@ describe("DashboardView", () => {
   });
 
   describe("編集モード", () => {
+    // センサー棚は、広い画面（1600px 以上）でだけ最初から開く。テストは広い画面として動かす
+    const originalWidth = window.innerWidth;
+    beforeEach(() => {
+      Object.defineProperty(window, "innerWidth", { value: 1700, configurable: true });
+    });
+    afterEach(() => {
+      Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
+    });
+
     it("「編集する」で、センサー棚が出る。設定パネルと部品バーは、ボタンで開閉できる。「編集を終わる」で全部消える", async () => {
       const user = userEvent.setup();
       vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
@@ -456,6 +466,125 @@ describe("DashboardView", () => {
       expect(api.deleteWidget).not.toHaveBeenCalled();
       await user.keyboard("{Delete}");
       await waitFor(() => expect(api.deleteWidget).toHaveBeenCalledWith("w1"));
+    });
+
+    describe("設定パネルの位置（選んだウィジェットを覆わない）", () => {
+      /** 画面の幅 1280px で、widget の id ごとに画面上の位置を返すようにする（jsdom には寸法が無いため） */
+      function mockWidgetRects(rects: Record<string, [number, number]>) {
+        Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+        Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+          const range = rects[this.dataset.widgetId ?? ""];
+          if (!range) return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
+          return { left: range[0], right: range[1], top: 200, bottom: 420, width: range[1] - range[0], height: 220, x: range[0], y: 200, toJSON() {} };
+        });
+      }
+
+      const threeWidgets = [
+        makeWidget({ id: "left", type: "AlarmAlert", gridColumn: 1, gridWidth: 4 }),
+        makeWidget({ id: "mid", type: "AlarmAlert", gridColumn: 5, gridWidth: 4 }),
+        makeWidget({ id: "right", type: "AlarmAlert", gridColumn: 9, gridWidth: 4 }),
+      ];
+
+      it("左端・中央のウィジェットを選ぶと右に、右端のウィジェットを選ぶと左に出す（覆われない）", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ left: [16, 330], mid: [340, 700], right: [710, 1264] });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: threeWidgets });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        const cards = await screen.findAllByRole("group", { name: "アラーム一覧" });
+        const panel = () => screen.getByRole("complementary", { name: "設定パネル" });
+
+        await user.click(cards.find((c) => c.dataset.widgetId === "left")!);
+        expect(panel()).toHaveAttribute("data-placement", "right");
+        await user.click(cards.find((c) => c.dataset.widgetId === "mid")!);
+        expect(panel()).toHaveAttribute("data-placement", "right");
+        await user.click(cards.find((c) => c.dataset.widgetId === "right")!);
+        expect(panel()).toHaveAttribute("data-placement", "left");
+      });
+
+      it("左右どちらにも掛かる幅広のウィジェットは、下に出す", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ wide: [16, 1264] });
+        const wide = makeWidget({ id: "wide", type: "AlarmAlert", gridColumn: 1, gridWidth: 12 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [wide] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+
+        expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom");
+      });
+
+      it("ドラッグ中は棚を隠すが、設定パネルは隠さず、パネルの枠にセンサーを置ける", async () => {
+        const user = userEvent.setup();
+        const graph = makeWidget({ id: "g1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [graph] });
+        vi.mocked(api.updateWidget).mockResolvedValue(graph);
+        vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(await screen.findByRole("group", { name: "グラフ" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+
+        act(() => useEditorStore.getState().setDragging({ kind: "sensor", sensorId: "s2" }));
+        await waitFor(() => expect(screen.getByRole("complementary", { name: "センサー棚" }).className).toContain("opacity-0"));
+        expect(screen.getByRole("complementary", { name: "設定パネル" }).className).not.toContain("opacity-0");
+
+        fireEvent.dragOver(screen.getByTestId("sensor-dropzone"), { dataTransfer: { dropEffect: "none" } });
+        fireEvent.drop(screen.getByTestId("sensor-dropzone"), { dataTransfer: { dropEffect: "none" } });
+        await waitFor(() =>
+          expect(api.updateWidget).toHaveBeenCalledWith("g1", expect.objectContaining({ config: expect.objectContaining({ sensorIds: ["s1", "s2"] }) })),
+        );
+      });
+    });
+
+    it("確認ダイアログの表示中は、Ctrl+Z を画面の裏の元に戻すに効かせない", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      act(() => useEditorStore.getState().pushHistory([]));
+      await user.click(screen.getByRole("button", { name: "このダッシュボードを削除" }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      await user.keyboard("{Control>}z{/Control}");
+
+      expect(useEditorStore.getState().history).toHaveLength(1);
+    });
+
+    it("日本語入力の変換を確定する Enter では、名前を保存しない（確定後の Enter で保存する）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      vi.mocked(api.updateDashboard).mockResolvedValue({ ...emptyDashboard, name: "あ" });
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      const input = screen.getByRole("textbox", { name: "名前" });
+      fireEvent.change(input, { target: { value: "あ" } });
+
+      fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+      fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+      expect(api.updateDashboard).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(api.updateDashboard).toHaveBeenCalledWith("d1", expect.objectContaining({ name: "あ" })));
+    });
+
+    it("新しく作った直後（編集モードで開く）は、設定パネルの名前の入力欄にフォーカスする", async () => {
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      useUiStore.setState({ selectedDashboardId: "d1", openInEditMode: true });
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+
+      const input = await screen.findByRole("textbox", { name: "名前" });
+      await waitFor(() => expect(input).toHaveFocus());
+      useUiStore.setState({ openInEditMode: false });
     });
 
     describe("ドラッグ＆ドロップ", () => {

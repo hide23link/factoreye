@@ -7,9 +7,10 @@
  * 【引数（props）】dashboard = 編集中のダッシュボード。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { deleteDashboard, updateDashboard } from "../../lib/api";
+import { isImeComposing } from "../../lib/ime";
 import { describeActionError } from "../../lib/errors";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useUiStore } from "../../store/useUiStore";
@@ -31,6 +32,16 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
   const [name, setName] = useState<string | null>(null);
   const [description, setDescription] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // 新しく作った直後は、名前の入力欄にフォーカスして全選択する（そのまま打てば名前が変わる）
+  const nameRef = useRef<HTMLInputElement>(null);
+  const focusName = useEditorStore((s) => s.focusName);
+  useEffect(() => {
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+    useEditorStore.getState().clearFocusName();
+  }, [focusName]);
 
   const saveMutation = useMutation({
     mutationFn: (change: { name?: string; description?: string }) => updateDashboard(dashboard.id, change),
@@ -75,7 +86,7 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
   // どちらの保存が失敗したかを、メッセージに入れる
   const failedField = saveMutation.variables && "name" in saveMutation.variables ? "名前" : "説明";
   const commitOnEnter = (commit: () => void) => (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") commit();
+    if (e.key === "Enter" && !isImeComposing(e)) commit();
   };
 
   return (
@@ -94,6 +105,7 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
       <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
         <Section title="名前">
           <input
+            ref={nameRef}
             aria-label="名前"
             value={name ?? dashboard.name}
             maxLength={100}

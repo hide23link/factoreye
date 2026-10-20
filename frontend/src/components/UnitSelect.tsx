@@ -7,7 +7,7 @@
  * 【誰が使うか】SensorSettingsPanel（作成フォーム・編集行）、SetupWizard。
  * 【引数（props）】value = 今の単位、onChange = 変えたとき、label = 読み上げ用の名前、className = 外側の幅など。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { OTHER_UNIT, UNIT_PRESETS, isPresetUnit } from "../lib/units";
 
@@ -24,7 +24,12 @@ export function UnitSelect({
 }) {
   // 「その他」を選んだ（まだ何も入力していない間も、入力欄を出し続ける）
   const [pickedOther, setPickedOther] = useState(false);
-  const isOther = pickedOther || (value !== "" && !isPresetUnit(value));
+  // 値が入っているときは、値で決める（候補なら候補、そうでなければ「その他」）。空のときだけ、選んだ操作に従う
+  const isOther = value !== "" ? !isPresetUnit(value) : pickedOther;
+  // 親が単位を初期値（候補）に戻したときは、「その他」の選択も解く（作成後に、前回の状態が残らないように）
+  useEffect(() => {
+    if (isPresetUnit(value)) setPickedOther(false);
+  }, [value]);
   const selected = isOther ? OTHER_UNIT : value;
 
   return (

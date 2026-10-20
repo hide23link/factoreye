@@ -9,6 +9,7 @@
  */
 import { create } from "zustand";
 
+import { NARROW_VIEWPORT } from "../lib/panel-placement";
 import type { Widget } from "../types";
 
 /** ドラッグしているもの: 棚のセンサー、または棚のウィジェットの種類 */
@@ -26,6 +27,9 @@ export interface EditorToast {
 /** 元に戻せる回数の上限 */
 const HISTORY_LIMIT = 50;
 
+// センサー棚を最初から開く画面の幅（px）。これより狭いと、棚がキャンバスの大部分を隠すため、閉じておく
+export const SHELF_OPEN_MIN_WIDTH = 1600;
+
 interface EditorState {
   editing: boolean;
   selectedWidgetId: string | null;
@@ -33,10 +37,13 @@ interface EditorState {
   shelfOpen: boolean;
   panelOpen: boolean;
   partsOpen: boolean;
+  // 設定パネルのダッシュボード名の入力欄に、フォーカスを移す（新しく作った直後に、名前をすぐ付けられるように）
+  focusName: boolean;
   dragging: DragPayload | null;
   history: Widget[][];
   toast: EditorToast | null;
-  startEditing: () => void;
+  startEditing: (options?: { focusName?: boolean }) => void;
+  clearFocusName: () => void;
   stopEditing: () => void;
   select: (id: string | null) => void;
   setShelfOpen: (open: boolean) => void;
@@ -56,24 +63,30 @@ interface EditorState {
 
 let nextToastId = 1;
 
+const isNarrow = () => typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT;
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   editing: false,
   selectedWidgetId: null,
   shelfOpen: false,
   panelOpen: false,
   partsOpen: false,
+  focusName: false,
   dragging: null,
   history: [],
   toast: null,
   // 広い画面（1024px 以上）では、センサー棚を最初から出す。狭い画面では、キャンバスを隠さないよう閉じておく
-  startEditing: () =>
+  startEditing: (options) =>
     set({
       editing: true,
       selectedWidgetId: null,
-      shelfOpen: typeof window !== "undefined" && window.innerWidth >= 1024,
-      panelOpen: false,
+      shelfOpen: typeof window !== "undefined" && window.innerWidth >= SHELF_OPEN_MIN_WIDTH && !options?.focusName,
+      // 名前を付けるときは、設定パネルを開く（棚は閉じて、キャンバスを隠さない）
+      panelOpen: options?.focusName === true,
       partsOpen: false,
+      focusName: options?.focusName === true,
     }),
+  clearFocusName: () => set({ focusName: false }),
   stopEditing: () =>
     set({
       editing: false,
@@ -86,9 +99,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       toast: null,
     }),
   // ウィジェットを選んだら、その設定が見えるよう、設定パネルを開く
-  select: (id) => set((s) => ({ selectedWidgetId: id, panelOpen: id === null ? s.panelOpen : true })),
-  setShelfOpen: (open) => set({ shelfOpen: open }),
-  setPanelOpen: (open) => set({ panelOpen: open }),
+  // 狭い画面では、棚とパネルの両方を開くと、キャンバスが見えなくなるので、片方だけにする
+  select: (id) =>
+    set((s) =>
+      id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, panelOpen: true, shelfOpen: isNarrow() ? false : s.shelfOpen },
+    ),
+  setShelfOpen: (open) => set((s) => ({ shelfOpen: open, panelOpen: open && isNarrow() ? false : s.panelOpen })),
+  setPanelOpen: (open) => set((s) => ({ panelOpen: open, shelfOpen: open && isNarrow() ? false : s.shelfOpen })),
   setPartsOpen: (open) => set({ partsOpen: open }),
   setDragging: (payload) => set({ dragging: payload }),
   pushHistory: (snapshot) => set((s) => ({ history: [...s.history, snapshot].slice(-HISTORY_LIMIT) })),
@@ -108,6 +125,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       shelfOpen: false,
       panelOpen: false,
       partsOpen: false,
+      focusName: false,
       dragging: null,
       history: [],
       toast: null,

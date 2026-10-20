@@ -95,7 +95,7 @@ export function SetupWizard() {
 
   // 段階1: センサーを作る（成功したら、そのセンサーの ID を覚えて段階2へ進む）
   const createSensorMutation = useMutation({
-    mutationFn: () => createSensor({ name, ingestKey, unit }),
+    mutationFn: () => createSensor({ name: name.trim(), ingestKey: ingestKey.trim(), unit: unit.trim() }),
     onSuccess: (sensor) => {
       void queryClient.invalidateQueries({ queryKey: ["sensors"] });
       setErrorMessage(null);

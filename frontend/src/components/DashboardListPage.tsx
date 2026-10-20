@@ -8,6 +8,7 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 
 import { useDashboards } from "../hooks/queries";
 import { createDashboard, fetchDashboard } from "../lib/api";
+import { nextDashboardName } from "../lib/dashboard-name";
 import { describeActionError } from "../lib/errors";
 import { useUiStore } from "../store/useUiStore";
 import type { Widget } from "../types";
@@ -16,7 +17,6 @@ import { ErrorNotice } from "./ErrorNotice";
 // プレビューの 1 行の高さ（px）。実際の格子の縮尺ではなく、配置の雰囲気が分かればよい
 const THUMB_ROW_PX = 6;
 const THUMB_COLUMNS = 12;
-const NEW_DASHBOARD_NAME = "新しいダッシュボード";
 
 /** 種類ごとのプレビューの色（生産管理は緑、アラームは赤、そのほかは青） */
 function thumbTone(type: Widget["type"]): string {
@@ -54,7 +54,7 @@ export function DashboardListPage() {
 
   // 型の選択は設けず、名前だけ仮に付けた空のダッシュボードを作って、編集モードで開く（名前は設定パネルで変えられる）
   const createMutation = useMutation({
-    mutationFn: () => createDashboard({ name: NEW_DASHBOARD_NAME }),
+    mutationFn: () => createDashboard({ name: nextDashboardName((dashboards ?? []).map((d) => d.name)) }),
     onSuccess: (dashboard) => {
       void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
       selectDashboard(dashboard.id, { edit: true });

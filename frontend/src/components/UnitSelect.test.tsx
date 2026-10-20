@@ -54,4 +54,27 @@ describe("UnitSelect", () => {
     expect(screen.getByTestId("value")).toHaveTextContent("kW");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  it("「その他」で入力したあと、親が単位を初期値（候補）に戻したら、選択欄も初期状態に戻る（作成後の再入力）", async () => {
+    const user = userEvent.setup();
+    function Form() {
+      const [unit, setUnit] = useState("°C");
+      return (
+        <>
+          <UnitSelect value={unit} onChange={setUnit} />
+          <button type="button" onClick={() => setUnit("°C")}>
+            リセット
+          </button>
+        </>
+      );
+    }
+    render(<Form />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "単位" }), "その他（自由入力）");
+    await user.type(screen.getByRole("textbox", { name: "単位（自由入力）" }), "psi");
+
+    await user.click(screen.getByRole("button", { name: "リセット" }));
+
+    expect(screen.getByRole("combobox", { name: "単位" })).toHaveValue("°C");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
 });
