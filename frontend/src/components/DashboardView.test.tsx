@@ -552,6 +552,25 @@ describe("DashboardView", () => {
         expect(panel.style.bottom).toBe("64px");
       });
 
+      it("棚を動かした位置に合わせて、設定パネルは棚と重ならない側に出る", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ mid: [400, 900] });
+        const mid = makeWidget({ id: "mid", type: "AlarmAlert", gridColumn: 4, gridWidth: 6 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [mid] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(screen.getByRole("button", { name: "センサー" }));
+        // 棚を右端（右のパネルの位置）へ動かす
+        act(() => useEditorStore.getState().setShelfPos({ x: 980, y: 200 }, { persist: false }));
+        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+
+        const panel = screen.getByRole("complementary", { name: "設定パネル" });
+        // 右は棚と重なるので、左端に出る
+        expect(panel).toHaveAttribute("data-placement", "left");
+        expect(panel.style.left).toBe("8px");
+      });
+
       it("ドラッグ中は棚を隠すが、設定パネルは隠さず、パネルの枠にセンサーを置ける", async () => {
         const user = userEvent.setup();
         const graph = makeWidget({ id: "g1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
@@ -591,6 +610,152 @@ describe("DashboardView", () => {
       expect(screen.getByRole("complementary", { name: "センサー棚" })).toBeInTheDocument();
       expect(screen.getByText(/左の一覧から/)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "センサーを開く" })).not.toBeInTheDocument();
+    });
+
+    describe("センサー棚を動かせる", () => {
+      const aside = () => screen.getByRole("complementary", { name: "センサー棚" });
+      const handle = () => screen.getByTestId("shelf-handle");
+      const leftOf = () => Number.parseInt(aside().style.left, 10);
+      const topOf = () => Number.parseInt(aside().style.top, 10);
+
+      async function openEditor() {
+        const user = userEvent.setup();
+        vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+        return user;
+      }
+
+      beforeEach(() => {
+        window.localStorage.clear();
+        useEditorStore.getState().reset();
+      });
+      afterEach(() => window.localStorage.clear());
+
+      /** jsdom の PointerEvent は座標を持たないので、座標つきのイベントを作って送る */
+      function pointer(type: "pointerDown" | "pointerMove" | "pointerUp", x: number, y: number) {
+        const event = createEvent[type](handle());
+        Object.defineProperty(event, "clientX", { value: x });
+        Object.defineProperty(event, "clientY", { value: y });
+        fireEvent(handle(), event);
+      }
+
+      it("見出しにフォーカスして矢印キーで動く（Shift で大きく）。位置は保存される", async () => {
+        const user = await openEditor();
+        handle().focus();
+
+        await user.keyboard("{ArrowRight}");
+        const first = leftOf();
+        await user.keyboard("{ArrowRight}");
+        expect(leftOf() - first).toBe(16);
+        await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+        const y1 = topOf();
+        await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+        expect(topOf() - y1).toBe(64);
+
+        expect(JSON.parse(window.localStorage.getItem("factoreye.sensorShelfPosition")!)).toEqual({ x: leftOf(), y: topOf() });
+      });
+
+      it("見出しをつかんで動かせる。動かし終えたときに保存する", async () => {
+        await openEditor();
+        pointer("pointerDown", 100, 100);
+        pointer("pointerMove", 160, 130);
+        expect(leftOf()).toBe(60);
+        expect(topOf()).toBe(30);
+        // 途中では保存しない
+        expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
+        pointer("pointerUp", 160, 130);
+        expect(JSON.parse(window.localStorage.getItem("factoreye.sensorShelfPosition")!)).toEqual({ x: 60, y: 30 });
+      });
+
+      it("画面の外へは動かせない（見出しは常に画面内）", async () => {
+        await openEditor();
+        pointer("pointerDown", 100, 100);
+        pointer("pointerMove", -5000, -5000);
+        expect([leftOf(), topOf()]).toEqual([0, 0]);
+        pointer("pointerMove", 90000, 90000);
+        // 右は窓の幅が収まる位置（1700 − 272）、下は見出しが残る位置（高さ − 44）まで
+        expect(leftOf()).toBe(window.innerWidth - 272);
+        expect(topOf()).toBe(window.innerHeight - 44);
+        pointer("pointerUp", 90000, 90000);
+      });
+
+      it("「位置をもとに戻す」で既定の場所に戻り、保存も消える", async () => {
+        const user = await openEditor();
+        expect(screen.queryByRole("button", { name: "位置をもとに戻す" })).not.toBeInTheDocument();
+        handle().focus();
+        await user.keyboard("{ArrowRight}");
+        await user.click(screen.getByRole("button", { name: "位置をもとに戻す" }));
+
+        expect(aside().style.left).toBe("8px");
+        expect(aside().style.bottom).not.toBe("");
+        expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
+        expect(screen.queryByRole("button", { name: "位置をもとに戻す" })).not.toBeInTheDocument();
+      });
+
+      it("次に編集を始めたとき、保存した位置に出る", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 400, y: 220 }));
+        await openEditor();
+        expect([leftOf(), topOf()]).toEqual([400, 220]);
+      });
+
+      it("画面が小さくなって、棚が画面の外になったら、既定の場所に戻す", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 1400, y: 220 }));
+        await openEditor();
+        expect(leftOf()).toBe(1400);
+
+        Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+
+        await waitFor(() => expect(aside().style.left).toBe("8px"));
+        expect(useEditorStore.getState().shelfPos).toBeNull();
+      });
+
+      it("localStorage が使えなくても、動かせる（保存されないだけ）", async () => {
+        vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+          throw new Error("denied");
+        });
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+          throw new Error("denied");
+        });
+        const user = await openEditor();
+        handle().focus();
+        await user.keyboard("{ArrowRight}");
+        expect(leftOf()).toBeGreaterThan(0);
+      });
+
+      it("動かしたあとも、センサーのドラッグ中は棚を隠す仕組みが働く", async () => {
+        const user = await openEditor();
+        handle().focus();
+        await user.keyboard("{ArrowRight}");
+
+        act(() => useEditorStore.getState().setDragging({ kind: "sensor", sensorId: "s1" }));
+
+        await waitFor(() => expect(aside().className).toContain("opacity-0"));
+        act(() => useEditorStore.getState().setDragging(null));
+        await waitFor(() => expect(aside().className).not.toContain("opacity-0"));
+      });
+
+      it("狭い画面（640px 未満）では、保存した位置があっても動かさず、従来の下寄せのまま", async () => {
+        Object.defineProperty(window, "innerWidth", { value: 600, configurable: true });
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 100, y: 100 }));
+        const user = userEvent.setup();
+        vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        // 狭い画面では、棚は閉じて始まる。開く
+        await user.click(screen.getByRole("button", { name: "センサー" }));
+
+        expect(aside().style.left).toBe("8px");
+        expect(aside().style.bottom).not.toBe("");
+        // つかんでも動かない
+        pointer("pointerDown", 100, 100);
+        pointer("pointerMove", 200, 200);
+        expect(aside().style.left).toBe("8px");
+      });
     });
 
     it("確認ダイアログの表示中は、Ctrl+Z を画面の裏の元に戻すに効かせない", async () => {

@@ -10,6 +10,7 @@
 import { create } from "zustand";
 
 import { NARROW_VIEWPORT } from "../lib/panel-placement";
+import { loadShelfPosition, saveShelfPosition, type ShelfPosition } from "../lib/shelf-position";
 import type { Widget } from "../types";
 
 /** ドラッグしているもの: 棚のセンサー、または棚のウィジェットの種類 */
@@ -35,6 +36,8 @@ interface EditorState {
   selectedWidgetId: string | null;
   // 左のセンサー棚・右の設定パネル・ウィジェットの部品バー（どれもキャンバスの上に重ねて出し、閉じられる）
   shelfOpen: boolean;
+  // センサー棚（動かせる窓）の位置。null は既定の場所（左上に固定）。保存は localStorage
+  shelfPos: ShelfPosition | null;
   panelOpen: boolean;
   partsOpen: boolean;
   // 設定パネルのダッシュボード名の入力欄に、フォーカスを移す（新しく作った直後に、名前をすぐ付けられるように）
@@ -47,6 +50,8 @@ interface EditorState {
   stopEditing: () => void;
   select: (id: string | null) => void;
   setShelfOpen: (open: boolean) => void;
+  /** 棚の位置を変える。persist=false は移動の途中（保存は、動かし終えたときに 1 回） */
+  setShelfPos: (pos: ShelfPosition | null, options?: { persist?: boolean }) => void;
   setPanelOpen: (open: boolean) => void;
   setPartsOpen: (open: boolean) => void;
   setDragging: (payload: DragPayload | null) => void;
@@ -69,6 +74,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editing: false,
   selectedWidgetId: null,
   shelfOpen: false,
+  shelfPos: null,
   panelOpen: false,
   partsOpen: false,
   focusName: false,
@@ -82,6 +88,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedWidgetId: null,
       shelfOpen: typeof window !== "undefined" && window.innerWidth >= SHELF_OPEN_MIN_WIDTH && !options?.focusName,
       // 名前を付けるときは、設定パネルを開く（棚は閉じて、キャンバスを隠さない）
+      // 前回動かした棚の位置を復元する（保存が無い・いまの画面の外なら、既定の場所）
+      shelfPos: typeof window !== "undefined" ? loadShelfPosition(window.innerWidth, window.innerHeight) : null,
       panelOpen: options?.focusName === true,
       partsOpen: false,
       focusName: options?.focusName === true,
@@ -105,6 +113,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, panelOpen: true, focusName: false, shelfOpen: isNarrow() ? false : s.shelfOpen },
     ),
   setShelfOpen: (open) => set((s) => ({ shelfOpen: open, panelOpen: open && isNarrow() ? false : s.panelOpen })),
+  setShelfPos: (pos, options) => {
+    set({ shelfPos: pos });
+    if (options?.persist !== false) saveShelfPosition(pos);
+  },
   setPanelOpen: (open) => set((s) => ({ panelOpen: open, shelfOpen: open && isNarrow() ? false : s.shelfOpen })),
   setPartsOpen: (open) => set({ partsOpen: open }),
   setDragging: (payload) => set({ dragging: payload }),
@@ -123,6 +135,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       editing: false,
       selectedWidgetId: null,
       shelfOpen: false,
+      shelfPos: null,
       panelOpen: false,
       partsOpen: false,
       focusName: false,

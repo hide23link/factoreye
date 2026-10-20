@@ -21,7 +21,8 @@ import "react-resizable/css/styles.css";
 import { useDashboard } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
-import { choosePanelPlacement, leftPanelOffset, NARROW_VIEWPORT, type PanelPlacement } from "../lib/panel-placement";
+import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
+import { isShelfPositionInside, SHELF_WIDTH_PX } from "../lib/shelf-position";
 import { useEditorStore } from "../store/useEditorStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -250,21 +251,44 @@ function LoadedDashboard({
   // 変わったとき・棚を開閉したときに測り直す。下に出すときは、ウィジェットが窓の上に見えるようスクロールする
   const selectedWidgetId = useEditorStore((s) => s.selectedWidgetId);
   const selectedWidget = dashboard.widgets.find((w) => w.id === selectedWidgetId);
-  const [placement, setPlacement] = useState<PanelPlacement>("right");
-  const placementKey = `${selectedWidgetId}:${selectedWidget?.gridColumn}:${selectedWidget?.gridWidth}:${selectedWidget?.gridRow}:${selectedWidget?.gridHeight}:${shelfOpen}:${panelOpen}`;
+  const [slot, setSlot] = useState<PanelSlot>({ placement: "right" });
+  const placement = slot.placement;
+  const shelfPos = useEditorStore((s) => s.shelfPos);
+  // 画面が小さくなって、動かした棚が画面の外になったら、位置を捨てて既定の場所に戻す
+  useEffect(() => {
+    const onResize = () => {
+      const pos = useEditorStore.getState().shelfPos;
+      if (pos && !isShelfPositionInside(pos, window.innerWidth, window.innerHeight)) useEditorStore.getState().setShelfPos(null);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  // 棚の矩形（画面上）。動かしていなければ既定の場所（左上に固定、下まで）。狭い画面は、動かした位置を使わない
+  const narrowNow = window.innerWidth < NARROW_VIEWPORT;
+  const movedShelf = shelfPos && !narrowNow ? shelfPos : null;
+  const shelfHeight = movedShelf ? Math.max(160, Math.min(window.innerHeight * 0.75, window.innerHeight - movedShelf.y - 8)) : 0;
+  const shelfRect: ViewRect | null = !shelfOpen
+    ? null
+    : movedShelf
+      ? { left: movedShelf.x, top: movedShelf.y, right: movedShelf.x + SHELF_WIDTH_PX, bottom: movedShelf.y + shelfHeight }
+      : { left: 8, top: drawerTop, right: 8 + SHELF_WIDTH_PX, bottom: window.innerHeight - (narrowNow ? BOTTOM_NAV_HEIGHT + 8 : 8) };
+  const shelfKey = shelfRect ? `${shelfRect.left},${shelfRect.top},${shelfRect.right},${shelfRect.bottom}` : "closed";
+  const placementKey = `${selectedWidgetId}:${selectedWidget?.gridColumn}:${selectedWidget?.gridWidth}:${selectedWidget?.gridRow}:${selectedWidget?.gridHeight}:${shelfKey}:${panelOpen}`;
   useLayoutEffect(() => {
     if (!editing || !panelOpen) return;
     const measure = () => {
       const el = selectedWidgetId ? document.querySelector<HTMLElement>(`[data-widget-id="${selectedWidgetId}"]`) : null;
       const box = el?.getBoundingClientRect();
-      const next = choosePanelPlacement({
+      const next = choosePanelSlot({
         widget: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom } : null,
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
-        shelfOpen,
+        shelf: shelfRect,
         drawerTop,
+        bottomGap: window.innerWidth < NARROW_VIEWPORT ? BOTTOM_NAV_HEIGHT + 8 : 8,
       });
-      setPlacement(next);
+      // 同じ結果なら、状態を更新しない（無駄な再描画を避ける）
+      setSlot((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     };
     measure();
     window.addEventListener("resize", measure);
@@ -389,8 +413,12 @@ function LoadedDashboard({
       {editing && shelfOpen && (
         <aside
           aria-label="センサー棚"
-          style={{ top: drawerTop, bottom: drawerBottom }}
-          className={`${drawerBase} left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
+          style={
+            movedShelf
+              ? { top: movedShelf.y, left: movedShelf.x, height: shelfHeight }
+              : { top: drawerTop, bottom: drawerBottom, left: 8 }
+          }
+          className={`${drawerBase} w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
         >
           <EditorShelf dashboard={dashboard} />
         </aside>
@@ -401,10 +429,10 @@ function LoadedDashboard({
           data-placement={placement}
           style={
             placement === "bottom"
-              ? // 下に出すときは、開いているセンサー棚の右隣から右端まで（棚と重ならない）
-                { height: "45vh", bottom: drawerBottom, left: leftPanelOffset(shelfOpen), right: 8 }
-              : placement === "left"
-                ? { top: drawerTop, bottom: drawerBottom, left: leftPanelOffset(shelfOpen) }
+              ? // 下に出すときは、開いているセンサー棚を避けた範囲に出す（棚と重ならない）
+                { height: "45vh", bottom: drawerBottom, left: slot.placement === "bottom" ? slot.left : 8, right: slot.placement === "bottom" ? slot.right : 8 }
+              : slot.placement === "left"
+                ? { top: drawerTop, bottom: drawerBottom, left: slot.left }
                 : { top: drawerTop, bottom: drawerBottom }
           }
           className={`${drawerBase} ${

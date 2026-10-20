@@ -6,7 +6,7 @@
  * 【誰が使うか】DashboardView（編集モードのとき）。
  * 【引数（props）】dashboard = 編集中のダッシュボード。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -14,26 +14,103 @@ import { useSensors } from "../../hooks/queries";
 import { useInView } from "../../hooks/useInView";
 import { fetchSensorReadings, fetchSensorReadingsAggregate } from "../../lib/api";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
+import { NARROW_VIEWPORT } from "../../lib/panel-placement";
+import { clampShelfPosition, type ShelfPosition } from "../../lib/shelf-position";
 import { classifySeverity } from "../../lib/severity";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor } from "../../types";
 
-/** センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。閉じるボタン付きの窓 */
+// 矢印キー 1 回で動く量（px）。Shift を押しながらだと大きく動く
+const KEY_STEP = 16;
+const KEY_STEP_LARGE = 64;
+
+/**
+ * センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。
+ * 見出しをつかんで、画面内の好きな位置へ動かせる（矢印キーでも動かせる）。位置は保存され、「位置をもとに戻す」で既定の場所に戻る。
+ * 狭い画面（640px 未満）は、従来どおり下寄せの固定で、動かせない。
+ */
 export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const setShelfOpen = useEditorStore((s) => s.setShelfOpen);
+  const setShelfPos = useEditorStore((s) => s.setShelfPos);
+  const shelfPos = useEditorStore((s) => s.shelfPos);
+  // 移動の途中の状態（つかんだ位置と、そのときの窓の位置）
+  const drag = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const movable = () => window.innerWidth >= NARROW_VIEWPORT;
+  /** いまの窓の位置（動かしたことが無ければ、既定の場所の実測値） */
+  const currentOrigin = (header: HTMLElement): ShelfPosition => {
+    const stored = useEditorStore.getState().shelfPos;
+    if (stored) return stored;
+    const box = header.closest("aside")?.getBoundingClientRect();
+    return { x: box?.left ?? 8, y: box?.top ?? 0 };
+  };
+  const clampToViewport = (pos: ShelfPosition) => clampShelfPosition(pos, window.innerWidth, window.innerHeight);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2.5">
-        <h2 className="text-sm font-bold">センサー</h2>
-        <button
-          type="button"
-          aria-label="センサー棚を閉じる"
-          onClick={() => setShelfOpen(false)}
-          className="h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
-        >
-          ✕
-        </button>
+      <div
+        role="group"
+        tabIndex={0}
+        aria-label="センサー棚の見出し（つかんで移動。矢印キーでも動かせます。Shift で大きく）"
+        data-testid="shelf-handle"
+        onPointerDown={(e) => {
+          if (!movable() || e.button > 0 || (e.target as HTMLElement).closest("button")) return;
+          const origin = currentOrigin(e.currentTarget);
+          drag.current = { startX: e.clientX, startY: e.clientY, originX: origin.x, originY: origin.y };
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d) return;
+          setShelfPos(clampToViewport({ x: d.originX + e.clientX - d.startX, y: d.originY + e.clientY - d.startY }), { persist: false });
+        }}
+        onPointerUp={() => {
+          if (!drag.current) return;
+          drag.current = null;
+          // 動かし終えたときに、1 回だけ保存する
+          setShelfPos(useEditorStore.getState().shelfPos);
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+        onKeyDown={(e) => {
+          const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+          if (!delta || !movable() || e.target !== e.currentTarget) return;
+          e.preventDefault();
+          const step = e.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
+          const origin = currentOrigin(e.currentTarget);
+          setShelfPos(clampToViewport({ x: origin.x + delta[0] * step, y: origin.y + delta[1] * step }));
+        }}
+        className="flex cursor-grab touch-none select-none items-center justify-between gap-1 border-b border-gray-200 px-3 py-2.5 active:cursor-grabbing"
+      >
+        <h2 className="text-sm font-bold">
+          <span aria-hidden="true" className="mr-1.5 text-gray-400">
+            ⋮⋮
+          </span>
+          センサー
+        </h2>
+        <div className="flex items-center gap-1">
+          {shelfPos && (
+            <button
+              type="button"
+              aria-label="位置をもとに戻す"
+              title="位置をもとに戻す"
+              onClick={() => setShelfPos(null)}
+              className="h-6 rounded px-1.5 text-xs text-gray-600 hover:bg-gray-100"
+            >
+              ⟲ もとの位置
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="センサー棚を閉じる"
+            onClick={() => setShelfOpen(false)}
+            className="h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
+          >
+            ✕
+          </button>
+        </div>
       </div>
       <div className="flex min-h-0 flex-col gap-2 overflow-auto p-2.5">
         <SensorShelf dashboard={dashboard} />
