@@ -8,6 +8,8 @@
  */
 import { useState } from "react";
 
+import { InfoButton } from "./controls";
+
 import { useQuery } from "@tanstack/react-query";
 
 import { useSensors } from "../../hooks/queries";
@@ -71,6 +73,7 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const { data: sensors, isError } = useSensors();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | SensorKind>("all");
+  const [helpOpen, setHelpOpen] = useState(false);
   const actions = useWidgetActions(dashboard);
 
   const needle = query.trim().toLowerCase();
@@ -82,17 +85,23 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
 
   return (
     <>
-      <p className="rounded-md bg-blue-50 px-2.5 py-2 text-xs text-gray-600">
-        センサーをドラッグして、グラフや空きスペースに<b>ドロップ</b>。または <b>＋</b> を押すだけでも追加できます。
-      </p>
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        aria-label="センサーを検索"
-        placeholder="センサーを検索（例: 温度、ライン1）"
-        className="w-full rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
-      />
+      <div className="flex items-center gap-1.5">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="センサーを検索"
+          placeholder="🔍 検索"
+          title="センサーを検索（例: 温度、ライン1）"
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-sm"
+        />
+        <InfoButton label="センサー棚" open={helpOpen} onToggle={() => setHelpOpen((o) => !o)} />
+      </div>
+      {helpOpen && (
+        <p className="rounded-md bg-blue-50 px-2.5 py-2 text-xs text-gray-600">
+          センサーをドラッグして、グラフや空きスペースに<b>ドロップ</b>。または <b>＋</b> を押すだけでも追加できます。
+        </p>
+      )}
       <div role="group" aria-label="センサーの種類で絞り込む" className="flex flex-wrap gap-1.5">
         {KIND_FILTERS.map((f) => (
           <button
@@ -205,7 +214,7 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
       <i aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 break-words text-sm font-semibold leading-tight" title={sensor.name}>{sensor.name}</div>
-        <div className="text-[11px] text-gray-500">{SENSOR_KIND_LABEL[kind]}</div>
+        <div className="truncate text-[11px] text-gray-500">{SENSOR_KIND_LABEL[kind]}</div>
       </div>
       {kind !== "state" && <Sparkline values={series} />}
       <div className="whitespace-nowrap text-right text-sm font-bold">

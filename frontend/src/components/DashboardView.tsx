@@ -360,19 +360,25 @@ function LoadedDashboard({
               <button
                 type="button"
                 aria-pressed={shelfOpen}
+                aria-label="センサー"
+                title="センサー"
                 onClick={() => store().setShelfOpen(!shelfOpen)}
-                className={`rounded border px-3 py-1.5 text-sm ${shelfOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+                className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm ${shelfOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
               >
-                センサー
+                <span aria-hidden="true">◫</span>
+                <span className="hidden lg:inline">センサー</span>
               </button>
               <div className="relative">
                 <button
                   type="button"
                   aria-expanded={partsOpen}
+                aria-label="ウィジェット"
+                title="ウィジェット"
                   onClick={() => store().setPartsOpen(!partsOpen)}
-                  className={`rounded border px-3 py-1.5 text-sm ${partsOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+                  className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm ${partsOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
                 >
-                  ＋ ウィジェット
+                  <span aria-hidden="true">＋</span>
+                <span className="hidden lg:inline">ウィジェット</span>
                 </button>
                 {partsOpen && (
                   <div className={`absolute right-0 top-full z-40 mt-1 transition-opacity ${hiddenClass}`}>
@@ -383,25 +389,34 @@ function LoadedDashboard({
               <button
                 type="button"
                 aria-pressed={panelOpen}
+                aria-label="設定"
+                title="設定"
                 onClick={() => store().setPanelOpen(!panelOpen)}
-                className={`rounded border px-3 py-1.5 text-sm ${panelOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
+                className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm ${panelOpen ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-300 hover:bg-gray-50"}`}
               >
-                設定
+                <span aria-hidden="true">⚙</span>
+                <span className="hidden lg:inline">設定</span>
               </button>
               <button
                 type="button"
                 disabled={historySize === 0}
+                aria-label="元に戻す"
+                title="元に戻す"
                 onClick={() => void actions.undo()}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
               >
-                ↶ 元に戻す
+                <span aria-hidden="true">↶</span>
+                <span className="hidden lg:inline">元に戻す</span>
               </button>
               <button
                 type="button"
                 onClick={() => store().stopEditing()}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+                aria-label="編集を終わる"
+                title="編集を終わる"
+                className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
               >
-                ✓ 編集を終わる
+                <span aria-hidden="true">✓</span>
+                <span className="hidden sm:inline">編集を終わる</span>
               </button>
             </>
           ) : (

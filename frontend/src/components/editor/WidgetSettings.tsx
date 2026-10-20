@@ -51,9 +51,10 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
           <WidgetIcon type={widget.type} size={18} />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-[15px] font-bold">{widgetLabel(widget.type)}の設定</h3>
-          <p className="text-xs text-gray-500">変更はすぐ画面に反映されます</p>
-        </div>
+          <h3 className="truncate text-[15px] font-bold" title="変更はすぐ画面に反映されます">
+            {widgetLabel(widget.type)}の設定
+          </h3>
+                  </div>
         {resetButton}
         <button
           type="button"
@@ -134,7 +135,7 @@ function SingleSensorField({ widget, actions, suited }: SectionProps & { suited:
 }
 
 const RANGE_OPTIONS = [
-  { value: 0, label: "全体と同じ" },
+  { value: 0, label: "全体" },
   { value: 1, label: "1時間" },
   { value: 6, label: "6時間" },
   { value: 24, label: "24時間" },
@@ -190,7 +191,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
           onChange={(graphType) => void changeConfig(actions, widget, { graphType })}
         />
       </Section>
-      <Section title="期間">
+      <Section title="期間" note="「全体」は、画面上部の時間の操作と同じ期間にします">
         <Segmented
           label="期間"
           value={config.rangeHours ?? 0}

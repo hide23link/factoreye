@@ -9,13 +9,40 @@ import { useId, useState, type ReactNode } from "react";
 
 import { isImeComposing } from "../../lib/ime";
 
-/** 見出し付きの区切り */
+/**
+ * 補足説明の ⓘ ボタン。押すと説明を開き、もう一度押すと閉じる（普段は文字を出さず、画面を広く使う）。
+ * 説明の文は、ボタンの下に出す。open / onToggle で開閉を呼び出し側が持つ。
+ */
+export function InfoButton({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`${label}の説明`}
+      aria-expanded={open}
+      title="説明を見る"
+      onClick={onToggle}
+      className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px] font-bold leading-none ${
+        open ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 text-gray-500 hover:border-blue-600 hover:text-blue-600"
+      }`}
+    >
+      i
+    </button>
+  );
+}
+
+/** 見出し付きの区切り。note（補足）は ⓘ を押したときだけ出す */
 export function Section({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
+  const [noteOpen, setNoteOpen] = useState(false);
   return (
     <section className="flex flex-col gap-2 border-b border-gray-200 py-3 last:border-b-0">
-      <h4 className="text-xs font-bold tracking-wide text-gray-500">{title}</h4>
+      <div className="flex items-center gap-1.5">
+        <h4 className="min-w-0 truncate text-xs font-bold tracking-wide text-gray-500" title={title}>
+          {title}
+        </h4>
+        {note && <InfoButton label={title} open={noteOpen} onToggle={() => setNoteOpen((o) => !o)} />}
+      </div>
+      {note && noteOpen && <p className="rounded-md bg-blue-50 px-2 py-1.5 text-xs text-gray-600">{note}</p>}
       {children}
-      {note && <p className="text-xs text-gray-500">{note}</p>}
     </section>
   );
 }
@@ -33,7 +60,7 @@ export function Segmented<T extends string | number>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex flex-wrap overflow-hidden rounded-md border border-gray-300 bg-white">
+    <div role="radiogroup" aria-label={label} className="flex w-full overflow-hidden rounded-md border border-gray-300 bg-white">
       {options.map((option) => (
         <button
           key={String(option.value)}
@@ -41,7 +68,7 @@ export function Segmented<T extends string | number>({
           role="radio"
           aria-checked={option.value === value}
           onClick={() => onChange(option.value)}
-          className={`border-r border-gray-300 px-3 py-1 text-sm last:border-r-0 ${
+          className={`min-w-0 flex-1 whitespace-nowrap border-r border-gray-300 px-2 py-1 text-sm last:border-r-0 ${
             option.value === value ? "bg-blue-50 font-semibold text-blue-700" : "text-gray-700 hover:bg-gray-50"
           }`}
         >

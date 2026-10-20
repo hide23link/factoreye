@@ -163,12 +163,12 @@ describe("WidgetSettings: グラフ", () => {
     expect(screen.getByRole("switch", { name: "しきい値の線を表示" })).toBeDisabled();
   });
 
-  it("期間は「全体と同じ」に戻せる（rangeHours を消す）", async () => {
+  it("期間は「全体」に戻せる（rangeHours を消す）", async () => {
     const user = userEvent.setup();
     const w = widget("SensorGraph", { sensorId: "s1", config: { rangeHours: 6 } });
     renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
 
-    await user.click(screen.getByRole("radio", { name: "全体と同じ" }));
+    await user.click(screen.getByRole("radio", { name: "全体" }));
 
     await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
     expect(lastConfig()).not.toHaveProperty("rangeHours");
