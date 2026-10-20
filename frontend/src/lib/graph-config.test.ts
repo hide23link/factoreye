@@ -10,6 +10,8 @@ import {
   graphSensorIds,
   graphSensorPatch,
   nextGraphColor,
+  graphYDomain,
+  thresholdLines,
 } from "./graph-config";
 
 type W = Pick<Widget, "type" | "sensorId" | "config">;
@@ -75,5 +77,36 @@ describe("effectiveRange", () => {
       from: 3600_000,
       to: 7 * 3600_000,
     });
+  });
+});
+
+describe("thresholdLines / graphYDomain", () => {
+  const sensor = {
+    thresholdMaxWarning: 190,
+    thresholdMaxCritical: 195,
+    thresholdMinWarning: null,
+    thresholdMinCritical: null,
+  };
+
+  it("設定されているしきい値だけを線にする", () => {
+    expect(thresholdLines(sensor).map((l) => [l.value, l.severity])).toEqual([
+      [190, "warning"],
+      [195, "critical"],
+    ]);
+  });
+
+  it("縦軸が自動のとき、しきい値が範囲に入るよう広げる", () => {
+    const [min, max] = graphYDomain({}, [190, 195]);
+    expect(typeof min).toBe("function");
+    expect(typeof max).toBe("function");
+    // データが 180〜185 でも、上は 195 まで見える。下はデータのまま
+    expect((min as (v: number) => number)(180)).toBe(180);
+    expect((max as (v: number) => number)(185)).toBe(195);
+    expect((max as (v: number) => number)(200)).toBe(200);
+  });
+
+  it("手動で決めた値を優先する。しきい値が無ければ自動", () => {
+    expect(graphYDomain({ yAxisMin: 0, yAxisMax: 100 }, [190])).toEqual([0, 100]);
+    expect(graphYDomain({}, [])).toEqual(["auto", "auto"]);
   });
 });

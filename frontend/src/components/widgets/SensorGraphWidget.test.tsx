@@ -115,4 +115,47 @@ describe("SensorGraphWidget", () => {
       500,
     );
   });
+  it("ウィジェット固有の期間（rangeHours）があれば、ダッシュボード全体の範囲より優先する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+    // ダッシュボード全体は固定期間でも、このウィジェットは「直近 6 時間」（現在は 01:00 に固定）
+    useTimeRangeStore.setState({
+      range: { mode: "absolute", from: Date.parse("2023-12-01T00:00:00.000Z"), to: Date.parse("2023-12-01T00:30:00.000Z") },
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { rangeHours: 6 } })} />);
+
+    await screen.findByText(/ライン温度/);
+    expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalledWith(
+      "s1",
+      "2023-12-31T19:00:00.000Z",
+      "2024-01-01T01:00:00.000Z",
+      500,
+    );
+  });
+
+  it("センサーが2つ以上なら、複数の線を重ねて描く（センサーごとに取得する）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s2", name: "炉内圧" }]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+
+    renderWithQueryClient(
+      <SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], graphType: "area" } })} />,
+    );
+
+    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+    const requested = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((c) => c[0]);
+    expect(requested).toEqual(expect.arrayContaining(["s1", "s2"]));
+  });
+
+  it("しきい値の線を表示する設定でも、描画で壊れない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([{ ...sensor, thresholdMaxWarning: 30, thresholdMaxCritical: 40 }]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { showThresholds: true } })} />);
+
+    expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
+  });
 });

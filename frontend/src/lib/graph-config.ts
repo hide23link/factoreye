@@ -8,7 +8,7 @@
  *
  * 【誰が使うか】SensorGraphWidget、MultiSensorComparisonWidget、GraphSettings、widget-sensors。
  */
-import type { Widget, WidgetConfig } from "../types";
+import type { Sensor, Widget, WidgetConfig } from "../types";
 import { resolveRange, type ResolvedRange, type TimeRange } from "./timeRange";
 
 /** 色の選択肢（クリックで順に切り替える）。先頭の青は、センサーグラフの従来の既定色 */
@@ -68,4 +68,40 @@ export function effectiveRange(widget: Pick<Widget, "config">, dashboardRange: T
 
 export function effectiveBounds(widget: Pick<Widget, "config">, dashboardRange: TimeRange, now: number): ResolvedRange {
   return resolveRange(effectiveRange(widget, dashboardRange), now);
+}
+
+/** グラフに重ねるしきい値の線 */
+export interface ThresholdLine {
+  value: number;
+  severity: "warning" | "critical";
+  label: string;
+}
+
+/** センサーの軽故障・重故障のしきい値（設定されているものだけ）。上限・下限の両方を返す */
+export function thresholdLines(
+  sensor: Pick<Sensor, "thresholdMaxWarning" | "thresholdMaxCritical" | "thresholdMinWarning" | "thresholdMinCritical">,
+): ThresholdLine[] {
+  const candidates: Array<[number | null, ThresholdLine["severity"], string]> = [
+    [sensor.thresholdMaxWarning, "warning", "軽故障 上限"],
+    [sensor.thresholdMaxCritical, "critical", "重故障 上限"],
+    [sensor.thresholdMinWarning, "warning", "軽故障 下限"],
+    [sensor.thresholdMinCritical, "critical", "重故障 下限"],
+  ];
+  return candidates.flatMap(([value, severity, label]) => (value === null ? [] : [{ value, severity, label }]));
+}
+
+type AxisBound = number | "auto" | ((dataValue: number) => number);
+
+/**
+ * 縦軸の範囲。手動で決めた値を優先し、自動のときは、しきい値の線が見えるように範囲を広げる
+ * （線が範囲の外にあると、描かれずに「しきい値が出ない」ように見えるため）。
+ */
+export function graphYDomain(config: WidgetConfig, thresholdValues: number[]): [AxisBound, AxisBound] {
+  const low = Math.min(...thresholdValues);
+  const high = Math.max(...thresholdValues);
+  const hasThresholds = thresholdValues.length > 0;
+  return [
+    config.yAxisMin ?? (hasThresholds ? (dataMin: number) => Math.min(dataMin, low) : "auto"),
+    config.yAxisMax ?? (hasThresholds ? (dataMax: number) => Math.max(dataMax, high) : "auto"),
+  ];
 }
