@@ -72,8 +72,13 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return () => resetTimeRange();
   }, []);
 
-  // 別のダッシュボードへ移るとき・閉じるときは、編集の状態（履歴・選択）を捨てる
-  useEffect(() => () => useEditorStore.getState().reset(), [dashboardId]);
+  // 別のダッシュボードへ移るとき・閉じるときは、編集の状態（履歴・選択）を捨てる。
+  // 新しく作った直後は、そのまま編集モードで開く（開発時の StrictMode は、開く→捨てる→開く の順に動くため、
+  // 「編集で開く」の指定はここで消さず、開くたびに読む）
+  useEffect(() => {
+    if (useUiStore.getState().openInEditMode) useEditorStore.getState().startEditing();
+    return () => useEditorStore.getState().reset();
+  }, [dashboardId]);
 
   // 狭い画面（スマホ）では、ウィジェットの並べ替えとサイズ変更を止める（画面のスクロールと干渉するため）
   const [isNarrow, setNarrow] = useState(

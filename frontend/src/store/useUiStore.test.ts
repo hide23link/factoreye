@@ -26,10 +26,10 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().view).toBe("main");
   });
 
-  it("ウィジェット追加モーダルの開閉", () => {
-    useUiStore.getState().openAddWidgetModal();
-    expect(useUiStore.getState().isAddWidgetModalOpen).toBe(true);
-    useUiStore.getState().closeAddWidgetModal();
-    expect(useUiStore.getState().isAddWidgetModalOpen).toBe(false);
+  it("selectDashboardは、指定したときだけ編集モードで開く", () => {
+    useUiStore.getState().selectDashboard("dash-1", { edit: true });
+    expect(useUiStore.getState().openInEditMode).toBe(true);
+    useUiStore.getState().selectDashboard("dash-2");
+    expect(useUiStore.getState().openInEditMode).toBe(false);
   });
 });
