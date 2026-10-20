@@ -8,29 +8,9 @@
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import { useSensorReadings, useSensors } from "../../hooks/queries";
-import type { Sensor, Widget } from "../../types";
+import { classifySeverity, type Severity } from "../../lib/severity";
+import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
-
-// 値の状態。重故障・軽故障・正常
-type Severity = "critical" | "warning" | "normal";
-
-// センサー自身の軽故障/重故障しきい値（設定 > センサー管理で編集）に照らして色分けする。
-// アラーム側（backend app/alarm_engine.py）と同じ優先順位（重故障を先に判定）
-function classifySeverity(value: number, sensor: Sensor): Severity {
-  if (sensor.thresholdMaxCritical !== null && value > sensor.thresholdMaxCritical) {
-    return "critical";
-  }
-  if (sensor.thresholdMinCritical !== null && value < sensor.thresholdMinCritical) {
-    return "critical";
-  }
-  if (sensor.thresholdMaxWarning !== null && value > sensor.thresholdMaxWarning) {
-    return "warning";
-  }
-  if (sensor.thresholdMinWarning !== null && value < sensor.thresholdMinWarning) {
-    return "warning";
-  }
-  return "normal";
-}
 
 // 状態ごとの見た目（背景、文字、線の色、説明の文言）
 const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: string; label: string }> = {

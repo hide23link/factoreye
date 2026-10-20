@@ -10,6 +10,7 @@
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
+import { pendingSaves } from "../lib/pending-saves";
 import {
   fetchAlarms,
   fetchDashboard,
@@ -47,7 +48,8 @@ export const useDashboard = (id: string | null) =>
     queryKey: ["dashboard", id],
     queryFn: () => fetchDashboard(id as string),
     enabled: id !== null,
-    refetchInterval: POLL_INTERVAL_MS,
+    // 編集の保存が進行中は取り直さない（保存前の状態に一瞬戻って、ちらつくため）
+    refetchInterval: () => (pendingSaves.isBusy() ? false : POLL_INTERVAL_MS),
   });
 
 /** アラームの一覧（5 秒ごとに取り直す）。status で絞り込める。limit で新しい順に件数を絞れる。 */

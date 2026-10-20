@@ -29,6 +29,7 @@ import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { formatChartTime } from "../../lib/time";
+import { effectiveRange, graphColor, graphSensorIds, graphYDomain, thresholdLines } from "../../lib/graph-config";
 import {
   absoluteRange,
   maxRangeForBuild,
@@ -39,15 +40,31 @@ import {
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
+import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
+import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
-/** グラフの区間数（表示の横幅に合わせた本数の目安。API の上限は 1000） */
-export const GRAPH_BUCKETS = 500;
+export { GRAPH_BUCKETS };
 
-/** センサーのグラフ。設定（色・グラフの種類・Y 軸の範囲）は widget.config に入っている。 */
+/**
+ * センサーのグラフ。設定（色・グラフの種類・Y 軸の範囲）は widget.config に入っている。
+ * センサーが2つ以上のときは、複数の線を重ねる描画（MultiSensorComparisonWidget）に任せる。
+ * hooks を条件で呼び分けないよう、1つのセンサー用の本体は別の関数にしている。
+ */
 export function SensorGraphWidget({ widget }: { widget: Widget }) {
+  return graphSensorIds(widget).length > 1 ? (
+    <MultiSensorComparisonWidget widget={widget} />
+  ) : (
+    <SingleSensorGraph widget={widget} />
+  );
+}
+
+function SingleSensorGraph({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const range = useTimeRangeStore((s) => s.range);
+  const dashboardRange = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
+  // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
+  const range = effectiveRange(widget, dashboardRange);
+  const hasOwnRange = range !== dashboardRange;
   // 直近モードでは、横軸（表示範囲）を時間経過で動かす。動かすのは 30 秒ごと（LIVE_CHART_INTERVAL_MS）
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で秒が変わるたびに取得のキーが変わり、
   // 取得 → 再描画 → 新しいキー → 取得、の連鎖で毎秒取り直すため、現在時刻は useNow の値を使う
@@ -61,12 +78,12 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
   );
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
-    if (next) setRange(next);
+    if (next && !hasOwnRange) setRange(next);
   });
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
-  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) =>
-    setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild())),
-  );
+  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
+    if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
+  });
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
@@ -90,12 +107,13 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
     value: b.avg,
   }));
 
-  const color = widget.config.color ?? "#2563eb";
+  const color = graphColor(widget, 0);
   const graphType = widget.config.graphType ?? "line";
-  const yDomain: [number | "auto", number | "auto"] = [
-    widget.config.yAxisMin ?? "auto",
-    widget.config.yAxisMax ?? "auto",
-  ];
+  const lines = widget.config.showThresholds && sensor ? thresholdLines(sensor) : [];
+  const yDomain = graphYDomain(
+    widget.config,
+    lines.map((l) => l.value),
+  );
 
   // 横軸の共通の設定（時刻の数値を、表示用の文字列に変換する）
   const xAxisProps = {
@@ -120,27 +138,30 @@ export function SensorGraphWidget({ widget }: { widget: Widget }) {
             <BarChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Bar dataKey="value" fill={color} isAnimationActive={false} />
+              {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </BarChart>
           ) : graphType === "area" ? (
             <AreaChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Area dataKey="value" stroke={color} fill={color} fillOpacity={0.2} isAnimationActive={false} />
+              {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </AreaChart>
           ) : (
             <LineChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Line type="monotone" dataKey="value" stroke={color} dot={false} isAnimationActive={false} />
+              {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </LineChart>
           )}

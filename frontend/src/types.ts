@@ -126,7 +126,9 @@ export type WidgetType =
   | "ProductionStatus"
   | "AlarmAlert"
   | "MultiSensorComparison"
-  | "StatValue";
+  | "StatValue"
+  // 生産管理（1日の目標に対する進み具合）。稼働ステータス（ProductionStatus）とは別の種類
+  | "ProductionPlan";
 
 /** ウィジェットの表示設定（色・Y 軸の範囲など）。 */
 export interface WidgetConfig {
@@ -144,6 +146,20 @@ export interface WidgetConfig {
   dailyTarget?: number;
   // StatValueWidget用: 表示する小数桁数（未指定なら1桁）
   decimals?: number;
+  // グラフ用: センサーごとの線の色（sensorIds と同じ順）。未指定なら既定の色
+  colors?: string[];
+  // グラフ用: センサーが1つのとき、軽故障・重故障のしきい値の線を重ねる
+  showThresholds?: boolean;
+  // グラフ用: このウィジェットだけの表示期間（時間）。未指定ならダッシュボード全体の期間に従う
+  rangeHours?: number;
+  // ProductionPlanWidget用: 勤務の開始・終了（時、0〜24）と、12:00 から始まる昼休みの長さ（分）
+  workStartHour?: number;
+  workEndHour?: number;
+  breakMinutes?: number;
+  // ProductionPlanWidget用: 表示項目の ON/OFF（未指定は表示する）
+  showHourly?: boolean;
+  showForecast?: boolean;
+  showUptime?: boolean;
 }
 
 /** ダッシュボードに置くウィジェット1つ分（種類・位置・サイズ・設定）。 */

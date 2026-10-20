@@ -1,38 +1,48 @@
 /**
  * ダッシュボードの表示画面。
- * ウィジェットを、ドラッグ・リサイズで並べ替えられる格子（react-grid-layout）に置く。
- * 動かし終えたら、位置とサイズの変化だけをサーバーへ保存する。
- * 上部には、名前と説明の編集（設定）、ウィジェットの追加、ダッシュボードの削除を置く。
+ * ウィジェットを 12 列の格子（react-grid-layout）に置く。
+ *
+ * 「編集する」を押すと編集モードになる:
+ * - 左: センサー／ウィジェットの棚（ドラッグ、または「＋」で追加）
+ * - 中央: 格子（見出しをつかんで移動、右下で大きさを変える）
+ * - 右: 設定パネル（ウィジェットを選ぶとその設定、未選択ならダッシュボードの名前・説明）
+ * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除（Backspace は誤操作しやすいので使わない）。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
  * 【引数（props）】dashboardId = 表示するダッシュボードの ID（App.tsx が渡す）。
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
-import type { Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { useDashboard } from "../hooks/queries";
-import { deleteDashboard, updateDashboard, updateWidget } from "../lib/api";
-import type { Widget } from "../types";
+import { useWidgetActions } from "../hooks/useWidgetActions";
+import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
+import { useEditorStore } from "../store/useEditorStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
+import type { DashboardDetail, Widget } from "../types";
+import { DropSurface } from "./editor/DropSurface";
+import { EditorShelf } from "./editor/EditorShelf";
+import { EditorToast } from "./editor/EditorToast";
+import { SettingsPanel } from "./editor/SettingsPanel";
 import { ErrorNotice } from "./ErrorNotice";
 import { TimeRangeControls } from "./TimeRangeControls";
 import { WidgetCard } from "./WidgetCard";
-import { WidgetFormModal } from "./WidgetFormModal";
 
-// 幅に応じて列数を変える（画面が狭いほど列が少なくなる）。lg は 12 列で、WidgetFormModal の列数と一致させる
+// 幅に応じて列数を変える（画面が狭いほど列が少なくなる）。lg は 12 列
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 // react-grid-layout は0始まりのx/y、backendは1始まりのgridColumn/gridRow
 const GRID_COLS = { lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 };
-const ROW_HEIGHT = 36;
+const VIEW_BREAKPOINTS = { lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 };
+// 編集中は、棚と設定パネルで格子が狭くなる。列数が変わると置いた位置が崩れるため、常に 12 列で編集する
+const EDIT_COLS = { lg: 12 };
+const EDIT_BREAKPOINTS = { lg: 0 };
 
 /** ウィジェットを、格子のレイアウト項目に変換する（列・行は 0 始まりに直す）。最小サイズは 1 列・2 行。 */
-function toLayoutItem(widget: Widget): Layout[number] {
+function toLayoutItem(widget: Widget) {
   return {
     i: widget.id,
     x: widget.gridColumn - 1,
@@ -44,16 +54,16 @@ function toLayoutItem(widget: Widget): Layout[number] {
   };
 }
 
+/** 入力欄の中では、Delete や Ctrl+Z をウィジェットの操作にしない */
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
+}
+
 /** ダッシュボードの表示本体。dashboardId のダッシュボードを、取得して描く。 */
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading, isError, refetch } = useDashboard(dashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
-  const [isModalOpen, setModalOpen] = useState(false);
-  const [isSettingsOpen, setSettingsOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const queryClient = useQueryClient();
+  const editing = useEditorStore((s) => s.editing);
 
   // 表示時間範囲: 開いたとき URL（あれば）、無ければ最後に見ていた範囲（localStorage）から読み、
   // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
@@ -61,6 +71,14 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     initTimeRangeFromUrl();
     return () => resetTimeRange();
   }, []);
+
+  // 別のダッシュボードへ移るとき・閉じるときは、編集の状態（履歴・選択）を捨てる。
+  // 新しく作った直後は、そのまま編集モードで開く（開発時の StrictMode は、開く→捨てる→開く の順に動くため、
+  // 「編集で開く」の指定はここで消さず、開くたびに読む）
+  useEffect(() => {
+    if (useUiStore.getState().openInEditMode) useEditorStore.getState().startEditing();
+    return () => useEditorStore.getState().reset();
+  }, [dashboardId]);
 
   // 狭い画面（スマホ）では、ウィジェットの並べ替えとサイズ変更を止める（画面のスクロールと干渉するため）
   const [isNarrow, setNarrow] = useState(
@@ -73,58 +91,6 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
   }, []);
-
-  // 削除: 一覧を取り直し、表示中の選択を外して一覧へ戻る
-  const deleteDashboardMutation = useMutation({
-    mutationFn: () => deleteDashboard(dashboardId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
-      selectDashboard(null);
-    },
-  });
-
-  // 名前と説明の保存。成功したら、設定の小窓を閉じる
-  const updateDashboardMutation = useMutation({
-    mutationFn: () => updateDashboard(dashboardId, { name: editName, description: editDescription }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
-      setSettingsError(null);
-      setSettingsOpen(false);
-    },
-    onError: (e: Error) => setSettingsError(e.message),
-  });
-
-  // 設定の小窓を開く。今の名前と説明を入力欄に入れてから開く
-  const openSettings = () => {
-    if (!dashboard) return;
-    setEditName(dashboard.name);
-    setEditDescription(dashboard.description ?? "");
-    setSettingsError(null);
-    setSettingsOpen(true);
-  };
-
-  // 格子を動かした結果を保存する。変わったウィジェットだけを、並行して更新する（無駄な通信を減らす）
-  const persistLayoutMutation = useMutation({
-    mutationFn: async (layout: Layout) => {
-      if (!dashboard) return;
-      const updates = layout.flatMap((item) => {
-        const widget = dashboard.widgets.find((w) => w.id === item.i);
-        if (!widget) return [];
-        const next = { gridColumn: item.x + 1, gridRow: item.y + 1, gridWidth: item.w, gridHeight: item.h };
-        const changed =
-          widget.gridColumn !== next.gridColumn ||
-          widget.gridRow !== next.gridRow ||
-          widget.gridWidth !== next.gridWidth ||
-          widget.gridHeight !== next.gridHeight;
-        return changed ? [updateWidget(widget.id, next)] : [];
-      });
-      await Promise.all(updates);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard", dashboardId] });
-    },
-  });
 
   if (!dashboard && isError) {
     return (
@@ -145,8 +111,84 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
   }
 
-  // 同じレイアウトを、全ての幅（lg〜xxs）に使う
+  return <LoadedDashboard dashboard={dashboard} isNarrow={isNarrow} editing={editing} />;
+}
+
+function LoadedDashboard({
+  dashboard,
+  isNarrow,
+  editing,
+}: {
+  dashboard: DashboardDetail;
+  isNarrow: boolean;
+  editing: boolean;
+}) {
+  const selectDashboard = useUiStore((s) => s.selectDashboard);
+  const historySize = useEditorStore((s) => s.history.length);
+  const actions = useWidgetActions(dashboard);
+
+  // キーボード: Ctrl/⌘+Z で元に戻す、Delete で選択中を削除、Esc で選択を外す
+  useEffect(() => {
+    if (!editing) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      const store = useEditorStore.getState();
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        void actions.undo();
+      } else if (e.key === "Delete" && store.selectedWidgetId) {
+        const widget = dashboard.widgets.find((w) => w.id === store.selectedWidgetId);
+        if (widget) {
+          e.preventDefault();
+          void actions.remove(widget);
+        }
+      } else if (e.key === "Escape") {
+        store.select(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
+
   const layout = dashboard.widgets.map(toLayoutItem);
+  // 編集中は、棚と設定パネルの分だけ格子が狭いので、常に 12 列の 1 つのレイアウトで扱う
+  const gridProps = editing
+    ? { layouts: { lg: layout }, breakpoints: EDIT_BREAKPOINTS, cols: EDIT_COLS }
+    : {
+        layouts: { lg: layout, md: layout, sm: layout, xs: layout, xxs: layout },
+        breakpoints: VIEW_BREAKPOINTS,
+        cols: GRID_COLS,
+      };
+
+  const grid = isNarrow ? (
+    // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
+    <div className="flex flex-col gap-3">
+      {dashboard.widgets.map((widget) => (
+        <div key={widget.id} className="h-80">
+          <WidgetCard widget={widget} dashboard={dashboard} />
+        </div>
+      ))}
+    </div>
+  ) : (
+    <ResponsiveGridLayout
+      className="layout"
+      {...gridProps}
+      rowHeight={GRID_ROW_HEIGHT}
+      margin={[GRID_MARGIN, GRID_MARGIN]}
+      isDraggable={editing}
+      isResizable={editing}
+      draggableHandle=".widget-drag-handle"
+      draggableCancel=".widget-no-drag"
+      onDragStop={(l) => void actions.saveLayout(l)}
+      onResizeStop={(l) => void actions.saveLayout(l)}
+    >
+      {dashboard.widgets.map((widget) => (
+        <div key={widget.id}>
+          <WidgetCard widget={widget} dashboard={dashboard} />
+        </div>
+      ))}
+    </ResponsiveGridLayout>
+  );
 
   return (
     <div className="px-2 py-4 sm:p-4">
@@ -161,126 +203,69 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           </button>
           <div>
             <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
-            {dashboard.description && (
-              <p className="text-xs text-gray-400">{dashboard.description}</p>
-            )}
+            {dashboard.description && <p className="text-xs text-gray-400">{dashboard.description}</p>}
           </div>
-          <button
-            type="button"
-            onClick={openSettings}
-            className="text-xs text-gray-400 hover:text-blue-600"
-            aria-label="ダッシュボード設定"
-          >
-            ⚙ 設定
-          </button>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
-          >
-            + ウィジェット追加
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm("このダッシュボードを削除しますか？")) {
-                deleteDashboardMutation.mutate();
-              }
-            }}
-            className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-          >
-            削除
-          </button>
+          {editing ? (
+            <>
+              <button
+                type="button"
+                disabled={historySize === 0}
+                onClick={() => void actions.undo()}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
+              >
+                ↶ 元に戻す
+              </button>
+              <button
+                type="button"
+                onClick={() => useEditorStore.getState().stopEditing()}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                ✓ 編集を終わる
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => useEditorStore.getState().startEditing()}
+              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              ✎ 編集する
+            </button>
+          )}
         </div>
       </div>
 
       <TimeRangeControls />
 
-      {dashboard.widgets.length === 0 ? (
+      {editing ? (
+        <div className="flex flex-col items-start gap-3 lg:flex-row">
+          <aside
+            aria-label="センサーとウィジェットの棚"
+            className="flex max-h-[calc(100vh-24px)] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-2 lg:w-[272px]"
+          >
+            <EditorShelf dashboard={dashboard} />
+          </aside>
+          <div className="min-w-0 flex-1 self-stretch">
+            <DropSurface dashboard={dashboard}>{grid}</DropSurface>
+          </div>
+          <aside
+            aria-label="設定パネル"
+            className="flex max-h-[calc(100vh-24px)] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-2 lg:w-[316px]"
+          >
+            <SettingsPanel dashboard={dashboard} />
+          </aside>
+        </div>
+      ) : dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-400">
-          まだウィジェットがありません。「+ ウィジェット追加」から追加してください。
+          まだウィジェットがありません。「編集する」を押して、センサーを置いてみましょう。
         </p>
       ) : (
-        isNarrow ? (
-          // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
-          <div className="flex flex-col gap-3">
-            {dashboard.widgets.map((widget) => (
-              <div key={widget.id} className="h-80">
-                <WidgetCard widget={widget} dashboard={dashboard} />
-              </div>
-            ))}
-          </div>
-        ) : (
-        <ResponsiveGridLayout
-          className="layout"
-          layouts={{ lg: layout, md: layout, sm: layout, xs: layout, xxs: layout }}
-          breakpoints={{ lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 }}
-          cols={GRID_COLS}
-          rowHeight={ROW_HEIGHT}
-          margin={[12, 12]}
-          isDraggable={!isNarrow}
-          isResizable={!isNarrow}
-          draggableHandle=".widget-drag-handle"
-          onDragStop={(l) => persistLayoutMutation.mutate(l)}
-          onResizeStop={(l) => persistLayoutMutation.mutate(l)}
-        >
-          {dashboard.widgets.map((widget) => (
-            <div key={widget.id}>
-              <WidgetCard widget={widget} dashboard={dashboard} />
-            </div>
-          ))}
-        </ResponsiveGridLayout>
-        )
+        grid
       )}
 
-      {isModalOpen && (
-        <WidgetFormModal dashboard={dashboard} onClose={() => setModalOpen(false)} />
-      )}
-
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">
-            <h2 className="mb-3 text-lg font-bold">ダッシュボード設定</h2>
-            <label className="mb-2 block text-sm">
-              名前
-              <input
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
-              />
-            </label>
-            <label className="mb-3 block text-sm">
-              説明
-              <textarea
-                value={editDescription}
-                onChange={(event) => setEditDescription(event.target.value)}
-                rows={2}
-                className="mt-1 w-full rounded border border-gray-300 px-2 py-1"
-              />
-            </label>
-            {settingsError && <p className="mb-3 text-xs text-red-600">{settingsError}</p>}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                disabled={!editName.trim() || updateDashboardMutation.isPending}
-                onClick={() => updateDashboardMutation.mutate()}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                保存
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <EditorToast />
     </div>
   );
 }

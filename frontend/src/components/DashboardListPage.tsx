@@ -1,61 +1,70 @@
 /**
- * ダッシュボードの一覧画面。名前を入れて新しく作れる。
+ * ダッシュボードの一覧画面。ミニプレビューつきのカードで一覧し、「新しいダッシュボード」から型を選んで作る。
  * 1つもまだ無いときは、セットアップガイドへの案内を出す。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んでいないときに出す。引数（props）はない。
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useDashboards } from "../hooks/queries";
-import { createDashboard } from "../lib/api";
+import { fetchDashboard } from "../lib/api";
 import { useUiStore } from "../store/useUiStore";
+import type { Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
+import { NewDashboardModal } from "./NewDashboardModal";
 
-/** ダッシュボードの一覧（作成フォームと、一覧のボタン）。 */
+// プレビューの 1 行の高さ（px）。実際の格子の縮尺ではなく、配置の雰囲気が分かればよい
+const THUMB_ROW_PX = 6;
+const THUMB_COLUMNS = 12;
+
+/** 種類ごとのプレビューの色（生産管理は緑、アラームは赤、そのほかは青） */
+function thumbTone(type: Widget["type"]): string {
+  if (type === "ProductionPlan") return "border-green-600 bg-green-100";
+  if (type === "AlarmAlert") return "border-red-600 bg-red-100";
+  return "border-blue-600 bg-blue-100";
+}
+
+/** ウィジェットの配置を、小さな四角で見せる。ウィジェットを取得できていないときは空のまま */
+function DashboardThumb({ widgets }: { widgets: Widget[] | undefined }) {
+  return (
+    <div aria-hidden="true" className="relative h-[130px] overflow-hidden border-b border-gray-200 bg-gray-50">
+      {widgets?.map((w) => (
+        <i
+          key={w.id}
+          className={`absolute rounded-sm border ${thumbTone(w.type)}`}
+          style={{
+            left: `${((w.gridColumn - 1) / THUMB_COLUMNS) * 100 + 0.6}%`,
+            top: (w.gridRow - 1) * THUMB_ROW_PX + 4,
+            width: `${(w.gridWidth / THUMB_COLUMNS) * 100 - 1.2}%`,
+            height: w.gridHeight * THUMB_ROW_PX - 2,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** ダッシュボードの一覧（カードと、新規作成）。 */
 export function DashboardListPage() {
   const { data: dashboards, isLoading, isError, refetch } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const setView = useUiStore((s) => s.setView);
-  const queryClient = useQueryClient();
-  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
 
-  // 作成後、そのダッシュボードを直接開く
-  const createMutation = useMutation({
-    mutationFn: () => createDashboard({ name: newName }),
-    onSuccess: (dashboard) => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
-      setNewName("");
-      selectDashboard(dashboard.id);
-    },
+  // プレビュー用に、各ダッシュボードのウィジェットを取る（一覧の API には含まれないため）。
+  // 5 秒ごとの取り直しはしない（一覧を開いている間に配置が変わることは少ない）
+  const details = useQueries({
+    queries: (dashboards ?? []).map((d) => ({
+      queryKey: ["dashboard", d.id],
+      queryFn: () => fetchDashboard(d.id),
+      staleTime: 30_000,
+    })),
   });
 
   return (
-    <div className="mx-auto max-w-3xl p-4">
+    <div className="mx-auto max-w-5xl p-4">
       <h1 className="mb-4 text-2xl font-bold text-gray-900">ダッシュボード一覧</h1>
-
-      <form
-        className="mb-6 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (newName.trim()) createMutation.mutate();
-        }}
-      >
-        <input
-          type="text"
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          placeholder="新しいダッシュボード名"
-          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={createMutation.isPending || !newName.trim()}
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          作成
-        </button>
-      </form>
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 
@@ -78,21 +87,42 @@ export function DashboardListPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {dashboards?.map((dashboard) => (
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+        {dashboards?.map((dashboard, index) => {
+          const widgets = details[index]?.data?.widgets;
+          return (
+            <button
+              key={dashboard.id}
+              type="button"
+              onClick={() => selectDashboard(dashboard.id)}
+              className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-sm hover:border-blue-400 hover:shadow"
+            >
+              <DashboardThumb widgets={widgets} />
+              <span className="px-3 py-2.5">
+                <span className="block font-semibold text-gray-900">{dashboard.name}</span>
+                <span className="text-xs text-gray-500">
+                  {dashboard.description ?? ""}
+                  {widgets !== undefined && `${dashboard.description ? "　・　" : ""}ウィジェット ${widgets.length}`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+        {!isLoading && (
           <button
-            key={dashboard.id}
             type="button"
-            onClick={() => selectDashboard(dashboard.id)}
-            className="rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm hover:border-blue-300 hover:shadow"
+            onClick={() => setCreating(true)}
+            className="flex min-h-[200px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 font-semibold text-gray-500 hover:border-blue-400 hover:text-blue-600"
           >
-            <p className="font-semibold text-gray-900">{dashboard.name}</p>
-            {dashboard.description && (
-              <p className="mt-1 text-sm text-gray-500">{dashboard.description}</p>
-            )}
+            <span aria-hidden="true" className="text-3xl leading-none">
+              ＋
+            </span>
+            新しいダッシュボード
           </button>
-        ))}
+        )}
       </div>
+
+      {creating && <NewDashboardModal onClose={() => setCreating(false)} />}
     </div>
   );
 }

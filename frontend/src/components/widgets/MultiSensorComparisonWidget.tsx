@@ -11,6 +11,10 @@
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -37,15 +41,21 @@ import {
 } from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
-import { GRAPH_BUCKETS } from "./SensorGraphWidget";
+import { effectiveRange, graphColor, graphSensorIds, graphYDomain, thresholdLines } from "../../lib/graph-config";
+import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
 
-// センサーごとの線の色（順番に使う。足りなくなったら最初から繰り返す）
-const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
-/** 複数センサーの比較グラフ。比較するセンサーは widget.config.sensorIds で決まる。 */
+/**
+ * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
+ * センサーグラフ（SensorGraph）でセンサーを2つ以上にしたときも、これで描く。
+ * 線・面・棒の種類と、線の色（config.colors）、ウィジェット固有の期間も反映する。
+ */
 export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const sensorIds = widget.config.sensorIds ?? [];
-  const range = useTimeRangeStore((s) => s.range);
+  const sensorIds = graphSensorIds(widget);
+  const dashboardRange = useTimeRangeStore((s) => s.range);
+  // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
+  const range = effectiveRange(widget, dashboardRange);
+  const hasOwnRange = range !== dashboardRange;
   const setRange = useTimeRangeStore((s) => s.setRange);
   // 直近モードでは、横軸（表示範囲）を 30 秒ごと（LIVE_CHART_INTERVAL_MS）に動かす
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
@@ -54,12 +64,12 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const live = range.mode === "relative";
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
-    if (next) setRange(next);
+    if (next && !hasOwnRange) setRange(next);
   });
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
-  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) =>
-    setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild())),
-  );
+  const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
+    if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
+  });
 
   // 範囲・区間数は、ウィジェットの取得と同じ queryKey の形にする（グラフ用の取得を共有する）
   const results = useQueries({
@@ -104,45 +114,91 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     }
   });
   const chartData = Array.from(seriesByTime.values()).sort((a, b) => a.time - b.time);
-  const yDomain: [number | "auto", number | "auto"] = [
-    widget.config.yAxisMin ?? "auto",
-    widget.config.yAxisMax ?? "auto",
+  // しきい値の線は、センサーが1つのときだけ重ねる（複数だと、どのセンサーの線か分からなくなるため）
+  const onlySensor = sensorIds.length === 1 ? sensors?.find((s) => s.id === sensorIds[0]) : undefined;
+  const lines = widget.config.showThresholds && onlySensor ? thresholdLines(onlySensor) : [];
+  const yDomain = graphYDomain(
+    widget.config,
+    lines.map((l) => l.value),
+  );
+  const graphType = widget.config.graphType ?? "line";
+
+  // 3種類のグラフで共通の部品（軸・目盛り・凡例・ドラッグ選択・しきい値の線）
+  const parts = [
+    <CartesianGrid key="grid" strokeDasharray="3 3" />,
+    <XAxis
+      key="x"
+      dataKey="time"
+      type="number"
+      domain={[bounds.from, bounds.to]}
+      tickFormatter={formatTime}
+      tick={{ fontSize: 10 }}
+    />,
+    <YAxis key="y" domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />,
+    <Tooltip key="tip" labelFormatter={(label: ReactNode) => formatTime(Number(label))} />,
+    <Legend key="legend" wrapperStyle={{ fontSize: 10 }} />,
+    ...renderThresholdLines(lines),
+    drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
   ];
+  const nameOf = (sensorId: string) => sensors?.find((s) => s.id === sensorId)?.name ?? sensorId;
+  // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
+  // 線は connectNulls で自分の点だけを繋ぐ。5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
+  const series = sensorIds.map((sensorId, i) => {
+    const color = graphColor(widget, i);
+    if (graphType === "bar") {
+      return <Bar key={sensorId} dataKey={sensorId} name={nameOf(sensorId)} fill={color} isAnimationActive={false} />;
+    }
+    if (graphType === "area") {
+      return (
+        <Area
+          key={sensorId}
+          dataKey={sensorId}
+          name={nameOf(sensorId)}
+          stroke={color}
+          fill={color}
+          fillOpacity={0.2}
+          isAnimationActive={false}
+          connectNulls
+        />
+      );
+    }
+    return (
+      <Line
+        key={sensorId}
+        type="monotone"
+        dataKey={sensorId}
+        name={nameOf(sensorId)}
+        stroke={color}
+        dot={false}
+        isAnimationActive={false}
+        connectNulls
+      />
+    );
+  });
 
   return (
     <div className="flex h-full flex-col">
-      <p className="mb-1 text-sm font-medium text-gray-700">複数センサー比較</p>
+      <p className="mb-1 text-sm font-medium text-gray-700">
+        {widget.type === "MultiSensorComparison" || sensorIds.length > 1 ? "複数センサー比較" : nameOf(sensorIds[0])}
+      </p>
       <div ref={chartRef} className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} {...drag.handlers}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={[bounds.from, bounds.to]}
-              tickFormatter={formatTime}
-              tick={{ fontSize: 10 }}
-            />
-            <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
-            <Tooltip labelFormatter={(label: ReactNode) => formatTime(Number(label))} />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
-            {sensorIds.map((sensorId, i) => (
-              <Line
-                key={sensorId}
-                type="monotone"
-                dataKey={sensorId}
-                name={sensors?.find((s) => s.id === sensorId)?.name ?? sensorId}
-                stroke={PALETTE[i % PALETTE.length]}
-                dot={false}
-                // 5 秒ごとの更新のたびに線が描き直されて見えないよう、アニメーションを止める
-                isAnimationActive={false}
-                // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
-                // connectNulls が無いと線が途切れてしまう。常に true にして、自分の点だけを繋ぐ
-                connectNulls
-              />
-            ))}
-            {drag.selection && <ReferenceArea x1={drag.selection.x1} x2={drag.selection.x2} />}
-          </LineChart>
+          {graphType === "bar" ? (
+            <BarChart data={chartData} {...drag.handlers}>
+              {parts}
+              {series}
+            </BarChart>
+          ) : graphType === "area" ? (
+            <AreaChart data={chartData} {...drag.handlers}>
+              {parts}
+              {series}
+            </AreaChart>
+          ) : (
+            <LineChart data={chartData} {...drag.handlers}>
+              {parts}
+              {series}
+            </LineChart>
+          )}
         </ResponsiveContainer>
       </div>
     </div>
