@@ -1,22 +1,22 @@
 /**
- * ダッシュボードの一覧画面。ミニプレビューつきのカードで一覧し、「新しいダッシュボード」から型を選んで作る。
+ * ダッシュボードの一覧画面。ミニプレビューつきのカードで一覧し、「新しいダッシュボード」で空のダッシュボードを作って、そのまま編集モードで開く。
  * 1つもまだ無いときは、セットアップガイドへの案内を出す。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んでいないときに出す。引数（props）はない。
  */
-import { useQueries } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 
 import { useDashboards } from "../hooks/queries";
-import { fetchDashboard } from "../lib/api";
+import { createDashboard, fetchDashboard } from "../lib/api";
+import { describeActionError } from "../lib/errors";
 import { useUiStore } from "../store/useUiStore";
 import type { Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
-import { NewDashboardModal } from "./NewDashboardModal";
 
 // プレビューの 1 行の高さ（px）。実際の格子の縮尺ではなく、配置の雰囲気が分かればよい
 const THUMB_ROW_PX = 6;
 const THUMB_COLUMNS = 12;
+const NEW_DASHBOARD_NAME = "新しいダッシュボード";
 
 /** 種類ごとのプレビューの色（生産管理は緑、アラームは赤、そのほかは青） */
 function thumbTone(type: Widget["type"]): string {
@@ -50,7 +50,16 @@ export function DashboardListPage() {
   const { data: dashboards, isLoading, isError, refetch } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const setView = useUiStore((s) => s.setView);
-  const [creating, setCreating] = useState(false);
+  const queryClient = useQueryClient();
+
+  // 型の選択は設けず、名前だけ仮に付けた空のダッシュボードを作って、編集モードで開く（名前は設定パネルで変えられる）
+  const createMutation = useMutation({
+    mutationFn: () => createDashboard({ name: NEW_DASHBOARD_NAME }),
+    onSuccess: (dashboard) => {
+      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      selectDashboard(dashboard.id, { edit: true });
+    },
+  });
 
   // プレビュー用に、各ダッシュボードのウィジェットを取る（一覧の API には含まれないため）。
   // 5 秒ごとの取り直しはしない（一覧を開いている間に配置が変わることは少ない）
@@ -111,8 +120,9 @@ export function DashboardListPage() {
         {!isLoading && (
           <button
             type="button"
-            onClick={() => setCreating(true)}
-            className="flex min-h-[200px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 font-semibold text-gray-500 hover:border-blue-400 hover:text-blue-600"
+            disabled={createMutation.isPending}
+            onClick={() => createMutation.mutate()}
+            className="flex min-h-[200px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 font-semibold text-gray-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
           >
             <span aria-hidden="true" className="text-3xl leading-none">
               ＋
@@ -122,7 +132,11 @@ export function DashboardListPage() {
         )}
       </div>
 
-      {creating && <NewDashboardModal onClose={() => setCreating(false)} />}
+      {createMutation.isError && (
+        <p role="alert" className="mt-3 text-sm text-red-600">
+          {describeActionError(createMutation.error, "ダッシュボードの作成")}
+        </p>
+      )}
     </div>
   );
 }

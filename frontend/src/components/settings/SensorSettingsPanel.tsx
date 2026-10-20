@@ -13,6 +13,7 @@ import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
 import type { Sensor } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
+import { UnitSelect } from "../UnitSelect";
 
 // 入力欄の値。数値、または空欄（""）。空欄は「しきい値なし」を表す
 type NumOrBlank = number | "";
@@ -38,9 +39,6 @@ function thresholdInput(
     />
   );
 }
-
-// よく使う単位のプリセット。<datalist>なので一覧から選ぶことも自由入力することもできる
-const UNIT_PRESETS = ["°C", "%", "MPa", "kPa", "Pa", "V", "A", "W", "kWh", "rpm", "Hz", "mm", "L", "kg"];
 
 // 新規センサー作成フォームのIngest Key初期値（空欄のままにしないための仮の提案値、編集も削除も自由）
 /** 取り込みキーの仮の値（sensor-＋現在時刻の36進）。重複しにくいように時刻を使う。 */
@@ -125,12 +123,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           </td>
           <td className="p-2 text-sm text-gray-400">{sensor.ingestKey}</td>
           <td className="p-2">
-            <input
-              value={unit}
-              onChange={(event) => setUnit(event.target.value)}
-              list="unit-presets"
-              className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
-            />
+            <UnitSelect value={unit} onChange={setUnit} />
           </td>
           <td className="p-2">
             <div className="flex items-center gap-1">
@@ -292,12 +285,7 @@ export function SensorSettingsPanel() {
         </label>
         <label className="text-sm">
           単位
-          <input
-            value={unit}
-            onChange={(event) => setUnit(event.target.value)}
-            list="unit-presets"
-            className="mt-1 block w-20 rounded border border-gray-300 px-2 py-1 text-sm"
-          />
+          <UnitSelect value={unit} onChange={setUnit} className="mt-1 flex" />
         </label>
         <button
           type="submit"
@@ -310,11 +298,6 @@ export function SensorSettingsPanel() {
       <p className="mb-3 text-xs text-gray-400">
         しきい値（軽故障・重故障・不感帯）は作成後、一覧の「編集」から設定します。
       </p>
-      <datalist id="unit-presets">
-        {UNIT_PRESETS.map((u) => (
-          <option key={u} value={u} />
-        ))}
-      </datalist>
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}

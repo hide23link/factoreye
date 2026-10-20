@@ -2,7 +2,7 @@
  * ウィジェットの種類の一覧（名前・説明・置いたときの大きさ）。
  * ウィジェット棚、設定パネルの見出し、ダッシュボードの型が同じ情報を使う。
  *
- * 【誰が使うか】WidgetShelf、WidgetSettings、widget-sensors、dashboard-templates、useWidgetActions。
+ * 【誰が使うか】WidgetShelf、WidgetSettings、widget-sensors、useWidgetActions。
  */
 import type { WidgetConfig, WidgetType } from "../types";
 import type { SensorKind } from "./sensor-kind";

@@ -13,6 +13,7 @@ import { useSensorReadings } from "../hooks/queries";
 import { addWidget, createDashboard, createSensor } from "../lib/api";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../lib/freeTier";
 import { useUiStore } from "../store/useUiStore";
+import { UnitSelect } from "./UnitSelect";
 
 // 段階の番号（1〜4）と、送信例のコードの種類（curl・Arduino・Python）
 type Step = 1 | 2 | 3 | 4;
@@ -63,7 +64,7 @@ export function SetupWizard() {
   const [suffix] = useState(() => Date.now().toString(36));
   const [name, setName] = useState(() => `デモセンサー-${suffix}`);
   const [ingestKey, setIngestKey] = useState(() => `demo-sensor-${suffix}`);
-  const [unit, setUnit] = useState("C");
+  const [unit, setUnit] = useState("°C");
   const [sensorId, setSensorId] = useState<string | null>(null);
   const [dashboardId, setDashboardId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -180,11 +181,7 @@ export function SetupWizard() {
             </label>
             <label className="block text-sm">
               単位
-              <input
-                value={unit}
-                onChange={(event) => setUnit(event.target.value)}
-                className="mt-1 block w-24 rounded border border-gray-300 px-2 py-1"
-              />
+              <UnitSelect value={unit} onChange={setUnit} className="mt-1 flex" />
             </label>
             <button
               type="submit"

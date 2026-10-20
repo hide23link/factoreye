@@ -108,4 +108,35 @@ describe("SensorSettingsPanel", () => {
     await user.click(within(row).getByText("削除"));
     expect(api.deleteSensor).toHaveBeenCalledWith("s1");
   });
+
+  it("作成フォームの単位は、プルダウンで候補をすべて選べる（°C 以外も選べる）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    const select = screen.getByRole("combobox", { name: "単位" });
+    expect(within(select).getAllByRole("option").length).toBeGreaterThan(20);
+    await user.type(screen.getByLabelText("名前"), "圧力計A-1");
+    await user.selectOptions(select, "MPa");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    await waitFor(() => expect(api.createSensor).toHaveBeenCalledWith(expect.objectContaining({ unit: "MPa" })));
+  });
+
+  it("候補にない既存の単位（ppm）は、編集しても消えず、そのまま保存できる", async () => {
+    const user = userEvent.setup();
+    const odd = { ...sensor, unit: "ppm" };
+    vi.mocked(api.fetchSensors).mockResolvedValue([odd]);
+    vi.mocked(api.updateSensor).mockResolvedValue(odd);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    expect(screen.getByRole("textbox", { name: "単位（自由入力）" })).toHaveValue("ppm");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(api.updateSensor).toHaveBeenCalledWith("s1", expect.objectContaining({ unit: "ppm" })));
+  });
 });
