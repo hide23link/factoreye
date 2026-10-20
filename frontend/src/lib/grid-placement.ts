@@ -7,6 +7,9 @@
 import type { Widget } from "../types";
 
 export const GRID_COLUMNS = 12;
+/** 1行の高さと、ウィジェットどうしの間隔（px）。DashboardView の react-grid-layout の設定と同じ値 */
+export const GRID_ROW_HEIGHT = 36;
+export const GRID_MARGIN = 12;
 
 export interface GridRect {
   column: number;
