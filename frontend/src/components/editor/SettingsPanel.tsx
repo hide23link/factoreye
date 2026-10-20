@@ -9,6 +9,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { deleteDashboard, updateDashboard } from "../../lib/api";
 import { isImeComposing } from "../../lib/ime";
 import { describeActionError } from "../../lib/errors";
@@ -26,6 +27,7 @@ export function SettingsPanel({ dashboard }: { dashboard: DashboardDetail }) {
 }
 
 function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
+  const { handleProps, resetButton } = useMovableWindow("panel", "設定パネル");
   const queryClient = useQueryClient();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   // 入力中の値。null は「保存済みの値をそのまま出す」
@@ -91,16 +93,22 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-gray-200 px-3.5 py-3">
+      <div
+        {...handleProps}
+        className="flex cursor-grab touch-none select-none items-center justify-between gap-2 border-b border-gray-200 px-3.5 py-3 active:cursor-grabbing"
+      >
         <h3 className="text-[15px] font-bold">ダッシュボードの設定</h3>
-        <button
-          type="button"
-          aria-label="設定パネルを閉じる"
-          onClick={() => useEditorStore.getState().setPanelOpen(false)}
-          className="h-6 w-6 shrink-0 rounded text-gray-500 hover:bg-gray-100"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-1">
+          {resetButton}
+          <button
+            type="button"
+            aria-label="設定パネルを閉じる"
+            onClick={() => useEditorStore.getState().setPanelOpen(false)}
+            className="h-6 w-6 shrink-0 rounded text-gray-500 hover:bg-gray-100"
+          >
+            ✕
+          </button>
+        </div>
       </div>
       <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
         <Section title="名前">

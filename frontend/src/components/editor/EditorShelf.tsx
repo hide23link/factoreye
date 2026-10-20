@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useSensors } from "../../hooks/queries";
 import { useInView } from "../../hooks/useInView";
+import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { fetchSensorReadings, fetchSensorReadingsAggregate } from "../../lib/api";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import { classifySeverity } from "../../lib/severity";
@@ -19,21 +20,38 @@ import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/s
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor } from "../../types";
 
-/** センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。閉じるボタン付きの窓 */
+/**
+ * センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。
+ * 見出しをつかんで、画面内の好きな位置へ動かせる（矢印キーでも動かせる）。位置は保存され、「位置をもとに戻す」で既定の場所に戻る。
+ * 狭い画面（640px 未満）は、従来どおり下寄せの固定で、動かせない。動かす仕組みは設定パネルと共通（useMovableWindow）。
+ */
 export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const setShelfOpen = useEditorStore((s) => s.setShelfOpen);
+  const { handleProps, resetButton } = useMovableWindow("shelf", "センサー棚");
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2.5">
-        <h2 className="text-sm font-bold">センサー</h2>
-        <button
-          type="button"
-          aria-label="センサー棚を閉じる"
-          onClick={() => setShelfOpen(false)}
-          className="h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
-        >
-          ✕
-        </button>
+      <div
+        {...handleProps}
+        className="flex cursor-grab touch-none select-none items-center justify-between gap-1 border-b border-gray-200 px-3 py-2.5 active:cursor-grabbing"
+      >
+        <h2 className="text-sm font-bold">
+          <span aria-hidden="true" className="mr-1.5 text-gray-400">
+            ⋮⋮
+          </span>
+          センサー
+        </h2>
+        <div className="flex items-center gap-1">
+          {resetButton}
+          <button
+            type="button"
+            aria-label="センサー棚を閉じる"
+            onClick={() => setShelfOpen(false)}
+            className="h-6 w-6 rounded text-gray-500 hover:bg-gray-100"
+          >
+            ✕
+          </button>
+        </div>
       </div>
       <div className="flex min-h-0 flex-col gap-2 overflow-auto p-2.5">
         <SensorShelf dashboard={dashboard} />
