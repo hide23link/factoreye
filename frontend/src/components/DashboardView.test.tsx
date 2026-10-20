@@ -712,15 +712,15 @@ describe("DashboardView", () => {
 
       it("「位置をもとに戻す」で既定の場所に戻り、保存も消える", async () => {
         const user = await openEditor();
-        expect(screen.queryByRole("button", { name: "位置をもとに戻す" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /センサー棚の位置をもとに戻す/ })).not.toBeInTheDocument();
         handle().focus();
         await user.keyboard("{ArrowRight}");
-        await user.click(screen.getByRole("button", { name: "位置をもとに戻す" }));
+        await user.click(screen.getByRole("button", { name: /センサー棚の位置をもとに戻す/ }));
 
         expect(aside().style.left).toBe("8px");
         expect(aside().style.bottom).not.toBe("");
         expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
-        expect(screen.queryByRole("button", { name: "位置をもとに戻す" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /センサー棚の位置をもとに戻す/ })).not.toBeInTheDocument();
       });
 
       it("次に編集を始めたとき、保存した位置に出る", async () => {
@@ -785,9 +785,11 @@ describe("DashboardView", () => {
           Object.defineProperty(event, "clientY", { value: y });
           fireEvent(handle(), event);
         };
+        // 既定の位置は、時間の操作の実測に依存する（環境で変わる）。動く前の値を読んで、変わらないことを比べる
+        const before = [aside().style.left, aside().style.top];
         send("pointerDown", 1, 100, 100);
         send("pointerMove", 2, 400, 400); // 別の指
-        expect([leftOf(), topOf()]).toEqual([8, 156]); // 別の指では動かない（既定の位置のまま）
+        expect([aside().style.left, aside().style.top]).toEqual(before); // 別の指では動かない（既定の位置のまま）
         send("pointerMove", 1, 130, 120);
         expect(leftOf()).toBe(30);
         send("pointerCancel", 2, 0, 0); // 別の指の取り消しでは終わらない
@@ -846,6 +848,148 @@ describe("DashboardView", () => {
         pointer("pointerDown", 100, 100);
         pointer("pointerMove", 200, 200);
         expect(aside().style.left).toBe("8px");
+      });
+    });
+
+    describe("設定パネルも動かせる（センサー棚と同じ仕組み）", () => {
+      const panel = () => screen.getByRole("complementary", { name: "設定パネル" });
+      const panelHandle = () => screen.getByTestId("panel-handle");
+      const leftOf = () => Number.parseInt(panel().style.left, 10);
+      const topOf = () => Number.parseInt(panel().style.top, 10);
+      const KEY = "factoreye.settingsPanelPosition";
+
+      beforeEach(() => {
+        window.localStorage.clear();
+        useEditorStore.getState().reset();
+      });
+      afterEach(() => window.localStorage.clear());
+
+      async function openPanel(widgets = [] as Widget[]) {
+        const user = userEvent.setup();
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets });
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(screen.getByRole("button", { name: "設定" }));
+        return user;
+      }
+
+      function pointerOnPanel(type: "pointerDown" | "pointerMove" | "pointerUp", x: number, y: number) {
+        const event = createEvent[type](panelHandle());
+        Object.defineProperty(event, "clientX", { value: x });
+        Object.defineProperty(event, "clientY", { value: y });
+        fireEvent(panelHandle(), event);
+      }
+
+      it("見出しを矢印キー（Shift で大きく）やドラッグで動かせて、動かし終えたときに保存される", async () => {
+        const user = await openPanel();
+        expect(panel()).not.toHaveAttribute("data-placement", "moved");
+        panelHandle().focus();
+        await user.keyboard("{ArrowRight}");
+        expect(panel()).toHaveAttribute("data-placement", "moved");
+        const x1 = leftOf();
+        await user.keyboard("{Shift>}{ArrowRight}{/Shift}");
+        expect(leftOf() - x1).toBe(64);
+
+        pointerOnPanel("pointerDown", 100, 100);
+        pointerOnPanel("pointerMove", 160, 130);
+        const during = JSON.parse(window.localStorage.getItem(KEY)!); // キー操作の保存値のまま（途中は保存しない）
+        pointerOnPanel("pointerUp", 160, 130);
+        const after = JSON.parse(window.localStorage.getItem(KEY)!);
+        expect(after).toEqual({ x: leftOf(), y: topOf() });
+        expect(after).not.toEqual(during);
+      });
+
+      it("画面内に制限される（見出しは常に画面内）。幅は 316px で数える", async () => {
+        await openPanel();
+        pointerOnPanel("pointerDown", 100, 100);
+        pointerOnPanel("pointerMove", 90000, 90000);
+        expect(leftOf()).toBe(window.innerWidth - 316);
+        expect(topOf()).toBe(window.innerHeight - 44);
+        pointerOnPanel("pointerMove", -90000, -90000);
+        expect([leftOf(), topOf()]).toEqual([0, 0]);
+        pointerOnPanel("pointerUp", 0, 0);
+      });
+
+      it("動かしたあとは、選ぶウィジェットが変わっても、自動配置で位置を変えず、動かした位置を使う", async () => {
+        const widgets = [
+          makeWidget({ id: "a", type: "AlarmAlert", gridColumn: 1, gridWidth: 4 }),
+          makeWidget({ id: "b", type: "AlarmAlert", gridColumn: 9, gridWidth: 4 }),
+        ];
+        const user = await openPanel(widgets);
+        panelHandle().focus();
+        await user.keyboard("{ArrowRight}");
+        const pos = [panel().style.left, panel().style.top];
+
+        const cards = await screen.findAllByRole("group", { name: "アラーム一覧" });
+        await user.click(cards.find((c) => c.dataset.widgetId === "a")!);
+        expect(panel()).toHaveAttribute("data-placement", "moved");
+        expect([panel().style.left, panel().style.top]).toEqual(pos);
+        await user.click(cards.find((c) => c.dataset.widgetId === "b")!);
+        expect([panel().style.left, panel().style.top]).toEqual(pos);
+      });
+
+      it("「もとの位置」で自動配置に戻り、保存も消える", async () => {
+        const user = await openPanel();
+        expect(screen.queryByRole("button", { name: /設定パネルの位置をもとに戻す/ })).not.toBeInTheDocument();
+        panelHandle().focus();
+        await user.keyboard("{ArrowRight}");
+        await user.click(screen.getByRole("button", { name: /設定パネルの位置をもとに戻す/ }));
+
+        expect(panel()).not.toHaveAttribute("data-placement", "moved");
+        expect(window.localStorage.getItem(KEY)).toBeNull();
+      });
+
+      it("次に編集を始めたとき、保存した位置に出る。棚とは別々に保存される", async () => {
+        window.localStorage.setItem(KEY, JSON.stringify({ x: 300, y: 200 }));
+        await openPanel();
+        expect([leftOf(), topOf()]).toEqual([300, 200]);
+        expect(useEditorStore.getState().shelfPos).toBeNull();
+      });
+
+      it("画面が小さくなって画面外になったら、表示だけ自動配置に戻し、保存は残す", async () => {
+        window.localStorage.setItem(KEY, JSON.stringify({ x: 1300, y: 200 }));
+        await openPanel();
+        expect(leftOf()).toBe(1300);
+
+        Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+
+        await waitFor(() => expect(panel()).not.toHaveAttribute("data-placement", "moved"));
+        expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ x: 1300, y: 200 });
+      });
+
+      it("640px 未満では、保存した位置があっても動かさず、従来の下寄せのまま", async () => {
+        Object.defineProperty(window, "innerWidth", { value: 600, configurable: true });
+        window.localStorage.setItem(KEY, JSON.stringify({ x: 100, y: 100 }));
+        await openPanel();
+
+        expect(panel()).toHaveAttribute("data-placement", "bottom");
+        pointerOnPanel("pointerDown", 100, 100);
+        pointerOnPanel("pointerMove", 200, 200);
+        expect(panel()).toHaveAttribute("data-placement", "bottom");
+      });
+
+      it("動かした位置のパネルでも、パネル内の枠にセンサーをドラッグして置ける", async () => {
+        const graph = makeWidget({ id: "g1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
+        vi.mocked(api.updateWidget).mockResolvedValue(graph);
+        vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+        const user = await openPanel([graph]);
+        await user.click(await screen.findByRole("group", { name: "グラフ" }));
+        panelHandle().focus();
+        await user.keyboard("{ArrowRight}");
+        expect(panel()).toHaveAttribute("data-placement", "moved");
+
+        act(() => useEditorStore.getState().setDragging({ kind: "sensor", sensorId: "s2" }));
+        await waitFor(() => expect(screen.getByRole("complementary", { name: "センサー棚" }).className).toContain("opacity-0"));
+        expect(panel().className).not.toContain("opacity-0");
+        fireEvent.dragOver(screen.getByTestId("sensor-dropzone"), { dataTransfer: { dropEffect: "none" } });
+        fireEvent.drop(screen.getByTestId("sensor-dropzone"), { dataTransfer: { dropEffect: "none" } });
+
+        await waitFor(() =>
+          expect(api.updateWidget).toHaveBeenCalledWith("g1", expect.objectContaining({ config: expect.objectContaining({ sensorIds: ["s1", "s2"] }) })),
+        );
       });
     });
 

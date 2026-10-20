@@ -7,6 +7,7 @@
  */
 import { useState } from "react";
 
+import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import {
   graphColor,
@@ -38,10 +39,14 @@ const changeConfig = (actions: Actions, widget: Widget, change: Partial<WidgetCo
 
 export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboard: DashboardDetail }) {
   const actions = useWidgetActions(dashboard);
+  const { handleProps, resetButton } = useMovableWindow("panel", "設定パネル");
 
   return (
     <>
-      <div className="flex items-center gap-2.5 border-b border-gray-200 px-3.5 py-3">
+      <div
+        {...handleProps}
+        className="flex cursor-grab touch-none select-none items-center gap-2.5 border-b border-gray-200 px-3.5 py-3 active:cursor-grabbing"
+      >
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-blue-600">
           <WidgetIcon type={widget.type} size={18} />
         </span>
@@ -49,6 +54,7 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
           <h3 className="text-[15px] font-bold">{widgetLabel(widget.type)}の設定</h3>
           <p className="text-xs text-gray-500">変更はすぐ画面に反映されます</p>
         </div>
+        {resetButton}
         <button
           type="button"
           aria-label="設定パネルを閉じる"
