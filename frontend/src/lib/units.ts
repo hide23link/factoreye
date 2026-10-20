@@ -36,6 +36,12 @@ export const UNIT_PRESETS: readonly UnitPreset[] = [
   { value: "本", hint: "生産数" },
   { value: "枚", hint: "生産数" },
   { value: "回", hint: "回数" },
+  { value: "0/1", hint: "稼働（動いている=1）" },
+  { value: "mA", hint: "電流" },
+  { value: "ppm", hint: "濃度" },
+  { value: "dB", hint: "騒音" },
+  { value: "s", hint: "時間（秒）" },
+  { value: "min", hint: "時間（分）" },
 ];
 
 /** 選択欄で「その他（自由入力）」を表す値。単位として保存されることはない */

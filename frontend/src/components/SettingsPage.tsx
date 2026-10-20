@@ -31,16 +31,17 @@ export function SettingsPage() {
     <div className="mx-auto max-w-4xl p-4">
       <h1 className="mb-4 text-2xl font-bold text-gray-900">設定</h1>
 
-      <div className="mb-4 flex gap-1 border-b border-gray-200">
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200">
         {TABS.map((t) => (
           <button
             key={t.value}
             type="button"
             onClick={() => setTab(t.value)}
+            aria-current={tab === t.value ? "page" : undefined}
             className={
               tab === t.value
-                ? "border-b-2 border-blue-600 px-3 py-2 text-sm font-medium text-blue-600"
-                : "px-3 py-2 text-sm text-gray-500 hover:text-gray-700"
+                ? "shrink-0 border-b-2 border-blue-600 px-3 py-2 text-sm font-medium text-blue-600"
+                : "shrink-0 px-3 py-2 text-sm text-gray-500 hover:text-gray-700"
             }
           >
             {t.label}

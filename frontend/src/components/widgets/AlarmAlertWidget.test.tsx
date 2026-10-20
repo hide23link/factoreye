@@ -131,4 +131,18 @@ describe("AlarmAlertWidget", () => {
     expect(await screen.findByText("確認済み")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "確認" })).not.toBeInTheDocument();
   });
+
+  it("確認に失敗したとき、理由を表示する（黙って何も起きない状態にしない）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchAlarms).mockImplementation(async (status) =>
+      status === "active" ? { alarms: [criticalAlarm], total: 1 } : { alarms: [], total: 0 },
+    );
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.acknowledgeAlarm).mockRejectedValue(new Error("network"));
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+    await user.click(await screen.findByRole("button", { name: "確認" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("アラームの確認に失敗しました");
+  });
 });

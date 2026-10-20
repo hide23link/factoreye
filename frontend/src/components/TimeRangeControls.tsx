@@ -56,15 +56,16 @@ export function TimeRangeControls() {
   const [error, setError] = useState<string | null>(null);
 
   const applyCustom = () => {
-    const from = new Date(customFrom).getTime();
-    const to = new Date(customTo).getTime();
+    // 欄に見えている値（未入力のときは、今の範囲）を使う。state が空のままだと、見えている値が無視されて NaN になる
+    const from = new Date(customFrom || toLocalInput(bounds.from)).getTime();
+    const to = new Date(customTo || toLocalInput(bounds.to)).getTime();
     const next = absoluteRange(from, to);
     if (!next) {
       setError("終了は開始より後にしてください");
       return;
     }
     if (to - from > maxMs) {
-      setError("表示できる期間は 90 日までです");
+      setError(`表示できる期間は ${Math.round(maxMs / (24 * 60 * 60 * 1000))} 日までです`);
       return;
     }
     setError(null);
@@ -180,7 +181,11 @@ export function TimeRangeControls() {
           >
             適用
           </button>
-          {error && <span className="text-red-600">{error}</span>}
+          {error && (
+            <span role="alert" className="text-red-600">
+              {error}
+            </span>
+          )}
         </div>
       </details>
     </div>

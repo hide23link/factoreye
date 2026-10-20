@@ -21,7 +21,7 @@ export function WidgetPalette({ dashboard }: { dashboard: DashboardDetail }) {
     <div
       role="group"
       aria-label="ウィジェットの種類"
-      className="flex max-w-[min(760px,calc(100vw-1rem))] flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2.5 shadow-lg"
+      className="flex w-[min(780px,calc(100vw-1rem))] flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2.5 shadow-lg"
     >
       <p className="w-full text-xs text-gray-500">種類をキャンバスにドラッグ。置いた場所に入ります。クリックでも追加できます。</p>
       {WIDGET_KINDS.map((kind) => (

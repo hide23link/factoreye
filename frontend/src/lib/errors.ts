@@ -68,3 +68,30 @@ export function describeActionError(err: unknown, action: string): string {
   if (status >= 500) return `${action}に失敗しました。サーバーで問題が起きました。`;
   return `${action}に失敗しました。`;
 }
+
+/**
+ * センサーの作成・更新の失敗を、利用者向けの文言にする。
+ * 409（名前や Ingest Key の重複）と 422（入力の不備）を区別し、ほかは操作の失敗の共通文言にする。
+ */
+export function describeSensorError(err: unknown, action: string): string {
+  const status = errorStatus(err);
+  if (status === 409) return `${action}に失敗しました。その名前（または Ingest Key）は、すでに使われています。`;
+  if (status === 422) return `${action}に失敗しました。入力内容（名前・単位・しきい値）を確認してください。`;
+  return describeActionError(err, action);
+}
+
+/** 通知設定（Discord）の保存の失敗。422 は、送信先の URL の形が合っていない */
+export function describeNotificationError(err: unknown): string {
+  if (errorStatus(err) === 422) {
+    return "通知設定の保存に失敗しました。Discord の Webhook URL（https:// で始まるもの）と、再通知の間隔を確認してください。";
+  }
+  return describeActionError(err, "通知設定の保存");
+}
+
+/** Webhook の追加・切り替えの失敗。422 は、URL が https でない・公開されていないアドレス、など */
+export function describeWebhookError(err: unknown, action: string): string {
+  if (errorStatus(err) === 422) {
+    return `${action}に失敗しました。URL は https:// で始まる、インターネットに公開されたアドレスにしてください（社内ネットワークのアドレスは、サーバーの設定で許可している場合だけ使えます）。`;
+  }
+  return describeActionError(err, action);
+}

@@ -10,8 +10,11 @@ import { useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
 import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
+import { describeActionError, describeSensorError } from "../../lib/errors";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
+import { validateSensorBasics, validateThresholds } from "../../lib/sensor-validation";
 import type { Sensor } from "../../types";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { ErrorNotice } from "../ErrorNotice";
 import { UnitSelect } from "../UnitSelect";
 
@@ -27,15 +30,17 @@ function toThreshold(v: NumOrBlank): number | null {
 function thresholdInput(
   value: NumOrBlank,
   onChange: (v: NumOrBlank) => void,
+  label: string,
   placeholder = "なし",
 ) {
   return (
     <input
       type="number"
+      aria-label={label}
       placeholder={placeholder}
       value={value}
       onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
-      className="w-16 rounded border border-gray-300 px-1.5 py-1 text-sm"
+      className="w-20 rounded border border-gray-300 px-1.5 py-1 text-sm"
     />
   );
 }
@@ -80,9 +85,26 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
       setError(null);
       setEditing(false);
     },
-    onError: (e: Error) =>
-      setError(e.message.includes("409") ? "その名前は既に使われています。" : e.message),
+    onError: (e: Error) => setError(describeSensorError(e, "センサーの保存")),
   });
+
+  // 保存の前に、入力を確かめる（空の名前・単位、しきい値の大小の逆転）。サーバーの 422 を待たずに、日本語で理由を出す
+  const trySave = () => {
+    const problem =
+      validateSensorBasics({ name, unit }) ??
+      validateThresholds({
+        minCritical: toThreshold(minCritical),
+        minWarning: toThreshold(minWarning),
+        maxWarning: toThreshold(maxWarning),
+        maxCritical: toThreshold(maxCritical),
+      });
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    saveMutation.mutate();
+  };
 
   const toggleEnabledMutation = useMutation({
     mutationFn: () => updateSensor(sensor.id, { enabled: !sensor.enabled }),
@@ -90,7 +112,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
       void invalidate();
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeActionError(e, "有効/無効の切り替え")),
   });
 
   const deleteMutation = useMutation({
@@ -99,12 +121,13 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
       void invalidate();
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(describeActionError(e, "センサーの削除")),
   });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const errorRow = error && (
     <tr className="border-b border-gray-100 bg-red-50">
-      <td colSpan={8} className="px-2 py-1 text-xs text-red-600">
+      <td colSpan={8} role="alert" className="px-2 py-1 text-xs text-red-600">
         {error}
       </td>
     </tr>
@@ -113,9 +136,20 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
   if (isEditing) {
     return (
       <>
-        <tr className="border-b border-gray-100 bg-blue-50/40">
+        <tr
+          className="border-b border-gray-100 bg-blue-50/40"
+          // 表の行はフォームにできないので、Enter で保存・Esc でキャンセルを、ここで受ける
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setEditing(false);
+            else if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+              e.preventDefault();
+              trySave();
+            }
+          }}
+        >
           <td className="p-2">
             <input
+              aria-label="センサー名"
               value={name}
               onChange={(event) => setName(event.target.value)}
               className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
@@ -127,21 +161,22 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           </td>
           <td className="p-2">
             <div className="flex items-center gap-1">
-              {thresholdInput(minWarning, setMinWarning)}
+              {thresholdInput(minWarning, setMinWarning, "軽故障の下限")}
               <span className="text-gray-400">/</span>
-              {thresholdInput(maxWarning, setMaxWarning)}
+              {thresholdInput(maxWarning, setMaxWarning, "軽故障の上限")}
             </div>
           </td>
           <td className="p-2">
             <div className="flex items-center gap-1">
-              {thresholdInput(minCritical, setMinCritical)}
+              {thresholdInput(minCritical, setMinCritical, "重故障の下限")}
               <span className="text-gray-400">/</span>
-              {thresholdInput(maxCritical, setMaxCritical)}
+              {thresholdInput(maxCritical, setMaxCritical, "重故障の上限")}
             </div>
           </td>
           <td className="p-2">
             <input
               type="number"
+              aria-label="不感帯"
               min={0}
               value={deadBand}
               onChange={(event) => setDeadBand(event.target.value === "" ? "" : Number(event.target.value))}
@@ -152,7 +187,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           <td className="p-2 text-right">
             <button
               type="button"
-              onClick={() => saveMutation.mutate()}
+              onClick={trySave}
               disabled={saveMutation.isPending}
               className="mr-2 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
             >
@@ -190,6 +225,8 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
             type="button"
             onClick={() => toggleEnabledMutation.mutate()}
             disabled={toggleEnabledMutation.isPending}
+            aria-pressed={sensor.enabled}
+            title={sensor.enabled ? "クリックで無効にする" : "クリックで有効にする"}
             className={
               sensor.enabled
                 ? "rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 hover:bg-green-200"
@@ -209,16 +246,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           </button>
           <button
             type="button"
-            onClick={() => {
-              if (
-                confirm(
-                  `センサー「${sensor.name}」を削除しますか？\n` +
-                    "測定値・アラーム履歴も完全に削除されます。元に戻せません。",
-                )
-              ) {
-                deleteMutation.mutate();
-              }
-            }}
+            onClick={() => setConfirmingDelete(true)}
             className="text-red-400 hover:text-red-600"
           >
             削除
@@ -226,6 +254,22 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
         </td>
       </tr>
       {errorRow}
+      {confirmingDelete && (
+        <tr>
+          <td className="p-0">
+            <ConfirmDialog
+              title="センサーを削除"
+              message={`センサー「${sensor.name}」を削除しますか？測定値・アラーム履歴も完全に削除されます。元に戻せません。`}
+              pending={deleteMutation.isPending}
+              onCancel={() => setConfirmingDelete(false)}
+              onConfirm={() => {
+                setConfirmingDelete(false);
+                deleteMutation.mutate();
+              }}
+            />
+          </td>
+        </tr>
+      )}
     </>
   );
 }
@@ -252,7 +296,8 @@ export function SensorSettingsPanel() {
       setUnit("°C");
       setError(null);
     },
-    onError: (e: Error) => setError(isFreeTierLimitError(e) ? FREE_TIER_LIMIT_MESSAGE : e.message),
+    onError: (e: Error) =>
+      setError(isFreeTierLimitError(e) ? FREE_TIER_LIMIT_MESSAGE : describeSensorError(e, "センサーの登録")),
   });
 
   return (
@@ -263,7 +308,10 @@ export function SensorSettingsPanel() {
         className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim() && ingestKey.trim() && unit.trim()) createMutation.mutate();
+          // 空欄があるときは、黙って何もしないのではなく、理由を出す
+          const problem = validateSensorBasics({ name, unit, ingestKey });
+          setError(problem);
+          if (!problem) createMutation.mutate();
         }}
       >
         <label className="text-sm">
@@ -298,7 +346,11 @@ export function SensorSettingsPanel() {
       <p className="mb-3 text-xs text-gray-400">
         しきい値（軽故障・重故障・不感帯）は作成後、一覧の「編集」から設定します。
       </p>
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="mb-3 text-sm text-red-600">
+          {error}
+        </p>
+      )}
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
 

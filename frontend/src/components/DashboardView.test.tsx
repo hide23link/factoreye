@@ -195,6 +195,36 @@ describe("DashboardView", () => {
       expect(screen.getByRole("textbox", { name: "名前" })).toHaveValue("工場A");
     });
 
+    it("名前を空にして離れると、理由を出して元の名前に戻す", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      await user.clear(screen.getByRole("textbox", { name: "名前" }));
+      await user.tab();
+
+      expect(screen.getByRole("alert")).toHaveTextContent("名前は空にできません");
+    });
+
+    it("名前の保存中は、入力した名前を表示し続ける（古い名前に一瞬戻らない）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      vi.mocked(api.updateDashboard).mockReturnValue(new Promise(() => {}));
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      const input = screen.getByRole("textbox", { name: "名前" });
+      await user.clear(input);
+      await user.type(input, "新しい名前");
+      await user.tab();
+
+      await waitFor(() => expect(api.updateDashboard).toHaveBeenCalled());
+      expect(screen.getByRole("textbox", { name: "名前" })).toHaveValue("新しい名前");
+    });
+
     it("ダッシュボードの削除は、確認のあとで deleteDashboard を呼ぶ", async () => {
       const user = userEvent.setup();
       vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);

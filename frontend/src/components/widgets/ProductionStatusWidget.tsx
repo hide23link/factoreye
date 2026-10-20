@@ -8,6 +8,7 @@
  * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
  */
 import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
+import { guessSensorKind } from "../../lib/sensor-kind";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 
@@ -38,6 +39,8 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
     LATEST_ONLY,
   );
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
+  // 合計は「個数」のセンサーでだけ意味がある。温度などに置いたときに「本日累計 °C」と出さない
+  const totalUnit = sensor && guessSensorKind(sensor) === "count" ? sensor.unit : "（合計値）";
 
   const lastHourFrom = startOfCurrentMinute(60 * 60 * 1000);
   const todayFrom = startOfTodayLocal();
@@ -78,13 +81,13 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
           <p className="text-base font-semibold text-gray-800">
             {lastHour ? Math.round(lastHour.sum) : "—"}
           </p>
-          <p>直近1時間 {sensor?.unit}</p>
+          <p>直近1時間 {totalUnit}</p>
         </div>
         <div>
           <p className="text-base font-semibold text-gray-800">
             {today ? Math.round(today.sum) : "—"}
           </p>
-          <p>本日累計 {sensor?.unit}</p>
+          <p>本日累計 {totalUnit}</p>
         </div>
       </div>
 

@@ -214,7 +214,7 @@ function LoadedDashboard({
   const hiddenClass = hideWhileDragging ? "pointer-events-none opacity-0" : "";
 
   const drawerBase =
-    "fixed bottom-2 top-[104px] z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
+    "fixed bottom-2 top-[156px] z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
 
   return (
     <div className="px-2 py-4 sm:p-4">

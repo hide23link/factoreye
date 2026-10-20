@@ -1,11 +1,13 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../lib/errors";
 import { renderWithQueryClient, screen, waitFor } from "../test/test-utils";
 import type { Sensor } from "../types";
 import { SetupWizard } from "./SetupWizard";
 
 vi.mock("../lib/api", () => ({
+  API_BASE_URL: "http://localhost:8000",
   fetchSensorReadings: vi.fn(),
   fetchSensors: vi.fn(),
   createSensor: vi.fn(),
@@ -69,7 +71,7 @@ describe("SetupWizard", () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
-    vi.mocked(api.createSensor).mockRejectedValue(new Error("409 conflict"));
+    vi.mocked(api.createSensor).mockRejectedValue(new ApiError(409, "POST /api/sensors failed: 409 conflict"));
 
     renderWithQueryClient(<SetupWizard />);
 

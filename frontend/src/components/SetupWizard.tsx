@@ -10,7 +10,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useSensorReadings } from "../hooks/queries";
-import { addWidget, createDashboard, createSensor } from "../lib/api";
+import { API_BASE_URL, addWidget, createDashboard, createSensor } from "../lib/api";
+import { validateSensorBasics } from "../lib/sensor-validation";
+import { describeActionError, errorStatus } from "../lib/errors";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../lib/freeTier";
 import { useUiStore } from "../store/useUiStore";
 import { UnitSelect } from "./UnitSelect";
@@ -85,9 +87,10 @@ export function SetupWizard() {
   // エラーの種類を、利用者に分かる文言にする（上限・名前の重複・その他）
   const describeError = (e: Error): string => {
     if (isFreeTierLimitError(e)) return FREE_TIER_LIMIT_MESSAGE;
-    if (e.message.includes("409"))
+    if (errorStatus(e) === 409)
       return "その名前またはIngest Keyは既に使われています。別の値に変更して再試行してください。";
-    return `エラーが発生しました: ${e.message}`;
+    // API の生のメッセージ（英語・JSON）は出さず、操作の失敗として案内する
+    return describeActionError(e, "セットアップ");
   };
 
   // 段階1: センサーを作る（成功したら、そのセンサーの ID を覚えて段階2へ進む）
@@ -130,9 +133,9 @@ export function SetupWizard() {
   // 送信例のコード。ingestKey とセンサーの値（42.0）を埋め込んで、そのまま実行できる形にする。
   // API キーは、利用者が自分の .env の値に置き換える（ここには書かない）
   const codeSnippets: Record<CodeTab, string> = {
-    curl: `curl -X POST http://localhost:8000/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`,
-    arduino: `// clients/arduino-m5stack/ のFactorEyeClientライブラリを使用\n#include <FactorEyeClient.h>\n#include <WiFi.h>\n\nFactorEyeClient factoreye;\n\nvoid setup() {\n  WiFi.begin("your-wifi-ssid", "your-wifi-password");\n  while (WiFi.status() != WL_CONNECTED) delay(500);\n\n  factoreye.begin(\n    "http://localhost:8000",\n    "<.envのINGEST_API_KEY>"\n  );\n}\n\nvoid loop() {\n  factoreye.send("${ingestKey}", 42.0);\n  delay(10000);\n}`,
-    python: `# clients/raspberry-pi/factoreye_client.py を使用（追加ライブラリ不要）\nfrom factoreye_client import FactorEyeClient\n\nclient = FactorEyeClient(\n    "http://localhost:8000",\n    "<.envのINGEST_API_KEY>",\n)\nclient.send("${ingestKey}", 42.0)`,
+    curl: `curl -X POST ${API_BASE_URL}/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`,
+    arduino: `// clients/arduino-m5stack/ のFactorEyeClientライブラリを使用\n#include <FactorEyeClient.h>\n#include <WiFi.h>\n\nFactorEyeClient factoreye;\n\nvoid setup() {\n  WiFi.begin("your-wifi-ssid", "your-wifi-password");\n  while (WiFi.status() != WL_CONNECTED) delay(500);\n\n  factoreye.begin(\n    "${API_BASE_URL}",\n    "<.envのINGEST_API_KEY>"\n  );\n}\n\nvoid loop() {\n  factoreye.send("${ingestKey}", 42.0);\n  delay(10000);\n}`,
+    python: `# clients/raspberry-pi/factoreye_client.py を使用（追加ライブラリ不要）\nfrom factoreye_client import FactorEyeClient\n\nclient = FactorEyeClient(\n    "${API_BASE_URL}",\n    "<.envのINGEST_API_KEY>",\n)\nclient.send("${ingestKey}", 42.0)`,
   };
 
   return (
@@ -145,7 +148,7 @@ export function SetupWizard() {
       <StepHeader step={step} />
 
       {errorMessage && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {errorMessage}
         </div>
       )}
@@ -160,7 +163,10 @@ export function SetupWizard() {
             className="space-y-2"
             onSubmit={(e) => {
               e.preventDefault();
-              createSensorMutation.mutate();
+              // 空欄のまま進めない（理由を出す）。サーバーの 422 を待たない
+              const problem = validateSensorBasics({ name, unit, ingestKey });
+              setErrorMessage(problem);
+              if (!problem) createSensorMutation.mutate();
             }}
           >
             <label className="block text-sm">

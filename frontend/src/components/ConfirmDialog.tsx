@@ -5,7 +5,7 @@
  * 閉じたら、開く前にフォーカスのあった要素へ戻す。背景のクリックでは閉じない。
  * ウィジェットの枠（react-grid-layout のグリッド）の中から呼ばれても画面全体に出るよう、document.body へ portal する。
  *
- * 【誰が使うか】WidgetCard.tsx（ウィジェットの削除）、WebhookSettingsPanel.tsx（購読の削除）。
+ * 【誰が使うか】SensorSettingsPanel.tsx（センサーの削除）、SettingsPanel.tsx（ダッシュボードの削除）、WebhookSettingsPanel.tsx（購読の削除）。
  * 【引数（props）】呼ぶ側が渡す。title=見出し、message=本文、confirmLabel=実行ボタンの文字（既定「削除」）、
  * onConfirm=実行を押したときの処理、onCancel=やめたときの処理、pending=実行中か。
  */

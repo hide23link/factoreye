@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithQueryClient, screen } from "../test/test-utils";
+import { fireEvent, renderWithQueryClient, screen } from "../test/test-utils";
 import { DEFAULT_RANGE } from "../lib/timeRange";
 import { useTimeRangeStore } from "../store/useTimeRangeStore";
 import { TimeRangeControls } from "./TimeRangeControls";
@@ -94,5 +94,24 @@ describe("TimeRangeControls", () => {
     });
     // 固定モードでは、一時停止のボタンは出ない（今に戻るで再開する）
     expect(screen.queryByRole("button", { name: "一時停止" })).toBeNull();
+  });
+
+  it("期間を指定: 開始だけ変えて適用しても、欄に見えている終了の値が使われ、エラーにならない", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByText("期間を指定"));
+    const from = screen.getByLabelText("開始");
+    // 欄に表示されている開始より 10 分前にする
+    const shown = (from as HTMLInputElement).value;
+    const earlier = new Date(new Date(shown).getTime() - 10 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const text = `${earlier.getFullYear()}-${pad(earlier.getMonth() + 1)}-${pad(earlier.getDate())}T${pad(earlier.getHours())}:${pad(earlier.getMinutes())}`;
+    fireEvent.change(from, { target: { value: text } });
+    await user.click(screen.getByRole("button", { name: "適用" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(useTimeRangeStore.getState().range.mode).toBe("absolute");
   });
 });

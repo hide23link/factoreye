@@ -47,17 +47,33 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
     },
   });
 
+  // 保存が終わるまでは、入力した値を表示し続ける（古い名前に一瞬戻って、保存失敗に見えないように）
+  const [emptyNameNotice, setEmptyNameNotice] = useState(false);
   const commitName = () => {
     const next = (name ?? dashboard.name).trim();
-    setName(null);
-    // 空にはできない（名前は必須）。元に戻す
-    if (next !== "" && next !== dashboard.name) saveMutation.mutate({ name: next });
+    setEmptyNameNotice(false);
+    if (next === "") {
+      // 名前は必須。元に戻し、理由を出す
+      setName(null);
+      setEmptyNameNotice(true);
+      return;
+    }
+    if (next === dashboard.name) {
+      setName(null);
+      return;
+    }
+    saveMutation.mutate({ name: next }, { onSettled: () => setName(null) });
   };
   const commitDescription = () => {
     const next = description ?? dashboard.description ?? "";
-    setDescription(null);
-    if (next !== (dashboard.description ?? "")) saveMutation.mutate({ description: next });
+    if (next === (dashboard.description ?? "")) {
+      setDescription(null);
+      return;
+    }
+    saveMutation.mutate({ description: next }, { onSettled: () => setDescription(null) });
   };
+  // どちらの保存が失敗したかを、メッセージに入れる
+  const failedField = saveMutation.variables && "name" in saveMutation.variables ? "名前" : "説明";
   const commitOnEnter = (commit: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter") commit();
   };
@@ -99,9 +115,15 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
           />
           {saveMutation.isError && (
             <p role="alert" className="text-xs text-red-600">
-              {describeActionError(saveMutation.error, "ダッシュボードの保存")}
+              {describeActionError(saveMutation.error, `${failedField}の保存`)}
             </p>
           )}
+          {emptyNameNotice && (
+            <p role="alert" className="text-xs text-red-600">
+              名前は空にできません。元の名前に戻しました。
+            </p>
+          )}
+          <p className="text-xs text-gray-500">名前・説明は、入力欄を離れる（Enter）と保存されます。</p>
         </Section>
         <Section title="つくりかた">
           <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-gray-500">
@@ -112,7 +134,7 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
               置いたウィジェットを<b className="text-gray-900">クリック</b>すると、ここに設定が出ます
             </li>
             <li>
-              <b className="text-gray-900">見出しをつかんで移動</b>、右下をつかんで大きさを変更
+              <b className="text-gray-900">カードをつかんで移動</b>、右下をつかんで大きさを変更
             </li>
           </ol>
         </Section>

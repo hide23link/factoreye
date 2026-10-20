@@ -37,19 +37,19 @@ describe("UnitSelect", () => {
     const user = userEvent.setup();
     render(<Harness initial="°C" />);
     await user.selectOptions(screen.getByRole("combobox", { name: "単位" }), "その他（自由入力）");
-    await user.type(screen.getByRole("textbox", { name: "単位（自由入力）" }), "ppm");
-    expect(screen.getByTestId("value")).toHaveTextContent("ppm");
+    await user.type(screen.getByRole("textbox", { name: "単位（自由入力）" }), "psi");
+    expect(screen.getByTestId("value")).toHaveTextContent("psi");
   });
 
   it("候補にない既存の単位は、「その他」の入力欄にそのまま表示される", () => {
-    render(<Harness initial="ppm" />);
+    render(<Harness initial="psi" />);
     expect(screen.getByRole("combobox", { name: "単位" })).toHaveValue("__other__");
-    expect(screen.getByRole("textbox", { name: "単位（自由入力）" })).toHaveValue("ppm");
+    expect(screen.getByRole("textbox", { name: "単位（自由入力）" })).toHaveValue("psi");
   });
 
   it("「その他」から候補に戻せる", async () => {
     const user = userEvent.setup();
-    render(<Harness initial="ppm" />);
+    render(<Harness initial="psi" />);
     await user.selectOptions(screen.getByRole("combobox", { name: "単位" }), "kW");
     expect(screen.getByTestId("value")).toHaveTextContent("kW");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
