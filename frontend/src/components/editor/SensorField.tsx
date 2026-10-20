@@ -63,7 +63,7 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
           over ? "border-blue-600 bg-blue-50" : "border-gray-200"
         }`}
       >
-        <ul className="flex flex-wrap gap-1.5">
+        <ul className="flex flex-wrap gap-1.5 empty:hidden">
           {sensorIds.map((id, index) => (
             <li key={id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white py-0.5 pl-2 pr-1 text-sm">
               {multiple && colorOf && onRecolor && (
@@ -76,7 +76,9 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
                   style={{ backgroundColor: colorOf(index) }}
                 />
               )}
-              {nameOf(id)}
+              <span className="max-w-[9rem] truncate" title={nameOf(id)}>
+                {nameOf(id)}
+              </span>
               <button
                 type="button"
                 aria-label={`${nameOf(id)}を外す`}
@@ -89,7 +91,7 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
           ))}
         </ul>
         <p className="text-center text-xs text-gray-500">
-          {sensorIds.length > 0 && !multiple ? "別のセンサーをドラッグすると入れ替わります" : "左の一覧からここにドラッグ"}
+          {sensorIds.length > 0 && !multiple ? "ドラッグで入れ替え" : "ここにドラッグ"}
         </p>
       </div>
 

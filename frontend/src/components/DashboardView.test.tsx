@@ -155,7 +155,7 @@ describe("DashboardView", () => {
       expect(await screen.findByText("乾燥炉 温度")).toBeInTheDocument();
       expect(screen.queryByRole("group", { name: "ウィジェットの種類" })).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "＋ ウィジェット" }));
+      await user.click(screen.getByRole("button", { name: "ウィジェット" }));
       expect(screen.getByRole("group", { name: "ウィジェットの種類" })).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "設定" }));
@@ -167,7 +167,7 @@ describe("DashboardView", () => {
       await user.click(screen.getByRole("button", { name: "設定パネルを閉じる" }));
       expect(screen.queryByRole("complementary", { name: "設定パネル" })).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "✓ 編集を終わる" }));
+      await user.click(screen.getByRole("button", { name: "編集を終わる" }));
       expect(screen.queryByRole("group", { name: "ウィジェットの種類" })).not.toBeInTheDocument();
     });
 
@@ -309,7 +309,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-      await user.click(screen.getByRole("button", { name: "＋ ウィジェット" }));
+      await user.click(screen.getByRole("button", { name: "ウィジェット" }));
       await user.click(screen.getByRole("button", { name: /生産管理/ }));
 
       await waitFor(() =>
@@ -353,7 +353,7 @@ describe("DashboardView", () => {
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
       await user.click(await screen.findByLabelText("ウィジェットを削除"));
       await waitFor(() => expect(api.deleteWidget).toHaveBeenCalledWith("w1"));
-      expect(await screen.findByRole("button", { name: "元に戻す" })).toBeInTheDocument();
+      expect(await screen.findAllByRole("button", { name: "元に戻す" })).toHaveLength(2); // 上部のボタンと、通知のボタン
 
       await user.keyboard("{Control>}z{/Control}");
 
@@ -369,7 +369,7 @@ describe("DashboardView", () => {
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
 
-      expect(screen.getByRole("button", { name: "↶ 元に戻す" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "元に戻す" })).toBeDisabled();
     });
 
     describe("閲覧と編集で、画面の構造（位置・大きさに関わる部分）が変わらない", () => {
@@ -755,7 +755,7 @@ describe("DashboardView", () => {
         await waitFor(() => expect(aside().style.left).toBe("8px"));
 
         Object.defineProperty(window, "innerWidth", { value: 1700, configurable: true });
-        await user.click(screen.getByRole("button", { name: "✓ 編集を終わる" }));
+        await user.click(screen.getByRole("button", { name: "編集を終わる" }));
         await user.click(screen.getByRole("button", { name: "✎ 編集する" }));
         await screen.findByRole("complementary", { name: "センサー棚" });
 
