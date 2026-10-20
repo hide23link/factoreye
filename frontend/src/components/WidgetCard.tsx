@@ -2,7 +2,7 @@
  * ダッシュボードに置かれた1つのウィジェットの枠。
  * 種類に応じた中身（WidgetBody）を選んで出す。
  *
- * 編集モードのときだけ、右上に（つかむ目印・複製・削除）を重ねる。クリックで選択され、設定パネルに設定が出る。
+ * 編集モードのときだけ、右上に（つかむ目印・設定・複製・削除）を重ねる。クリックで選択され、「設定」ボタンを押すと設定パネルに設定が出る。
  * 編集の前後で、枠の大きさ・中身の位置が変わらないようにする（見出しの帯などを足さない）。
  * 編集中は、中身へのマウス操作（グラフのドラッグ選択など）を止める。クリックを「選択」に使い、移動と競合させないため。
  *
@@ -54,6 +54,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   const editing = useEditorStore((s) => s.editing);
   const selected = useEditorStore((s) => s.selectedWidgetId === widget.id);
   const select = useEditorStore((s) => s.select);
+  const openSettings = useEditorStore((s) => s.openSettings);
   const actions = useWidgetActions(dashboard);
   const label = widgetLabel(widget.type);
 
@@ -90,11 +91,23 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
         </ChunkErrorBoundary>
       </div>
       {editing && (
-        // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・複製・削除
+        // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・設定・複製・削除
         <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white/90 px-0.5 shadow-sm">
           <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-400">
             ⋮⋮
           </span>
+          <button
+            type="button"
+            aria-label="ウィジェットの設定"
+            title="設定"
+            onClick={(e) => {
+              e.stopPropagation();
+              openSettings(widget.id);
+            }}
+            className="widget-no-drag h-6 w-6 rounded text-gray-500 hover:bg-blue-50 hover:text-blue-700"
+          >
+            ⚙
+          </button>
           <button
             type="button"
             aria-label="ウィジェットを複製"

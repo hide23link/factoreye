@@ -91,6 +91,11 @@ afterEach(() => {
   useEditorStore.getState().reset();
 });
 
+/** ウィジェット内の「設定」ボタンを押して、設定パネルを開く（カードを選ぶだけでは開かない） */
+async function openSettings(user: ReturnType<typeof userEvent.setup>, card: HTMLElement | Promise<HTMLElement>) {
+  await user.click(within(await card).getByRole("button", { name: "ウィジェットの設定" }));
+}
+
 describe("DashboardView", () => {
   it("ローディング中はスピナーテキストを表示する", () => {
     vi.mocked(api.fetchDashboard).mockReturnValue(new Promise(() => {}));
@@ -320,6 +325,23 @@ describe("DashboardView", () => {
       );
     });
 
+    it("ウィジェットをクリックしても設定パネルは開かず、内側の「設定」ボタンで開く", async () => {
+      const user = userEvent.setup();
+      const widget = makeWidget({ id: "w1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
+      vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [widget] });
+      vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      const card = await screen.findByRole("group", { name: "グラフ" });
+      await user.click(card);
+      expect(card).toHaveAttribute("aria-current", "true");
+      expect(screen.queryByRole("complementary", { name: "設定パネル" })).not.toBeInTheDocument();
+
+      await openSettings(user, card);
+      expect(await screen.findByText("グラフの設定")).toBeInTheDocument();
+    });
+
     it("ウィジェットを選ぶと設定パネルがそのウィジェットの設定になり、変更はすぐ updateWidget で保存される", async () => {
       const user = userEvent.setup();
       const widget = makeWidget({ id: "w1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
@@ -329,7 +351,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-      await user.click(await screen.findByRole("group", { name: "グラフ" }));
+      await openSettings(user, await screen.findByRole("group", { name: "グラフ" }));
 
       expect(await screen.findByText("グラフの設定")).toBeInTheDocument();
       await user.click(screen.getByRole("radio", { name: "面" }));
@@ -461,7 +483,7 @@ describe("DashboardView", () => {
 
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-      await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+      await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
 
       await user.keyboard("{Backspace}");
       expect(api.deleteWidget).not.toHaveBeenCalled();
@@ -500,11 +522,11 @@ describe("DashboardView", () => {
         const cards = await screen.findAllByRole("group", { name: "アラーム一覧" });
         const panel = () => screen.getByRole("complementary", { name: "設定パネル" });
 
-        await user.click(cards.find((c) => c.dataset.widgetId === "left")!);
+        await openSettings(user, cards.find((c) => c.dataset.widgetId === "left")!);
         expect(panel()).toHaveAttribute("data-placement", "right");
-        await user.click(cards.find((c) => c.dataset.widgetId === "mid")!);
+        await openSettings(user, cards.find((c) => c.dataset.widgetId === "mid")!);
         expect(panel()).toHaveAttribute("data-placement", "right");
-        await user.click(cards.find((c) => c.dataset.widgetId === "right")!);
+        await openSettings(user, cards.find((c) => c.dataset.widgetId === "right")!);
         expect(panel()).toHaveAttribute("data-placement", "left");
       });
 
@@ -516,7 +538,7 @@ describe("DashboardView", () => {
 
         renderWithQueryClient(<DashboardView dashboardId="d1" />);
         await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
 
         expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom");
       });
@@ -530,7 +552,7 @@ describe("DashboardView", () => {
         renderWithQueryClient(<DashboardView dashboardId="d1" />);
         await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
         await user.click(screen.getByRole("button", { name: "センサー" })); // 棚を開く
-        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
 
         const panel = screen.getByRole("complementary", { name: "設定パネル" });
         expect(panel).toHaveAttribute("data-placement", "bottom");
@@ -549,7 +571,7 @@ describe("DashboardView", () => {
 
         renderWithQueryClient(<DashboardView dashboardId="d1" />);
         await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
 
         const panel = screen.getByRole("complementary", { name: "設定パネル" });
         expect(panel).toHaveAttribute("data-placement", "bottom");
@@ -567,7 +589,7 @@ describe("DashboardView", () => {
         await user.click(screen.getByRole("button", { name: "センサー" }));
         // 棚を右端（右のパネルの位置）へ動かす
         act(() => useEditorStore.getState().setShelfPos({ x: 980, y: 200 }, { persist: false }));
-        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
 
         const panel = screen.getByRole("complementary", { name: "設定パネル" });
         // 右は棚と重なるので、左端に出る
@@ -585,7 +607,7 @@ describe("DashboardView", () => {
         renderWithQueryClient(<DashboardView dashboardId="d1" />);
         await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
         await user.click(screen.getByRole("button", { name: "センサー" }));
-        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+        await openSettings(user, await screen.findByRole("group", { name: "アラーム一覧" }));
         await waitFor(() => expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom"));
         const calls = spy.mock.calls.length;
 
@@ -609,7 +631,7 @@ describe("DashboardView", () => {
 
         renderWithQueryClient(<DashboardView dashboardId="d1" />);
         await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
-        await user.click(await screen.findByRole("group", { name: "グラフ" }));
+        await openSettings(user, await screen.findByRole("group", { name: "グラフ" }));
         await screen.findByRole("complementary", { name: "センサー棚" });
 
         act(() => useEditorStore.getState().setDragging({ kind: "sensor", sensorId: "s2" }));
@@ -921,10 +943,10 @@ describe("DashboardView", () => {
         const pos = [panel().style.left, panel().style.top];
 
         const cards = await screen.findAllByRole("group", { name: "アラーム一覧" });
-        await user.click(cards.find((c) => c.dataset.widgetId === "a")!);
+        await openSettings(user, cards.find((c) => c.dataset.widgetId === "a")!);
         expect(panel()).toHaveAttribute("data-placement", "moved");
         expect([panel().style.left, panel().style.top]).toEqual(pos);
-        await user.click(cards.find((c) => c.dataset.widgetId === "b")!);
+        await openSettings(user, cards.find((c) => c.dataset.widgetId === "b")!);
         expect([panel().style.left, panel().style.top]).toEqual(pos);
       });
 
@@ -976,7 +998,7 @@ describe("DashboardView", () => {
         vi.mocked(api.updateWidget).mockResolvedValue(graph);
         vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
         const user = await openPanel([graph]);
-        await user.click(await screen.findByRole("group", { name: "グラフ" }));
+        await openSettings(user, await screen.findByRole("group", { name: "グラフ" }));
         panelHandle().focus();
         await user.keyboard("{ArrowRight}");
         expect(panel()).toHaveAttribute("data-placement", "moved");
