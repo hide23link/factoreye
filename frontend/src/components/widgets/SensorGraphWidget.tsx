@@ -40,7 +40,7 @@ import {
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
-import { GRAPH_BUCKETS, renderThresholdLines } from "./graph-parts";
+import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
 export { GRAPH_BUCKETS };
@@ -138,7 +138,7 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
             <BarChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Bar dataKey="value" fill={color} isAnimationActive={false} />
               {renderThresholdLines(lines)}
@@ -148,7 +148,7 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
             <AreaChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Area dataKey="value" stroke={color} fill={color} fillOpacity={0.2} isAnimationActive={false} />
               {renderThresholdLines(lines)}
@@ -158,7 +158,7 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
             <LineChart data={chartData} {...drag.handlers}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
               <Tooltip labelFormatter={tooltipLabelFormatter} />
               <Line type="monotone" dataKey="value" stroke={color} dot={false} isAnimationActive={false} />
               {renderThresholdLines(lines)}

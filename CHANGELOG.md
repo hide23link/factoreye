@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **ダッシュボードの編集画面を刷新**: 「編集する」で、左にセンサー／ウィジェットの棚、右に設定パネルを出す（ウィジェット追加・編集のモーダルは廃止）。センサーはドラッグ（グラフに追加／空きに新規作成）または「＋」で追加でき、ウィジェットは見出しをつかんで移動、右下で大きさを変える。設定の変更はすぐ保存する。Ctrl/⌘+Z と削除後の通知で元に戻せる。グラフは複数センサー・線／面／棒・線の色・しきい値線・ウィジェットごとの期間に対応（保存済みの設定はそのまま表示できる）。ダッシュボード一覧はミニプレビューつきのカードになり、新規作成で型（からっぽ／設備監視／生産管理）を選べる。API・DB の変更なし
 - **コードの読みやすさを改善（動作は変えていない）**: backend・frontend・tools/recovery・loadtest の各ファイルの冒頭に、「誰が・いつ呼ぶか」「引数は誰が渡すか」「処理の流れ」を追加した。略語の名前（`exc`・`p`・`s` など）を役割の分かる名前に直した。`ThresholdBreached` は `MinMax` に改名した（DB の型名 `thresholdbreached`・列名・API・Webhook は変更なし）。方針は ecopower の `guidelines/03-development-standards.md`「理解しやすさ」に従う
 - **画面の初期の読み込みを軽くした**: 画面（ダッシュボード・設定・セットアップガイド・管理者画面・規約）と、グラフのウィジェットを、開いた時に読み込むようにした。ダッシュボード以外を開く場合の初期の転送量は、785 KB（gzip 232 KB）→ 203 KB（gzip 65 KB）。デプロイ直後に古い画面を開いていても、読み込みに失敗した時は 1 回だけ自動で再読み込みし、それでも失敗すれば再読み込みの案内を出す
 
 ### Added
+- **生産管理ウィジェット（`ProductionPlan`）**: 1日の目標だけで動く。計画（目標 ÷ 稼働時間を均等割り）に対する差・達成率・終業時の見込み・稼働率と停止時間（10 分単位）・時間別の実績を表示する。ウィジェットの実寸に合わせて、入りきらない項目を自動で省く。既存の稼働ステータス（`ProductionStatus`）とは別の種類
 - **未登録の ingestKey のセンサーを自動で作る設定**（`INGEST_AUTO_CREATE=on`、self-hosted だけ。既定 off）: 機器が本文に付けた `name`・`unit` で作る。`ingestKey` は英数字と `. _ -` で 64 文字まで、センサーの総数は `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）まで。名前・単位は、拒否せずに整える（制御文字などを除く）。名前が重なるときは、候補を順に試す。作る処理は、advisory lock で 1 つずつ行う。SaaS では無視する。`ingestKey` に NUL を含む取り込みは、500 ではなく 400 にした。Arduino の `FactorEyeClient` に `setSensorInfo`（名前と単位を結びつける）を追加
 - **LAN 向けの取り込み専用の窓口**（`infra/lan-ingest/`）: nginx で、`POST /api/ingest/readings` と `GET /health` だけを LAN に通す（それ以外は 404）。私設アドレスからだけ受け、機器の IP を `CF-Connecting-IP` として backend に渡す（機器ごとにレート制限を数え、偽装を防ぐ）。`INGEST_AUTH=off` で動かすときの前提の窓口。確認用の `verify.sh` つき
 - **self-hosted の取り込みをキーなしにできる設定**（`INGEST_AUTH=off`、既定 `key`）: 機器に API キーを入れない運用向け。`off` のときは `X-API-Key` を確かめず、`ingestKey` だけでセンサーを識別する（`INGEST_API_KEY` は使わず、本番の既定値の検査もしない）。起動時に警告を出す。取り込みの口を LAN などに限定して使う。Arduino の `FactorEyeClient` は、API キーが空なら `X-API-Key` を付けずに送る

@@ -42,7 +42,7 @@ import {
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { effectiveRange, graphColor, graphSensorIds, graphYDomain, thresholdLines } from "../../lib/graph-config";
-import { GRAPH_BUCKETS, renderThresholdLines } from "./graph-parts";
+import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
 
 /**
  * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
@@ -134,7 +134,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       tickFormatter={formatTime}
       tick={{ fontSize: 10 }}
     />,
-    <YAxis key="y" domain={yDomain} width={44} tick={{ fontSize: 10 }} />,
+    <YAxis key="y" domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />,
     <Tooltip key="tip" labelFormatter={(label: ReactNode) => formatTime(Number(label))} />,
     <Legend key="legend" wrapperStyle={{ fontSize: 10 }} />,
     ...renderThresholdLines(lines),

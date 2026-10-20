@@ -25,3 +25,8 @@ export function renderThresholdLines(lines: ThresholdLine[]) {
     />
   ));
 }
+
+/** 縦軸の目盛りの文字。しきい値で範囲を広げると端数の多い目盛りになり、軸の幅に入らないため、有効数字 4 桁に丸める */
+export function formatYTick(value: number): string {
+  return String(Number(value.toPrecision(4)));
+}

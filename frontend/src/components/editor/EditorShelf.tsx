@@ -174,7 +174,7 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
       </span>
       <i aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold">{sensor.name}</div>
+        <div className="line-clamp-2 break-words text-sm font-semibold leading-tight" title={sensor.name}>{sensor.name}</div>
         <div className="text-[11px] text-gray-500">{SENSOR_KIND_LABEL[kind]}</div>
       </div>
       {kind !== "state" && <Sparkline values={series} />}
@@ -196,7 +196,7 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
 }
 
 /** 小さな推移線。点が2つ未満なら何も描かない */
-function Sparkline({ values, width = 56, height = 18 }: { values: number[]; width?: number; height?: number }) {
+function Sparkline({ values, width = 40, height = 18 }: { values: number[]; width?: number; height?: number }) {
   if (values.length < 2) return <span style={{ width }} aria-hidden="true" />;
   const low = Math.min(...values);
   const range = Math.max(...values) - low || 1;
