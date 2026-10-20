@@ -50,6 +50,7 @@ export function DropSurface({
   const { width } = useElementSize(ref);
   const [hover, setHover] = useState<Hover | null>(null);
   const { data: sensors } = useSensors();
+  const shelfOpen = useEditorStore((s) => s.shelfOpen);
   const actions = useWidgetActions(dashboard);
   const metrics = { containerWidth: width, rowHeight: GRID_ROW_HEIGHT, margin: GRID_MARGIN };
 
@@ -158,7 +159,21 @@ export function DropSurface({
           <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white/70 px-5 py-4">
             <b className="text-base text-gray-900">ここにセンサーをドラッグしてみましょう</b>
             <br />
-            左の一覧から、好きなセンサーをここへ。グラフや生産管理が自動でできあがります。
+            {shelfOpen
+              ? "左の一覧から、好きなセンサーをここへ。グラフや生産管理が自動でできあがります。"
+              : "上の［センサー］を押して一覧を開き、好きなセンサーをここへ。グラフや生産管理が自動でできあがります。"}
+            {!shelfOpen && (
+              <>
+                <br />
+                <button
+                  type="button"
+                  onClick={() => useEditorStore.getState().setShelfOpen(true)}
+                  className="pointer-events-auto mt-2 rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  センサーを開く
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

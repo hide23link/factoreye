@@ -21,7 +21,7 @@ import "react-resizable/css/styles.css";
 import { useDashboard } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
-import { choosePanelPlacement, leftPanelOffset, type PanelPlacement } from "../lib/panel-placement";
+import { choosePanelPlacement, leftPanelOffset, NARROW_VIEWPORT, type PanelPlacement } from "../lib/panel-placement";
 import { useEditorStore } from "../store/useEditorStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -44,6 +44,8 @@ const VIEW_BREAKPOINTS = { lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 };
 // 編集中は、棚と設定パネルで格子が狭くなる。列数が変わると置いた位置が崩れるため、常に 12 列で編集する
 const EDIT_COLS = { lg: 12 };
 const EDIT_BREAKPOINTS = { lg: 0 };
+// スマホ用の下部ナビ（App.tsx の BottomNav、min-h-14）の高さ（px）
+const BOTTOM_NAV_HEIGHT = 56;
 
 /** ウィジェットを、格子のレイアウト項目に変換する（列・行は 0 始まりに直す）。最小サイズは 1 列・2 行。 */
 function toLayoutItem(widget: Widget) {
@@ -233,7 +235,11 @@ function LoadedDashboard({
     update();
     window.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
+    // 時間の操作の高さが変わっても（カスタム期間の入力欄で行が増えるなど）、窓の上端を追従させる
+    const observer = typeof ResizeObserver !== "undefined" && controlsRef.current ? new ResizeObserver(update) : null;
+    if (observer && controlsRef.current) observer.observe(controlsRef.current);
     return () => {
+      observer?.disconnect();
       cancelAnimationFrame(frame);
       window.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
@@ -259,11 +265,6 @@ function LoadedDashboard({
         drawerTop,
       });
       setPlacement(next);
-      if (next === "bottom" && box) {
-        // 下の窓（画面の高さの 45%）より上に、ウィジェットの下端が来るようにする
-        const visibleBottom = window.innerHeight * 0.55 - 16;
-        if (box.bottom > visibleBottom) window.scrollBy({ top: box.bottom - visibleBottom });
-      }
     };
     measure();
     window.addEventListener("resize", measure);
@@ -272,11 +273,29 @@ function LoadedDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, placementKey]);
 
+  // 狭い画面（640px 未満）は、画面の下に固定の下部ナビ（高さ 56px）がある。窓がそれに隠れないよう、その分だけ上げる
+  const drawerBottom = window.innerWidth < NARROW_VIEWPORT ? BOTTOM_NAV_HEIGHT + 8 : 8;
+  // 下に出すときは、ウィジェットが下の窓（画面の高さの 45%）より上に見えるようスクロールする。
+  // 窓の分の余白（ページの下の padding）が付いたあとでないと、ページが短くてスクロールできないため、placement が決まってから行う
+  useLayoutEffect(() => {
+    if (!editing || !panelOpen || placement !== "bottom" || !selectedWidgetId) return;
+    const el = document.querySelector<HTMLElement>(`[data-widget-id="${selectedWidgetId}"]`);
+    const box = el?.getBoundingClientRect();
+    // 窓の上端 = 画面の高さ − 窓の高さ（45%）− 窓の下の余白（狭い画面は下部ナビの分）
+    const bottomGap = window.innerWidth < NARROW_VIEWPORT ? BOTTOM_NAV_HEIGHT + 8 : 8;
+    const visibleBottom = window.innerHeight * 0.55 - bottomGap - 16;
+    if (box && box.bottom > visibleBottom) window.scrollBy({ top: box.bottom - visibleBottom });
+  }, [editing, panelOpen, placement, selectedWidgetId]);
+
   const drawerBase =
     "fixed z-30 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg transition-opacity";
 
   return (
-    <div className="px-2 py-4 sm:p-4">
+    <div
+      className="px-2 py-4 sm:p-4"
+      // 設定パネルを下に出すときは、ページの下に窓の高さの余白を足す（ウィジェットを窓の上までスクロールできるように）。上の位置は変わらない
+      style={editing && panelOpen && placement === "bottom" ? { paddingBottom: "50vh" } : undefined}
+    >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <button
@@ -370,8 +389,8 @@ function LoadedDashboard({
       {editing && shelfOpen && (
         <aside
           aria-label="センサー棚"
-          style={{ top: drawerTop }}
-          className={`${drawerBase} bottom-2 left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
+          style={{ top: drawerTop, bottom: drawerBottom }}
+          className={`${drawerBase} left-2 w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
         >
           <EditorShelf dashboard={dashboard} />
         </aside>
@@ -382,13 +401,14 @@ function LoadedDashboard({
           data-placement={placement}
           style={
             placement === "bottom"
-              ? { height: "45vh" }
+              ? // 下に出すときは、開いているセンサー棚の右隣から右端まで（棚と重ならない）
+                { height: "45vh", bottom: drawerBottom, left: leftPanelOffset(shelfOpen), right: 8 }
               : placement === "left"
-                ? { top: drawerTop, left: leftPanelOffset(shelfOpen) }
-                : { top: drawerTop }
+                ? { top: drawerTop, bottom: drawerBottom, left: leftPanelOffset(shelfOpen) }
+                : { top: drawerTop, bottom: drawerBottom }
           }
           className={`${drawerBase} ${
-            placement === "bottom" ? "inset-x-2 bottom-2" : placement === "left" ? "bottom-2 w-[316px]" : "bottom-2 right-2 w-[316px]"
+            placement === "bottom" ? "" : placement === "left" ? "w-[316px]" : "right-2 w-[316px]"
           } max-w-[calc(100vw-1rem)]`}
         >
           <SettingsPanel dashboard={dashboard} />

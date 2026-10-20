@@ -517,6 +517,41 @@ describe("DashboardView", () => {
         expect(screen.getByRole("complementary", { name: "設定パネル" })).toHaveAttribute("data-placement", "bottom");
       });
 
+      it("下に出す設定パネルは、開いているセンサー棚の右隣から始まり、棚と重ならない", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ wide: [16, 1264] });
+        const wide = makeWidget({ id: "wide", type: "AlarmAlert", gridColumn: 1, gridWidth: 12 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [wide] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(screen.getByRole("button", { name: "センサー" })); // 棚を開く
+        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+
+        const panel = screen.getByRole("complementary", { name: "設定パネル" });
+        expect(panel).toHaveAttribute("data-placement", "bottom");
+        // 棚（左 8 + 幅 272）の右隣。棚が閉じていれば 8
+        expect(panel.style.left).toBe("288px");
+        await user.click(screen.getByRole("button", { name: "センサー棚を閉じる" }));
+        expect(screen.getByRole("complementary", { name: "設定パネル" }).style.left).toBe("8px");
+      });
+
+      it("狭い画面（640px 未満）では、下部ナビ（56px）に隠れないよう、窓を上げて出す", async () => {
+        const user = userEvent.setup();
+        mockWidgetRects({ wide: [16, 560] });
+        Object.defineProperty(window, "innerWidth", { value: 600, configurable: true });
+        const wide = makeWidget({ id: "wide", type: "AlarmAlert", gridColumn: 1, gridWidth: 12 });
+        vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [wide] });
+
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(await screen.findByRole("group", { name: "アラーム一覧" }));
+
+        const panel = screen.getByRole("complementary", { name: "設定パネル" });
+        expect(panel).toHaveAttribute("data-placement", "bottom");
+        expect(panel.style.bottom).toBe("64px");
+      });
+
       it("ドラッグ中は棚を隠すが、設定パネルは隠さず、パネルの枠にセンサーを置ける", async () => {
         const user = userEvent.setup();
         const graph = makeWidget({ id: "g1", type: "SensorGraph", sensorId: "s1", config: { graphType: "line" } });
@@ -539,6 +574,23 @@ describe("DashboardView", () => {
           expect(api.updateWidget).toHaveBeenCalledWith("g1", expect.objectContaining({ config: expect.objectContaining({ sensorIds: ["s1", "s2"] }) })),
         );
       });
+    });
+
+    it("空のキャンバスの案内: 棚が閉じているときは［センサー］を押すよう案内し、ボタンで棚を開ける", async () => {
+      const user = userEvent.setup();
+      // 1600px 未満では、棚は閉じて始まる
+      Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+
+      expect(screen.queryByRole("complementary", { name: "センサー棚" })).not.toBeInTheDocument();
+      expect(screen.getByText(/上の［センサー］を押して一覧を開き/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "センサーを開く" }));
+      expect(screen.getByRole("complementary", { name: "センサー棚" })).toBeInTheDocument();
+      expect(screen.getByText(/左の一覧から/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "センサーを開く" })).not.toBeInTheDocument();
     });
 
     it("確認ダイアログの表示中は、Ctrl+Z を画面の裏の元に戻すに効かせない", async () => {

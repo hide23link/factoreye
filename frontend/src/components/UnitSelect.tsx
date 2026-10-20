@@ -7,7 +7,7 @@
  * 【誰が使うか】SensorSettingsPanel（作成フォーム・編集行）、SetupWizard。
  * 【引数（props）】value = 今の単位、onChange = 変えたとき、label = 読み上げ用の名前、className = 外側の幅など。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { OTHER_UNIT, UNIT_PRESETS, isPresetUnit } from "../lib/units";
 
@@ -22,15 +22,21 @@ export function UnitSelect({
   label?: string;
   className?: string;
 }) {
-  // 「その他」を選んだ（まだ何も入力していない間も、入力欄を出し続ける）
+  // 「その他」を選んだ。入力中に値がたまたま候補と一致しても（「L」→「L/h」の途中など）、入力欄は消さない。
+  // 解除するのは、プルダウンで候補を選んだときと、親が値を候補に戻したとき（下の effect）だけ
   const [pickedOther, setPickedOther] = useState(false);
-  // 値が入っているときは、値で決める（候補なら候補、そうでなければ「その他」）。空のときだけ、選んだ操作に従う
-  const isOther = value !== "" ? !isPresetUnit(value) : pickedOther;
-  // 親が単位を初期値（候補）に戻したときは、「その他」の選択も解く（作成後に、前回の状態が残らないように）
-  useEffect(() => {
-    if (isPresetUnit(value)) setPickedOther(false);
-  }, [value]);
+  // この部品が最後に親へ伝えた値。これと違う候補の値が来たら、親が戻した（リセットした）とみなす
+  const lastEmitted = useRef(value);
+  const emit = (next: string) => {
+    lastEmitted.current = next;
+    onChange(next);
+  };
+  const isOther = pickedOther || (value !== "" && !isPresetUnit(value));
   const selected = isOther ? OTHER_UNIT : value;
+  useEffect(() => {
+    if (value !== lastEmitted.current && isPresetUnit(value)) setPickedOther(false);
+    lastEmitted.current = value;
+  }, [value]);
 
   return (
     <span className={`inline-flex flex-col gap-1 ${className}`}>
@@ -42,11 +48,11 @@ export function UnitSelect({
           if (next === OTHER_UNIT) {
             setPickedOther(true);
             // 候補だった値を、そのまま「その他」の初期値にしない（選び直した意図を空欄で示す）
-            if (isPresetUnit(value)) onChange("");
+            if (isPresetUnit(value)) emit("");
             return;
           }
           setPickedOther(false);
-          onChange(next);
+          emit(next);
         }}
         className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
       >
@@ -64,7 +70,7 @@ export function UnitSelect({
           value={value}
           maxLength={20}
           placeholder="例: ppm"
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => emit(event.target.value)}
           className="w-24 rounded border border-gray-300 px-2 py-1 text-sm"
         />
       )}

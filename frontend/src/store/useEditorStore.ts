@@ -102,7 +102,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // 狭い画面では、棚とパネルの両方を開くと、キャンバスが見えなくなるので、片方だけにする
   select: (id) =>
     set((s) =>
-      id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, panelOpen: true, shelfOpen: isNarrow() ? false : s.shelfOpen },
+      id === null ? { selectedWidgetId: null } : { selectedWidgetId: id, panelOpen: true, focusName: false, shelfOpen: isNarrow() ? false : s.shelfOpen },
     ),
   setShelfOpen: (open) => set((s) => ({ shelfOpen: open, panelOpen: open && isNarrow() ? false : s.panelOpen })),
   setPanelOpen: (open) => set((s) => ({ panelOpen: open, shelfOpen: open && isNarrow() ? false : s.shelfOpen })),
