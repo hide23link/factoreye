@@ -116,8 +116,10 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
                 }}
                 className="flex w-full items-center gap-2 border-b border-gray-100 px-2.5 py-1.5 text-left text-sm last:border-b-0 hover:bg-blue-50"
               >
-                {sensor.name}
-                <small className="ml-auto text-gray-500">{SENSOR_KIND_LABEL[guessSensorKind(sensor)]}</small>
+                <span className="min-w-0 flex-1 truncate" title={sensor.name}>
+                  {sensor.name}
+                </span>
+                <small className="shrink-0 text-gray-500">{SENSOR_KIND_LABEL[guessSensorKind(sensor)]}</small>
               </button>
             </li>
           ))}

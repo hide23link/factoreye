@@ -340,6 +340,10 @@ describe("DashboardView", () => {
 
       await openSettings(user, card);
       expect(await screen.findByText("グラフの設定")).toBeInTheDocument();
+
+      // もう一度押すと閉じる
+      await user.click(within(card).getByRole("button", { name: "ウィジェットの設定" }));
+      await waitFor(() => expect(screen.queryByRole("complementary", { name: "設定パネル" })).not.toBeInTheDocument());
     });
 
     it("ウィジェットを選ぶと設定パネルがそのウィジェットの設定になり、変更はすぐ updateWidget で保存される", async () => {
