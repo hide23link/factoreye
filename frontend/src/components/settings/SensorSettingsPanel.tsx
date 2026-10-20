@@ -12,6 +12,7 @@ import { useSensors } from "../../hooks/queries";
 import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
 import { describeActionError, describeSensorError } from "../../lib/errors";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
+import { isImeComposing } from "../../lib/ime";
 import { validateSensorBasics, validateThresholds } from "../../lib/sensor-validation";
 import type { Sensor } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -69,11 +70,25 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["sensors"] });
 
+  // 編集をやめるとき、入力途中の値を元の値に戻す（次に編集を開いたとき、前回の途中の値が残らないように）
+  const cancelEdit = () => {
+    setName(sensor.name);
+    setUnit(sensor.unit);
+    setMinWarning(sensor.thresholdMinWarning ?? "");
+    setMinCritical(sensor.thresholdMinCritical ?? "");
+    setMaxWarning(sensor.thresholdMaxWarning ?? "");
+    setMaxCritical(sensor.thresholdMaxCritical ?? "");
+    setDeadBand(sensor.thresholdDeadBand);
+    setError(null);
+    setEditing(false);
+  };
+
   const saveMutation = useMutation({
     mutationFn: () =>
       updateSensor(sensor.id, {
-        name,
-        unit,
+        // 前後の空白は送らない（見た目では同じ名前が、別の名前として登録されるのを防ぐ）
+        name: name.trim(),
+        unit: unit.trim(),
         thresholdMinWarning: toThreshold(minWarning),
         thresholdMinCritical: toThreshold(minCritical),
         thresholdMaxWarning: toThreshold(maxWarning),
@@ -140,8 +155,8 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
           className="border-b border-gray-100 bg-blue-50/40"
           // 表の行はフォームにできないので、Enter で保存・Esc でキャンセルを、ここで受ける
           onKeyDown={(e) => {
-            if (e.key === "Escape") setEditing(false);
-            else if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+            if (e.key === "Escape") cancelEdit();
+            else if (e.key === "Enter" && !isImeComposing(e) && e.target instanceof HTMLInputElement) {
               e.preventDefault();
               trySave();
             }
@@ -195,7 +210,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
             </button>
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={cancelEdit}
               className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
             >
               キャンセル
@@ -287,7 +302,7 @@ export function SensorSettingsPanel() {
 
   // 新規登録。上限（Free Tier）に達した場合は、案内の文言を出す
   const createMutation = useMutation({
-    mutationFn: () => createSensor({ name, ingestKey, unit }),
+    mutationFn: () => createSensor({ name: name.trim(), ingestKey: ingestKey.trim(), unit: unit.trim() }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sensors"] });
       setName("");

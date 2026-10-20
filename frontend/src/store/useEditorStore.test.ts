@@ -52,4 +52,11 @@ describe("useEditorStore", () => {
     s.stopEditing();
     expect(useEditorStore.getState()).toMatchObject({ editing: false, history: [], toast: null, dragging: null });
   });
+
+  it("新規作成直後の名前フォーカスの指示は、ウィジェットを選んだら取り下げる", () => {
+    useEditorStore.getState().startEditing({ focusName: true });
+    expect(useEditorStore.getState().focusName).toBe(true);
+    useEditorStore.getState().select("w1");
+    expect(useEditorStore.getState().focusName).toBe(false);
+  });
 });

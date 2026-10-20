@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
+import { fireEvent, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import { ApiError } from "../../lib/errors";
 import type { Sensor } from "../../types";
 import { SensorSettingsPanel } from "./SensorSettingsPanel";
@@ -202,5 +202,55 @@ describe("SensorSettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(api.updateSensor).toHaveBeenCalledWith("s1", expect.objectContaining({ unit: "psi" })));
+  });
+
+  it("名前・単位の前後の空白は、送る前に取り除く", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await user.type(screen.getByLabelText("名前"), "  圧力計A-1  ");
+    await user.selectOptions(screen.getByRole("combobox", { name: "単位" }), "その他（自由入力）");
+    await user.type(screen.getByRole("textbox", { name: "単位（自由入力）" }), " psi ");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    await waitFor(() => expect(api.createSensor).toHaveBeenCalledWith(expect.objectContaining({ name: "圧力計A-1", unit: "psi" })));
+  });
+
+  it("編集: 日本語入力の変換確定の Enter では保存しない", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.updateSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    const name = screen.getByRole("textbox", { name: "センサー名" });
+
+    fireEvent.keyDown(name, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(name, { key: "Enter", keyCode: 229 });
+    expect(api.updateSensor).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(name, { key: "Enter" });
+    await waitFor(() => expect(api.updateSensor).toHaveBeenCalled());
+  });
+
+  it("編集: Esc でキャンセルすると、入力途中の値を捨てて元の値に戻る", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("編集"));
+    const name = screen.getByRole("textbox", { name: "センサー名" });
+    await user.clear(name);
+    await user.type(name, "途中の名前");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox", { name: "センサー名" })).not.toBeInTheDocument();
+
+    await user.click(within((await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement).getByText("編集"));
+    expect(screen.getByRole("textbox", { name: "センサー名" })).toHaveValue("圧力計A-1");
   });
 });

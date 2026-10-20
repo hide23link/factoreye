@@ -7,6 +7,8 @@
  */
 import { useId, useState, type ReactNode } from "react";
 
+import { isImeComposing } from "../../lib/ime";
+
 /** 見出し付きの区切り */
 export function Section({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
   return (
@@ -152,7 +154,7 @@ export function NumberField({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commitDraft}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commitDraft();
+            if (e.key === "Enter" && !isImeComposing(e)) commitDraft();
           }}
           className={`min-w-0 px-2 py-1 text-center ${step !== undefined ? "w-24 font-bold" : "w-full"}`}
         />

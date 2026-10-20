@@ -117,4 +117,18 @@ describe("DashboardListPage", () => {
     expect(await screen.findByText(/ダッシュボードの作成に失敗しました/)).toBeInTheDocument();
     expect(useUiStore.getState().selectedDashboardId).toBeNull();
   });
+
+  it("同じ名前がすでにあるときは、連番を付けて作る（新しいダッシュボード 2）", async () => {
+    const user = userEvent.setup();
+    const existing = [{ ...dashboards[0], id: "x1", name: "新しいダッシュボード" }];
+    vi.mocked(api.fetchDashboards).mockResolvedValue(existing);
+    vi.mocked(api.createDashboard).mockResolvedValue({ ...dashboards[0], id: "d-new", name: "新しいダッシュボード 2", widgets: [] });
+
+    renderWithQueryClient(<DashboardListPage />);
+    await screen.findAllByRole("button", { name: /新しいダッシュボード/ });
+    // 作成のカードは、一覧の最後
+    await user.click(screen.getAllByRole("button", { name: /新しいダッシュボード/ }).at(-1)!);
+
+    await waitFor(() => expect(api.createDashboard).toHaveBeenCalledWith({ name: "新しいダッシュボード 2" }));
+  });
 });
