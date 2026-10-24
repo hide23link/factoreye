@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { act, renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
+import { act, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import { GRAPH_COLORS } from "../../lib/graph-config";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor, Widget } from "../../types";
@@ -13,6 +13,8 @@ vi.mock("../../lib/api", () => ({
   updateWidget: vi.fn(),
   addWidget: vi.fn(),
   deleteWidget: vi.fn(),
+  fetchSensorReadings: vi.fn(),
+  fetchSensorReadingsAggregate: vi.fn(),
 }));
 
 import * as api from "../../lib/api";
@@ -63,6 +65,8 @@ function lastConfig(): Widget["config"] {
 beforeEach(() => {
   useEditorStore.getState().reset();
   vi.mocked(api.fetchSensors).mockResolvedValue([sensor("s1", "温度"), sensor("s2", "圧力", "MPa"), sensor("s3", "ライン1 生産数", "個")]);
+  vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
+  vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 0, count: 0 });
   vi.mocked(api.updateWidget).mockImplementation(async (id) => widget("SensorGraph", { id }));
 });
 
@@ -127,11 +131,31 @@ describe("WidgetSettings: 生産管理", () => {
     const user = userEvent.setup();
     renderWithQueryClient(<WidgetSettings widget={plan} dashboard={dashboardOf(plan)} />);
 
-    await user.click(screen.getByRole("button", { name: "▼ 一覧から選ぶ" }));
+    await user.click(screen.getByRole("button", { name: "＋ センサーを選ぶ" }));
     await user.click(await screen.findByRole("button", { name: /^温度/ }));
 
     await waitFor(() => expect(api.updateWidget).toHaveBeenCalledWith("w1", expect.objectContaining({ sensorId: "s1" })));
     expect(useEditorStore.getState().toast?.message).toContain("生産数のセンサーではなさそうです");
+  });
+});
+
+describe("WidgetSettings: 1つだけ選ぶ欄", () => {
+  const stat = widget("StatValue", { sensorId: "s1" });
+
+  it("いま選んでいる行を押しても何も変えずに閉じ、別の行を押すと入れ替わって閉じる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={stat} dashboard={dashboardOf(stat)} />);
+
+    await user.click(await screen.findByRole("button", { name: "＋ センサーを選ぶ" }));
+    // 外すボタン（「温度を外す」）と取り違えないよう、選ぶ画面の中から探す
+    await user.click(within(await screen.findByRole("group", { name: "センサーを選ぶ" })).getByRole("button", { name: /温度/ }));
+    expect(screen.queryByRole("group", { name: "センサーを選ぶ" })).not.toBeInTheDocument();
+    expect(api.updateWidget).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "＋ センサーを選ぶ" }));
+    await user.click(within(await screen.findByRole("group", { name: "センサーを選ぶ" })).getByRole("button", { name: /^圧力/ }));
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalledWith("w1", expect.objectContaining({ sensorId: "s2" })));
+    expect(screen.queryByRole("group", { name: "センサーを選ぶ" })).not.toBeInTheDocument();
   });
 });
 
@@ -146,6 +170,46 @@ describe("WidgetSettings: グラフ", () => {
 
     await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
     expect(lastConfig().colors).toEqual(["#111111", GRAPH_COLORS[0]]);
+  });
+
+  it("センサーを追加する画面は、追加してもすぐには閉じず、続けて選べる", async () => {
+    const user = userEvent.setup();
+    const one = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1"], colors: ["#111111"] } });
+    renderWithQueryClient(<WidgetSettings widget={one} dashboard={dashboardOf(one)} />);
+
+    await user.click(await screen.findByRole("button", { name: "＋ センサーを追加" }));
+    await user.click(await screen.findByRole("button", { name: /^圧力/ }));
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalledWith("w1", expect.objectContaining({ sensorId: "s1" })));
+    expect(lastConfig()).toMatchObject({ sensorIds: ["s1", "s2"] });
+    expect(screen.getByRole("group", { name: "センサーを選ぶ" })).toBeInTheDocument();
+  });
+
+  it("センサーを追加する画面で、選択中の行を押すと外れ、残った線の色は保たれる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={graph} dashboard={dashboardOf(graph)} />);
+
+    await user.click(await screen.findByRole("button", { name: "＋ センサーを追加" }));
+    const picker = screen.getByRole("group", { name: "センサーを選ぶ" });
+    await user.click(within(picker).getByRole("button", { name: /^温度/ }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig()).toMatchObject({ sensorIds: ["s2"], colors: ["#222222"] });
+  });
+
+  it("Esc で閉じ、フォーカスは開いたボタンに戻る。ボタンにフォーカスがあるときの Esc でも閉じる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={graph} dashboard={dashboardOf(graph)} />);
+
+    const toggle = await screen.findByRole("button", { name: "＋ センサーを追加" });
+    await user.click(toggle);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "センサーを選ぶ" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "＋ センサーを追加" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "＋ センサーを追加" }));
+    screen.getByRole("button", { name: "▲ 閉じる" }).focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "センサーを選ぶ" })).not.toBeInTheDocument();
   });
 
   it("×でセンサーを外すと、残った線の色が入れ替わらない", async () => {

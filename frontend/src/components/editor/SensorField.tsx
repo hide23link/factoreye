@@ -1,18 +1,19 @@
 /**
- * 設定パネルの「センサー」欄。選んだセンサーのチップ、ドラッグで入れる枠、「一覧から選ぶ」。
+ * 設定パネルの「センサー」欄。選んだセンサーのチップ、ドラッグで入れる枠、「センサーを追加」（登録済みのセンサーを、状態・現在値つきで選ぶ）。
  *
  * - グラフ（複数OK）: チップの色の丸をクリックすると線の色が変わる。×で外す。ドロップは「追加」
  * - ほかの種類（1つ）: ドロップは「入れ替え」
- * ドラッグ以外でも選べるよう、「一覧から選ぶ」を必ず用意する（キーボード操作のため）。
+ * ドラッグ以外でも選べるよう、「＋ センサーを追加」（SensorPicker）を必ず用意する（キーボード操作のため）。
  *
  * 【誰が使うか】GraphSettings、StatValueSettings、ProductionStatusSettings、ProductionPlanSettings。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
-import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
+import type { SensorKind } from "../../lib/sensor-kind";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { Sensor } from "../../types";
+import { SensorPicker } from "./SensorPicker";
 
 interface Props {
   sensorIds: string[];
@@ -33,17 +34,28 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
   const dragging = useEditorStore((s) => s.dragging);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [over, setOver] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  // 閉じたら、開いたボタンにフォーカスを戻す（行や入力欄が消えて、フォーカスが失われないように）
+  const closePicker = () => {
+    setPickerOpen(false);
+    toggleRef.current?.focus();
+  };
 
   const nameOf = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
-  const candidates = (sensors ?? [])
-    .filter((s) => multiple ? !sensorIds.includes(s.id) : true)
-    // 向いている種類を先に並べる
-    .sort((a, b) => Number(guessSensorKind(b) === suited) - Number(guessSensorKind(a) === suited));
-
   const accept = (sensor: Sensor) => (multiple ? onAdd(sensor) : onReplace(sensor));
 
   return (
-    <div className="flex flex-col gap-2">
+    // data-sensor-field: DashboardView が、この中のキー操作（Delete・Ctrl+Z）を画面のウィジェットに効かせないための目印
+    <div
+      data-sensor-field
+      className="flex flex-col gap-2"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && pickerOpen) {
+          e.stopPropagation();
+          closePicker();
+        }
+      }}
+    >
       <div
         data-testid="sensor-dropzone"
         onDragOver={(e) => {
@@ -96,34 +108,32 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
       </div>
 
       <button
+        ref={toggleRef}
         type="button"
         aria-expanded={pickerOpen}
         onClick={() => setPickerOpen((open) => !open)}
-        className="self-start rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+        className="self-start rounded-md border-2 border-dashed border-blue-600 bg-blue-50 px-3 py-1.5 text-sm font-bold text-blue-700 hover:bg-blue-100"
       >
-        {pickerOpen ? "▲ 閉じる" : "▼ 一覧から選ぶ"}
+        {pickerOpen ? "▲ 閉じる" : multiple ? "＋ センサーを追加" : "＋ センサーを選ぶ"}
       </button>
       {pickerOpen && (
-        <ul className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-white">
-          {candidates.length === 0 && <li className="p-2 text-sm text-gray-500">選べるセンサーがありません</li>}
-          {candidates.map((sensor) => (
-            <li key={sensor.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  accept(sensor);
-                  setPickerOpen(false);
-                }}
-                className="flex w-full items-center gap-2 border-b border-gray-100 px-2.5 py-1.5 text-left text-sm last:border-b-0 hover:bg-blue-50"
-              >
-                <span className="min-w-0 flex-1 truncate" title={sensor.name}>
-                  {sensor.name}
-                </span>
-                <small className="shrink-0 text-gray-500">{SENSOR_KIND_LABEL[guessSensorKind(sensor)]}</small>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <SensorPicker
+          sensors={sensors ?? []}
+          selectedIds={sensorIds}
+          suited={suited}
+          multiple={multiple}
+          onToggle={(sensor, selected) => {
+            if (selected) {
+              // 外せるのは複数選べるとき（グラフ）だけ。1つだけのときは、同じセンサーを押しても何も変えない
+              const index = sensorIds.indexOf(sensor.id);
+              if (multiple && index >= 0) onRemove(index);
+            } else {
+              accept(sensor);
+            }
+            if (!multiple) closePicker();
+          }}
+          onClose={closePicker}
+        />
       )}
     </div>
   );
