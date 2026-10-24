@@ -10,22 +10,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useSensorReadings } from "../hooks/queries";
-import { API_BASE_URL, addWidget, createDashboard, createSensor } from "../lib/api";
+import { addWidget, createDashboard, createSensor } from "../lib/api";
+import { CODE_TABS, ingestSnippets, type CodeTab } from "../lib/ingest-snippets";
 import { validateSensorBasics } from "../lib/sensor-validation";
 import { describeActionError, errorStatus } from "../lib/errors";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../lib/freeTier";
 import { useUiStore } from "../store/useUiStore";
 import { UnitSelect } from "./UnitSelect";
 
-// 段階の番号（1〜4）と、送信例のコードの種類（curl・Arduino・Python）
+// 段階の番号（1〜4）
 type Step = 1 | 2 | 3 | 4;
-type CodeTab = "curl" | "arduino" | "python";
-
-const CODE_TABS: { value: CodeTab; label: string }[] = [
-  { value: "curl", label: "curl" },
-  { value: "arduino", label: "Arduino (M5Stack)" },
-  { value: "python", label: "Python (Raspberry Pi)" },
-];
 
 /** 画面上部の進み具合（4 段階）。今の段階を強調し、済んだ段階には ✓ を付ける。 */
 function StepHeader({ step }: { step: Step }) {
@@ -130,13 +124,7 @@ export function SetupWizard() {
     onError: (e: Error) => setErrorMessage(describeError(e)),
   });
 
-  // 送信例のコード。ingestKey とセンサーの値（42.0）を埋め込んで、そのまま実行できる形にする。
-  // API キーは、利用者が自分の .env の値に置き換える（ここには書かない）
-  const codeSnippets: Record<CodeTab, string> = {
-    curl: `curl -X POST ${API_BASE_URL}/api/ingest/readings \\\n  -H "X-API-Key: <.envのINGEST_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"ingestKey": "${ingestKey}", "value": 42.0}'`,
-    arduino: `// clients/arduino-m5stack/ のFactorEyeClientライブラリを使用\n#include <FactorEyeClient.h>\n#include <WiFi.h>\n\nFactorEyeClient factoreye;\n\nvoid setup() {\n  WiFi.begin("your-wifi-ssid", "your-wifi-password");\n  while (WiFi.status() != WL_CONNECTED) delay(500);\n\n  factoreye.begin(\n    "${API_BASE_URL}",\n    "<.envのINGEST_API_KEY>"\n  );\n}\n\nvoid loop() {\n  factoreye.send("${ingestKey}", 42.0);\n  delay(10000);\n}`,
-    python: `# clients/raspberry-pi/factoreye_client.py を使用（追加ライブラリ不要）\nfrom factoreye_client import FactorEyeClient\n\nclient = FactorEyeClient(\n    "${API_BASE_URL}",\n    "<.envのINGEST_API_KEY>",\n)\nclient.send("${ingestKey}", 42.0)`,
-  };
+  const codeSnippets = ingestSnippets(ingestKey);
 
   return (
     <div className="mx-auto max-w-xl p-4">

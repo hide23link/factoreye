@@ -11,6 +11,8 @@ vi.mock("../../lib/api", () => ({
   createSensor: vi.fn(),
   updateSensor: vi.fn(),
   deleteSensor: vi.fn(),
+  fetchSensorReadings: vi.fn(),
+  API_BASE_URL: "http://localhost:8000",
 }));
 
 import * as api from "../../lib/api";
@@ -33,6 +35,8 @@ const sensor: Sensor = {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const NO_READINGS = { readings: [], total: 0 };
 
 describe("SensorSettingsPanel", () => {
   it("センサー一覧を表示する", async () => {
@@ -65,6 +69,163 @@ describe("SensorSettingsPanel", () => {
         expect.objectContaining({ name: "圧力計A-1", unit: "°C" }),
       ),
     );
+  });
+
+  it("センサーの種類を選ぶと、単位の初期値が入る（生産数は「個」）。選んだ種類で登録できる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor).mockResolvedValue({ ...sensor, name: "ライン1", unit: "個" });
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    const kinds = within(screen.getByRole("group", { name: "センサーの種類から始める" }));
+    await user.click(kinds.getByRole("button", { name: /生産数/ }));
+    expect(kinds.getByRole("button", { name: /生産数/ })).toHaveAttribute("aria-pressed", "true");
+
+    await user.type(screen.getByLabelText("名前"), "ライン1");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+    await waitFor(() => expect(api.createSensor).toHaveBeenCalledWith(expect.objectContaining({ name: "ライン1", unit: "個" })));
+  });
+
+  it("登録に成功すると「つなぎ方」の案内が出て、データが届くまで待つ表示になる。閉じられる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await user.type(screen.getByLabelText("名前"), "圧力計A-1");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    const guide = await screen.findByRole("region", { name: "センサーのつなぎ方" });
+    expect(within(guide).getByText(/圧力計A-1」を登録しました/)).toBeInTheDocument();
+    expect(within(guide).getByText("sensor-abc")).toBeInTheDocument();
+    expect(await within(guide).findByText(/データが届くのを待っています/)).toBeInTheDocument();
+    // 送信コードの例に、登録したセンサーの Ingest Key が入っている
+    expect(guide.querySelector("pre")?.textContent).toContain('"ingestKey": "sensor-abc"');
+
+    await user.click(within(guide).getByRole("button", { name: "閉じる" }));
+    expect(screen.queryByRole("region", { name: "センサーのつなぎ方" })).not.toBeInTheDocument();
+  });
+
+  it("最初のデータが届くと、案内が「届きました」に変わる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue({
+      readings: [{ id: 1, sensorId: "s1", value: 25.3, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      total: 1,
+    });
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await user.type(screen.getByLabelText("名前"), "圧力計A-1");
+    await user.click(screen.getByRole("button", { name: "追加" }));
+
+    expect(await screen.findByText(/最初のデータが届きました（25.3 MPa）/)).toBeInTheDocument();
+  });
+
+  async function registerSensor(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await user.type(screen.getByLabelText("名前"), name);
+    await user.click(screen.getByRole("button", { name: "追加" }));
+  }
+
+  it("登録に失敗したときは、つなぎ方の案内を出さない", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createSensor).mockRejectedValue(new Error("boom"));
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await registerSensor(user, "圧力計A-1");
+    await waitFor(() => expect(api.createSensor).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "センサーのつなぎ方" })).not.toBeInTheDocument();
+  });
+
+  it("続けて登録すると、案内は新しいセンサーのものに切り替わる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor)
+      .mockResolvedValueOnce(sensor)
+      .mockResolvedValueOnce({ ...sensor, id: "s2", name: "流量計B", ingestKey: "sensor-xyz" });
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await registerSensor(user, "圧力計A-1");
+    expect(await screen.findByText(/圧力計A-1」を登録しました/)).toBeInTheDocument();
+    await registerSensor(user, "流量計B");
+
+    const guide = await screen.findByRole("region", { name: "センサーのつなぎ方" });
+    expect(within(guide).getByText(/流量計B」を登録しました/)).toBeInTheDocument();
+    expect(within(guide).getByText("sensor-xyz")).toBeInTheDocument();
+  });
+
+  it("案内のコードの例は、タブで切り替えられる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await registerSensor(user, "圧力計A-1");
+    const guide = await screen.findByRole("region", { name: "センサーのつなぎ方" });
+    expect(guide.querySelector("pre")?.textContent).toContain("curl");
+    await user.click(within(guide).getByRole("button", { name: "Python (Raspberry Pi)" }));
+    expect(guide.querySelector("pre")?.textContent).toContain("FactorEyeClient");
+    expect(guide.querySelector("pre")?.textContent).toContain('"sensor-abc"');
+  });
+
+  it("コピーに失敗したら、そう伝える。成功したら「コピーしました」", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText(/まだセンサーが登録されていません/);
+    await registerSensor(user, "圧力計A-1");
+    const guide = await screen.findByRole("region", { name: "センサーのつなぎ方" });
+
+    const writeText = vi.fn().mockRejectedValueOnce(new Error("denied")).mockResolvedValueOnce(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await user.click(within(guide).getByRole("button", { name: "📋 コピー" }));
+    expect(await within(guide).findByRole("alert")).toHaveTextContent("コピーできませんでした");
+
+    await user.click(within(guide).getByRole("button", { name: "📋 コピー" }));
+    expect(await within(guide).findByRole("button", { name: "✔ コピーしました" })).toBeInTheDocument();
+    expect(writeText).toHaveBeenLastCalledWith("sensor-abc");
+  });
+
+  it("案内を出しているセンサーを削除したら、案内も閉じる", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(NO_READINGS);
+    vi.mocked(api.createSensor).mockResolvedValue(sensor);
+    vi.mocked(api.deleteSensor).mockResolvedValue(undefined);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("sensor-abc");
+    await registerSensor(user, "圧力計A-1");
+    await screen.findByRole("region", { name: "センサーのつなぎ方" });
+
+    const row = (await screen.findByText("圧力計A-1", { selector: "td" })).closest("tr") as HTMLElement;
+    await user.click(within(row).getByText("削除"));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "削除" }));
+
+    await waitFor(() => expect(api.deleteSensor).toHaveBeenCalledWith("s1"));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "センサーのつなぎ方" })).not.toBeInTheDocument());
+  });
+
+  it("一覧の各センサーに、しきい値バーが出る（しきい値が無ければ「しきい値なし」）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s2", name: "流量", thresholdMaxCritical: null }]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    expect(await screen.findByRole("img", { name: /しきい値: .*重故障/ })).toBeInTheDocument();
+    expect(screen.getByText("しきい値なし")).toBeInTheDocument();
   });
 
   it("Free Tier 上限（402）に達すると上限の案内を表示する", async () => {
