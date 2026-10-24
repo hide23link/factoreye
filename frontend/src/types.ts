@@ -152,6 +152,25 @@ export interface WidgetConfig {
   showThresholds?: boolean;
   // グラフ用: このウィジェットだけの表示期間（時間）。未指定ならダッシュボード全体の期間に従う
   rangeHours?: number;
+  // グラフ用の見た目。どれも未指定なら従来の見た目（読み方は lib/graph-config.ts の graphStyle）
+  lineShape?: "smooth" | "linear" | "step";
+  lineWidth?: number;
+  // 面グラフの塗りの濃さ（0〜1）
+  fillOpacity?: number;
+  showPoints?: boolean;
+  showGrid?: boolean;
+  showTooltip?: boolean;
+  legendPosition?: "bottom" | "right" | "off";
+  // グラフ用: 区間（間引いたデータ）の値の出し方。未指定は平均
+  aggregation?: "avg" | "max" | "min";
+  // グラフ用: 自動で取り直す間隔（秒）。未指定は 30 秒
+  refreshSeconds?: number;
+  // グラフ用（センサー2つ以上）: 縦軸を実際の値にするか、センサーごとに 0〜100% にそろえるか。未指定は実際の値
+  axisMode?: "shared" | "normalized";
+  // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
+  stack?: "none" | "normal" | "percent";
+  // しきい値の表示（線・色の帯・両方・なし）。未指定なら showThresholds に従う（true は「線」）
+  thresholdMode?: "off" | "line" | "area" | "both";
   // ProductionPlanWidget用: 勤務の開始・終了（時、0〜24）と、12:00 から始まる昼休みの長さ（分）
   workStartHour?: number;
   workEndHour?: number;

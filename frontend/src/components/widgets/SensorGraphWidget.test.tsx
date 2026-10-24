@@ -158,4 +158,61 @@ describe("SensorGraphWidget", () => {
 
     expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
   });
+  // jsdom ではグラフの中身（線や帯）は描かれないので、新しい見た目の設定で壊れないことだけを確かめる
+  it.each(["line", "area", "bar"] as const)("見た目の設定（%s）をすべて指定しても、描画で壊れない", async (graphType) => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([{ ...sensor, thresholdMaxWarning: 30, thresholdMaxCritical: 40 }]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
+    });
+    const config = {
+      graphType,
+      lineShape: "step",
+      lineWidth: 3,
+      fillOpacity: 0.5,
+      showPoints: true,
+      showGrid: false,
+      showTooltip: false,
+      thresholdMode: "both",
+    } as const;
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config })} />);
+
+    expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
+  });
+
+  it.each(["bottom", "right", "off"] as const)("複数センサーで凡例を「%s」にしても、描画で壊れない", async (legendPosition) => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s2", name: "炉内圧" }]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+
+    renderWithQueryClient(
+      <SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], legendPosition, showGrid: false, showTooltip: false } })} />,
+    );
+
+    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+  });
+  it("区間の値を最大にすると、最大の値で描く設定でも壊れない（単一センサー）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
+    });
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { aggregation: "max", refreshSeconds: 10 } })} />);
+    expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { graphType: "area", stack: "normal" },
+    { graphType: "bar", stack: "percent" },
+    { graphType: "line", axisMode: "normalized" },
+    { graphType: "area", axisMode: "normalized", aggregation: "min" },
+  ] as const)("複数センサーで %o を指定しても、描画で壊れない", async (extra) => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s2", name: "炉内圧" }]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
+    });
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], ...extra } })} />);
+    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+  });
 });

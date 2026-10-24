@@ -120,6 +120,8 @@ export const useDownsampledReadings = (
   range: { from: number; to: number },
   buckets: number,
   live: boolean,
+  // 直近モードで取り直す間隔（ミリ秒）。グラフの設定（refreshSeconds）で変えられる
+  intervalMs: number = LIVE_CHART_INTERVAL_MS,
 ) =>
   useQuery({
     queryKey: [
@@ -137,7 +139,7 @@ export const useDownsampledReadings = (
         buckets,
       ),
     enabled: sensorId !== null,
-    refetchInterval: live ? LIVE_CHART_INTERVAL_MS : false,
+    refetchInterval: live ? intervalMs : false,
     // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（グラフが消えて描き直されるのを防ぐ）
     placeholderData: keepPreviousData,
   });

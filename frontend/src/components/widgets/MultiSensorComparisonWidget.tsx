@@ -26,11 +26,12 @@ import {
   YAxis,
 } from "recharts";
 
-import { LIVE_CHART_INTERVAL_MS, useSensors } from "../../hooks/queries";
+import { useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
+import { buildRows, normalizeRows, rawValueOf } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
 import {
   absoluteRange,
@@ -41,8 +42,17 @@ import {
 } from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
-import { effectiveRange, graphColor, graphSensorIds, graphYDomain, thresholdLines } from "../../lib/graph-config";
-import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
+import {
+  effectiveRange,
+  graphColor,
+  bandEnds,
+  graphDataOptions,
+  graphSensorIds,
+  graphYAxisPlan,
+  graphStyle,
+  thresholdOverlay,
+} from "../../lib/graph-config";
+import { GRAPH_BUCKETS, formatTooltipValue, formatYTick, renderThresholdBands, renderThresholdLines } from "./graph-parts";
 
 /**
  * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
@@ -57,9 +67,10 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const range = effectiveRange(widget, dashboardRange);
   const hasOwnRange = range !== dashboardRange;
   const setRange = useTimeRangeStore((s) => s.setRange);
-  // 直近モードでは、横軸（表示範囲）を 30 秒ごと（LIVE_CHART_INTERVAL_MS）に動かす
+  // 直近モードでは、横軸（表示範囲）を設定の間隔（既定 30 秒）ごとに動かす
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  const options = graphDataOptions(widget.config, sensorIds.length);
+  const now = useNow(options.refreshMs);
   const bounds = resolveRange(range, now);
   const live = range.mode === "relative";
   const drag = useDragSelect((from, to) => {
@@ -88,7 +99,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
           new Date(bounds.to).toISOString(),
           GRAPH_BUCKETS,
         ),
-      refetchInterval: live ? LIVE_CHART_INTERVAL_MS : false,
+      refetchInterval: live ? options.refreshMs : false,
       // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（線が消えて描き直されるのを防ぐ）
       placeholderData: keepPreviousData,
     })),
@@ -101,31 +112,45 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const hours = spanHours(range, now);
   const formatTime = (ms: number) => formatChartTime(ms, hours);
 
-  // 区間の開始時刻ごとに、各センサーの平均を1行にまとめる（同じ区間は同じ行に入る）
-  const seriesByTime = new Map<number, Record<string, number>>();
-  sensorIds.forEach((sensorId, i) => {
+  // 区間の中央の時刻ごとに、各センサーの値（平均・最大・最小）を1行にまとめる。
+  // 積み上げでは欠けを埋め、0〜100% にそろえるときは、センサーごとに換算する（元の値はツールチップ用に残す）
+  const inputs = sensorIds.flatMap((sensorId, i) => {
     const data = results[i]?.data;
-    const halfBucketMs = ((data?.bucketSeconds ?? 0) * 1000) / 2;
-    for (const b of data?.buckets ?? []) {
-      const time = new Date(b.start).getTime() + halfBucketMs;
-      const row = seriesByTime.get(time) ?? { time };
-      row[sensorId] = b.avg;
-      seriesByTime.set(time, row);
-    }
+    return data ? [{ sensorId, bucketSeconds: data.bucketSeconds, buckets: data.buckets }] : [];
   });
-  const chartData = Array.from(seriesByTime.values()).sort((a, b) => a.time - b.time);
+  const rawRows = buildRows(inputs, options.aggregation, { fillGaps: options.stack !== "none" });
+  const chartData = options.axisMode === "normalized" ? normalizeRows(rawRows, sensorIds) : rawRows;
   // しきい値の線は、センサーが1つのときだけ重ねる（複数だと、どのセンサーの線か分からなくなるため）
   const onlySensor = sensorIds.length === 1 ? sensors?.find((s) => s.id === sensorIds[0]) : undefined;
-  const lines = widget.config.showThresholds && onlySensor ? thresholdLines(onlySensor) : [];
-  const yDomain = graphYDomain(
+  const style = graphStyle(widget.config);
+  const overlay = thresholdOverlay(widget.config, onlySensor);
+  const { lines, bands } = overlay;
+  const percentStack = options.stack === "percent";
+  // しきい値の帯を塗る範囲の端（帯を出すのはセンサー1つのときだけ）
+  const ends = bandEnds(
     widget.config,
-    lines.map((l) => l.value),
+    chartData.flatMap((row) => (typeof row[sensorIds[0]] === "number" ? [row[sensorIds[0]]] : [])),
+    overlay.axisValues,
   );
+  const axisPlan = graphYAxisPlan(widget.config, options, overlay.axisValues);
+  const formatYAxis = {
+    values: formatYTick,
+    percent: (v: number) => `${Math.round(v)}%`,
+    percentStack: (v: number) => `${Math.round(v * 100)}%`,
+  }[axisPlan.scale];
+  // ツールチップの値は、有効数字 4 桁＋センサーの単位。0〜100% にそろえたときは、グラフの値が換算後なので、元の値を出す
+  const tooltipValueFormatter = (value: unknown, _name: unknown, item: { dataKey?: unknown; payload?: unknown }) => {
+    const unit = sensors?.find((s) => s.id === item.dataKey)?.unit;
+    return formatTooltipValue(rawValueOf(item) ?? value, unit);
+  };
+  // 積み上げるときは、すべての面・棒を同じ積み上げグループに入れる
+  const stackId = options.stack === "none" ? undefined : "stack";
+
   const graphType = widget.config.graphType ?? "line";
 
   // 3種類のグラフで共通の部品（軸・目盛り・凡例・ドラッグ選択・しきい値の線）
   const parts = [
-    <CartesianGrid key="grid" strokeDasharray="3 3" />,
+    style.showGrid ? <CartesianGrid key="grid" strokeDasharray="3 3" /> : null,
     <XAxis
       key="x"
       dataKey="time"
@@ -134,9 +159,24 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       tickFormatter={formatTime}
       tick={{ fontSize: 10 }}
     />,
-    <YAxis key="y" domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />,
-    <Tooltip key="tip" labelFormatter={(label: ReactNode) => formatTime(Number(label))} />,
-    <Legend key="legend" wrapperStyle={{ fontSize: 10 }} />,
+    <YAxis key="y" domain={axisPlan.domain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYAxis} />,
+    style.showTooltip ? (
+      <Tooltip
+        key="tip"
+        labelFormatter={(label: ReactNode) => formatTime(Number(label))}
+        formatter={tooltipValueFormatter}
+      />
+    ) : null,
+    style.legendPosition === "off" ? null : (
+      <Legend
+        key="legend"
+        wrapperStyle={{ fontSize: 10 }}
+        layout={style.legendPosition === "right" ? "vertical" : "horizontal"}
+        verticalAlign={style.legendPosition === "right" ? "middle" : "bottom"}
+        align={style.legendPosition === "right" ? "right" : "center"}
+      />
+    ),
+    ...renderThresholdBands(bands, ends),
     ...renderThresholdLines(lines),
     drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
   ];
@@ -146,7 +186,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const series = sensorIds.map((sensorId, i) => {
     const color = graphColor(widget, i);
     if (graphType === "bar") {
-      return <Bar key={sensorId} dataKey={sensorId} name={nameOf(sensorId)} fill={color} isAnimationActive={false} />;
+      return <Bar key={sensorId} dataKey={sensorId} name={nameOf(sensorId)} fill={color} stackId={stackId} isAnimationActive={false} />;
     }
     if (graphType === "area") {
       return (
@@ -155,8 +195,12 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
           dataKey={sensorId}
           name={nameOf(sensorId)}
           stroke={color}
+          type={style.curveType}
+          strokeWidth={style.lineWidth}
+          dot={style.showPoints}
           fill={color}
-          fillOpacity={0.2}
+          stackId={stackId}
+          fillOpacity={style.fillOpacity}
           isAnimationActive={false}
           connectNulls
         />
@@ -165,11 +209,12 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     return (
       <Line
         key={sensorId}
-        type="monotone"
+        type={style.curveType}
         dataKey={sensorId}
         name={nameOf(sensorId)}
         stroke={color}
-        dot={false}
+        strokeWidth={style.lineWidth}
+        dot={style.showPoints}
         isAnimationActive={false}
         connectNulls
       />
@@ -184,12 +229,12 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       <div ref={chartRef} className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData} {...drag.handlers}>
+            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...drag.handlers}>
               {parts}
               {series}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} {...drag.handlers}>
+            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...drag.handlers}>
               {parts}
               {series}
             </AreaChart>

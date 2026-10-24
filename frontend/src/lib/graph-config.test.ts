@@ -10,8 +10,15 @@ import {
   graphSensorIds,
   graphSensorPatch,
   nextGraphColor,
+  bandEnds,
+  graphDataOptions,
+  graphStyle,
+  graphYAxisPlan,
   graphYDomain,
+  thresholdBands,
   thresholdLines,
+  thresholdMode,
+  thresholdOverlay,
 } from "./graph-config";
 
 type W = Pick<Widget, "type" | "sensorId" | "config">;
@@ -108,5 +115,172 @@ describe("thresholdLines / graphYDomain", () => {
   it("手動で決めた値を優先する。しきい値が無ければ自動", () => {
     expect(graphYDomain({ yAxisMin: 0, yAxisMax: 100 }, [190])).toEqual([0, 100]);
     expect(graphYDomain({}, [])).toEqual(["auto", "auto"]);
+  });
+});
+
+describe("graphStyle（見た目の読み方）", () => {
+  it("何も指定していない古い設定は、従来の見た目（線はなめらか・面は直線、太さ1、塗り0.2、グリッド・ツールチップあり、凡例は下）", () => {
+    expect(graphStyle({})).toEqual({
+      curveType: "monotone",
+      lineWidth: 1,
+      fillOpacity: 0.2,
+      showPoints: false,
+      showGrid: true,
+      showTooltip: true,
+      legendPosition: "bottom",
+    });
+    expect(graphStyle({ graphType: "area" }).curveType).toBe("linear");
+  });
+
+  it("線の形を選ぶと、recharts の曲線の種類になる", () => {
+    expect(graphStyle({ lineShape: "linear" }).curveType).toBe("linear");
+    expect(graphStyle({ lineShape: "step" }).curveType).toBe("stepAfter");
+    expect(graphStyle({ lineShape: "smooth", graphType: "area" }).curveType).toBe("monotone");
+  });
+
+  it("太さ・塗りは範囲に丸め、数値でない値や未知の文字列は既定に戻す", () => {
+    expect(graphStyle({ lineWidth: 99 }).lineWidth).toBe(6);
+    expect(graphStyle({ lineWidth: -3 }).lineWidth).toBe(0.5);
+    expect(graphStyle({ lineWidth: Number.NaN }).lineWidth).toBe(1);
+    expect(graphStyle({ fillOpacity: 5 }).fillOpacity).toBe(1);
+    expect(graphStyle({ lineShape: "zigzag" as never }).curveType).toBe("monotone");
+    expect(graphStyle({ legendPosition: "top" as never }).legendPosition).toBe("bottom");
+  });
+
+  it("オフにした項目だけ変わる", () => {
+    expect(graphStyle({ showGrid: false, showTooltip: false, showPoints: true, legendPosition: "right" })).toMatchObject({
+      showGrid: false,
+      showTooltip: false,
+      showPoints: true,
+      legendPosition: "right",
+    });
+  });
+});
+
+describe("thresholdMode", () => {
+  it("thresholdMode が無ければ、従来の showThresholds に従う（true は線）", () => {
+    expect(thresholdMode({})).toBe("off");
+    expect(thresholdMode({ showThresholds: true })).toBe("line");
+  });
+  it("thresholdMode があれば、それを優先する（showThresholds が残っていても）", () => {
+    expect(thresholdMode({ showThresholds: true, thresholdMode: "off" })).toBe("off");
+    expect(thresholdMode({ thresholdMode: "both" })).toBe("both");
+  });
+  it("未知の値は、showThresholds に戻る", () => {
+    expect(thresholdMode({ thresholdMode: "bad" as never, showThresholds: true })).toBe("line");
+  });
+});
+
+describe("thresholdBands", () => {
+  const none = { thresholdMaxWarning: null, thresholdMaxCritical: null, thresholdMinWarning: null, thresholdMinCritical: null };
+  it("しきい値が無ければ帯も無い", () => {
+    expect(thresholdBands(none)).toEqual([]);
+  });
+  it("上限: 軽故障は 軽故障〜重故障、重故障は 重故障〜上（端なし）", () => {
+    const bands = thresholdBands({ ...none, thresholdMaxWarning: 80, thresholdMaxCritical: 90 });
+    expect(bands).toEqual([
+      { from: 80, to: 90, severity: "warning" },
+      { from: 90, to: null, severity: "critical" },
+    ]);
+  });
+  it("下限も同様に、下へ向かう。重故障だけのときは重故障の帯だけ", () => {
+    expect(thresholdBands({ ...none, thresholdMinWarning: 10, thresholdMinCritical: 5 })).toEqual([
+      { from: 5, to: 10, severity: "warning" },
+      { from: null, to: 5, severity: "critical" },
+    ]);
+    expect(thresholdBands({ ...none, thresholdMaxCritical: 90 })).toEqual([{ from: 90, to: null, severity: "critical" }]);
+  });
+  it("軽故障だけのときは、上（端なし）まで軽故障の色", () => {
+    expect(thresholdBands({ ...none, thresholdMaxWarning: 80 })).toEqual([{ from: 80, to: null, severity: "warning" }]);
+  });
+});
+
+describe("thresholdOverlay", () => {
+  const sensor = { thresholdMaxWarning: 80, thresholdMaxCritical: 90, thresholdMinWarning: null, thresholdMinCritical: null };
+  it("表示しない／センサーが無いときは、何も重ねず、縦軸も広げない", () => {
+    expect(thresholdOverlay({}, sensor)).toEqual({ axisValues: [], lines: [], bands: [] });
+    expect(thresholdOverlay({ thresholdMode: "line" }, undefined)).toEqual({ axisValues: [], lines: [], bands: [] });
+  });
+  it("線だけ・帯だけ・両方で、重ねるものが変わる。縦軸はどれでも広げる", () => {
+    const line = thresholdOverlay({ thresholdMode: "line" }, sensor);
+    expect(line.lines).toHaveLength(2);
+    expect(line.bands).toEqual([]);
+    expect(line.axisValues).toEqual([80, 90]);
+
+    const area = thresholdOverlay({ thresholdMode: "area" }, sensor);
+    expect(area.lines).toEqual([]);
+    expect(area.bands).toHaveLength(2);
+    expect(area.axisValues).toEqual([80, 90]);
+
+    const both = thresholdOverlay({ thresholdMode: "both" }, sensor);
+    expect(both.lines).toHaveLength(2);
+    expect(both.bands).toHaveLength(2);
+  });
+  it("古い showThresholds: true は線", () => {
+    expect(thresholdOverlay({ showThresholds: true }, sensor).lines).toHaveLength(2);
+  });
+});
+
+describe("graphDataOptions", () => {
+  it("何も指定していない古い設定は、平均・30秒・実際の値・積み上げなし", () => {
+    expect(graphDataOptions({}, 1)).toEqual({ aggregation: "avg", refreshMs: 30_000, axisMode: "shared", stack: "none", stackable: false });
+  });
+  it("区間の値と更新間隔を選べる。選択肢にない間隔・未知の値は既定に戻す", () => {
+    expect(graphDataOptions({ aggregation: "max", refreshSeconds: 10 }, 1)).toMatchObject({ aggregation: "max", refreshMs: 10_000 });
+    expect(graphDataOptions({ refreshSeconds: 7 }, 1).refreshMs).toBe(30_000);
+    expect(graphDataOptions({ refreshSeconds: 0 }, 1).refreshMs).toBe(30_000);
+    expect(graphDataOptions({ aggregation: "median" as never }, 1).aggregation).toBe("avg");
+  });
+  it("0〜100% と積み上げは、センサー2つ以上のときだけ効く", () => {
+    expect(graphDataOptions({ axisMode: "normalized" }, 1).axisMode).toBe("shared");
+    expect(graphDataOptions({ axisMode: "normalized" }, 2).axisMode).toBe("normalized");
+    expect(graphDataOptions({ graphType: "area", stack: "normal" }, 1).stack).toBe("none");
+    expect(graphDataOptions({ graphType: "area", stack: "normal" }, 2).stack).toBe("normal");
+  });
+  it("積み上げは、面・棒で、縦軸が実際の値のときだけ効く（線グラフ・0〜100% では無効）", () => {
+    expect(graphDataOptions({ graphType: "line", stack: "normal" }, 2).stack).toBe("none");
+    expect(graphDataOptions({ stack: "normal" }, 2).stack).toBe("none");
+    expect(graphDataOptions({ graphType: "bar", stack: "percent" }, 2).stack).toBe("percent");
+    expect(graphDataOptions({ graphType: "area", stack: "normal", axisMode: "normalized" }, 2).stack).toBe("none");
+  });
+});
+
+describe("graphYAxisPlan", () => {
+  it("実際の値: 手動の範囲、無ければしきい値込みの自動", () => {
+    const plan = graphYAxisPlan({ yAxisMin: 0, yAxisMax: 100 }, graphDataOptions({}, 2), []);
+    expect(plan).toEqual({ domain: [0, 100], scale: "values" });
+  });
+  it("0〜100% にそろえるときは 0〜100。手動の縦軸は使わない", () => {
+    const plan = graphYAxisPlan({ axisMode: "normalized", yAxisMin: 5, yAxisMax: 6 }, graphDataOptions({ axisMode: "normalized" }, 2), []);
+    expect(plan).toEqual({ domain: [0, 100], scale: "percent" });
+  });
+  it("100% 積み上げは 0〜1（recharts の換算後）", () => {
+    const options = graphDataOptions({ graphType: "area", stack: "percent" }, 2);
+    expect(graphYAxisPlan({}, options, [])).toEqual({ domain: [0, 1], scale: "percentStack" });
+  });
+});
+
+describe("graphDataOptions: stackable", () => {
+  it("積み上げを選べるのは、センサー2つ以上の面・棒で、実際の値の縦軸のとき", () => {
+    expect(graphDataOptions({ graphType: "area" }, 2).stackable).toBe(true);
+    expect(graphDataOptions({ graphType: "bar" }, 2).stackable).toBe(true);
+    expect(graphDataOptions({ graphType: "line" }, 2).stackable).toBe(false);
+    expect(graphDataOptions({ graphType: "area" }, 1).stackable).toBe(false);
+    expect(graphDataOptions({ graphType: "area", axisMode: "normalized" }, 2).stackable).toBe(false);
+  });
+});
+
+describe("bandEnds", () => {
+  it("手動の縦軸が無ければ、データとしきい値の最小〜最大から、少し外へ余らせる", () => {
+    expect(bandEnds({}, [70, 92], [80, 90])).toEqual({ low: 70 - 0.44, high: 92 + 0.44 });
+  });
+  it("手動の縦軸があれば、その範囲を使う", () => {
+    const ends = bandEnds({ yAxisMin: 0, yAxisMax: 100 }, [70, 92], [80, 90]);
+    expect(ends.low).toBeCloseTo(-2);
+    expect(ends.high).toBeCloseTo(102);
+  });
+  it("データもしきい値も無いときは、0〜1。値がすべて同じでも幅を持たせる", () => {
+    expect(bandEnds({}, [], [])).toEqual({ low: 0, high: 1 });
+    expect(bandEnds({}, [5, 5], [5])).toEqual({ low: 4, high: 6 });
   });
 });

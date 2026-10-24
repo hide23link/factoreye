@@ -222,9 +222,104 @@ describe("WidgetSettings: グラフ", () => {
     expect(lastConfig()).toMatchObject({ sensorIds: ["s2"], colors: ["#222222"] });
   });
 
-  it("センサーが2つのとき、しきい値の線のスイッチは押せない", async () => {
+  it("センサーが2つのとき、しきい値の表示は選べず、案内が出る", () => {
     renderWithQueryClient(<WidgetSettings widget={graph} dashboard={dashboardOf(graph)} />);
-    expect(screen.getByRole("switch", { name: "しきい値の線を表示" })).toBeDisabled();
+    expect(screen.queryByRole("radiogroup", { name: "しきい値の表示" })).not.toBeInTheDocument();
+    expect(screen.getByText("センサーを1つにすると使えます")).toBeInTheDocument();
+  });
+
+  it("センサーが1つのとき、しきい値の表示を選ぶと thresholdMode に保存し、古い showThresholds を消す", async () => {
+    const user = userEvent.setup();
+    const one = widget("SensorGraph", { sensorId: "s1", config: { showThresholds: true } });
+    renderWithQueryClient(<WidgetSettings widget={one} dashboard={dashboardOf(one)} />);
+
+    // 古い設定（showThresholds: true）は「線」として表示される
+    const modes = within(screen.getByRole("radiogroup", { name: "しきい値の表示" }));
+    expect(modes.getByRole("radio", { name: "線" })).toHaveAttribute("aria-checked", "true");
+    await user.click(modes.getByRole("radio", { name: "両方" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig()).toMatchObject({ thresholdMode: "both" });
+    expect(lastConfig().showThresholds).toBeUndefined();
+  });
+
+  it("線の形・太さ・点・目盛り・ツールチップを変えると、その項目だけ保存される", async () => {
+    const user = userEvent.setup();
+    const w = widget("SensorGraph", { sensorId: "s1", config: { graphType: "line" } });
+    renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
+
+    await user.click(screen.getByRole("radio", { name: "階段" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ lineShape: "step" }));
+
+    await user.click(screen.getByRole("switch", { name: "点を表示" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ showPoints: true }));
+
+    await user.click(screen.getByRole("switch", { name: "目盛りの線" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ showGrid: false }));
+
+    await user.click(screen.getByRole("switch", { name: "ツールチップ（なぞると値が出る）" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ showTooltip: false }));
+  });
+
+  it("塗りの濃さは面グラフのときだけ出る。凡例の場所はセンサーが2つ以上のときだけ出る", () => {
+    const line = widget("SensorGraph", { sensorId: "s1", config: { graphType: "line" } });
+    const { unmount } = renderWithQueryClient(<WidgetSettings widget={line} dashboard={dashboardOf(line)} />);
+    expect(screen.queryByLabelText("塗りの濃さ")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "凡例の場所" })).not.toBeInTheDocument();
+    unmount();
+
+    const area = widget("SensorGraph", { sensorId: "s1", config: { graphType: "area", sensorIds: ["s1", "s2"] } });
+    renderWithQueryClient(<WidgetSettings widget={area} dashboard={dashboardOf(area)} />);
+    expect(screen.getByLabelText("塗りの濃さ")).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "凡例の場所" })).toBeInTheDocument();
+  });
+
+  it("区間の値と更新間隔を選ぶと、その項目だけ保存される", async () => {
+    const user = userEvent.setup();
+    const w = widget("SensorGraph", { sensorId: "s1" });
+    renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
+
+    await user.click(within(screen.getByRole("radiogroup", { name: "区間の値" })).getByRole("radio", { name: "最大" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ aggregation: "max" }));
+
+    await user.click(within(screen.getByRole("radiogroup", { name: "更新間隔" })).getByRole("radio", { name: "1分" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ refreshSeconds: 60 }));
+  });
+
+  it("センサーが1つのときは、重ね方（縦軸・積み上げ）を出さない", () => {
+    const w = widget("SensorGraph", { sensorId: "s1", config: { graphType: "area" } });
+    renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
+    expect(screen.queryByRole("radiogroup", { name: "縦軸のモード" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "積み上げ" })).not.toBeInTheDocument();
+  });
+
+  it("センサーが2つのとき、縦軸を 0〜100% にすると保存し、手動の縦軸と積み上げの欄は隠れる", async () => {
+    const user = userEvent.setup();
+    const w = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], graphType: "area" } });
+    const { rerender } = renderWithQueryClient(<WidgetSettings widget={w} dashboard={dashboardOf(w)} />);
+    expect(screen.getByRole("radiogroup", { name: "積み上げ" })).toBeInTheDocument();
+    expect(screen.getByText("自動で合わせる")).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("radiogroup", { name: "縦軸のモード" })).getByRole("radio", { name: "0〜100%" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ axisMode: "normalized" }));
+
+    const normalized = { ...w, config: { ...w.config, axisMode: "normalized" as const } };
+    rerender(<WidgetSettings widget={normalized} dashboard={dashboardOf(normalized)} />);
+    expect(screen.queryByRole("radiogroup", { name: "積み上げ" })).not.toBeInTheDocument();
+    expect(screen.queryByText("自動で合わせる")).not.toBeInTheDocument();
+  });
+
+  it("積み上げは、線グラフでは出ない。面グラフで選ぶと保存される", async () => {
+    const user = userEvent.setup();
+    const line = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], graphType: "line" } });
+    const { unmount } = renderWithQueryClient(<WidgetSettings widget={line} dashboard={dashboardOf(line)} />);
+    expect(screen.queryByRole("radiogroup", { name: "積み上げ" })).not.toBeInTheDocument();
+    unmount();
+
+    const bar = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], graphType: "bar" } });
+    renderWithQueryClient(<WidgetSettings widget={bar} dashboard={dashboardOf(bar)} />);
+    await user.click(within(screen.getByRole("radiogroup", { name: "積み上げ" })).getByRole("radio", { name: "積み上げ" }));
+    await waitFor(() => expect(lastConfig()).toMatchObject({ stack: "normal" }));
   });
 
   it("期間は「全体」に戻せる（rangeHours を消す）", async () => {
