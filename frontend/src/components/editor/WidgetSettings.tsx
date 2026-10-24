@@ -10,10 +10,22 @@ import { useState } from "react";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import {
+  MAX_LINE_WIDTH,
+  REFRESH_SECONDS_OPTIONS,
   graphColor,
+  graphDataOptions,
   graphSensorIds,
   graphSensorPatch,
+  defaultLineShape,
+  graphStyle,
   nextGraphColor,
+  thresholdMode,
+  type Aggregation,
+  type AxisMode,
+  type LegendPosition,
+  type LineShape,
+  type StackMode,
+  type ThresholdMode,
 } from "../../lib/graph-config";
 import {
   planPerWorkHour,
@@ -141,9 +153,46 @@ const RANGE_OPTIONS = [
   { value: 24, label: "24時間" },
 ] as const;
 
+const LINE_SHAPE_OPTIONS: ReadonlyArray<{ value: LineShape; label: string }> = [
+  { value: "smooth", label: "なめらか" },
+  { value: "linear", label: "直線" },
+  { value: "step", label: "階段" },
+];
+const LEGEND_OPTIONS: ReadonlyArray<{ value: LegendPosition; label: string }> = [
+  { value: "bottom", label: "下" },
+  { value: "right", label: "右" },
+  { value: "off", label: "なし" },
+];
+const AGGREGATION_OPTIONS: ReadonlyArray<{ value: Aggregation; label: string }> = [
+  { value: "avg", label: "平均" },
+  { value: "max", label: "最大" },
+  { value: "min", label: "最小" },
+];
+const REFRESH_LABEL: Record<(typeof REFRESH_SECONDS_OPTIONS)[number], string> = { 10: "10秒", 30: "30秒", 60: "1分", 300: "5分" };
+const REFRESH_OPTIONS = REFRESH_SECONDS_OPTIONS.map((seconds) => ({ value: seconds, label: REFRESH_LABEL[seconds] }));
+const AXIS_MODE_OPTIONS: ReadonlyArray<{ value: AxisMode; label: string }> = [
+  { value: "shared", label: "実際の値" },
+  { value: "normalized", label: "0〜100%" },
+];
+const STACK_OPTIONS: ReadonlyArray<{ value: StackMode; label: string }> = [
+  { value: "none", label: "しない" },
+  { value: "normal", label: "積み上げ" },
+  { value: "percent", label: "100%" },
+];
+const THRESHOLD_OPTIONS: ReadonlyArray<{ value: ThresholdMode; label: string }> = [
+  { value: "off", label: "なし" },
+  { value: "line", label: "線" },
+  { value: "area", label: "帯" },
+  { value: "both", label: "両方" },
+];
+
 function GraphSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const config = widget.config;
+  const style = graphStyle(config);
+  const options = graphDataOptions(config, ids.length);
+  // 縦軸を手動で決められるのは、実際の値で描くとき（0〜100% や 100% 積み上げでは、軸が決まっている）
+  const axisIsFixed = options.axisMode === "normalized" || options.stack === "percent";
   // 縦軸は、値があれば手動。値を入れる前でも入力欄を出し続けるため、「手動にした」操作だけ覚えておく
   // （ウィジェットを切り替えたときは、SettingsPanel の key で作り直されるので、前のウィジェットの状態は引き継がない）
   const [pickedManual, setPickedManual] = useState(false);
@@ -199,35 +248,131 @@ function GraphSettings({ widget, actions }: SectionProps) {
           onChange={(hours) => void changeConfig(actions, widget, { rangeHours: hours === 0 ? undefined : hours })}
         />
       </Section>
-      <Section title="縦軸">
-        <Toggle
-          label="自動で合わせる"
-          checked={!manualAxis}
-          onChange={(auto) => {
-            setPickedManual(!auto);
-            if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined });
-          }}
+      {!axisIsFixed && (
+        <Section title="縦軸">
+          <Toggle
+            label="自動で合わせる"
+            checked={!manualAxis}
+            onChange={(auto) => {
+              setPickedManual(!auto);
+              if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined });
+            }}
+          />
+          {manualAxis && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                最小
+                <NumberField label="縦軸の最小" value={config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMin", v)} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                最大
+                <NumberField label="縦軸の最大" value={config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMax", v)} />
+              </label>
+            </div>
+          )}
+        </Section>
+      )}
+      <Section title="データのまとめ方" note="グラフは、期間を細かい区間に分けて描きます。最大や最小を選ぶと、一瞬の山や谷を見逃しにくくなります">
+        <Segmented
+          label="区間の値"
+          value={options.aggregation}
+          options={AGGREGATION_OPTIONS}
+          onChange={(aggregation) => void changeConfig(actions, widget, { aggregation })}
         />
-        {manualAxis && (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
-              最小
-              <NumberField label="縦軸の最小" value={config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMin", v)} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
-              最大
-              <NumberField label="縦軸の最大" value={config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMax", v)} />
-            </label>
-          </div>
+        <div className="text-xs text-gray-500">自動で更新する間隔（長くすると、横軸の動きも遅くなります）</div>
+        <Segmented
+          label="更新間隔"
+          value={options.refreshMs / 1000}
+          options={REFRESH_OPTIONS}
+          onChange={(refreshSeconds) => void changeConfig(actions, widget, { refreshSeconds })}
+        />
+      </Section>
+      {ids.length > 1 && (
+        <Section title="複数センサーの重ね方" note="単位の違うセンサーを同じ高さで比べるときは「0〜100%」。積み上げは、単位が同じセンサー向けです">
+          <div className="text-xs text-gray-500">縦軸</div>
+          <Segmented
+            label="縦軸のモード"
+            value={options.axisMode}
+            options={AXIS_MODE_OPTIONS}
+            onChange={(axisMode) => void changeConfig(actions, widget, { axisMode })}
+          />
+          {options.stackable && (
+            <>
+              <div className="text-xs text-gray-500">積み上げ</div>
+              <Segmented
+                label="積み上げ"
+                value={options.stack}
+                options={STACK_OPTIONS}
+                onChange={(stack) => void changeConfig(actions, widget, { stack })}
+              />
+            </>
+          )}
+        </Section>
+      )}
+      <Section title="線の見た目">
+        {(config.graphType ?? "line") !== "bar" && (
+          <Segmented
+            label="線の形"
+            value={config.lineShape ?? defaultLineShape(config)}
+            options={LINE_SHAPE_OPTIONS}
+            onChange={(lineShape) => void changeConfig(actions, widget, { lineShape })}
+          />
+        )}
+        <label className="flex flex-col gap-1 text-xs text-gray-500">
+          線の太さ
+          <NumberField
+            label="線の太さ"
+            value={style.lineWidth}
+            min={0.5}
+            max={MAX_LINE_WIDTH}
+            step={0.5}
+            unit="px"
+            onCommit={(v) => void changeConfig(actions, widget, { lineWidth: v ?? undefined })}
+          />
+        </label>
+        {(config.graphType ?? "line") === "area" && (
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            塗りの濃さ
+            <NumberField
+              label="塗りの濃さ"
+              value={Math.round(style.fillOpacity * 100)}
+              min={0}
+              max={100}
+              step={10}
+              unit="%"
+              onCommit={(v) => void changeConfig(actions, widget, { fillOpacity: v === null ? undefined : v / 100 })}
+            />
+          </label>
+        )}
+        <Toggle label="点を表示" checked={style.showPoints} onChange={(showPoints) => void changeConfig(actions, widget, { showPoints })} />
+      </Section>
+      <Section title="目盛りと表示">
+        <Toggle label="目盛りの線" checked={style.showGrid} onChange={(showGrid) => void changeConfig(actions, widget, { showGrid })} />
+        <Toggle label="ツールチップ（なぞると値が出る）" checked={style.showTooltip} onChange={(showTooltip) => void changeConfig(actions, widget, { showTooltip })} />
+        {ids.length > 1 && (
+          <>
+            <div className="text-xs text-gray-500">凡例の場所</div>
+            <Segmented
+              label="凡例の場所"
+              value={style.legendPosition}
+              options={LEGEND_OPTIONS}
+              onChange={(legendPosition) => void changeConfig(actions, widget, { legendPosition })}
+            />
+          </>
         )}
       </Section>
-      <Section title="しきい値" note="センサー1つのときに、軽故障・重故障の線を重ねます">
-        <Toggle
-          label="しきい値の線を表示"
-          checked={config.showThresholds ?? false}
-          disabled={ids.length !== 1}
-          onChange={(showThresholds) => void changeConfig(actions, widget, { showThresholds })}
-        />
+      <Section title="しきい値" note="センサー1つのときに、軽故障・重故障を線や色の帯で重ねます">
+        {ids.length === 1 ? (
+          <Segmented
+            label="しきい値の表示"
+            value={thresholdMode(config)}
+            options={THRESHOLD_OPTIONS}
+            // 古い設定の showThresholds は、thresholdMode に置き換わるので消す
+            onChange={(mode) => void changeConfig(actions, widget, { thresholdMode: mode, showThresholds: undefined })}
+          />
+        ) : (
+          <p className="text-sm text-gray-400">センサーを1つにすると使えます</p>
+        )}
       </Section>
     </>
   );

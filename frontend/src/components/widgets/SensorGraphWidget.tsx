@@ -24,12 +24,22 @@ import {
   YAxis,
 } from "recharts";
 
-import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { useDownsampledReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
+import { bucketValue } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
-import { effectiveRange, graphColor, graphSensorIds, graphYDomain, thresholdLines } from "../../lib/graph-config";
+import {
+  effectiveRange,
+  graphColor,
+  graphSensorIds,
+  bandEnds,
+  graphDataOptions,
+  graphStyle,
+  graphYDomain,
+  thresholdOverlay,
+} from "../../lib/graph-config";
 import {
   absoluteRange,
   maxRangeForBuild,
@@ -40,7 +50,7 @@ import {
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
-import { GRAPH_BUCKETS, formatYTick, renderThresholdLines } from "./graph-parts";
+import { GRAPH_BUCKETS, formatTooltipValue, formatYTick, renderThresholdBands, renderThresholdLines } from "./graph-parts";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
 export { GRAPH_BUCKETS };
@@ -65,16 +75,18 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
   // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
   const range = effectiveRange(widget, dashboardRange);
   const hasOwnRange = range !== dashboardRange;
-  // 直近モードでは、横軸（表示範囲）を時間経過で動かす。動かすのは 30 秒ごと（LIVE_CHART_INTERVAL_MS）
+  // 直近モードでは、横軸（表示範囲）を時間経過で動かす。動かすのは 設定の間隔（既定 30 秒）ごと
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で秒が変わるたびに取得のキーが変わり、
   // 取得 → 再描画 → 新しいキー → 取得、の連鎖で毎秒取り直すため、現在時刻は useNow の値を使う
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  const options = graphDataOptions(widget.config, 1);
+  const now = useNow(options.refreshMs);
   const bounds = resolveRange(range, now);
   const { data, isError, refetch } = useDownsampledReadings(
     widget.sensorId,
     bounds,
     GRAPH_BUCKETS,
     range.mode === "relative",
+    options.refreshMs,
   );
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
@@ -104,15 +116,19 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
   const halfBucketMs = (data.bucketSeconds * 1000) / 2;
   const chartData = data.buckets.map((b) => ({
     time: new Date(b.start).getTime() + halfBucketMs,
-    value: b.avg,
+    value: bucketValue(b, options.aggregation),
   }));
 
   const color = graphColor(widget, 0);
   const graphType = widget.config.graphType ?? "line";
-  const lines = widget.config.showThresholds && sensor ? thresholdLines(sensor) : [];
-  const yDomain = graphYDomain(
+  const style = graphStyle(widget.config);
+  const overlay = thresholdOverlay(widget.config, sensor);
+  const { lines, bands } = overlay;
+  const yDomain = graphYDomain(widget.config, overlay.axisValues);
+  const ends = bandEnds(
     widget.config,
-    lines.map((l) => l.value),
+    chartData.map((point) => point.value),
+    overlay.axisValues,
   );
 
   // 横軸の共通の設定（時刻の数値を、表示用の文字列に変換する）
@@ -124,6 +140,9 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
     tick: { fontSize: 10 },
   };
   const tooltipLabelFormatter = (label: ReactNode) => formatTime(Number(label));
+  // ツールチップは「センサー名: 値 単位」（既定の「value: 83.60231701333902」だと、何の値か分からず、桁も多すぎる）
+  const seriesName = sensor?.name ?? "値";
+  const tooltipValueFormatter = (value: unknown) => formatTooltipValue(value, sensor?.unit);
   const selection = drag.selection;
 
   return (
@@ -136,31 +155,52 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
             <BarChart data={chartData} {...drag.handlers}>
-              <CartesianGrid strokeDasharray="3 3" />
+              {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              <Tooltip labelFormatter={tooltipLabelFormatter} />
-              <Bar dataKey="value" fill={color} isAnimationActive={false} />
+              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              <Bar dataKey="value" name={seriesName} fill={color} isAnimationActive={false} />
+              {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </BarChart>
           ) : graphType === "area" ? (
             <AreaChart data={chartData} {...drag.handlers}>
-              <CartesianGrid strokeDasharray="3 3" />
+              {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              <Tooltip labelFormatter={tooltipLabelFormatter} />
-              <Area dataKey="value" stroke={color} fill={color} fillOpacity={0.2} isAnimationActive={false} />
+              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              <Area
+                dataKey="value"
+                name={seriesName}
+                type={style.curveType}
+                stroke={color}
+                strokeWidth={style.lineWidth}
+                fill={color}
+                fillOpacity={style.fillOpacity}
+                dot={style.showPoints}
+                isAnimationActive={false}
+              />
+              {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </AreaChart>
           ) : (
             <LineChart data={chartData} {...drag.handlers}>
-              <CartesianGrid strokeDasharray="3 3" />
+              {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              <Tooltip labelFormatter={tooltipLabelFormatter} />
-              <Line type="monotone" dataKey="value" stroke={color} dot={false} isAnimationActive={false} />
+              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              <Line
+                type={style.curveType}
+                dataKey="value"
+                name={seriesName}
+                stroke={color}
+                strokeWidth={style.lineWidth}
+                dot={style.showPoints}
+                isAnimationActive={false}
+              />
+              {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </LineChart>

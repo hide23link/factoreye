@@ -139,6 +139,8 @@ function LoadedDashboard({
     if (!editing) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return;
+      // センサーを選ぶ欄の中では、Delete・Ctrl+Z を画面のウィジェットに効かせない（選ぶ操作の最中に消えないように）
+      if (e.target instanceof Element && e.target.closest("[data-sensor-field]")) return;
       // 確認ダイアログの表示中は、キー操作を画面の裏のウィジェットに効かせない（Delete・Ctrl+Z）
       if (document.querySelector('[role="dialog"]')) return;
       const store = useEditorStore.getState();

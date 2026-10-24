@@ -9,15 +9,13 @@
 import { useState } from "react";
 
 import { InfoButton } from "./controls";
-
-import { useQuery } from "@tanstack/react-query";
+import { Sparkline } from "./Sparkline";
 
 import { useSensors } from "../../hooks/queries";
 import { useInView } from "../../hooks/useInView";
+import { useSensorSnapshot } from "../../hooks/useSensorSnapshot";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
-import { fetchSensorReadings, fetchSensorReadingsAggregate } from "../../lib/api";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
-import { classifySeverity } from "../../lib/severity";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor } from "../../types";
@@ -132,69 +130,11 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   );
 }
 
-/** 今日の 0 時（ローカル）を、分単位に丸めた ISO 文字列で返す。取得のキーが毎回変わらないようにする */
-function startOfToday(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-// 行の推移線に使う点の数と、取る期間（時間）
-const SPARK_POINTS = 36;
-const SPARK_HOURS = 6;
-// 行の値を取り直す間隔（ミリ秒）。棚は参考表示なので、ウィジェットの 5 秒より長くする
-const SHELF_REFRESH_MS = 30_000;
-
 function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
   const setDragging = useEditorStore((s) => s.setDragging);
-  const kind = guessSensorKind(sensor);
   // 画面に見えている行だけ取得する（センサーが多くても、全行を取りに行かない）
   const { ref, inView } = useInView<HTMLLIElement>();
-  const { data } = useQuery({
-    queryKey: ["shelf-readings", sensor.id],
-    queryFn: () => {
-      const from = new Date(Date.now() - SPARK_HOURS * 60 * 60 * 1000).toISOString();
-      return fetchSensorReadings(sensor.id, from, SPARK_POINTS);
-    },
-    enabled: inView,
-    refetchInterval: inView ? SHELF_REFRESH_MS : false,
-  });
-  // 生産数は「いまの値」より本日の累計のほうが意味があるため、累計を出す
-  const { data: today } = useQuery({
-    queryKey: ["shelf-today", sensor.id],
-    queryFn: () => fetchSensorReadingsAggregate(sensor.id, startOfToday()),
-    enabled: inView && kind === "count",
-    refetchInterval: inView ? SHELF_REFRESH_MS : false,
-  });
-
-  const newestFirst = data?.readings ?? [];
-  const latest = newestFirst[0]?.value;
-  const series = [...newestFirst].reverse().map((r) => r.value);
-
-  const shown =
-    kind === "count"
-      ? today
-        ? Math.round(today.sum).toLocaleString("ja-JP")
-        : "—"
-      : kind === "state"
-        ? latest === undefined
-          ? "—"
-          : latest > 0
-            ? "稼働中"
-            : "停止中"
-        : latest === undefined
-          ? "—"
-          : latest.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-
-  // 状態の点: しきい値を超えていれば橙・赤、稼働は動いていれば緑、受信が無ければ灰色
-  const dot =
-    latest === undefined
-      ? "bg-gray-400"
-      : kind === "state"
-        ? latest > 0
-          ? "bg-green-600"
-          : "bg-red-600"
-        : { normal: "bg-green-600", warning: "bg-amber-500", critical: "bg-red-600" }[classifySeverity(latest, sensor)];
+  const { kind, shown, dotClass, series } = useSensorSnapshot(sensor, inView);
 
   return (
     <li
@@ -211,7 +151,7 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
       <span aria-hidden="true" className="select-none text-xs tracking-tighter text-gray-400">
         ⋮⋮
       </span>
-      <i aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+      <i aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`} />
       {/* 名前は 1 行目に幅いっぱいで出し（長くても 2 行まで）、種類・推移線・値は 2 行目に並べる。名前が値に押されて切れないようにする */}
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 break-words text-sm font-semibold leading-tight" title={sensor.name}>{sensor.name}</div>
@@ -234,20 +174,5 @@ function SensorRow({ sensor, onAdd }: { sensor: Sensor; onAdd: () => void }) {
         ＋
       </button>
     </li>
-  );
-}
-
-/** 小さな推移線。点が2つ未満なら何も描かない */
-function Sparkline({ values, width = 40, height = 18 }: { values: number[]; width?: number; height?: number }) {
-  if (values.length < 2) return <span style={{ width }} aria-hidden="true" />;
-  const low = Math.min(...values);
-  const range = Math.max(...values) - low || 1;
-  const points = values
-    .map((v, i) => `${((i / (values.length - 1)) * width).toFixed(1)},${(height - 2 - ((v - low) / range) * (height - 4)).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-      <polyline fill="none" stroke="#6b7280" strokeWidth={1.4} points={points} />
-    </svg>
   );
 }

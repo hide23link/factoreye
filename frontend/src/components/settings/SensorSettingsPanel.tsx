@@ -18,6 +18,8 @@ import type { Sensor } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ErrorNotice } from "../ErrorNotice";
 import { UnitSelect } from "../UnitSelect";
+import { SensorConnectGuide } from "./SensorConnectGuide";
+import { ThresholdBar } from "./ThresholdBar";
 
 // 入力欄の値。数値、または空欄（""）。空欄は「しきい値なし」を表す
 type NumOrBlank = number | "";
@@ -52,11 +54,19 @@ function generateIngestKey(): string {
   return `sensor-${Date.now().toString(36)}`;
 }
 
+/** 「種類から始める」の選択肢。選ぶと単位の初期値が入る（計測値は °C、生産数は個、稼働は 0/1。単位は選んだあとで変えられる）。選ばなくても登録できる */
+type SensorStartKind = "measure" | "count" | "state";
+const SENSOR_START_KINDS: ReadonlyArray<{ id: SensorStartKind; icon: string; label: string; hint: string; unit: string }> = [
+  { id: "measure", icon: "🌡️", label: "計測値", hint: "温度・圧力・振動など", unit: "°C" },
+  { id: "count", icon: "📦", label: "生産数", hint: "できた個数を数える", unit: "個" },
+  { id: "state", icon: "🚦", label: "稼働", hint: "動いている=1、止まっている=0", unit: "0/1" },
+];
+
 /**
  * センサー1件の行。表示と編集を切り替える（編集中は、名前・単位・閾値を入力欄にする）。
  * 保存・有効/無効・削除の操作ごとに、一覧を取り直す。
  */
-function SensorRow({ sensor }: { sensor: Sensor }) {
+function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId: string) => void }) {
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
   const [name, setName] = useState(sensor.name);
@@ -134,6 +144,7 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
     mutationFn: () => deleteSensor(sensor.id),
     onSuccess: () => {
       void invalidate();
+      onDeleted(sensor.id);
       setError(null);
     },
     onError: (e: Error) => setError(describeActionError(e, "センサーの削除")),
@@ -225,7 +236,10 @@ function SensorRow({ sensor }: { sensor: Sensor }) {
   return (
     <>
       <tr className="border-b border-gray-100">
-        <td className="p-2 text-sm font-medium text-gray-900">{sensor.name}</td>
+        <td className="p-2 text-sm font-medium text-gray-900">
+          {sensor.name}
+          <ThresholdBar sensor={sensor} />
+        </td>
         <td className="p-2 font-mono text-xs text-gray-400">{sensor.ingestKey}</td>
         <td className="p-2 text-sm text-gray-600">{sensor.unit}</td>
         <td className="p-2 text-sm text-gray-600">
@@ -299,12 +313,17 @@ export function SensorSettingsPanel() {
   const [ingestKey, setIngestKey] = useState(generateIngestKey);
   const [unit, setUnit] = useState("°C");
   const [error, setError] = useState<string | null>(null);
+  // 登録した直後のセンサー（つなぎ方の案内を出す）と、選んだ種類（単位の初期値のため）
+  const [justCreated, setJustCreated] = useState<Sensor | null>(null);
+  const [startKind, setStartKind] = useState<SensorStartKind | null>(null);
 
   // 新規登録。上限（Free Tier）に達した場合は、案内の文言を出す
   const createMutation = useMutation({
     mutationFn: () => createSensor({ name: name.trim(), ingestKey: ingestKey.trim(), unit: unit.trim() }),
-    onSuccess: () => {
+    onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ["sensors"] });
+      setJustCreated(created);
+      setStartKind(null);
       setName("");
       // 空欄に戻すと次の入力がまた手探りになるため、次回分の仮キーを提案し直す
       setIngestKey(generateIngestKey());
@@ -319,6 +338,33 @@ export function SensorSettingsPanel() {
     <div>
       <h2 className="mb-3 text-lg font-bold text-gray-900">センサー管理</h2>
 
+      {justCreated && <SensorConnectGuide key={justCreated.id} sensor={justCreated} onClose={() => setJustCreated(null)} />}
+
+      <div role="group" aria-label="センサーの種類から始める" className="mb-2 flex flex-wrap gap-2">
+        {SENSOR_START_KINDS.map((kind) => (
+          <button
+            key={kind.id}
+            type="button"
+            aria-pressed={startKind === kind.id}
+            onClick={() => {
+              setStartKind(kind.id);
+              setUnit(kind.unit);
+            }}
+            title={kind.hint}
+            className={`flex items-center gap-2 rounded-lg border-2 px-3 py-1.5 text-left text-sm ${
+              startKind === kind.id ? "border-blue-600 bg-blue-50" : "border-gray-200 bg-white hover:border-blue-400"
+            }`}
+          >
+            <span aria-hidden="true" className="text-xl">
+              {kind.icon}
+            </span>
+            <span>
+              <b className="block leading-tight">{kind.label}</b>
+              <small className="text-gray-500">{kind.hint}</small>
+            </span>
+          </button>
+        ))}
+      </div>
       <form
         className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3"
         onSubmit={(e) => {
@@ -390,7 +436,12 @@ export function SensorSettingsPanel() {
           </thead>
           <tbody>
             {sensors.map((sensor) => (
-              <SensorRow key={sensor.id} sensor={sensor} />
+              <SensorRow
+                key={sensor.id}
+                sensor={sensor}
+                // 削除したセンサーの「つなぎ方」の案内は、閉じる（削除済みのセンサーを待ち続けないように）
+                onDeleted={(id) => setJustCreated((current) => (current?.id === id ? null : current))}
+              />
             ))}
           </tbody>
         </table>
