@@ -157,11 +157,22 @@ export function DropSurface({
       {editing && dashboard.widgets.length === 0 && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center p-4 text-center text-sm text-gray-500">
           <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white/70 px-5 py-4">
+            {/* 空の画面の見本: 棚のセンサーを、キャンバスへ置くと、グラフやゲージになる（装飾） */}
+            <svg viewBox="0 0 220 80" aria-hidden="true" className="mx-auto mb-2 h-16 w-auto text-blue-500">
+              <rect x="4" y="14" width="52" height="52" rx="8" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 3" />
+              <path d="M14 52l10-12 8 6 14-18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M70 40h34m-8-8l8 8-8 8" fill="none" stroke="#9ca3af" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <rect x="116" y="8" width="100" height="64" rx="8" fill="#eff6ff" stroke="#bfdbfe" strokeWidth="2" />
+              <path d="M130 58a22 22 0 0144 0" fill="none" stroke="#bbf7d0" strokeWidth="7" />
+              <path d="M152 58l12-14" stroke="#111827" strokeWidth="2.5" strokeLinecap="round" />
+              <rect x="182" y="24" width="24" height="10" rx="3" fill="#bfdbfe" />
+              <rect x="182" y="40" width="24" height="10" rx="3" fill="#bfdbfe" />
+            </svg>
             <b className="text-base text-gray-900">ここにセンサーをドラッグしてみましょう</b>
             <br />
             {shelfOpen
-              ? "左の一覧から、好きなセンサーをここへ。グラフや生産管理が自動でできあがります。"
-              : "上の［センサー］を押して一覧を開き、好きなセンサーをここへ。グラフや生産管理が自動でできあがります。"}
+              ? "左の一覧から、好きなセンサーをここへ。グラフ・ゲージ・生産管理などが、センサーに合わせてできあがります。"
+              : "上の［センサー］を押して一覧を開き、好きなセンサーをここへ。グラフ・ゲージ・生産管理などが、センサーに合わせてできあがります。"}
             {!shelfOpen && (
               <>
                 <br />

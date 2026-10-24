@@ -11,6 +11,7 @@ import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../..
 import { guessSensorKind } from "../../lib/sensor-kind";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
+import { GearIcon } from "./GearIcon";
 
 // 稼働判定に使うのは最新の 1 件だけなので、1 件だけ取る
 const LATEST_ONLY = 1;
@@ -66,13 +67,21 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
     dailyTarget && dailyTarget > 0 && today ? (today.sum / dailyTarget) * 100 : null;
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2">
-      <p className="text-sm font-medium text-gray-700">{sensor?.name ?? "センサー"}</p>
+    <div
+      className={`flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 px-2 ${
+        isRunning ? "border-green-500 bg-green-50" : "border-transparent bg-gray-100"
+      }`}
+    >
+      <GearIcon spinning={isRunning} className={isRunning ? "text-green-600" : "text-gray-400"} />
+      <p className="max-w-full truncate text-sm font-medium text-gray-700" title={sensor?.name}>
+        {sensor?.name ?? "センサー"}
+      </p>
       <span
-        className={`rounded-full px-4 py-2 text-lg font-bold ${
-          isRunning ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
+        className={`rounded-full px-4 py-1.5 text-lg font-bold ${
+          isRunning ? "bg-green-700 text-white" : "bg-gray-600 text-white"
         }`}
       >
+        <span aria-hidden="true">{isRunning ? "▶ " : "⏸ "}</span>
         {isRunning ? "稼働中" : "停止中"}
       </span>
 

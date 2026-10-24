@@ -347,6 +347,42 @@ describe("WidgetSettings: グラフ", () => {
   });
 });
 
+describe("WidgetSettings: ゲージ", () => {
+  const gauge = widget("Gauge", { sensorId: "s1" });
+
+  it("目盛りの最小・最大を保存する", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={gauge} dashboard={dashboardOf(gauge)} />);
+
+    const min = screen.getByLabelText("目盛りの最小");
+    await user.clear(min);
+    await user.type(min, "0{Enter}");
+    await waitFor(() => expect(lastConfig()).toMatchObject({ gaugeMin: 0 }));
+
+    const max = screen.getByLabelText("目盛りの最大");
+    await user.type(max, "120{Enter}");
+    await waitFor(() => expect(lastConfig()).toMatchObject({ gaugeMax: 120 }));
+  });
+
+  it("最大を空欄に戻すと、手動の指定が消えて自動に戻る", async () => {
+    const user = userEvent.setup();
+    const fixed = widget("Gauge", { sensorId: "s1", config: { gaugeMin: 0, gaugeMax: 120 } });
+    renderWithQueryClient(<WidgetSettings widget={fixed} dashboard={dashboardOf(fixed)} />);
+    await user.clear(screen.getByLabelText("目盛りの最大"));
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(lastConfig().gaugeMax).toBeUndefined());
+    expect(lastConfig().gaugeMin).toBe(0);
+  });
+
+  it("センサーを選び直せる（1つだけ）", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={gauge} dashboard={dashboardOf(gauge)} />);
+    await user.click(screen.getByRole("button", { name: "＋ センサーを選ぶ" }));
+    await user.click(within(await screen.findByRole("group", { name: "センサーを選ぶ" })).getByRole("button", { name: /^圧力/ }));
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalledWith("w1", expect.objectContaining({ sensorId: "s2" })));
+  });
+});
+
 describe("WidgetSettings: アラーム一覧", () => {
   it("設定項目が無いことを案内する", () => {
     const w = widget("AlarmAlert");

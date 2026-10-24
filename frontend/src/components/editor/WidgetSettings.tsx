@@ -109,6 +109,8 @@ function TypeSettings({ widget, actions }: SectionProps) {
       return <GraphSettings widget={widget} actions={actions} />;
     case "StatValue":
       return <StatValueSettings widget={widget} actions={actions} />;
+    case "Gauge":
+      return <GaugeSettings widget={widget} actions={actions} />;
     case "ProductionStatus":
       return <ProductionStatusSettings widget={widget} actions={actions} />;
     case "ProductionPlan":
@@ -373,6 +375,42 @@ function GraphSettings({ widget, actions }: SectionProps) {
         ) : (
           <p className="text-sm text-gray-400">センサーを1つにすると使えます</p>
         )}
+      </Section>
+    </>
+  );
+}
+
+function GaugeSettings({ widget, actions }: SectionProps) {
+  const config = widget.config;
+  // 最小・最大は、両方そろったときだけ手動になる（片方だけだと、自動のまま）
+  return (
+    <>
+      <SingleSensorField widget={widget} actions={actions} suited="measure" />
+      <Section title="目盛りの範囲" note="空欄なら、しきい値と現在値から自動で決めます。最小と最大の両方を入れると、その範囲で固定します">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最小
+            <NumberField label="目盛りの最小" value={config.gaugeMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { gaugeMin: v ?? undefined })} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最大
+            <NumberField label="目盛りの最大" value={config.gaugeMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { gaugeMax: v ?? undefined })} />
+          </label>
+        </div>
+        {config.gaugeMin !== undefined && config.gaugeMax !== undefined && config.gaugeMin >= config.gaugeMax && (
+          <p role="alert" className="text-xs text-red-600">最小は、最大より小さくしてください（いまは、自動の範囲で表示しています）</p>
+        )}
+      </Section>
+      <Section title="小数点以下">
+        <NumberField
+          label="小数点以下の桁数"
+          value={config.decimals ?? 1}
+          min={0}
+          max={6}
+          step={1}
+          unit="桁"
+          onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? 1 })}
+        />
       </Section>
     </>
   );

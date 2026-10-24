@@ -8,9 +8,12 @@
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import { useSensorReadings, useSensors } from "../../hooks/queries";
+import { guessSensorKind } from "../../lib/sensor-kind";
 import { classifySeverity, type Severity } from "../../lib/severity";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
+import { SensorKindIcon } from "./SensorKindIcon";
+import { ThresholdMeter } from "./ThresholdMeter";
 
 // 状態ごとの見た目（背景、文字、線の色、説明の文言）
 const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: string; label: string }> = {
@@ -51,14 +54,21 @@ export function StatValueWidget({ widget }: { widget: Widget }) {
     <div
       className={`flex h-full flex-col items-center justify-center gap-1 rounded p-2 ${style.bg}`}
     >
-      <p className="text-sm font-medium text-gray-600">{sensor.name}</p>
+      <p className="flex max-w-full items-center gap-1.5 text-sm font-medium text-gray-600">
+        <SensorKindIcon kind={guessSensorKind(sensor)} className="shrink-0 text-gray-400" />
+        <span className="truncate" title={sensor.name}>
+          {sensor.name}
+        </span>
+      </p>
       <p className={`text-4xl font-bold tabular-nums ${style.text}`}>
         {latest ? latest.value.toFixed(decimals) : "—"}
         <span className="ml-1 text-base font-normal text-gray-400">{sensor.unit}</span>
       </p>
       {style.label && <span className={`text-xs font-medium ${style.text}`}>{style.label}</span>}
+      {latest && <ThresholdMeter sensor={sensor} value={latest.value} />}
+      {/* 推移線は、高さ 40px（数値・しきい値バーで高さが埋まる小さいウィジェットでも、つぶれないよう最低 24px、縮めない） */}
       {sparklineData.length > 1 && (
-        <div className="h-10 w-full max-w-[160px]">
+        <div className="h-10 min-h-6 w-full max-w-[160px] shrink-0">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={sparklineData}>
               <Line

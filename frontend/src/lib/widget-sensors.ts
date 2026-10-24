@@ -37,6 +37,8 @@ export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): 
     }
     case "StatValue":
       return { ok: true, sensorId: sensor.id, config: widget.config, message: `数値を「${sensor.name}」に切り替えました` };
+    case "Gauge":
+      return { ok: true, sensorId: sensor.id, config: widget.config, message: `ゲージを「${sensor.name}」に切り替えました` };
     case "ProductionStatus":
       return { ok: true, sensorId: sensor.id, config: widget.config, message: `稼働ステータスを「${sensor.name}」に切り替えました` };
     case "ProductionPlan": {

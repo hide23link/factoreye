@@ -289,6 +289,26 @@ describe("DashboardView", () => {
       expect(types).toEqual(["ProductionPlan", "ProductionStatus"]);
     });
 
+    it("センサー棚で置き方を選ぶと、その種類で新しく作る（計測値はゲージ・数値も、生産数はグラフも選べる）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      vi.mocked(api.addWidget).mockResolvedValue(makeWidget({ id: "w9" }));
+
+      renderWithQueryClient(<DashboardView dashboardId="d1" />);
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(await screen.findByRole("button", { name: "乾燥炉 温度をゲージとして追加" }));
+      await user.click(await screen.findByRole("button", { name: "乾燥炉 温度を数値として追加" }));
+      await user.click(await screen.findByRole("button", { name: "ライン1 生産数をグラフとして追加" }));
+
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(3));
+      const calls = vi.mocked(api.addWidget).mock.calls.map((c) => [c[1].type, c[1].sensorId]);
+      expect(calls).toEqual([
+        ["Gauge", "s1"],
+        ["StatValue", "s1"],
+        ["SensorGraph", expect.any(String)],
+      ]);
+    });
+
     it("センサーを検索と種類で絞り込める", async () => {
       const user = userEvent.setup();
       vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
@@ -315,7 +335,7 @@ describe("DashboardView", () => {
       renderWithQueryClient(<DashboardView dashboardId="d1" />);
       await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
       await user.click(screen.getByRole("button", { name: "ウィジェット" }));
-      await user.click(screen.getByRole("button", { name: /生産管理/ }));
+      await user.click(screen.getByRole("button", { name: /^生産管理/ }));
 
       await waitFor(() =>
         expect(api.addWidget).toHaveBeenCalledWith(

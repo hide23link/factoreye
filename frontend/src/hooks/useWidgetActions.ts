@@ -334,9 +334,16 @@ export function useWidgetActions(dashboard: DashboardDetail) {
   /**
    * センサーの「＋」ボタン・空きへのドロップ。
    * 選択中のグラフがあれば（稼働以外のセンサーなら）そこへ追加し、無ければ種類に合うウィジェットを新しく作る。
+   * chosenType を渡したときは（置き方の選択）、その種類のウィジェットを新しく作る。
    */
-  const addSensor = (sensor: Sensor, position?: { column: number; row: number }) =>
+  const addSensor = (sensor: Sensor, position?: { column: number; row: number }, chosenType?: WidgetType) =>
     enqueue(async () => {
+      // 置き方を選んだとき（センサー棚の「📈 グラフ」など）は、その種類で新しく作る
+      if (chosenType) {
+        const made = await doCreate(chosenType, { sensorId: sensor.id, position });
+        if (made) useEditorStore.getState().showToast(`「${sensor.name}」を${widgetLabel(chosenType)}として追加しました`);
+        return;
+      }
       const selectedId = useEditorStore.getState().selectedWidgetId;
       const selected = currentWidgets().find((w) => w.id === selectedId);
       const kind = guessSensorKind(sensor);

@@ -50,7 +50,8 @@ export function WidgetPalette({ dashboard }: { dashboard: DashboardDetail }) {
             <span className="min-w-0">
               <b className="block truncate text-sm">
                 {kind.label}
-                {kind.type === "ProductionPlan" && (
+                {/* NEW の印は、新しい種類を足したときに付け替える（前は生産管理、いまはゲージ） */}
+                {kind.type === "Gauge" && (
                   <em className="ml-1 rounded bg-blue-600 px-1 py-px align-[1px] text-[10px] font-bold not-italic text-white">NEW</em>
                 )}
               </b>

@@ -122,4 +122,26 @@ describe("ProductionStatusWidget", () => {
     );
     expect(screen.getByText("センサーが設定されていません")).toBeInTheDocument();
   });
+
+  const reading = (value: number) => ({
+    readings: [{ id: 1, sensorId: "s1", value, recordedAt: "2024-01-01T00:00:00.000Z" }],
+    total: 1,
+  });
+
+  it("稼働中は緑のカードで歯車が回る（motion-safe）。停止中は灰色で、歯車は回らない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 1, count: 1 });
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(reading(5));
+    const running = renderWithQueryClient(<ProductionStatusWidget widget={makeWidget()} />);
+    expect(await screen.findByText("稼働中")).toBeInTheDocument();
+    expect(running.container.firstElementChild).toHaveClass("border-green-500");
+    expect(running.container.querySelector("g.motion-safe\\:animate-spin")).not.toBeNull();
+    running.unmount();
+
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue(reading(0));
+    const stopped = renderWithQueryClient(<ProductionStatusWidget widget={makeWidget({ onThreshold: 0 })} />);
+    expect(await screen.findByText("停止中")).toBeInTheDocument();
+    expect(stopped.container.firstElementChild).not.toHaveClass("border-green-500");
+    expect(stopped.container.querySelector("g.motion-safe\\:animate-spin")).toBeNull();
+  });
 });
