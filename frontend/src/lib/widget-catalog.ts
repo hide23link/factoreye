@@ -41,6 +41,15 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     defaultConfig: { timeRangeHours: 1, decimals: 1 },
   },
   {
+    type: "Gauge",
+    label: "ゲージ",
+    description: "範囲の中で、いまの値を針で見る。しきい値の色つき",
+    width: 4,
+    height: 6,
+    suitedSensor: "measure",
+    defaultConfig: { decimals: 1 },
+  },
+  {
     type: "AlarmAlert",
     label: "アラーム一覧",
     description: "発生中のアラームを一覧",
@@ -79,6 +88,16 @@ export function widgetKind(type: WidgetType): WidgetKind | undefined {
 
 export function widgetLabel(type: WidgetType): string {
   return widgetKind(type)?.label ?? LEGACY_LABEL[type] ?? type;
+}
+
+/**
+ * センサーの種類ごとの、置き方の選択肢（先頭が、「＋」やドラッグで置いたときの既定）。
+ * 計測値はグラフ・数値・ゲージ、生産数は生産管理・グラフ・数値、稼働は稼働ステータス・グラフ。
+ */
+export function widgetChoicesFor(kind: SensorKind): WidgetType[] {
+  if (kind === "count") return ["ProductionPlan", "SensorGraph", "StatValue"];
+  if (kind === "state") return ["ProductionStatus", "SensorGraph"];
+  return ["SensorGraph", "StatValue", "Gauge"];
 }
 
 /** センサーを置いたときに作るウィジェットの種類（計測値→グラフ、生産数→生産管理、稼働→稼働ステータス） */

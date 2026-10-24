@@ -127,6 +127,8 @@ export type WidgetType =
   | "AlarmAlert"
   | "MultiSensorComparison"
   | "StatValue"
+  // 半円のメーター（正常・軽故障・重故障の色の帯と針）
+  | "Gauge"
   // 生産管理（1日の目標に対する進み具合）。稼働ステータス（ProductionStatus）とは別の種類
   | "ProductionPlan";
 
@@ -144,8 +146,11 @@ export interface WidgetConfig {
   onThreshold?: number;
   // ProductionStatusWidget用: 本日の生産目標数（未指定なら達成率は表示しない）
   dailyTarget?: number;
-  // StatValueWidget用: 表示する小数桁数（未指定なら1桁）
+  // StatValueWidget・GaugeWidget用: 表示する小数桁数（未指定なら1桁）
   decimals?: number;
+  // GaugeWidget用: メーターの目盛りの最小・最大（未指定なら、しきい値と現在値から自動で決める）
+  gaugeMin?: number;
+  gaugeMax?: number;
   // グラフ用: センサーごとの線の色（sensorIds と同じ順）。未指定なら既定の色
   colors?: string[];
   // グラフ用: センサーが1つのとき、軽故障・重故障のしきい値の線を重ねる
