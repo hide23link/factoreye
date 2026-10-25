@@ -27,7 +27,7 @@ const sensor: Sensor = {
 };
 
 function makeReading(value: number): Reading {
-  return { id: 1, sensorId: "s1", value, recordedAt: "2024-01-01T00:00:00.000Z" };
+  return { sensorId: "s1", value, recordedAt: "2024-01-01T00:00:00.000Z" };
 }
 
 function makeWidget(overrides: Partial<Widget> = {}): Widget {

@@ -44,8 +44,8 @@ describe("SensorPicker", () => {
   beforeEach(() => {
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({
       readings: [
-        { id: 2, sensorId: "s", value: 92, recordedAt: "2026-10-23T00:00:00Z" },
-        { id: 1, sensorId: "s", value: 70, recordedAt: "2026-10-22T23:59:00Z" },
+        { sensorId: "s", value: 92, recordedAt: "2026-10-23T00:00:00Z" },
+        { sensorId: "s", value: 70, recordedAt: "2026-10-22T23:59:00Z" },
       ],
       total: 2,
     });

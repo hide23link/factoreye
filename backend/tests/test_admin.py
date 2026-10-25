@@ -1,7 +1,7 @@
 """管理者API・管理者アカウント（テキストファイル）のテスト（AUTH_MODE=multi_tenant）。"""
 
 from collections.abc import AsyncGenerator, Generator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -91,7 +91,9 @@ async def _add_sensor_with_readings(email: str, n_readings: int) -> str:
         sensor_id = sensor.id  # commit で expire される前に取得
         now = datetime.now(UTC)
         for i in range(n_readings):
-            session.add(Reading(sensor_id=sensor_id, value=float(i), recorded_at=now))
+            # 主キーは (sensor_id, recorded_at) なので、時刻をずらす
+            at = now + timedelta(microseconds=i)
+            session.add(Reading(sensor_id=sensor_id, value=float(i), recorded_at=at))
         await session.commit()
     return str(sensor_id)
 

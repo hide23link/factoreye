@@ -24,6 +24,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -46,6 +47,9 @@ FLUSH_INTERVAL_SECONDS = 1.0
 # DB 障害が長引いたときに、再試行待ちの測定値でメモリを使い切らないための上限
 # （1件あたり約 200 バイト → 約 20 MB）。超えた分は古いものから捨てる
 MAX_PENDING_READINGS = 100_000
+# 1 つの INSERT 文に入れる最大行数（_insert_readings 参照）。1 行 3 パラメータ × 5,000 = 15,000 で、
+# asyncpg の上限 32,767 に収まる
+_INSERT_CHUNK_SIZE = 5_000
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,46 @@ async def flush_once() -> int:
     return len(pending)
 
 
+async def _insert_readings(
+    session: AsyncSession, readings: list[PendingReading]
+) -> list[PendingReading]:
+    """測定値を書き、実際に書けたものだけを返す（元の順序のまま）。
+
+    主キー (sensor_id, recorded_at) が同じ値は書かない（ON CONFLICT DO NOTHING）。
+    1 つの INSERT 文に入れる行数を _INSERT_CHUNK_SIZE に区切る。PostgreSQL のドライバ（asyncpg）は
+    1 文のパラメータが 32,767 個までで、1 行 3 個なので、全行を 1 文にすると 1 万件余りで失敗し、
+    バッファが減らず取り込み全体が止まる。
+    """
+    inserted: set[tuple[UUID, datetime]] = set()
+    for start in range(0, len(readings), _INSERT_CHUNK_SIZE):
+        chunk = readings[start : start + _INSERT_CHUNK_SIZE]
+        result = await session.execute(
+            pg_insert(Reading)
+            .values(
+                [
+                    {"sensor_id": p.sensor_id, "value": p.value, "recorded_at": p.recorded_at}
+                    for p in chunk
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=["sensor_id", "recorded_at"])
+            .returning(col(Reading.sensor_id), col(Reading.recorded_at))
+        )
+        inserted.update((row[0], row[1]) for row in result.all())
+
+    written: list[PendingReading] = []
+    for p in readings:
+        key = (p.sensor_id, p.recorded_at)
+        if key in inserted:
+            written.append(p)
+            inserted.discard(key)  # 同じ主キーが 2 つあれば、書けたのは先の 1 つだけ
+    if len(written) < len(readings):
+        logger.warning(
+            "skipped %d readings with the same sensor and time as an existing one",
+            len(readings) - len(written),
+        )
+    return written
+
+
 async def _write_and_evaluate(
     session: AsyncSession, pending: list[PendingReading]
 ) -> tuple[
@@ -316,12 +360,12 @@ async def _write_and_evaluate(
     if not existing:
         return [], [], [], {}
 
-    session.add_all(
-        [
-            Reading(sensor_id=p.sensor_id, value=p.value, recorded_at=p.recorded_at)
-            for p in existing
-        ]
-    )
+    # 主キー (sensor_id, recorded_at) が同じ値は書かずに続ける。別々の送信が同じマイクロ秒に
+    # 重なる、または flush の再試行で同じ値が二度届いても、バッチ全体は失敗しない。
+    # 実際に書けた行だけを、アラーム評価・通知・戻り値に使う（書けていない値で判定しない）
+    existing = await _insert_readings(session, existing)
+    if not existing:
+        return [], [], [], {}
     settings_by_workspace = await _load_notification_settings(
         session, set(workspace_by_sensor.values())
     )

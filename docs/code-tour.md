@@ -181,7 +181,7 @@ erDiagram
 | テーブル | 役割 | 覚えておくこと |
 |---|---|---|
 | `sensors` | センサー（しきい値・不感帯・`ingest_key`） | `ingest_key` は全体で一意。名前はワークスペース内で一意 |
-| `readings` | 測定値（時系列） | `(sensor_id, recorded_at)` の複合インデックスで範囲検索を速くする |
+| `readings` | 測定値（時系列） | 主キーは `(sensor_id, recorded_at)`（連番の `id` は無い）。この主キーの索引で範囲検索も速くする |
 | `alarms` | アラームの履歴 | センサーを消すと、アラームも一緒に消える |
 | `dashboards` / `widgets` | ダッシュボードと、その中のウィジェット | 位置は 12 列の格子（`grid_column` など）で持つ |
 | `notification_settings` | Discord 通知の設定 | ワークスペースごとに 1 行 |

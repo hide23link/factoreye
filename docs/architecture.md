@@ -57,7 +57,7 @@ flowchart LR
 | テーブル | 役割 | 主な内容 |
 |---|---|---|
 | `sensors` | センサー | 名前（ワークスペース内で一意）、`ingest_key`（全体で一意。取り込みAPIがキーだけで特定するため）、単位、しきい値4項目、不感帯、有効/無効 |
-| `readings` | 測定値 | sensor_id、値、`recorded_at`（取り込んだサーバー時刻）。`(sensor_id, recorded_at)` で索引 |
+| `readings` | 測定値 | sensor_id、値、`recorded_at`（取り込んだサーバー時刻）。主キーは `(sensor_id, recorded_at)`（連番の `id` は無い。同じセンサーで同じ時刻の値は持てないため、1 回の送信内の i 番目の値は i マイクロ秒ずらして保存する。重複は書かずに続ける） |
 | `alarms` | アラーム | sensor_id、状態（active / acknowledged / resolved）、重要度（warning / critical）、しきい値方向（min / max）、確認者、`last_notified_at`。ユーザー操作では削除しない（センサーを削除すると関連分も削除される） |
 | `dashboards` | ダッシュボード | 名前、説明、レイアウト設定。削除は論理削除（`deleted_at`） |
 | `widgets` | ウィジェット | ダッシュボードの配置（12列グリッド）、種別、センサーとの紐付け、設定 |

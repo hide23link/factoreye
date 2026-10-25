@@ -37,8 +37,8 @@ ALTER TABLE public.workspaces OWNER TO fe_test_owner;
 CREATE TABLE public.sensors (id uuid PRIMARY KEY, workspace_id uuid, name varchar(100),
   created_at timestamptz);
 ALTER TABLE public.sensors OWNER TO fe_test_owner;
-CREATE TABLE public.readings (id serial PRIMARY KEY, sensor_id uuid, value double precision,
-  recorded_at timestamptz);
+CREATE TABLE public.readings (sensor_id uuid NOT NULL, recorded_at timestamptz NOT NULL,
+  value double precision NOT NULL, PRIMARY KEY (sensor_id, recorded_at));
 ALTER TABLE public.readings OWNER TO fe_test_owner;
 CREATE TYPE public.alarmstatus AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED');
 ALTER TYPE public.alarmstatus OWNER TO fe_test_owner;
@@ -69,6 +69,17 @@ INSERT INTO public.notification_settings (id, workspace_id, enabled) VALUES
   (1, NULL, true), (2, '{WS_A}', true);
 SELECT setval('public.notification_settings_id_seq', 2);
 """
+
+
+# readings の主キーを (sensor_id, recorded_at) に統合する前の版（id 列つき）のバックアップ。
+# 適用前に取ったバックアップは、この形で残っている
+OLD_READINGS_DUMP_SQL = DUMP_SQL.replace(
+    """CREATE TABLE public.readings (sensor_id uuid NOT NULL, recorded_at timestamptz NOT NULL,
+  value double precision NOT NULL, PRIMARY KEY (sensor_id, recorded_at));""",
+    """CREATE TABLE public.readings (id serial PRIMARY KEY, sensor_id uuid, value double precision,
+  recorded_at timestamptz);""",
+)
+assert OLD_READINGS_DUMP_SQL != DUMP_SQL
 
 
 def write_dump(directory: Path, name: str, sql: str = DUMP_SQL) -> Path:

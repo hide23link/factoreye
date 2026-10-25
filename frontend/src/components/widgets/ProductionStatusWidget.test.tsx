@@ -51,7 +51,7 @@ describe("ProductionStatusWidget", () => {
   it("閾値を超えていれば稼働中、直近1時間/本日累計を表示する", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({
-      readings: [{ id: 1, sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      readings: [{ sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
       total: 1,
     });
     vi.mocked(api.fetchSensorReadingsAggregate)
@@ -79,7 +79,7 @@ describe("ProductionStatusWidget", () => {
   it("1 件だけでも、しきい値以下なら停止中、超えれば稼働中（件数が少なくても判定は同じ）", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({
-      readings: [{ id: 1, sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      readings: [{ sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
       total: 1,
     });
     vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 0, count: 0 });
@@ -124,7 +124,7 @@ describe("ProductionStatusWidget", () => {
   });
 
   const reading = (value: number) => ({
-    readings: [{ id: 1, sensorId: "s1", value, recordedAt: "2024-01-01T00:00:00.000Z" }],
+    readings: [{ sensorId: "s1", value, recordedAt: "2024-01-01T00:00:00.000Z" }],
     total: 1,
   });
 

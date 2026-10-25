@@ -73,7 +73,13 @@ async def saas_data(alembic_table: None) -> AsyncGenerator[dict[str, UUID], None
         session.add_all([sensor, other])
         await session.flush()
 
-        session.add_all([Reading(sensor_id=sensor.id, value=float(v)) for v in (10, 20, 30)])
+        t0 = datetime.now(UTC)
+        session.add_all(
+            [
+                Reading(sensor_id=sensor.id, value=float(v), recorded_at=t0 + timedelta(seconds=i))
+                for i, v in enumerate((10, 20, 30))
+            ]
+        )
         session.add(
             Alarm(
                 sensor_id=sensor.id,
