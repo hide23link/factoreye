@@ -40,4 +40,6 @@ if [ "$ok" != 1 ]; then
   log "  ② 直せないなら、infra/walg/README.md の「戻し方」で、archive_mode を元に戻す。"
   exit 1
 fi
+# 有効にした印。monitor.sh が、あとで archive_mode が off に戻っていたら異常として通知する（init.sh を忘れた放置は、印が無いので通知しない）
+mkdir -p "${WALG_DIR:-/opt/factoreye/walg}" 2>/dev/null && touch "${WALG_DIR:-/opt/factoreye/walg}/archive-enabled" 2>/dev/null || log "警告: 有効にした印を作れませんでした（監視は続く）"
 log "完了。次は、最初の全体のバックアップ: infra/walg/backup.sh full"

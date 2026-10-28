@@ -6,7 +6,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"; P="walgtest$$"
-export COMPOSE_PROJECT_NAME="$P" COMPOSE_FILE="$T/compose.yml" POSTGRES_USER=factoreye POSTGRES_DB=factoreye
+export COMPOSE_PROJECT_NAME="$P" COMPOSE_FILE="$T/compose.yml" POSTGRES_USER=factoreye POSTGRES_DB=factoreye WALG_DIR="$T/walgdir" WEBHOOK_FILE="$T/no-webhook"
 cleanup() { docker compose -f "$T/compose.yml" --profile restore down -v >/dev/null 2>&1 || true; docker rmi "${P}-postgres" >/dev/null 2>&1 || true; rm -rf "$T"; }
 trap cleanup EXIT
 fail() { echo "NG: $*" >&2; exit 1; }
@@ -49,10 +49,13 @@ for _ in $(seq 1 60); do SQLX "select 1" >/dev/null 2>&1 && break; sleep 1; done
 OUT=$(PG_SERVICE=postgres bash -c 'source "$1/common.sh"; in_pg() { echo ""; }; need_walg_env' _ "$HERE" 2>&1 || true)
 echo "$OUT" | grep -q 'WAL-G の設定がコンテナにありません' || fail "設定が無いときのエラーが出ない"; ok "設定が無いときは、わかりやすいエラーで止まる"
 
+OUT=$(PG_SERVICE=postgres bash -c 'source "$1/common.sh"; in_pg() { echo s3://shared-bucket/foo; }; require_dedicated_prefix' _ "$HERE" 2>&1 || true)
+echo "$OUT" | grep -q '専用バケットではありません' || fail "共有バケットの置き場で、delete を拒否しない"; ok "置き場が専用バケットでなければ、full（delete を伴う）を拒否する"
 # 1. 初期化（2 回実行しても安全）
 step "$HERE/init.sh" || fail "init.sh が失敗"; ok "init.sh（接続確認・archive 設定・再起動・WAL が届くか確認）"
 step "$HERE/init.sh" || fail "init.sh の 2 回目が失敗"; ok "init.sh を 2 回実行しても安全"
 [ "$(SQLX 'show archive_mode')" = on ] || fail "archive_mode が on でない"
+[ -e "$WALG_DIR/archive-enabled" ] || fail "有効にした印が作られない"; ok "init.sh は、有効にした印を作る"
 
 # 2. データ → 全体 → 追加 → 差分 → 追加 → WAL
 SQLX "create table t(id bigserial primary key, v double precision, ts timestamptz default now())" >/dev/null

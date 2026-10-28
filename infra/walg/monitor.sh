@@ -9,16 +9,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 MAX_WAL_MB="${MAX_WAL_MB:-2048}"
 DISK_PCT="${DISK_PCT:-85}"
-WEBHOOK_FILE="${WEBHOOK_FILE:-/opt/factoreye/walg/discord-webhook}"
 STATE_FILE="${STATE_FILE:-/var/tmp/factoreye-walg-alert}"
 
+notify_on_failure monitor
 wait_ready
-if [ "$(sql 'show archive_mode')" != "on" ]; then
-  log "archive_mode が off です（有効にする前。見るものがありません）"
-  exit 0
-fi
-
 alerts=()
+if [ "$(sql 'show archive_mode')" != "on" ]; then
+  if [ ! -e "${WALG_DIR:-/opt/factoreye/walg}/archive-enabled" ]; then
+    log "archive_mode が off です（有効にする前。見るものがありません）"
+    exit 0
+  fi
+  alerts+=("archive_mode が off です（init.sh で有効にした後に戻っています。WAL が R2 に送られていません）")
+fi
 
 # ① アーカイブが今、失敗している: 最後の失敗が、最後の成功より新しい
 failing=$(sql "select (last_failed_time is not null and (last_archived_time is null or last_failed_time > last_archived_time)) from pg_stat_archiver")
@@ -44,19 +46,9 @@ if [ "${#alerts[@]}" -eq 0 ]; then
   exit 0
 fi
 
-msg="factoreye 本番の DB のバックアップに異常: $(IFS=' / '; echo "${alerts[*]}")。対応は infra/walg/README.md の「異常のとき」"
+joined=""; for a in "${alerts[@]}"; do joined="${joined:+$joined / }$a"; done
+msg="factoreye 本番の DB のバックアップに異常: ${joined}。対応は infra/walg/README.md の「異常のとき」"
 log "異常: $msg"
 
-# Discord に通知（Webhook のファイルがあるときだけ。1 時間に 1 回まで）
-if [ -r "$WEBHOOK_FILE" ]; then
-  now=$(date +%s); last=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
-  if [ $((now - last)) -ge 3600 ]; then
-    body=$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    if curl -s -m 10 -o /dev/null -H 'Content-Type: application/json' -d "{\"content\":\"🔴 ${body}\"}" "$(cat "$WEBHOOK_FILE")"; then
-      echo "$now" > "$STATE_FILE"
-    else
-      log "Discord への通知に失敗しました"
-    fi
-  fi
-fi
+notify "$msg" "$STATE_FILE"
 exit 2

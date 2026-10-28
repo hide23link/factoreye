@@ -9,8 +9,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 TYPE="${1:-}"
 case "$TYPE" in full|delta) ;; *) die "使い方: backup.sh full | delta" ;; esac
 
+notify_on_failure "backup-${1:-}"
 wait_ready
 need_walg_env
+[ "$TYPE" != full ] || require_dedicated_prefix
 log "ベースバックアップ（${TYPE}）を開始"
 if [ "$TYPE" = full ]; then walg backup-push --full "$PGDATA_DIR"; else walg backup-push "$PGDATA_DIR"; fi
 if [ "$TYPE" = full ]; then

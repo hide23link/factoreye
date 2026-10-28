@@ -35,5 +35,5 @@ awk '
   { print }
 ' "$HERE/walg.env.example" > "$DEST"
 chmod 600 "$DEST"
-grep -v '^#' "$DEST" | grep -q '<' && die "<...> のプレースホルダが残っています: $DEST"
+grep -v '^#' "$DEST" | grep -qE '^[A-Z_0-9]+=<' && die "<...> のプレースホルダが残っています: $DEST"
 echo "作りました: ${DEST}（エンドポイント ${E}。鍵は表示しません）"

@@ -45,7 +45,8 @@ factoreye-db/
    rm -f /etc/cron.d/factoreye-pgbackrest
    ```
 2. DR コンソール（`https://factoreye.hide23.link/admin/dr`）の「自動切り替え」が**無効**なことを確認する。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
-3. **`main` にマージして、自動デプロイを済ませる**（PostgreSQL が、WAL-G 入りの新しいイメージで作り直される。数秒、DB が再起動する）。確認: `docker compose -f docker-compose.cloud.yml exec -T postgres wal-g --version`
+3. 自動デプロイの前提を確認する: 本番の Docker Compose が **2.24 以上**（`docker compose version`。`env_file` の `required: false` の書き方に必要）。デプロイを実行する runner のユーザーが、`/opt/factoreye/walg/walg.env`（権限 600、所有者 root）を読めること（root でなければ、権限エラーで `compose up` が失敗する。その場合は runner が読めるグループにして 640 にする）。
+4. **`main` にマージして、自動デプロイを済ませる**（PostgreSQL が、WAL-G 入りの新しいイメージで作り直される。数秒、DB が再起動する）。確認: `docker compose -f docker-compose.cloud.yml exec -T postgres wal-g --version`
 
 ### 1. 鍵を置く
 
@@ -71,6 +72,8 @@ curl -s localhost/health                                     # {"status":"ok",..
 
 ### 3. 有効にして、最初の全体のバックアップを取る
 
+先に、**バケット `factoreye-db` が空（`README.txt` だけ）なことを確認する**（過去の試験や別の DB の WAL・ベースが残っていると、作り直した DB の履歴と混ざる。専用バケットなので、残っていれば Cloudflare のコンソールで全削除する。`README.txt` は、`wrangler r2 object put factoreye-db/README.txt --file infra/walg/bucket-README.txt --remote` で置ける）。
+
 ```bash
 infra/walg/init.sh          # 最後に「WAL が R2 に届く」確認が成功すること（途中で PostgreSQL が数秒、再起動する）
 infra/walg/backup.sh full
@@ -94,11 +97,12 @@ chmod 644 /etc/cron.d/factoreye-walg
 ```
 設定ファイルの暗号化バックアップ（毎晩）は、`BACKUP_DB=off` にして、DB のダンプをやめる（従来の cron の行に `BACKUP_DB=off` を足す）:
 ```bash
-crontab -l | sed 's#OFFSITE_S3_URI=#BACKUP_DB=off OFFSITE_S3_URI=#' | crontab -
+crontab -l | grep -q 'BACKUP_DB=off' || crontab -l | sed 's#OFFSITE_S3_URI=#BACKUP_DB=off OFFSITE_S3_URI=#' | crontab -   # 2 回実行しても重複しない
 ```
 
 ### 5. 確認
 
+- `archive_mode` が `on` なこと（`docker compose -f docker-compose.cloud.yml exec -T postgres psql -U factoreye -d factoreye -Atc 'show archive_mode'`）。`off` のままだと、WAL は R2 に送られない。
 - DR コンソールが「正常」に戻ること。1〜2 分後、R2 の `factoreye-db/wal_005/` に WAL が増えること。
 - 任意: Discord の通知（`monitor.sh`）は、Webhook の URL を 1 行だけ書いたファイル `/opt/factoreye/walg/discord-webhook`（権限 600）を置くと、有効になる。
 
