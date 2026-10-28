@@ -217,7 +217,7 @@ LAN と Tailscale だけに許可しているため。LAN 上の別サブネッ�
 - バックアップのファイルは、ほかの利用者が読めない権限（640）で作る（復旧ツールはグループの権限で読む）。`backups/`は
   `.gitignore`済みでリポジトリにはコミットされない
 
-## クラウド版の DB のバックアップ（pgBackRest）
+## クラウド版の DB のバックアップ（WAL-G）
 
-クラウド版は、毎晩の `pg_dump` をやめ、**WAL の追記とベースバックアップを R2 に送る**。手順・cron・確認は `infra/pgbackrest/README.md`。`infra/backup.sh` は、`BACKUP_DB=off` で、**設定ファイルの暗号化バックアップだけ**を作る（DR の控えの起動に必要）。OSS 版（`docker-compose.yml`）は、従来どおり `pg_dump`（`BACKUP_DB` の既定は `on`）。
+クラウド版は、毎晩の `pg_dump` をやめ、**WAL の追記とベースバックアップを R2 に送る**。手順・cron・確認は `infra/walg/README.md`。`infra/backup.sh` は、`BACKUP_DB=off` で、**設定ファイルの暗号化バックアップだけ**を作る（DR の控えの起動に必要）。OSS 版（`docker-compose.yml`）は、従来どおり `pg_dump`（`BACKUP_DB` の既定は `on`）。
 
