@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   absoluteRange,
@@ -147,7 +147,7 @@ describe("nowRange", () => {
 });
 
 describe("maxRangeMs", () => {
-  it("SaaS は 90 日、self-hosted は上限なし", () => {
+  it("SaaS は 14 日、self-hosted は上限なし", () => {
     expect(maxRangeMs(true)).toBe(14 * 24 * HOUR);
     expect(maxRangeMs(false)).toBe(Number.POSITIVE_INFINITY);
   });
@@ -190,5 +190,18 @@ describe("describeRange", () => {
 
   it("プリセットに無い直近の幅は、分で表す", () => {
     expect(describeRange({ mode: "relative", durationMs: 90 * MINUTE })).toBe("直近 90 分");
+  });
+});
+
+describe("fromSearchParams（SaaS の上限）", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("SaaS では、14 日より長い ?range= を 14 日に丸める", () => {
+    vi.stubEnv("VITE_AUTH_MODE", "multi_tenant");
+    expect(fromSearchParams("?range=30d")).toEqual({ mode: "relative", durationMs: 14 * 24 * HOUR });
+    expect(fromSearchParams("?range=7d")).toEqual({ mode: "relative", durationMs: 7 * 24 * HOUR });
+  });
+  it("self-hosted では、丸めない", () => {
+    vi.stubEnv("VITE_AUTH_MODE", "disabled");
+    expect(fromSearchParams("?range=30d")).toEqual({ mode: "relative", durationMs: 30 * 24 * HOUR });
   });
 });

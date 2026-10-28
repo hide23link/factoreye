@@ -172,7 +172,8 @@ export function fromSearchParams(search: string): TimeRange | null {
   const rangeKey = params.get("range");
   if (rangeKey) {
     const durationMs = parseDuration(rangeKey);
-    return durationMs === null ? null : { mode: "relative", durationMs };
+    // 保持期間より長い範囲（古い URL の ?range=30d など）は、表示できる最長に丸める（空のグラフと食い違う表示を避ける）
+    return durationMs === null ? null : { mode: "relative", durationMs: Math.min(durationMs, maxRangeForBuild()) };
   }
   const fromText = params.get("from");
   const toText = params.get("to");

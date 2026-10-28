@@ -61,6 +61,60 @@ async def test_purge_deletes_old_multi_tenant_readings() -> None:
     assert remaining[0].recorded_at.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(days=14)
 
 
+async def test_purge_retention_boundary() -> None:
+    """境界: 13 日 23 時間は残し、14 日 1 時間は消す（誤って新しい行を消さない）。"""
+    from app.auth import hash_password
+    async with AsyncSession(engine) as session:
+        email = f"purge-b-{uuid4().hex[:6]}@example.com"
+        user = User(email=email, password_hash=hash_password("pw"))
+        session.add(user)
+        await session.flush()
+        ws = Workspace(name="purge-b-ws", owner_id=user.id)
+        session.add(ws)
+        await session.flush()
+        sensor = await _create_sensor(session, workspace_id=ws.id)
+        sensor_id = sensor.id
+        now = datetime.now(UTC)
+        await _create_reading(session, sensor_id, now - timedelta(days=13, hours=23))
+        await _create_reading(session, sensor_id, now - timedelta(days=14, hours=1))
+        await session.commit()
+
+    assert await purge_old_readings() == 1
+    async with AsyncSession(engine) as session:
+        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor_id))
+        remaining = result.all()
+    assert len(remaining) == 1
+    assert remaining[0].recorded_at.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(days=14)
+
+
+async def test_purge_readings_batches(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """区切りより多い行も、複数回に分けて、すべて消す（途中で止まらない・戻り値は合計）。"""
+    from app import purge as purge_module
+    from app.auth import hash_password
+    monkeypatch.setattr(purge_module, "_READINGS_PURGE_BATCH_SIZE", 10)
+    async with AsyncSession(engine) as session:
+        email = f"purge-n-{uuid4().hex[:6]}@example.com"
+        user = User(email=email, password_hash=hash_password("pw"))
+        session.add(user)
+        await session.flush()
+        ws = Workspace(name="purge-n-ws", owner_id=user.id)
+        session.add(ws)
+        await session.flush()
+        sensor = await _create_sensor(session, workspace_id=ws.id)
+        sensor_id = sensor.id
+        old = datetime.now(UTC) - timedelta(days=20)
+        for i in range(25):
+            await _create_reading(session, sensor_id, old - timedelta(minutes=i))
+        await _create_reading(session, sensor_id, datetime.now(UTC) - timedelta(days=1))
+        await session.commit()
+
+    assert await purge_module.purge_old_readings() == 25
+    async with AsyncSession(engine) as session:
+        result = await session.exec(select(Reading).where(Reading.sensor_id == sensor_id))
+        remaining = result.all()
+    assert len(remaining) == 1
+
+
 async def test_purge_skips_self_hosted_readings() -> None:
     """self-hosted（workspace_id=None）のデータは削除しない。"""
     async with AsyncSession(engine) as session:
