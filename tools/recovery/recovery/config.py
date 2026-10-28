@@ -46,6 +46,8 @@ class Settings:
     # R2 の WAL-G のバックアップから復旧するための設定（本番の walg.env と同じ形式）。
     # 無ければ「R2 から復旧する」は使えない。鍵は読み取りの権限で足りる
     walg_env: dict[str, str] | None = None
+    # walg_env を使えない理由（ファイルが読めない・内容が不正）。画面に出す。問題がなければ None
+    walg_error: str | None = None
     # R2 から復元した DB の作業用の場所（使い終わったら消す。本番の DB と同じ大きさの空きが要る）
     r2_work_dir: Path = Path("/var/lib/recovery/r2restore")
 
@@ -55,16 +57,30 @@ def normalize_dsn(dsn: str) -> str:
     return dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
-def _load_walg_env(path: str | None) -> dict[str, str] | None:
-    """WAL-G の設定ファイル（walg.env と同じ形式）を読む。ファイルが無ければ、機能を使わない。"""
-    if not path or not Path(path).is_file():
-        return None
+def _load_walg_env(path: str | None) -> tuple[dict[str, str] | None, str | None]:
+    """WAL-G の設定ファイル（walg.env と同じ形式）を読む。(設定, 使えない理由)を返す。
+
+    ファイルが無ければ、機能を使わない（理由なし）。読めない・内容が不正なときも、起動は止めず、
+    R2 からの復旧だけを無効にして理由を返す（既存の復旧ツールの機能は動かし続ける）。
+    """
+    if not path:
+        return None, None
+    file = Path(path)
+    try:
+        if not file.is_file():
+            return None, None
+        text = file.read_text()
+    except (OSError, ValueError) as e:  # 権限など／UTF-8 でない内容
+        return None, (
+            f"WALG_ENV_FILE を読めません（{type(e).__name__}）。ファイルの所有者・権限・グループ"
+            "（BACKUP_GID）と文字コード（UTF-8）を確認してください（README「R2 から復旧する」）"
+        )
     from recovery.walg import parse_env_file
 
-    env = parse_env_file(Path(path).read_text())
+    env = parse_env_file(text)
     if not (env.get("WALG_S3_PREFIX") or env.get("WALG_FILE_PREFIX")):
-        raise ConfigError("WALG_ENV_FILE に WALG_S3_PREFIX（s3://factoreye-db）がありません")
-    return env
+        return None, "WALG_ENV_FILE に WALG_S3_PREFIX（s3://factoreye-db）がありません"
+    return env, None
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:
@@ -95,6 +111,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             "書き戻しを使う場合は TARGET_MODE（今の DB が SaaS 版なら saas、OSS 版なら oss）を"
             "設定してください"
         )
+    walg_env, walg_error = _load_walg_env(e.get("WALG_ENV_FILE"))
     return Settings(
         backup_source=source,
         scratch_dsn=normalize_dsn(scratch),
@@ -107,6 +124,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         s3_endpoint_url=e.get("S3_ENDPOINT_URL") or None,
         snapshot_dir=Path(e.get("RECOVERY_SNAPSHOT_DIR", "/var/lib/recovery/snapshots")),
         handoff_source=e.get("HANDOFF_SOURCE") or None,
-        walg_env=_load_walg_env(e.get("WALG_ENV_FILE")),
+        walg_env=walg_env,
+        walg_error=walg_error,
         r2_work_dir=Path(e.get("R2_RESTORE_DIR", "/var/lib/recovery/r2restore")),
     )

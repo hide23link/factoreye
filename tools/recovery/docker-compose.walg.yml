@@ -1,0 +1,9 @@
+# walg.env のグループが BACKUP_GID と違うときだけ、重ねて使う追加設定:
+#   docker compose -f docker-compose.yml -f docker-compose.lxc.yml -f docker-compose.walg.yml up -d
+# walg.env を権限 640（所有者 root など）で置く運用で、そのグループの ID（stat -c %g walg/walg.env）を
+# .env の WALG_GID に設定する。BACKUP_GID と同じ値にしたいときは、このファイルを使わず、
+# walg.env のグループを BACKUP_GID に合わせる（同じ値を 2 つ並べると、docker compose がエラーにする）
+services:
+  recovery:
+    group_add:
+      - "${WALG_GID:?WALG_GID を .env に設定してください}"

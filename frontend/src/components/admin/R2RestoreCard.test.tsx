@@ -71,6 +71,14 @@ describe("R2RestoreCard", () => {
     expect(await screen.findByText(/R2 からの復旧は設定されていません/)).toBeInTheDocument();
   });
 
+  it("設定を読めなかった理由があれば、それを出す", async () => {
+    setup({
+      configured: false, state: "idle", info: null,
+      message: "WALG_ENV_FILE を読めません（PermissionError）。WALG_GID を確認してください",
+    });
+    expect(await screen.findByText(/WALG_ENV_FILE を読めません/)).toBeInTheDocument();
+  });
+
   it("復元の途中は状態を出し、始めるボタンを押せない", async () => {
     setup({ ...IDLE, state: "replaying" });
     expect(await screen.findByTestId("r2-state")).toHaveTextContent("再生中");
