@@ -57,6 +57,9 @@ ssh factoreye 'umask 077; mkdir -p /opt/factoreye/walg; cat > /opt/factoreye/wal
 LXC で:
 ```bash
 cd /opt/factoreye && git pull origin main && sudo infra/walg/make-conf.sh
+# 自動デプロイの runner（ユーザー factoreye）が、walg.env を読めるようにする（読めないと compose up が permission denied で失敗する。実際に起きた）
+sudo chmod 755 /opt/factoreye/walg                  # umask 077 で作ったディレクトリは、runner が入れない
+sudo chgrp factoreye /opt/factoreye/walg/walg.env && sudo chmod 640 /opt/factoreye/walg/walg.env   # r2.env は 600 のまま（root だけ）
 ```
 
 ### 2. DB を新しく作り直す（アプリを止める）
