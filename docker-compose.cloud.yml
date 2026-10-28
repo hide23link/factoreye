@@ -49,7 +49,9 @@ services:
       - backend
 
   postgres:
-    image: postgres:15-alpine
+    # postgres:15-alpine に pgBackRest を足したイメージ（DR のバックアップ用。infra/cloud/postgres/Dockerfile）
+    build: ./infra/cloud/postgres
+    image: factoreye-postgres:15
     restart: unless-stopped
     environment:
       - POSTGRES_USER=factoreye
@@ -57,6 +59,8 @@ services:
       - POSTGRES_DB=factoreye
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # pgBackRest の設定（R2 の鍵を含む。Git 管理外。権限 600、所有者は postgres＝uid 70）。無くても PostgreSQL は起動する
+      - /opt/factoreye/pgbackrest:/etc/pgbackrest
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U factoreye"]
       interval: 5s
