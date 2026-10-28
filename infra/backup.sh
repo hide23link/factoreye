@@ -10,6 +10,9 @@
 #   factoreye-<日時>-config.tar.gz.enc         .env・管理者ファイルなど（暗号化。BACKUP_PASSPHRASE_FILE を設定した場合だけ）
 #   factoreye-<日時>-config.tar.gz.enc.sha256
 # OFFSITE_S3_URI を設定すると、作ったファイルを infra/offsite-s3.sh で S3 にも送る。
+# BACKUP_DB=off にすると、DB のダンプを取らず、設定ファイルのバックアップだけを作る（既定は on）。
+#   クラウド版は DB のバックアップを pgBackRest（WAL の追記＋ベース）で R2 に送るため、毎晩のダンプはやめた（infra/pgbackrest/README.md）。
+#   設定ファイルのバックアップは、DR の控えの起動に必要なので、残す。
 set -euo pipefail
 
 # このスクリプトの場所からリポジトリルート（docker-compose.ymlがある場所）を特定する
@@ -27,6 +30,13 @@ BACKUP_PASSPHRASE_FILE="${BACKUP_PASSPHRASE_FILE:-}"
 # どれも DB に入っていないため、プログラムを壊されたときに DB だけ戻しても復旧できない
 BACKUP_CONFIG_FILES="${BACKUP_CONFIG_FILES:-.env admin/admins.txt /etc/cloudflared/config.yml}"
 OFFSITE_S3_URI="${OFFSITE_S3_URI:-}"
+# on: DB のダンプ（pg_dump）＋設定ファイル。off: 設定ファイルだけ（BACKUP_PASSPHRASE_FILE が必須）
+BACKUP_DB="${BACKUP_DB:-on}"
+case "$BACKUP_DB" in on|off) ;; *) echo "エラー: BACKUP_DB は on か off です（今: ${BACKUP_DB}）" >&2; exit 1 ;; esac
+if [ "$BACKUP_DB" = "off" ] && [ -z "$BACKUP_PASSPHRASE_FILE" ]; then
+  echo "エラー: BACKUP_DB=off のときは、BACKUP_PASSPHRASE_FILE が必要です（設定ファイルだけを保存するため）" >&2
+  exit 1
+fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 DEST="$BACKUP_DIR/factoreye-$TIMESTAMP.sql.gz"
@@ -82,7 +92,7 @@ backup_config_files() {
   fi
   mv "$CONFIG_PARTIAL" "$CONFIG_DEST"
   write_checksum "$CONFIG_DEST"
-  log "設定ファイルを保存しました: $CONFIG_DEST（${#targets[@]} 件）"
+  log "設定ファイルを保存しました: ${CONFIG_DEST}（${#targets[@]} 件）"
 }
 
 # バックアップには利用者のデータとパスワードのハッシュが入るため、ほかの利用者には読ませない（640）。
@@ -90,24 +100,28 @@ backup_config_files() {
 umask 027
 mkdir -p "$BACKUP_DIR"
 
-log "バックアップ開始: $DEST"
+if [ "$BACKUP_DB" = "on" ]; then
+  log "バックアップ開始: $DEST"
 
-# -T: ttyを確保しない（cron等の非対話実行でpg_dumpの出力がTTY制御文字で壊れるのを防ぐ）
-if ! docker compose exec -T "$POSTGRES_SERVICE" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$PARTIAL"; then
-  log "エラー: pg_dumpに失敗しました"
-  rm -f "$PARTIAL"
-  exit 1
+  # -T: ttyを確保しない（cron等の非対話実行でpg_dumpの出力がTTY制御文字で壊れるのを防ぐ）
+  if ! docker compose exec -T "$POSTGRES_SERVICE" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$PARTIAL"; then
+    log "エラー: pg_dumpに失敗しました"
+    rm -f "$PARTIAL"
+    exit 1
+  fi
+
+  if [ ! -s "$PARTIAL" ]; then
+    log "エラー: バックアップファイルが空です（${DEST}）"
+    rm -f "$PARTIAL"
+    exit 1
+  fi
+
+  mv "$PARTIAL" "$DEST"
+  write_checksum "$DEST"
+  log "バックアップ完了: $DEST ($(du -h "$DEST" | cut -f1))"
+else
+  log "DB のダンプは取りません（BACKUP_DB=off。DB は pgBackRest で R2 へ）。設定ファイルだけを保存します"
 fi
-
-if [ ! -s "$PARTIAL" ]; then
-  log "エラー: バックアップファイルが空です（$DEST）"
-  rm -f "$PARTIAL"
-  exit 1
-fi
-
-mv "$PARTIAL" "$DEST"
-write_checksum "$DEST"
-log "バックアップ完了: $DEST ($(du -h "$DEST" | cut -f1))"
 
 # 設定ファイル・外部保管に失敗しても、DB のバックアップと保持期間の削除は続ける。
 # 失敗は最後に終了コードで知らせる（cron のログで気づけるように）
@@ -115,11 +129,19 @@ status=0
 backup_config_files || status=1
 
 if [ -n "$OFFSITE_S3_URI" ]; then
-  uploads=("$DEST" "$DEST.sha256")
+  uploads=()
+  if [ "$BACKUP_DB" = "on" ]; then
+    uploads+=("$DEST" "$DEST.sha256")
+  fi
   if [ -f "$CONFIG_DEST" ]; then
     uploads+=("$CONFIG_DEST" "$CONFIG_DEST.sha256")
   fi
-  "$REPO_ROOT/infra/offsite-s3.sh" "${uploads[@]}" || status=1
+  if [ "${#uploads[@]}" -gt 0 ]; then
+    "$REPO_ROOT/infra/offsite-s3.sh" "${uploads[@]}" || status=1
+  else
+    log "外部へ送るファイルがありません（設定ファイルの保存に失敗したか、対象がない）"
+    status=1
+  fi
 fi
 
 log "保持期間（${RETENTION_DAYS}日）を過ぎたバックアップを削除します"

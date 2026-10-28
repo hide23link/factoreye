@@ -1,0 +1,35 @@
+# pgBackRest の設定（R2 へ WAL とベースバックアップを送る）。
+# 本番では /opt/factoreye/pgbackrest/pgbackrest.conf に置く（Git 管理外）。権限 600、所有者は postgres（uid 70）:
+#   install -o 70 -g 70 -m 600 pgbackrest.conf.example /opt/factoreye/pgbackrest/pgbackrest.conf  # その後、<> を埋める
+# 設計と、各値の根拠（試験の結果）は ecopower の docs/aws-dr-wal-design.md §3・§12。
+[global]
+repo1-type=s3
+# R2 のエンドポイントは、https:// を付けず、ホスト名だけ
+repo1-s3-endpoint=<アカウント ID>.r2.cloudflarestorage.com
+repo1-s3-region=auto
+repo1-s3-bucket=factoreye-backup
+repo1-s3-uri-style=path
+repo1-s3-key=<R2 の Access Key ID>
+repo1-s3-key-secret=<R2 の Secret Access Key>
+# バケットのロック（接頭辞 factoreye-）に当たらない場所にする（pgBackRest が古い分を自分で削除するため）
+repo1-path=/pgbackrest/prod
+# 差分を、変わったブロックだけにする（必須。無いと差分が全体とほぼ同じ大きさになる）
+repo1-bundle=y
+repo1-block=y
+# 全体は 1 世代、差分は 3 日分（R2 の無料枠 10 GB に収めるため）
+repo1-retention-full=1
+repo1-retention-diff=3
+compress-type=zst
+compress-level=3
+process-max=2
+archive-async=y
+spool-path=/var/spool/pgbackrest
+log-path=/var/log/pgbackrest
+log-level-console=info
+start-fast=y
+
+[factoreye]
+pg1-path=/var/lib/postgresql/data
+# 本番の PostgreSQL の管理者のロールは factoreye（postgres ではない。docker-compose.cloud.yml の POSTGRES_USER）
+pg1-user=factoreye
+pg1-database=factoreye
