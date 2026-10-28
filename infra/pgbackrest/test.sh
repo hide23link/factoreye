@@ -75,6 +75,6 @@ for i in $(seq 1 90); do
   [ "$(DC exec -T -u postgres postgres psql -U factoreye -d factoreye -At -c 'select pg_is_in_recovery()' 2>/dev/null || echo x)" = f ] && break; sleep 2
 done
 GOT=$(SQLX "select count(*) from t")
-[ "$GOT" = "$EXPECT" ] || fail "復元後の行数が違う（期待 $EXPECT、実際 $GOT）"
+[ "$GOT" = "$EXPECT" ] || fail "復元後の行数が違う（期待 ${EXPECT}、実際 ${GOT}）"
 ok "復元（全体＋差分＋WAL の再生）で、行数が一致（$GOT 行）"
 echo "すべて OK"

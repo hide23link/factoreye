@@ -6,6 +6,7 @@
 | ファイル | 役割 |
 |---|---|
 | `pgbackrest.conf.example` | 設定の雛形（R2 の鍵を入れて、本番の `/opt/factoreye/pgbackrest/pgbackrest.conf` に置く） |
+| `make-conf.sh` | 既存の R2 の鍵（`.offsite-s3.env`）から、`pgbackrest.conf` を作る |
 | `init.sh` | 有効にする（初回だけ。何度実行しても安全）。ステンザ作成 → archive 設定 → 再起動 → check |
 | `backup.sh full｜diff` | ベースバックアップ（全体は週 1 回、差分は毎日） |
 | `check.sh` | `check`（WAL が R2 に届くか）と `verify`（欠け・破損がないか）。毎日 |
@@ -14,18 +15,17 @@
 
 ## 本番を停止して入れる手順（初回）
 
-前提: R2 の Access Key ID と Secret（バケット `factoreye-backup` の Object Read & Write）を用意する。
+前提: 本番の `/opt/factoreye/.offsite-s3.env`（R2 の鍵。バケット `factoreye-backup` の Object Read & Write）がある。
 
 ### 0. 事前（アプリは動かしたまま）
 
-1. **設定ファイルを置く**（Git 管理外。所有者は postgres＝uid 70、権限 600）。**デプロイの前に置く**（コンテナが、この場所をマウントするため）
+1. **設定ファイルを作る**（既存の `/opt/factoreye/.offsite-s3.env`＝本番のバックアップを R2 に送る鍵から、自動で作る。鍵を貼り付けなくてよく、画面にも出ない。権限 600、所有者 uid 70）。**デプロイの前に作る**（コンテナが、この場所をマウントするため）
    ```bash
    cd /opt/factoreye && git pull origin main
-   sudo mkdir -p /opt/factoreye/pgbackrest
-   sudo install -o 70 -g 70 -m 600 infra/pgbackrest/pgbackrest.conf.example /opt/factoreye/pgbackrest/pgbackrest.conf
-   sudo -e /opt/factoreye/pgbackrest/pgbackrest.conf     # <アカウント ID>、<R2 の Access Key ID>、<R2 の Secret Access Key> を埋める
-   sudo chown 70:70 /opt/factoreye/pgbackrest/pgbackrest.conf && sudo chmod 600 /opt/factoreye/pgbackrest/pgbackrest.conf
+   sudo infra/pgbackrest/make-conf.sh
    ```
+   作られた設定の内容（鍵は除く）を確認する: `sudo grep -v 'key' /opt/factoreye/pgbackrest/pgbackrest.conf | grep -v '^#' | grep .`
+   （バケットは `factoreye-backup`、`repo1-path` は `/pgbackrest/prod`。R2 の鍵の権限は、バケットの Object Read & Write が必要。）
 2. **Discord の通知（任意）**: `monitor.sh` の通知先。Webhook の URL を 1 行だけ書いたファイルを置く（無ければ、通知なしで、ログだけ）
    ```bash
    sudo install -m 600 /dev/null /opt/factoreye/pgbackrest/discord-webhook && sudo -e /opt/factoreye/pgbackrest/discord-webhook
