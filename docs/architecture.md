@@ -354,7 +354,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 ### 引き継ぎからの書き戻し（管理画面）
 - 流れ: 一覧 → 試算（追加される件数。何も書かない）→ 確認の小窓 → 実行（直前に本番の控え `before-merge-*` を取り、1 つのトランザクション）→ 結果。実行は、試算の件数と実行の直前の件数が一致したときだけ
 - API: `GET /api/admin/failback/handoffs`、`POST /api/admin/failback/preview`、`POST /api/admin/failback/apply`（`backend/app/api/admin_failback.py`。管理者トークンが必要。`AUTH_MODE=multi_tenant` のときだけマウントする）
-- 書き込みは backend が直接は行わず、内部ネットワーク（`factoreye-cloud`）で復旧ツールの `POST /api/handoffs/{name}/failback` を呼ぶ（`backend/app/failback_client.py`）。設定は `FAILBACK_RECOVERY_URL`（既定 `http://recovery:8090`）・`FAILBACK_RECOVERY_USERNAME`・`FAILBACK_RECOVERY_PASSWORD`（復旧ツールの Basic 認証と同じ値。空なら無効）・`FAILBACK_TIMEOUT_SECONDS`（既定 180）
+- 書き込みは backend が直接は行わず、内部ネットワーク（`factoreye-cloud`）で復旧ツールの `POST /api/handoffs/{name}/failback` を呼ぶ（`backend/app/failback_client.py`）。設定は `FAILBACK_RECOVERY_URL`（既定 `http://recovery:8090`）・`FAILBACK_RECOVERY_USERNAME`・`FAILBACK_RECOVERY_PASSWORD`（復旧ツールの Basic 認証と同じ値。空なら無効）・`FAILBACK_TIMEOUT_SECONDS`（既定 600）
 - 本番と控えのスキーマの版（Alembic）が違うときは、書き戻さずに警告する（409）。引き継ぎの sha256・gzip が壊れていれば使わない
 - 制限: 控えの稼働中の、既存の行の更新・削除（パスワードの変更など）は戻らない。起点より前に発生して起点以降に解除されたアラームの変化も戻らない
 

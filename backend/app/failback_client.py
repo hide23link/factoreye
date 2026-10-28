@@ -21,7 +21,10 @@ _STATUS_MAP = {404: 404, 409: 409, 422: 422}
 
 
 class FailbackError(Exception):
-    """復旧ツールの呼び出しの失敗。HTTP の状態コードと、画面に出す文（構造つきの詳細があれば detail）。"""
+    """復旧ツールの呼び出しの失敗。
+
+    HTTP の状態コードと、画面に出す文を持つ（構造つきの詳細があれば detail）。
+    """
 
     def __init__(self, status_code: int, message: str, detail: dict[str, Any] | None = None):
         super().__init__(message)

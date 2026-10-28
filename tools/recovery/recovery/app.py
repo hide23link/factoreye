@@ -384,6 +384,19 @@ def create_app(
                     raise HTTPException(
                         422, f"引き継ぎが壊れています（{result.error}）。書き戻しません"
                     )
+                if result.checksum != "ok":
+                    # .sha256 が無いものは、改ざん・書きかけを見分けられない。使わない
+                    raise HTTPException(
+                        422, "引き継ぎの .sha256 がありません。検証できないため、書き戻しません"
+                    )
+                latest = await asyncio.to_thread(h.latest)
+                if latest is not None and latest[1].kind != "reduced":
+                    # 縮小ダンプ以外（全体のダンプなど）は、この経路の想定外。何も書かない
+                    raise HTTPException(
+                        422,
+                        f"引き継ぎの種類が縮小ダンプ（reduced）ではありません"
+                        f"（kind={latest[1].kind}）。書き戻しません",
+                    )
                 had_loaded = await scratch.is_loaded(name)
                 try:
                     try:

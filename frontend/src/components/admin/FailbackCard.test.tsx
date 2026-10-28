@@ -70,6 +70,43 @@ describe("FailbackCard", () => {
     expect(screen.getByText(/起点: 2026-10-05 00:30:00\+00/)).toBeInTheDocument();
     // 制限は、実行の前から見える
     expect(screen.getByText(/パスワードの変更など）は戻りません/)).toBeInTheDocument();
+    expect(screen.getByText(/削除したセンサー・ダッシュボード.*復活します/)).toBeInTheDocument();
+    expect(screen.getByText(/取り込み（機器からの送信）を止めるか減らして/)).toBeInTheDocument();
+  });
+
+  it("時間切れ（504）のときは、完了の確かめ方を案内する", async () => {
+    const user = await openPreview();
+    vi.mocked(adminApi.applyFailback).mockRejectedValue(
+      apiError(504, "復旧ツールの応答がありません（時間切れ）。しばらくしてから確かめてください"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "本番に書き戻す" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "書き戻す" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("時間切れ");
+    expect(alert).toHaveTextContent("再度試算して、追加が 0 件なら、書き戻しは完了しています");
+  });
+
+  it("実行中に何度押しても、実行は 1 回だけ", async () => {
+    const user = await openPreview();
+    let finish: (r: FailbackResult) => void = () => {};
+    vi.mocked(adminApi.applyFailback).mockReturnValue(
+      new Promise<FailbackResult>((resolve) => {
+        finish = resolve;
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "本番に書き戻す" }));
+    const confirm = within(await screen.findByRole("dialog")).getByRole("button", { name: "書き戻す" });
+    await user.click(confirm);
+    await user.click(confirm);
+    await user.click(confirm);
+
+    expect(adminApi.applyFailback).toHaveBeenCalledTimes(1);
+    expect(confirm).toBeDisabled();
+    finish({ ...PREVIEW, applied: true, snapshot: "before-merge-x.sql.gz" });
+    await screen.findByTestId("failback-applied");
   });
 
   it("引き継ぎが無いときは、その旨を出す", async () => {

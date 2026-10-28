@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     failback_recovery_username: str = "admin"
     failback_recovery_password: SecretStr = SecretStr("")
     # 復旧ツールの応答を待つ秒数（引き継ぎの取得・展開・試算を含むため長めにする）
-    failback_timeout_seconds: float = Field(default=180, gt=0, le=900)
+    failback_timeout_seconds: float = Field(default=600, gt=0, le=900)
     # 取り込みのIP別レート制限（例: 100/minute）。"off" で解除（実機・負荷テスト用）
     ingest_rate_limit: str = "100/minute"
     # 未登録の ingestKey が来たとき、センサーを自動で作る（self-hosted だけ。SaaS では使えない）。

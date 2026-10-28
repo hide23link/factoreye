@@ -15,10 +15,12 @@ import asyncpg
 import httpx
 import pytest
 
+from recovery import app as app_module
 from recovery import dbinfo, merge
 from recovery.app import _handoff_selection, create_app
 from recovery.config import Settings
 from recovery.scratch import Scratch
+from recovery.snapshot import SnapshotError
 from recovery.sources import (
     CompositeSource,
     HandoffSource,
@@ -252,16 +254,20 @@ async def test_schema_version_mismatch_is_rejected_with_both_versions(
 # ── 読み込み元（handoff-inc/） ───────────────────────────────────────────
 
 
-def _put_handoff(directory: Path, stamp: str, sql: str, *, bad_sha: bool = False) -> str:
+def _put_handoff(
+    directory: Path, stamp: str, sql: str, *, bad_sha: bool = False, no_sha: bool = False,
+    kind: str = "reduced",
+) -> str:
     """handoff.sh が置く形（ダンプ・.sha256・latest.json）を作る。画面での名前を返す。"""
     name = f"factoreye-{stamp}.sql.gz"
     path = write_dump(directory, name, sql)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if bad_sha:
         digest = "0" * 64
-    (directory / f"{name}.sha256").write_text(f"{digest}  {name}\n")
+    if not no_sha:
+        (directory / f"{name}.sha256").write_text(f"{digest}  {name}\n")
     (directory / "latest.json").write_text(json.dumps({
-        "kind": "reduced", "name": name, "createdAt": "2026-10-28T10:30:00Z",
+        "kind": kind, "name": name, "createdAt": "2026-10-28T10:30:00Z",
         "watermark": "2026-10-05 00:30:00+00", "alembic": "d4e5f6a7b8c9",
         "instance": "i-0abc", "region": "ap-northeast-3", "bytes": path.stat().st_size,
     }))
@@ -398,3 +404,121 @@ async def test_api_is_disabled_without_handoff_source_or_write_dsn(
         _settings(tmp_path, s, prod, target_write_dsn=None), s, HandoffSource(LocalSource(inc))
     ) as c:
         assert (await c.post(f"/api/handoffs/{name}/failback", json={})).status_code == 403
+
+
+@needs_db
+async def test_api_refuses_missing_sha256_and_non_reduced_kind(
+    tmp_path: Path, dbs: tuple[Scratch, str, str]
+) -> None:
+    s, _, prod = dbs
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    settings = _settings(tmp_path, s, prod)
+    no_sha = _put_handoff(inc, "20261028-103000", HANDOFF_SQL, no_sha=True)
+    async with _client(settings, s, HandoffSource(LocalSource(inc))) as c:
+        r = await c.post(f"/api/handoffs/{no_sha}/failback", json={})
+        assert r.status_code == 422 and ".sha256" in r.json()["detail"]
+        assert not await s.is_loaded(no_sha)
+    full = _put_handoff(inc, "20261028-113000", HANDOFF_SQL, kind="full")
+    async with _client(settings, s, HandoffSource(LocalSource(inc))) as c:
+        r = await c.post(f"/api/handoffs/{full}/failback", json={})
+        assert r.status_code == 422 and "reduced" in r.json()["detail"]
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM readings"))[0][0] == 2
+
+
+@needs_db
+async def test_api_writes_nothing_when_the_snapshot_fails(
+    tmp_path: Path, dbs: tuple[Scratch, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s, _, prod = dbs
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    name = _put_handoff(inc, "20261028-103000", HANDOFF_SQL)
+
+    async def broken(*_: object) -> None:
+        raise SnapshotError("pg_dump に失敗しました")
+
+    monkeypatch.setattr(app_module, "dump_database", broken)
+    async with _client(_settings(tmp_path, s, prod), s, HandoffSource(LocalSource(inc))) as c:
+        url = f"/api/handoffs/{name}/failback"
+        planned = sum(t["inserted"] for t in (await c.post(url, json={})).json()["tables"])
+        r = await c.post(url, json={"apply": True, "expected_inserted": planned})
+    assert r.status_code == 503
+    # 控えが取れなければ、書き込まない
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM readings"))[0][0] == 2
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM users"))[0][0] == 1
+
+
+@needs_db
+async def test_unique_conflict_gives_a_readable_message_without_values(
+    tmp_path: Path,
+) -> None:
+    # 本番に、同じメール（b@example.com）の別のユーザーがいる
+    other = PROD_SQL.replace(
+        f"('{U1}', 'a@example.com', 'prod-hash', '2026-10-01T00:00:00Z');",
+        f"('{U1}', 'a@example.com', 'prod-hash', '2026-10-01T00:00:00Z'),"
+        "('aaaaaaaa-0000-0000-0000-000000000009', 'b@example.com', 'x', '2026-10-06T00:00:00Z');",
+    )
+    s = Scratch(SCRATCH_DSN)
+    handoff, prod = _name("handoff"), _name("prod")
+    await s.load(handoff, write_dump(tmp_path, handoff, HANDOFF_SQL))
+    await s.load(prod, write_dump(tmp_path, prod, other))
+    try:
+        with pytest.raises(merge.MergeError) as e:
+            await _failback(s, handoff, prod, apply=True)
+        text = str(e.value)
+        assert text.startswith("users:") and "一意制約の衝突" in text
+        assert "email" in text and "もう一度" in text and "何も書き込んでいません" in text
+        assert "b@example.com" not in text  # 行の値は出さない
+        assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM workspaces"))[0][0] == 1
+    finally:
+        await s.drop(handoff)
+        await s.drop(prod)
+
+
+@needs_db
+async def test_merge_holds_a_lock_that_blocks_concurrent_reading_inserts(
+    dbs: tuple[Scratch, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s, handoff, prod = dbs
+    original = merge._merge_table
+    blocked: list[bool] = []
+
+    async def spy(*args: object, **kwargs: object) -> merge.TableResult:
+        if not blocked:
+            # 書き戻しの最中に、別の接続が測定値を挿入しようとする（機器の再送）
+            conn = await asyncpg.connect(s.dsn_for(prod))
+            try:
+                await conn.execute("SET lock_timeout = '300ms'")
+                try:
+                    await conn.execute(
+                        "INSERT INTO readings (sensor_id, value, recorded_at)"
+                        f" VALUES ('{S1}', 1.0, '2026-10-05T02:00:00Z')"
+                    )
+                    blocked.append(False)
+                except asyncpg.LockNotAvailableError:
+                    blocked.append(True)
+            finally:
+                await conn.close()
+        return await original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(merge, "_merge_table", spy)
+    await _failback(s, handoff, prod, apply=True)
+
+    assert blocked == [True]
+    # 割り込みが無いので、(sensor_id, recorded_at) の重複は無い
+    dup = await _fetch(
+        s.dsn_for(prod),
+        "SELECT count(*) FROM (SELECT 1 FROM readings GROUP BY sensor_id, recorded_at"
+        " HAVING count(*) > 1) d",
+    )
+    assert dup[0][0] == 0
+    # 書き戻しが終われば、挿入できる（ロックは残らない）
+    conn = await asyncpg.connect(s.dsn_for(prod))
+    try:
+        await conn.execute(
+            "INSERT INTO readings (sensor_id, value, recorded_at)"
+            f" VALUES ('{S1}', 5.0, '2026-10-05T09:00:00Z')"
+        )
+    finally:
+        await conn.close()

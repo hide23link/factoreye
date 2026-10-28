@@ -329,6 +329,28 @@ async def _advance_sequence(dst: asyncpg.Connection, table: str) -> None:
         await dst.execute("SELECT setval($1::regclass, $2, true)", seq, max_id)
 
 
+_KEY_COLUMNS_RE = re.compile(r"^Key \(([^)]*)\)=")
+
+
+def describe_pg_error(table: str, e: asyncpg.PostgresError) -> str:
+    """DB のエラーを、人が読める文にする。行の値（メールなど）は出さず、表・制約・列の名前だけ。"""
+    detail = getattr(e, "detail", None) or ""
+    m = _KEY_COLUMNS_RE.match(detail)
+    columns = f"、列 {m.group(1)}" if m else ""
+    constraint = getattr(e, "constraint_name", None)
+    name = f"（制約 {constraint}{columns}）" if constraint else ""
+    if isinstance(e, asyncpg.UniqueViolationError):
+        what = f"一意制約の衝突{name}: 同じ値の別の行が、今の DB にあります"
+    elif isinstance(e, asyncpg.ForeignKeyViolationError):
+        what = f"外部キーの違反{name}: 参照先の行が、今の DB にありません"
+    else:
+        what = f"DB のエラー（{type(e).__name__}）"
+    return (
+        f"{table}: {what}。何も書き込んでいません。"
+        "衝突した行を今の DB 側で直してから、もう一度実行してください"
+    )
+
+
 def _rowcount(status: str) -> int:
     return int(status.rsplit(" ", 1)[-1])
 
@@ -384,6 +406,11 @@ async def merge(
     tr = dst.transaction()
     await tr.start()
     try:
+        # 書き戻しの間、測定値の挿入（機器からの再送を含む）を待たせる。readings には
+        # (sensor_id, recorded_at) の一意制約が無く、割り込まれると重複ができるため。
+        # SHARE ROW EXCLUSIVE は、読み取りは止めず、挿入・更新・削除と、別の書き戻しを待たせる
+        if "readings" in dst_tables:
+            await dst.execute("LOCK TABLE public.readings IN SHARE ROW EXCLUSIVE MODE")
         for i, spec in enumerate(specs_for(sel)):
             if spec.table not in src_tables or spec.table not in dst_tables:
                 results.append(TableResult(spec.table, 0, 0, 0, "テーブルが無いため飛ばしました"))
@@ -401,7 +428,7 @@ async def merge(
                 )
             except asyncpg.PostgresError as e:
                 # 外部キー・一意制約の違反（例: 同じメールの別のユーザーが今の DB にいる）
-                raise MergeError(f"{spec.table}: {e}") from e
+                raise MergeError(describe_pg_error(spec.table, e)) from e
     except BaseException:
         await tr.rollback()
         raise

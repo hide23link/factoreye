@@ -54,7 +54,12 @@ const TABLE_LABELS: Record<string, string> = {
 
 // 書き戻しの前に、管理者に必ず伝えること
 const LIMITATION =
-  "控えの稼働中に行われた、既存の行の更新・削除（パスワードの変更など）は戻りません。";
+  "控えの稼働中に行われた、既存の行の更新・削除（パスワードの変更など）は戻りません。" +
+  "また、本番に復帰したあとに削除したセンサー・ダッシュボード・ウィジェット・Webhook・利用者は、" +
+  "引き継ぎに残っていれば復活します。";
+
+// 時間切れ（504）のときに足す案内。書き込みは復旧ツールの中で続いているかもしれない
+const TIMEOUT_HINT = "再度試算して、追加が 0 件なら、書き戻しは完了しています。";
 
 // 書き戻しの表（試算と結果で共通）
 function ResultTable({ result }: { result: FailbackResult }) {
@@ -137,13 +142,13 @@ export function FailbackCard({ token, onAuthError }: Props) {
   const items: FailbackHandoff[] = handoffs.data?.items ?? [];
   const busy = previewMutation.isPending || applyMutation.isPending;
   const errorText = (() => {
-    if (applyMutation.error) {
-      return adminErrorDetail(applyMutation.error, "書き戻しに失敗しました。もう一度お試しください");
-    }
-    if (previewMutation.error) {
-      return adminErrorDetail(previewMutation.error, "試算に失敗しました。もう一度お試しください");
-    }
-    return null;
+    const error = applyMutation.error ?? previewMutation.error;
+    if (!error) return null;
+    const fallback = applyMutation.error
+      ? "書き戻しに失敗しました。もう一度お試しください"
+      : "試算に失敗しました。もう一度お試しください";
+    const text = adminErrorDetail(error, fallback);
+    return error instanceof AdminApiError && error.status === 504 ? `${text} ${TIMEOUT_HINT}` : text;
   })();
 
   return (
@@ -152,6 +157,11 @@ export function FailbackCard({ token, onAuthError }: Props) {
       <p className="mb-3 text-sm text-gray-600">
         本番が止まっている間に控え（AWS）が受け取ったデータのうち、本番に無い行だけを足します。
         今ある行は変えません・消しません。何度実行しても二重になりません。{LIMITATION}
+      </p>
+      <p className="mb-3 text-sm text-gray-600">
+        書き戻す前に、取り込み（機器からの送信）を止めるか減らしてください。書き戻しの間、測定値の
+        挿入は待たされます（重複はできません）。書き戻した行だけを消す手順はありません。
+        実行前に、試算の件数を確かめてください。
       </p>
 
       {handoffs.isPending && <p className="text-sm text-gray-500">引き継ぎを読み込み中…</p>}
