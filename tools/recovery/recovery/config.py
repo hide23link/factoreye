@@ -70,10 +70,10 @@ def _load_walg_env(path: str | None) -> tuple[dict[str, str] | None, str | None]
         if not file.is_file():
             return None, None
         text = file.read_text()
-    except OSError as e:
+    except (OSError, ValueError) as e:  # 権限など／UTF-8 でない内容
         return None, (
             f"WALG_ENV_FILE を読めません（{type(e).__name__}）。ファイルの所有者・権限・グループ"
-            "（WALG_GID）を確認してください（README「R2 から復旧する」）"
+            "（BACKUP_GID）と文字コード（UTF-8）を確認してください（README「R2 から復旧する」）"
         )
     from recovery.walg import parse_env_file
 

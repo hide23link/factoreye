@@ -329,9 +329,9 @@ async def test_reset_removes_the_work_area_and_blocks_failback(
         async with await _client(tmp, s, job, target, _target_sql("")) as c:
             assert (await c.post("/api/r2restore/failback", json={})).status_code == 409
             await _ready(c)
-            assert (tmp / "r2work").exists()
+            assert (tmp / "r2work" / "work").exists()
             assert (await c.delete("/api/r2restore")).json()["state"] == "idle"
-            assert not (tmp / "r2work").exists()
+            assert not (tmp / "r2work" / "work").exists()
             assert (await c.post("/api/r2restore/failback", json={})).status_code == 409
     finally:
         await s.drop(target)
@@ -396,7 +396,7 @@ async def test_restore_survives_tampered_config_and_keeps_keys_out_of_postgres_e
                 break
             await asyncio.sleep(1)
         assert job.state == "ready", job.message
-        pgdata = tmp / "r2work" / "pgdata"
+        pgdata = tmp / "r2work" / "work" / "pgdata"
         # 設定は自前の最小のものに置き換わっている
         assert (pgdata / "pg_hba.conf").read_text() == "local all all trust\n"
         conf = (pgdata / "postgresql.conf").read_text()
@@ -408,7 +408,7 @@ async def test_restore_survives_tampered_config_and_keeps_keys_out_of_postgres_e
         environ = Path(f"/proc/{pid}/environ").read_bytes()
         assert SECRET.encode() not in environ
         # 鍵のファイルは自分だけが読める
-        assert ((tmp / "r2work" / "walg-secrets.sh").stat().st_mode & 0o777) == 0o600
+        assert ((tmp / "r2work" / "work" / "walg-secrets.sh").stat().st_mode & 0o777) == 0o600
     finally:
         await job.reset()
 
@@ -489,7 +489,7 @@ async def test_reset_while_fetching_kills_the_child_process(
     pid = int(pidfile.read_text())
     await job.reset()
 
-    assert job.state == "idle" and not (tmp_path / "w").exists()
+    assert job.state == "idle" and not (tmp_path / "w" / "work").exists()
     await asyncio.sleep(0.3)
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)  # 子プロセスが残っていない
@@ -536,13 +536,130 @@ async def test_not_enough_free_disk_fails_fast_with_a_reason(
                     break
                 await asyncio.sleep(0.5)
             assert st["state"] == "failed" and "空きが足りません" in st["message"]
-            assert not (tmp / "r2work" / "pgdata").exists()
+            assert not (tmp / "r2work" / "work" / "pgdata").exists()
     finally:
         await s.drop(target)
 
 
-def test_cleanup_stale_removes_the_previous_work_area(tmp_path: Path) -> None:
-    work = tmp_path / "r2work"
-    (work / "pgdata").mkdir(parents=True)
-    R2Restore({"WALG_S3_PREFIX": "s3://x"}, work).cleanup_stale()
-    assert not work.exists()
+def test_cleanup_stale_removes_only_the_work_dir_and_stale_sockets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "r2restore"
+    (root / "work" / "pgdata").mkdir(parents=True)
+    (root / "precious.txt").write_text("keep")  # 設定された場所にある、ほかのファイルは消さない
+    sockets = tmp_path / "tmp"
+    (sockets / "r2r-abc").mkdir(parents=True)
+    (sockets / "other-dir").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(sockets))
+    R2Restore({"WALG_S3_PREFIX": "s3://x"}, root).cleanup_stale()
+    assert not (root / "work").exists() and (root / "precious.txt").read_text() == "keep"
+    assert not (sockets / "r2r-abc").exists() and (sockets / "other-dir").exists()
+
+
+async def test_symlinks_planted_in_the_backup_are_not_followed(
+    stack: tuple[Scratch, R2Restore, Path], walg_repo: Path
+) -> None:
+    s, _, tmp = stack
+    victims = {n: tmp / f"victim-{n}" for n in ("conf", "auto", "hba", "ident", "signal")}
+    for v in victims.values():
+        v.write_text("ORIGINAL")
+
+    class Planted(R2Restore):
+        async def _fetch_base(self, pgdata: Path) -> None:
+            await super()._fetch_base(pgdata)
+            for name, key in (("postgresql.conf", "conf"), ("postgresql.auto.conf", "auto"),
+                              ("pg_hba.conf", "hba"), ("pg_ident.conf", "ident"),
+                              ("recovery.signal", "signal")):
+                (pgdata / name).unlink(missing_ok=True)
+                (pgdata / name).symlink_to(victims[key])
+
+    job = Planted({"WALG_FILE_PREFIX": str(walg_repo)}, tmp / "r2work")
+    try:
+        job.start()
+        for _ in range(240):
+            if job.state in ("ready", "failed"):
+                break
+            await asyncio.sleep(1)
+        assert job.state == "ready", job.message
+        # リンク先は書き換わっていない
+        assert all(v.read_text() == "ORIGINAL" for v in victims.values())
+        pgdata = tmp / "r2work" / "work" / "pgdata"
+        assert not (pgdata / "postgresql.conf").is_symlink()
+        assert (pgdata / "pg_hba.conf").read_text() == "local all all trust\n"
+    finally:
+        await job.reset()
+
+
+async def test_pgdata_that_is_a_symlink_is_refused(
+    stack: tuple[Scratch, R2Restore, Path], walg_repo: Path
+) -> None:
+    _, _, tmp = stack
+
+    class Linked(R2Restore):
+        async def _fetch_base(self, pgdata: Path) -> None:
+            await super()._fetch_base(pgdata)
+            real = tmp / "elsewhere"
+            pgdata.rename(real)
+            pgdata.symlink_to(real)
+
+    job = Linked({"WALG_FILE_PREFIX": str(walg_repo)}, tmp / "r2work")
+    try:
+        job.start()
+        for _ in range(240):
+            if job.state in ("ready", "failed"):
+                break
+            await asyncio.sleep(1)
+        assert job.state == "failed" and "通常のディレクトリ" in (job.message or "")
+    finally:
+        await job.reset()
+
+
+async def test_merge_source_connects_as_a_non_superuser_reader(
+    stack: tuple[Scratch, R2Restore, Path],
+) -> None:
+    s, job, tmp = stack
+    target = _name()
+    try:
+        async with await _client(tmp, s, job, target, _target_sql("")) as c:
+            await _ready(c)
+            conn = await asyncpg.connect(job.dsn)
+            try:
+                assert str(await conn.fetchval("SELECT current_user")).startswith("r2_reader_")
+                assert not await conn.fetchval(
+                    "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
+                )
+                assert await conn.fetchval("SELECT count(*) FROM readings") == 4
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.execute("INSERT INTO readings (sensor_id, value, recorded_at)"
+                                       f" VALUES ('{S1}', 1, now())")
+            finally:
+                await conn.close()
+    finally:
+        await s.drop(target)
+
+
+def test_redact_replaces_longer_values_first_and_short_secrets_too() -> None:
+    job = R2Restore(
+        {"AWS_SECRET_ACCESS_KEY": "abcd", "AWS_ACCESS_KEY_ID": "abcdEFGHIJ", "AWS_TOKEN": "",
+         "WALG_S3_PREFIX": "s3://x"},
+        Path("/nonexistent"),
+    )
+    # 短い値（abcd）が長い値（abcdEFGHIJ）の一部でも、長い値が先に伏せられる
+    assert job.redact("id=abcdEFGHIJ secret=abcd") == "id=*** secret=***"
+    assert job.redact("nothing") == "nothing"  # 空の値で全部が置き換わらない
+
+
+def test_log_tail_redacts_before_cutting(tmp_path: Path) -> None:
+    job = R2Restore({"AWS_SECRET_ACCESS_KEY": SECRET}, tmp_path / "r2")
+    job._work.mkdir(parents=True)
+    # 切り出しの境界（末尾 1500 文字）に、鍵がまたがる
+    (job._work / "pg.log").write_text("x" * 100 + SECRET + "y" * 1495)
+    tail = job._log_tail()
+    assert SECRET not in tail and SECRET[-6:] not in tail and "***" in tail
+
+
+def test_env_names_that_are_not_shell_safe_are_dropped(tmp_path: Path) -> None:
+    text = "GOOD=1\nBAD NAME=2\nEVIL;rm -rf /=3\n1STARTS=4\n$(x)=5\n"
+    assert parse_env_file(text) == {"GOOD": "1"}
+    job = R2Restore({"GOOD": "1", "BAD;X": "2"}, tmp_path)
+    assert job._env == {"GOOD": "1"}

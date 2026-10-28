@@ -24,6 +24,8 @@ import asyncio
 import contextlib
 import json
 import os
+import re
+import secrets
 import shlex
 import shutil
 import tempfile
@@ -87,6 +89,10 @@ _CONTROL_DEFAULTS = {
     "max_prepared_transactions": "0", "max_locks_per_transaction": "64", "wal_level": "replica",
 }
 _SECRET_NAME_PARTS = ("KEY", "SECRET", "TOKEN", "PASS")
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# 作業用の領域の中で、消してよい場所（R2_RESTORE_DIR そのものは消さない）
+WORK_SUBDIR = "work"
+SOCKET_PREFIX = "r2r-"
 _SAFETY_MARGIN_BYTES = 512 * 1024 * 1024
 
 
@@ -124,20 +130,32 @@ def parse_env_file(text: str) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        env[key.strip()] = value.strip()
+        key = key.strip()
+        if _ENV_NAME_RE.fullmatch(key):  # シェルに書くので、名前の形が正しいものだけ読む
+            env[key] = value.strip()
     return env
+
+
+def _write_fresh(path: Path, text: str, mode: int = 0o644) -> None:
+    """新しいファイルとして書く。バックアップに仕込まれたシンボリックリンクをたどらない。"""
+    path.unlink(missing_ok=True)  # リンクなら、リンク先でなくリンクそのものを消す
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
 
 
 class R2Restore:
     def __init__(self, walg_env: dict[str, str], work_dir: Path) -> None:
-        self._env = walg_env
-        self._work = work_dir
+        self._env = {k: v for k, v in walg_env.items() if _ENV_NAME_RE.fullmatch(k)}
+        # 消してよいのは、この中の work だけ（設定された場所に、ほかのファイルがあっても消さない）
+        self._work = work_dir / WORK_SUBDIR
         self._sock: Path | None = None
         self.state = "idle"
         self.message: str | None = None
         self.info = RestoreInfo()
         self._task: asyncio.Task[None] | None = None
         self._procs: set[asyncio.subprocess.Process] = set()
+        self._reader: str | None = None
 
     # ── 外から見るもの ───────────────────────────────────────────────
 
@@ -151,8 +169,9 @@ class R2Restore:
 
     @property
     def dsn(self) -> str:
-        assert self._sock is not None and self.state == "ready"
-        return f"postgresql://{PG_USER}@/{PG_DATABASE}?host={self._sock}&port={PG_PORT}"
+        """merge の元として読む接続先。管理者ではない読み取りロールで接続する。"""
+        assert self._sock is not None and self.state == "ready" and self._reader
+        return f"postgresql://{self._reader}@/{PG_DATABASE}?host={self._sock}&port={PG_PORT}"
 
     def start(self) -> None:
         """裏で復元を始める（実行中なら何もしない）。前の作業用の場所は消してから始める。"""
@@ -162,13 +181,20 @@ class R2Restore:
         self._task = asyncio.create_task(self._run())
 
     def cleanup_stale(self) -> None:
-        """起動時に、前回の残り（落ちたときの作業用の場所）を消す。"""
+        """起動時に、前回の残り（作業用の場所の work と、unix ソケットの一時ディレクトリ）を消す"""
         shutil.rmtree(self._work, ignore_errors=True)
+        for stale in Path(tempfile.gettempdir()).glob(f"{SOCKET_PREFIX}*"):
+            shutil.rmtree(stale, ignore_errors=True)
 
     def redact(self, text: str) -> str:
         """メッセージから、鍵の値を伏せる（失敗の文に鍵が混ざらないように）。"""
-        for key, value in self._env.items():
-            if len(value) >= 4 and any(part in key.upper() for part in _SECRET_NAME_PARTS):
+        # 長い値から置き換える（短い値が長い値の一部のとき、長い値が壊れないように）。空の値は除く
+        secret_values = sorted(
+            (v for k, v in self._env.items() if any(p in k.upper() for p in _SECRET_NAME_PARTS)),
+            key=len, reverse=True,
+        )
+        for value in secret_values:
+            if value:
                 text = text.replace(value, "***")
         return text
 
@@ -253,28 +279,29 @@ class R2Restore:
         await self._exec("wal-g", "backup-fetch", str(pgdata), "LATEST", with_secrets=True)
 
     async def _replay(self, pgdata: Path) -> None:
+        if pgdata.is_symlink() or not pgdata.is_dir():
+            raise RestoreError("展開した PGDATA が、通常のディレクトリではありません")
         os.chmod(pgdata, 0o700)
         # 鍵は権限 600 のファイルに置き、restore_command の包みが読む（PostgreSQL の環境に置かない）
-        secrets = self._work / "walg-secrets.sh"
+        secret_file = self._work / "walg-secrets.sh"
         lines = "".join(f"{k}={shlex.quote(v)}\nexport {k}\n" for k, v in self._env.items())
-        fd = os.open(secrets, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(lines)
+        _write_fresh(secret_file, lines, 0o600)
         script = self._work / "walg-fetch.sh"
-        script.write_text(_FETCH_SCRIPT.format(secrets=secrets))
-        script.chmod(0o700)
+        _write_fresh(script, _FETCH_SCRIPT.format(secrets=secret_file), 0o700)
         # unix ソケットのパスは長さに上限があるため、短い一時ディレクトリに置く
         self._sock = Path(tempfile.mkdtemp(prefix="r2r-"))
         control = await self._controldata(pgdata)
-        # バックアップの設定（postgresql.conf・pg_hba.conf など）は使わず、最小の自前のものにする
-        (pgdata / "postgresql.conf").write_text(
-            _CONF.format(sock=self._sock, port=PG_PORT, script=script, **control)
+        # バックアップの設定（postgresql.conf・pg_hba.conf など）は使わず、最小の自前のものにする。
+        # シンボリックリンクが仕込まれていても、リンク先（作業用 DB の設定など）を書かない
+        _write_fresh(
+            pgdata / "postgresql.conf",
+            _CONF.format(sock=self._sock, port=PG_PORT, script=script, **control),
         )
-        (pgdata / "postgresql.auto.conf").write_text("")
-        (pgdata / "pg_hba.conf").write_text(_HBA)
-        (pgdata / "pg_ident.conf").write_text("")
+        _write_fresh(pgdata / "postgresql.auto.conf", "")
+        _write_fresh(pgdata / "pg_hba.conf", _HBA)
+        _write_fresh(pgdata / "pg_ident.conf", "")
         (pgdata / "standby.signal").unlink(missing_ok=True)
-        (pgdata / "recovery.signal").touch()
+        _write_fresh(pgdata / "recovery.signal", "")
         opts = (
             "-c archive_mode=off -c shared_preload_libraries= -c session_preload_libraries= "
             "-c local_preload_libraries= -c archive_library= "
@@ -314,11 +341,23 @@ class R2Restore:
                     if ts is not None:
                         self.info.wal_last_time = ts.isoformat()
                 else:
+                    await self._create_reader(conn)
                     await self._read_info(conn)
                     return
             finally:
                 await conn.close()
             await asyncio.sleep(1)
+
+    async def _create_reader(self, conn: asyncpg.Connection) -> None:
+        """昇格後の DB に、読み取りだけのロールを作る。merge の元の読み取りは、このロールで行う。
+
+        復元した DB の関数・ビューが、管理者の権限で動くのを避けるため。名前はランダムにする
+        （バックアップにある同名のロールと衝突・乗っ取りをさせない）。
+        """
+        name = f"r2_reader_{secrets.token_hex(6)}"
+        await conn.execute(f'CREATE ROLE "{name}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE')
+        await conn.execute(f'GRANT pg_read_all_data TO "{name}"')
+        self._reader = name
 
     async def _read_info(self, conn: asyncpg.Connection) -> None:
         with contextlib.suppress(asyncpg.PostgresError):
@@ -340,7 +379,8 @@ class R2Restore:
 
     def _log_tail(self) -> str:
         with contextlib.suppress(OSError):
-            return self.redact((self._work / "pg.log").read_text(errors="replace")[-_TAIL:])
+            # 先に伏せてから切る（切れ目で鍵が半端に残らないように）
+            return self.redact((self._work / "pg.log").read_text(errors="replace"))[-_TAIL:]
         return ""
 
     async def _stop_and_clean(self) -> None:
@@ -353,3 +393,4 @@ class R2Restore:
         if self._sock is not None:
             shutil.rmtree(self._sock, ignore_errors=True)
             self._sock = None
+        self._reader = None
