@@ -1,6 +1,6 @@
-"""定期削除バッチ（Free Tier の 90日データ、期限切れのリフレッシュトークン）。
+"""定期削除バッチ（Free Tier の 14日データ、期限切れのリフレッシュトークン）。
 
-毎日 UTC 03:00 に実行し、90日以上前の Reading と、有効期限が切れたリフレッシュトークンを削除する。
+毎日 UTC 03:00 に実行し、14日以上前の Reading と、有効期限が切れたリフレッシュトークンを削除する。
 Reading は self-hosted（workspace_id IS NULL のセンサー）を対象外とする。
 
 なぜ SaaS だけか: OSS（self-hosted）の利用者は、測定値を無期限に残すかどうかを自分で決める。
@@ -23,7 +23,7 @@ from app.db.models import Reading, RefreshToken, Sensor
 from app.db.session import engine
 
 # 測定値を残す日数（SaaS の無料枠の上限）
-_RETENTION_DAYS = 90
+_RETENTION_DAYS = 14
 # 有効期限が切れてから、リフレッシュトークンを残す日数。
 # 期限切れのトークンは更新に使えない（auth.refresh が拒否する）ので、削除しても挙動は変わらない。
 # 時計のずれや、障害調査で直近の行を見たい場合に備えて、少しだけ残す
@@ -34,7 +34,7 @@ _logger = logging.getLogger(__name__)
 
 
 async def purge_old_readings() -> int:
-    """90日以上前の Reading を削除し、削除件数を返す。"""
+    """14日以上前の Reading を削除し、削除件数を返す。"""
     cutoff = datetime.now(UTC) - timedelta(days=_RETENTION_DAYS)
 
     # 対象は、ワークスペースに属するセンサー（workspace_id が NULL でないもの）の測定値だけ。

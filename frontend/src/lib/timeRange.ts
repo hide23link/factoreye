@@ -40,11 +40,11 @@ export const DEFAULT_RANGE: TimeRange = { mode: "relative", durationMs: HOUR };
 const MIN_DURATION_MS = MINUTE;
 
 /**
- * 表示できる最長の期間。SaaS（Free Tier）は測定値の保持が 90 日のため 90 日まで。
+ * 表示できる最長の期間。SaaS（Free Tier）は測定値の保持が 14 日のため 14 日まで。
  * self-hosted は保持期間の制限が無いので、上限を設けない。
  */
 export function maxRangeMs(isMultiTenant: boolean): number {
-  return isMultiTenant ? 90 * DAY : Number.POSITIVE_INFINITY;
+  return isMultiTenant ? 14 * DAY : Number.POSITIVE_INFINITY;
 }
 
 /** このビルド（VITE_AUTH_MODE）での、表示できる最長の期間 */

@@ -1,4 +1,4 @@
-"""90日データ削除バッチ + Free Tier センサー上限のテスト。"""
+"""14日データ削除バッチ + Free Tier センサー上限のテスト。"""
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -29,10 +29,10 @@ async def _create_reading(session: AsyncSession, sensor_id: UUID, recorded_at: d
     return r
 
 
-# ── 90日削除バッチ ────────────────────────────────────────────
+# ── 14日削除バッチ ────────────────────────────────────────────
 
 async def test_purge_deletes_old_multi_tenant_readings() -> None:
-    """multi-tenant の 90日超えデータを削除する。"""
+    """multi-tenant の 14日超えデータを削除する。"""
     from app.auth import hash_password
     async with AsyncSession(engine) as session:
         user = User(email=f"purge-{uuid4().hex[:6]}@example.com", password_hash=hash_password("pw"))
@@ -43,7 +43,7 @@ async def test_purge_deletes_old_multi_tenant_readings() -> None:
         await session.flush()
 
         sensor = await _create_sensor(session, workspace_id=ws.id)
-        old = datetime.now(UTC) - timedelta(days=91)
+        old = datetime.now(UTC) - timedelta(days=15)
         recent = datetime.now(UTC) - timedelta(days=10)
 
         sensor_id = sensor.id  # commit で expire される前に取得
@@ -58,7 +58,7 @@ async def test_purge_deletes_old_multi_tenant_readings() -> None:
         result = await session.exec(select(Reading).where(Reading.sensor_id == sensor_id))
         remaining = result.all()
     assert len(remaining) == 1
-    assert remaining[0].recorded_at.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(days=30)
+    assert remaining[0].recorded_at.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(days=14)
 
 
 async def test_purge_skips_self_hosted_readings() -> None:

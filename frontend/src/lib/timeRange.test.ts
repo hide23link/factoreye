@@ -148,7 +148,7 @@ describe("nowRange", () => {
 
 describe("maxRangeMs", () => {
   it("SaaS は 90 日、self-hosted は上限なし", () => {
-    expect(maxRangeMs(true)).toBe(90 * 24 * HOUR);
+    expect(maxRangeMs(true)).toBe(14 * 24 * HOUR);
     expect(maxRangeMs(false)).toBe(Number.POSITIVE_INFINITY);
   });
 });
