@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **管理画面に「R2 から復旧する」を追加（SaaS 版）**: 本番が消えた・データが不完全なときに、R2 の WAL-G のバックアップ（ベース ＋ WAL）を復旧ツールで一時的な PostgreSQL に再生し、本番に無い行だけを足す（引き継ぎも同じ操作で合わせられる）。復元は復旧ツールの裏のジョブ。スキーマの版が違えば拒否する。書き戻しの間は `readings` をロックし、`.sha256` の無い引き継ぎは使わない。復旧ツールのイメージに PostgreSQL 15 と WAL-G を追加
 - **管理画面に「書き戻し」を追加（SaaS 版）**: 本番が止まっている間に控え（AWS）が稼いだデータ（R2 の `handoff-inc/` の縮小ダンプ）を、本番に無い行だけ足す。一覧 → 試算 → 確認 → 実行（直前に本番の控え・1 トランザクション）。backend が復旧ツールを内部ネットワークで呼ぶ（`/api/admin/failback/*`、設定 `FAILBACK_RECOVERY_*`）。復旧ツールに `HANDOFF_SOURCE` と引き継ぎ用の API を追加。控えの稼働中の既存の行の更新・削除は戻らない
 
 ### Changed
