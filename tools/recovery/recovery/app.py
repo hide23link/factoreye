@@ -32,7 +32,14 @@ from recovery import compare, dbinfo, merge
 from recovery.config import Settings
 from recovery.scratch import LoadError, Scratch, db_name_for
 from recovery.snapshot import SnapshotError, dump_database
-from recovery.sources import BackupSource, SourceError, validate_name, verify
+from recovery.sources import (
+    BackupSource,
+    HandoffSource,
+    SourceError,
+    validate_handoff_name,
+    validate_name,
+    verify,
+)
 
 CURRENT = "current"
 MAX_PAGE_SIZE = 500
@@ -54,6 +61,14 @@ class MergeRequest(BaseModel):
     apply: bool = False
     # 実行のとき: 画面で確認した試行の件数（足す行の合計）。実行の直前の試行と違えば中止する。
     # 試行の後に今の DB が変わり、確認した内容と違うものを書き込まないように
+    expected_inserted: int | None = Field(default=None, ge=0)
+
+
+class FailbackRequest(BaseModel):
+    # false: 試算（書き込まずに追加される件数を数える）
+    # true: 実行（直前の控えを取ってから書き込む）
+    apply: bool = False
+    # 実行のとき: 試算で確認した、足す行の合計。実行の直前の試算と違えば中止する
     expected_inserted: int | None = Field(default=None, ge=0)
 
 
@@ -88,7 +103,12 @@ def describe_os_error(e: OSError) -> tuple[str, int]:
     return f"入出力のエラー（DB の接続ではありません）: {e}", 500
 
 
-def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> FastAPI:
+def create_app(
+    settings: Settings,
+    source: BackupSource,
+    scratch: Scratch,
+    handoff: HandoffSource | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="FactorEye recovery",
         docs_url=None,
@@ -144,6 +164,7 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             "source": source.describe(),
             "target_configured": settings.target_dsn is not None,
             "merge_enabled": settings.target_write_dsn is not None,
+            "handoff_configured": handoff is not None,
             "target_mode": settings.target_mode,
         }
 
@@ -264,6 +285,35 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
             "workspaces": [asdict(w) for w in compare.compare_workspaces(b_ws, c_ws)],
         }
 
+    async def run_merge(
+        backup_dsn: str, sel: merge.MergeSelection, apply: bool, expected_inserted: int | None
+    ) -> dict[str, object]:
+        """試算または実行。merge_lock を持った状態で呼ぶ。"""
+        write_dsn = settings.target_write_dsn
+        assert write_dsn is not None
+        snapshot = None
+        if apply:
+            if expected_inserted is None:
+                raise HTTPException(422, "先に試行して、件数を確かめてください")
+            async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(write_dsn) as dst:
+                plan = await merge.merge(
+                    src, dst, sel, apply=False, target_mode=settings.target_mode
+                )
+            planned = sum(t.inserted for t in plan.tables)
+            if planned != expected_inserted:
+                raise HTTPException(
+                    409,
+                    f"試行の後に今の DB が変わりました（確認した {expected_inserted} 行"
+                    f" → 今は {planned} 行）。もう一度試行してください",
+                )
+            # 試行で問題が無くても、実行の直前の状態を必ず控える
+            snapshot = await dump_database(write_dsn, settings.snapshot_dir)
+        async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(write_dsn) as dst:
+            result = await merge.merge(
+                src, dst, sel, apply=apply, target_mode=settings.target_mode
+            )
+        return {**asdict(result), "snapshot": snapshot.name if snapshot else None}
+
     @app.post("/api/backups/{name}/merge")
     async def merge_into_current(name: str, req: MergeRequest) -> dict[str, object]:
         """選んだワークスペースの、今の DB に無い行だけを書き戻す。"""
@@ -278,34 +328,106 @@ def create_app(settings: Settings, source: BackupSource, scratch: Scratch) -> Fa
         )
         # 書き戻しは同時に 1 つだけ（控えと書き込みの順番が入れ違わないように）
         async with merge_lock:
-            snapshot = None
-            if req.apply:
-                if req.expected_inserted is None:
-                    raise HTTPException(422, "先に試行して、件数を確かめてください")
-                async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
-                    settings.target_write_dsn
-                ) as dst:
-                    plan = await merge.merge(
-                        src, dst, sel, apply=False, target_mode=settings.target_mode
-                    )
-                planned = sum(t.inserted for t in plan.tables)
-                if planned != req.expected_inserted:
+            return await run_merge(backup_dsn, sel, req.apply, req.expected_inserted)
+
+    def require_handoff() -> HandoffSource:
+        if handoff is None:
+            raise HTTPException(
+                404, "引き継ぎの読み込み元（HANDOFF_SOURCE）が設定されていません"
+            )
+        return handoff
+
+    @app.get("/api/handoffs")
+    async def list_handoffs() -> dict[str, object]:
+        """控えが置いた縮小ダンプの一覧（新しい順）。最新の 1 つだけ、記録（latest.json）が付く。"""
+        h = require_handoff()
+        entries = await asyncio.to_thread(h.list)
+        latest = await asyncio.to_thread(h.latest)
+        items = []
+        for e in entries:
+            info = asdict(latest[1]) if latest and latest[0] == e.name else {}
+            items.append({
+                "name": e.name,
+                "size": e.size,
+                "modified": e.modified.isoformat(),
+                # 縮小ダンプの置き場（handoff-inc/）には縮小ダンプだけが置かれる。
+                # 記録が無い古いものは、kind・watermark が分からない（None）
+                "kind": info.get("kind"),
+                "watermark": info.get("watermark"),
+                "alembic": info.get("alembic"),
+                "instance": info.get("instance"),
+                "region": info.get("region"),
+                "created_at": info.get("created_at"),
+            })
+        return {"source": h.describe(), "items": items}
+
+    @app.post("/api/handoffs/{name}/failback")
+    async def failback(name: str, req: FailbackRequest) -> dict[str, object]:
+        """引き継ぎ（縮小ダンプ）の、今の DB に無い行だけを書き戻す。
+
+        取得 → 検証（壊れていれば中止）→ 展開 → 書き戻し（試算・実行は /merge と同じ処理）
+        → 展開を消す。対象は、縮小ダンプの全ワークスペース
+        （OSS 版の今の DB なら、ワークスペースに属さないデータ）。
+        """
+        if settings.target_write_dsn is None:
+            raise HTTPException(
+                403, "書き戻しは無効です（TARGET_WRITE_DATABASE_URL が設定されていません）"
+            )
+        h = require_handoff()
+        validate_handoff_name(name)
+        async with merge_lock:
+            fetched = await asyncio.to_thread(h.fetch, name)
+            try:
+                result = await asyncio.to_thread(verify, fetched)
+                if not result.ok:
+                    # 引き継ぎは自動で作られる。検証に通らないものは、force なしで使わない
                     raise HTTPException(
-                        409,
-                        f"試行の後に今の DB が変わりました（確認した {req.expected_inserted} 行"
-                        f" → 今は {planned} 行）。もう一度試行してください",
+                        422, f"引き継ぎが壊れています（{result.error}）。書き戻しません"
                     )
-                # 試行で問題が無くても、実行の直前の状態を必ず控える
-                snapshot = await dump_database(settings.target_write_dsn, settings.snapshot_dir)
-            async with dbinfo.read_only(backup_dsn) as src, merge.connect_target(
-                settings.target_write_dsn
-            ) as dst:
-                result = await merge.merge(
-                    src, dst, sel, apply=req.apply, target_mode=settings.target_mode
-                )
-        return {**asdict(result), "snapshot": snapshot.name if snapshot else None}
+                had_loaded = await scratch.is_loaded(name)
+                try:
+                    try:
+                        await scratch.load(name, fetched.path)
+                    except LoadError as e:
+                        raise HTTPException(422, f"引き継ぎを展開できません: {e}") from e
+                    backup_dsn = scratch.dsn_for(name)
+                    sel = await _handoff_selection(backup_dsn, settings.target_mode)
+                    if not sel.workspace_ids and not sel.include_self_hosted:
+                        raise HTTPException(422, "引き継ぎにワークスペースがありません")
+                    try:
+                        body = await run_merge(
+                            backup_dsn, sel, req.apply, req.expected_inserted
+                        )
+                    except merge.SchemaMismatch as e:
+                        raise HTTPException(
+                            409,
+                            {
+                                "code": "schema_mismatch",
+                                "message": str(e),
+                                "handoff_alembic": e.backup,
+                                "current_alembic": e.current,
+                            },
+                        ) from e
+                finally:
+                    if not had_loaded:
+                        await scratch.drop(name)
+            finally:
+                if fetched.temporary:
+                    fetched.path.unlink(missing_ok=True)
+        return {**body, "handoff": name, "checksum": result.checksum}
 
     return app
+
+
+async def _handoff_selection(dsn: str, target_mode: str | None) -> merge.MergeSelection:
+    """引き継ぎの書き戻す範囲。SaaS 版は全ワークスペース、OSS 版は所属のないデータ。"""
+    if target_mode == "oss":
+        return merge.MergeSelection([], include_self_hosted=True)
+    async with dbinfo.read_only(dsn) as conn:
+        if "workspaces" not in await dbinfo.list_tables(conn):
+            return merge.MergeSelection([])
+        ids = [r["id"] for r in await conn.fetch("SELECT id FROM workspaces")]
+    return merge.MergeSelection(ids)
 
 
 def _jsonable(d: dict[str, object]) -> dict[str, object]:

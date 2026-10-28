@@ -42,6 +42,18 @@ DB を丸ごと戻す場合は、`infra/restore.sh` を使います。
 - 直前の控えから DB を丸ごと戻すと、控えを取った後に届いた測定値は失われます
 - バックアップと今の DB のスキーマの版（Alembic）が違うときは、書き戻せません
 
+### 引き継ぎからの書き戻し（控え＝AWS が稼いだデータ）
+
+本番が止まっている間、AWS の控えが動き、**増加分の縮小ダンプ**を R2 の `handoff-inc/` に置きます（`tools/aws-dr/handoff.sh`。小さい表は全体、`readings`・`alarms` は起点以降の行だけ。`latest.json` に種類・起点・スキーマの版・台の ID・リージョン）。本番に復帰したら、そのうち**本番に無い行だけ**を足します（今ある行は変えない・消さない。何度実行しても二重にならない）。
+
+- **使い方（普通）**: 本番アプリの管理画面（`/admin`）の「書き戻し」で、一覧 → 試算 → 確認 → 実行。本番アプリ（backend）が、内部ネットワークでこのツールの API を呼びます
+- **使い方（直接）**: このツールの画面・API でも行えます。`GET /api/handoffs`（一覧）、`POST /api/handoffs/<handoff-factoreye-日時.sql.gz>/failback`（本文 `{}` が試算、`{"apply": true, "expected_inserted": <試算の合計>}` が実行）
+- **設定**: `HANDOFF_SOURCE=s3://<バケット>/<接頭辞>/handoff-inc`（ディレクトリでもよい）。鍵と `S3_ENDPOINT_URL`（R2）は `BACKUP_SOURCE` と同じものを読む（`s3:ListBucket` と `s3:GetObject` だけの鍵）。書き戻しには `TARGET_WRITE_DATABASE_URL` と `TARGET_MODE`（SaaS 版は `saas`）も必要です。backend から呼ぶには、このツールが本番のネットワーク（`factoreye-cloud`。`docker-compose.lxc.yml`）に入っていて、backend の `FAILBACK_RECOVERY_PASSWORD` がここの `RECOVERY_PASSWORD` と同じ値であること
+- **処理**: 引き継ぎを取得 → sha256・gzip を検証（壊れていれば使わない）→ 作業用の Postgres に展開 → 書き戻し（試算・実行は上の「書き戻し」と同じ処理: 直前の本番の控え `before-merge-*`、1 つのトランザクション、試算の件数との再確認）→ 展開を消す。対象は縮小ダンプの全ワークスペース（OSS 版の今の DB なら、ワークスペースに属さないデータ）
+- **規則**: 測定値は（センサー, 時刻）で重複を避け、id は今の DB で採番する。アラームは id で判定し、今の DB の同じセンサーに発生中のものがあれば、足すほうを解除済みにする。int の連番（OSS 版の通知設定）は、足した最大の id まで進める。親の行が無い子の行（縮小ダンプにセンサーが無い測定値など）は足さない
+- **前提**: 本番と控えのスキーマの版（Alembic）が同じこと。違えば書き込まずに 409 で警告します
+- **制限**: 控えの稼働中の、既存の行の更新・削除（パスワードの変更など）は戻りません。起点より前に発生して、起点以降に解除されたアラームの変化も戻りません
+
 ### OSS 版 ⇄ SaaS 版
 
 バックアップと今の DB の版（OSS 版・SaaS 版）が違っても、所属を付け替えて書き戻せます。今の DB がどちらかは `TARGET_MODE` で指定します（データの中身からは判断しません。空の SaaS 版は OSS 版と見分けられないため）。
@@ -128,6 +140,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE factoreye IN SCHEMA public GRANT SELECT ON TAB
 | `TARGET_DATABASE_URL` | なし | 今の DB。読み取り専用で接続する |
 | `TARGET_WRITE_DATABASE_URL` | なし | 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しは使えない。設定するには `TARGET_DATABASE_URL` と `TARGET_MODE` も必要（無いと起動時にエラー） |
 | `TARGET_MODE` | なし（書き戻しを使うなら必須） | 今の DB が SaaS 版なら `saas`、OSS 版なら `oss` |
+| `HANDOFF_SOURCE` | なし | 控え（AWS）が置いた縮小ダンプの読み込み元（`s3://<バケット>/<接頭辞>/handoff-inc` かディレクトリ）。無ければ、引き継ぎからの書き戻しは使えない |
 | `AWS_ACCESS_KEY_ID` など | なし | S3 の認証。`s3:ListBucket` と `s3:GetObject` だけの鍵にする |
 | `S3_ENDPOINT_URL` | なし | S3 互換のサービス（MinIO など） |
 | `BACKUP_GID` | `0` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |

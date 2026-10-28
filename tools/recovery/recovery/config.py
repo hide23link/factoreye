@@ -40,6 +40,9 @@ class Settings:
     s3_endpoint_url: str | None
     # 書き戻しの直前に取る、今の DB の控えの置き場所
     snapshot_dir: Path
+    # 控え（AWS）が置いた縮小ダンプの読み込み元（ディレクトリか s3://<バケット>/<接頭辞>/handoff-inc）。
+    # 無ければ、引き継ぎからの書き戻しは使えない
+    handoff_source: str | None = None
 
 
 def normalize_dsn(dsn: str) -> str:
@@ -86,4 +89,5 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         password=password,
         s3_endpoint_url=e.get("S3_ENDPOINT_URL") or None,
         snapshot_dir=Path(e.get("RECOVERY_SNAPSHOT_DIR", "/var/lib/recovery/snapshots")),
+        handoff_source=e.get("HANDOFF_SOURCE") or None,
     )

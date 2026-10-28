@@ -31,6 +31,18 @@ class MergeError(Exception):
     pass
 
 
+class SchemaMismatch(MergeError):
+    """スキーマの版（Alembic）が違う。列の意味が違いうるので、書き戻さない。"""
+
+    def __init__(self, backup: str | None, current: str | None) -> None:
+        super().__init__(
+            f"スキーマの版が違います（バックアップ {backup} / 今 {current}）。"
+            "同じ版のバックアップを使ってください"
+        )
+        self.backup = backup
+        self.current = current
+
+
 @dataclass(frozen=True)
 class MergeSelection:
     workspace_ids: list[UUID]
@@ -364,10 +376,7 @@ async def merge(
     src_ver, dst_ver = await _alembic(src), await _alembic(dst)
     if src_ver != dst_ver:
         # 列の意味が版で変わっている可能性があるため、同じ版どうしに限る
-        raise MergeError(
-            f"スキーマの版が違います（バックアップ {src_ver} / 今 {dst_ver}）。"
-            "同じ版のバックアップを使ってください"
-        )
+        raise SchemaMismatch(src_ver, dst_ver)
     src_tables = set(await list_tables(src))
     dst_tables = set(await list_tables(dst))
 

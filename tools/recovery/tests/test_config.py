@@ -40,3 +40,9 @@ def test_write_requires_mode() -> None:
     assert load_settings({**env, "TARGET_MODE": "SaaS"}).target_mode == "saas"
     with pytest.raises(ConfigError):
         load_settings({**env, "TARGET_MODE": "cloud"})
+
+
+def test_handoff_source_is_optional() -> None:
+    assert load_settings(BASE).handoff_source is None
+    s = load_settings({**BASE, "HANDOFF_SOURCE": "s3://factoreye-backup/handoff-inc"})
+    assert s.handoff_source == "s3://factoreye-backup/handoff-inc"

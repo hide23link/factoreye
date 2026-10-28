@@ -348,7 +348,15 @@ DB に接続できない場合は `status` が `degraded` になる。
 - バックアップ（ディレクトリか S3）の一覧・検証、今の DB との比較、閲覧・CSV の書き出し、書き戻し（今の DB に**無い行だけ**を足す。今ある行は変えない・消さない）ができる
 - バックアップは、乗っ取られた本番で書き換えられている前提で展開する（`.sha256` も一緒に作り直せるため）。管理者ではないロールで流し込み、psql のメタコマンドを止める
 - OSS 版 ⇄ SaaS 版は、所属を付け替えて書き戻せる。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須）。SaaS → OSS のワークスペース単位の移し替えは、§10.1 のデータ移行でもできる（通知設定の上書きの指定など、移行に特化した機能はそちら）
+- 控え（AWS）が稼いだ増加分（縮小ダンプ。R2 の `handoff-inc/`）は、本番に復帰したあと、管理画面（`/admin`）の「書き戻し」で本番に足す（下の「引き継ぎからの書き戻し」）
 - 書き戻しの規則・展開の安全策・設定の一覧・起動手順は [`tools/recovery/README.md`](../tools/recovery/README.md) を正とする
+
+### 引き継ぎからの書き戻し（管理画面）
+- 流れ: 一覧 → 試算（追加される件数。何も書かない）→ 確認の小窓 → 実行（直前に本番の控え `before-merge-*` を取り、1 つのトランザクション）→ 結果。実行は、試算の件数と実行の直前の件数が一致したときだけ
+- API: `GET /api/admin/failback/handoffs`、`POST /api/admin/failback/preview`、`POST /api/admin/failback/apply`（`backend/app/api/admin_failback.py`。管理者トークンが必要。`AUTH_MODE=multi_tenant` のときだけマウントする）
+- 書き込みは backend が直接は行わず、内部ネットワーク（`factoreye-cloud`）で復旧ツールの `POST /api/handoffs/{name}/failback` を呼ぶ（`backend/app/failback_client.py`）。設定は `FAILBACK_RECOVERY_URL`（既定 `http://recovery:8090`）・`FAILBACK_RECOVERY_USERNAME`・`FAILBACK_RECOVERY_PASSWORD`（復旧ツールの Basic 認証と同じ値。空なら無効）・`FAILBACK_TIMEOUT_SECONDS`（既定 180）
+- 本番と控えのスキーマの版（Alembic）が違うときは、書き戻さずに警告する（409）。引き継ぎの sha256・gzip が壊れていれば使わない
+- 制限: 控えの稼働中の、既存の行の更新・削除（パスワードの変更など）は戻らない。起点より前に発生して起点以降に解除されたアラームの変化も戻らない
 
 ### 設定（環境変数）
 | 変数 | 既定 | 内容 |
@@ -369,6 +377,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `ADMIN_ACCESS_EXPIRE_MINUTES` | `60` | 管理者トークンの有効期限（分） |
 | `IMPERSONATION_EXPIRE_MINUTES` | `15` | 管理者が利用者として閲覧するときのトークンの有効期限（分） |
 | `ADMIN_CREDENTIALS_FILE` | `admin/admins.txt` | 管理者アカウントのファイル |
+| `FAILBACK_RECOVERY_URL` / `FAILBACK_RECOVERY_USERNAME` / `FAILBACK_RECOVERY_PASSWORD` | `http://recovery:8090` / `admin` / 空 | 管理画面の「書き戻し」が呼ぶ復旧ツールのアドレスと Basic 認証（SaaS 版。値は `.env` にだけ置く） |
 | `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（ブラウザから見える API のアドレスと、画面の認証モード）。変えるにはビルドし直す |
 
 環境変数の例は、リポジトリ直下の `.env.example`（docker compose 用）、`backend/.env.example`（`uvicorn` を直接起動する場合）、`infra/cloud/.env.cloud.example`（クラウド版）。

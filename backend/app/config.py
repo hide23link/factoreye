@@ -8,7 +8,7 @@
 """
 from enum import StrEnum
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 配布物に書かれている既定の秘密値（本番では使えない）
@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     # 管理者アカウントのテキストファイル（ID:bcryptハッシュ）。
     # 本番は docker-compose の volumes でホストの ./admin を差し込む
     admin_credentials_file: str = "admin/admins.txt"
+    # 管理画面の「書き戻し」（控えが稼いだデータを本番に足す）が呼ぶ、復旧ツール（tools/recovery）の
+    # 内部アドレスと Basic 認証。復旧ツールの RECOVERY_USERNAME / RECOVERY_PASSWORD と同じ値にする。
+    # パスワードは .env にだけ置き、ログ・画面に出さない。url か password が空なら、機能は使えない
+    failback_recovery_url: str = "http://recovery:8090"
+    failback_recovery_username: str = "admin"
+    failback_recovery_password: SecretStr = SecretStr("")
+    # 復旧ツールの応答を待つ秒数（引き継ぎの取得・展開・試算を含むため長めにする）
+    failback_timeout_seconds: float = Field(default=180, gt=0, le=900)
     # 取り込みのIP別レート制限（例: 100/minute）。"off" で解除（実機・負荷テスト用）
     ingest_rate_limit: str = "100/minute"
     # 未登録の ingestKey が来たとき、センサーを自動で作る（self-hosted だけ。SaaS では使えない）。

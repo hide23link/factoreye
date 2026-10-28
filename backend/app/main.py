@@ -34,6 +34,7 @@ from app import webhooks as webhooks_sender
 # ここで読み込んだだけでは使えない。下の app.include_router(...) で登録して、はじめて使える
 from app.api import (
     admin,  # 管理者用の API（利用者の一覧・編集・なりすまし閲覧など）。SaaS 版だけ
+    admin_failback,  # 管理者用: 控えが稼いだデータを本番に書き戻す。SaaS 版だけ
     alarms,  # アラームの一覧を見る・確認済みにする
     auth,  # 登録・ログイン・ログアウト。SaaS 版だけ
     dashboards,  # ダッシュボード（画面）の作成・取得・変更・削除
@@ -178,6 +179,7 @@ if settings.auth_mode == AuthMode.MULTI_TENANT:
     app.include_router(auth.router)  # /api/auth/*: 登録・ログイン・ログアウト
     # 管理者API（管理者はテキストファイルで管理。app/admin_accounts.py 参照）
     app.include_router(admin.router)
+    app.include_router(admin_failback.router)  # /api/admin/failback/*: 控えからの書き戻し
 
 
 @app.get("/health")
