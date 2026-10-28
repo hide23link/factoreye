@@ -36,6 +36,8 @@ const PREVIEW: FailbackResult = {
   applied: false,
   totalInserted: 5,
   snapshot: null,
+  parts: [],
+  r2: null,
   tables: [
     { table: "readings", source: 4, inserted: 3, existing: 1, note: null, closed: 0 },
     { table: "alarms", source: 3, inserted: 2, existing: 1, note: "発生中のアラーム 1 件を解除済みにして戻します", closed: 1 },

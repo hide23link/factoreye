@@ -20,6 +20,8 @@ import {
 } from "../../lib/adminApi";
 import type { FailbackHandoff, FailbackResult } from "../../lib/adminApi";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { FailbackResultTable } from "./FailbackResultTable";
+import { LIMITATION, TIMEOUT_HINT, formatDateTime } from "./failbackShared";
 
 interface Props {
   token: string;
@@ -29,67 +31,8 @@ interface Props {
 const isAuthError = (e: unknown) =>
   e instanceof AdminApiError && (e.status === 401 || e.status === 403);
 
-function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString("ja-JP");
-}
-
 function formatBytes(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-// 表の名前を、画面の言葉にする（知らない表は、そのまま出す）
-const TABLE_LABELS: Record<string, string> = {
-  users: "利用者",
-  workspaces: "ワークスペース",
-  sensors: "センサー",
-  readings: "測定値",
-  alarms: "アラーム",
-  dashboards: "ダッシュボード",
-  widgets: "ウィジェット",
-  webhook_subscriptions: "Webhook",
-  notification_settings: "通知設定",
-};
-
-// 書き戻しの前に、管理者に必ず伝えること
-const LIMITATION =
-  "控えの稼働中に行われた、既存の行の更新・削除（パスワードの変更など）は戻りません。" +
-  "また、本番に復帰したあとに削除したセンサー・ダッシュボード・ウィジェット・Webhook・利用者は、" +
-  "引き継ぎに残っていれば復活します。";
-
-// 時間切れ（504）のときに足す案内。書き込みは復旧ツールの中で続いているかもしれない
-const TIMEOUT_HINT = "再度試算して、追加が 0 件なら、書き戻しは完了しています。";
-
-// 書き戻しの表（試算と結果で共通）
-function ResultTable({ result }: { result: FailbackResult }) {
-  return (
-    <table className="mt-2 w-full text-left text-sm" data-testid="failback-tables">
-      <thead>
-        <tr className="text-xs text-gray-500">
-          <th className="py-1 pr-2 font-normal">データ</th>
-          <th className="py-1 pr-2 text-right font-normal">引き継ぎの行数</th>
-          <th className="py-1 pr-2 text-right font-normal">
-            {result.applied ? "足した行数" : "足される行数"}
-          </th>
-          <th className="py-1 text-right font-normal">本番に既にある</th>
-        </tr>
-      </thead>
-      <tbody>
-        {result.tables.map((t) => (
-          <tr key={t.table} className="border-t border-gray-100">
-            <td className="py-1 pr-2">
-              {TABLE_LABELS[t.table] ?? t.table}
-              {t.note && <span className="ml-2 text-xs text-amber-700">{t.note}</span>}
-            </td>
-            <td className="py-1 pr-2 text-right">{t.source.toLocaleString()}</td>
-            <td className="py-1 pr-2 text-right font-bold">{t.inserted.toLocaleString()}</td>
-            <td className="py-1 text-right text-gray-500">{t.existing.toLocaleString()}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
 }
 
 // 控えが稼いだデータを、本番に無い行だけ足す（一覧 → 試算 → 確認 → 実行 → 結果）
@@ -219,7 +162,7 @@ export function FailbackCard({ token, onAuthError }: Props) {
             試算の結果: 本番に <span className="font-bold">{preview.totalInserted.toLocaleString()}</span>{" "}
             行が足されます（まだ書き込んでいません）
           </p>
-          <ResultTable result={preview} />
+          <FailbackResultTable result={preview} />
           <div className="mt-3">
             <button
               type="button"
@@ -247,7 +190,7 @@ export function FailbackCard({ token, onAuthError }: Props) {
               （復旧ツールの一覧に出ます。取り消したいときは、ここから戻します）
             </p>
           )}
-          <ResultTable result={applied} />
+          <FailbackResultTable result={applied} />
         </div>
       )}
 

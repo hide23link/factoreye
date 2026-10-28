@@ -203,8 +203,33 @@ export interface FailbackTable {
 }
 
 /** 試算または実行の結果。実行のときは applied=true で、直前の本番の控え（snapshot）の名前が付く。 */
+export interface FailbackPart {
+  tables: FailbackTable[];
+}
+
+/** R2 の WAL-G のバックアップの内容（復元が終わったあとに分かる）。 */
+export interface R2Info {
+  baseName: string | null;
+  baseTime: string | null;
+  walLastTime: string | null;
+  alembic: string | null;
+  latestReading: string | null;
+}
+
+/** R2 からの復元の状態。fetching=ベースを取得中、replaying=WAL を再生中。 */
+export interface R2Status {
+  configured: boolean;
+  state: "idle" | "fetching" | "replaying" | "ready" | "failed";
+  message: string | null;
+  info: R2Info | null;
+}
+
 export interface FailbackResult {
   name: string;
+  /** 元が 2 つ以上（R2 ＋ 引き継ぎ）のときだけ。tables は合計 */
+  parts: FailbackPart[];
+  /** R2 からの復旧のときの、バックアップの内容 */
+  r2: R2Info | null;
   applied: boolean;
   totalInserted: number;
   tables: FailbackTable[];
@@ -227,5 +252,33 @@ export const applyFailback = (token: string, name: string, expectedInserted: num
   send<FailbackResult>(
     "/api/admin/failback/apply",
     { method: "POST", body: JSON.stringify({ name, expectedInserted }) },
+    token,
+  );
+
+// ── R2 の WAL-G のバックアップからの復旧（本番が消えた・データが不完全なとき） ──────────
+
+export const fetchR2Status = (token: string) =>
+  send<R2Status>("/api/admin/failback/r2", { method: "GET" }, token);
+
+/** R2 の最新のベースの取得と WAL の再生を始める（裏で進む。状態は fetchR2Status で見る）。 */
+export const startR2Restore = (token: string) =>
+  send<R2Status>("/api/admin/failback/r2/start", { method: "POST" }, token);
+
+/** 復元した作業用の DB を消す（本番には触れない）。 */
+export const resetR2Restore = (token: string) =>
+  send<R2Status>("/api/admin/failback/r2", { method: "DELETE" }, token);
+
+/** 試算（本番には何も書かない）。handoff を渡すと、R2 → 引き継ぎの順に合わせて数える。 */
+export const previewR2Failback = (token: string, handoff: string | null) =>
+  send<FailbackResult>(
+    "/api/admin/failback/r2/preview",
+    { method: "POST", body: JSON.stringify({ handoff }) },
+    token,
+  );
+
+export const applyR2Failback = (token: string, handoff: string | null, expectedInserted: number) =>
+  send<FailbackResult>(
+    "/api/admin/failback/r2/apply",
+    { method: "POST", body: JSON.stringify({ handoff, expectedInserted }) },
     token,
   );
