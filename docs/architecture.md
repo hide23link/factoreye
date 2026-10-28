@@ -362,6 +362,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 ### R2 の WAL-G のバックアップからの復旧（管理画面）
 - 本番（Proxmox の LXC）が消えた・データが不完全なときに、R2 の `factoreye-db`（ベース ＋ WAL）から、本番に無い行だけを足す。API: `GET/POST/DELETE /api/admin/failback/r2`（状態・開始・破棄）、`POST /api/admin/failback/r2/{preview,apply}`（`handoff` を渡すと R2 → 引き継ぎの順に、1 つのトランザクションで足す）
 - 復旧ツールが、`wal-g backup-fetch LATEST` → `recovery.signal` ＋ `restore_command` → 一時的な PostgreSQL 15（unix ソケットだけ）で WAL を再生 → 昇格後の DB を merge の入力にする。時間のかかる復元は復旧ツールの裏のジョブで、画面は状態（取得中 / 再生中 / 準備完了 / 失敗）を見る。使う WAL-G のコマンドは読み取りだけ（`backup-list`・`backup-fetch`・`wal-fetch`）
+- 復元した PostgreSQL は、バックアップの設定を使わず最小の自前の設定で起動する。鍵は環境に渡さず権限 600 のファイルから読む。`walg.env` が読めなくても復旧ツールは起動し、R2 の機能だけ無効になる（理由を画面に出す）
 - 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は [`tools/recovery/README.md`](../tools/recovery/README.md)
 
 ### 設定（環境変数）

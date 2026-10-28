@@ -158,7 +158,7 @@ export function R2RestoreCard({ token, onAuthError }: Props) {
       )}
       {data && !data.configured && (
         <p className="text-sm text-gray-500">
-          R2 からの復旧は設定されていません（復旧ツールの walg.env）
+          {data.message ?? "R2 からの復旧は設定されていません（復旧ツールの walg.env）"}
         </p>
       )}
 
