@@ -9,6 +9,7 @@ from recovery.app import create_app
 from recovery.config import load_settings
 from recovery.scratch import Scratch
 from recovery.sources import CompositeSource, HandoffSource, LocalSource, make_source
+from recovery.walg import R2Restore
 
 
 def build() -> FastAPI:
@@ -25,4 +26,5 @@ def build() -> FastAPI:
         handoff = HandoffSource(
             make_source(settings.handoff_source, settings.cache_dir, settings.s3_endpoint_url)
         )
-    return create_app(settings, source, Scratch(settings.scratch_dsn), handoff)
+    r2 = R2Restore(settings.walg_env, settings.r2_work_dir) if settings.walg_env else None
+    return create_app(settings, source, Scratch(settings.scratch_dsn), handoff, r2)

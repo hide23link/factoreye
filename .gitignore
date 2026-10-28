@@ -45,3 +45,4 @@ ras.txt
 
 # 外部保管（S3）の認証情報（infra/offsite-s3.sh）
 /.offsite-s3.env
+tools/recovery/walg/

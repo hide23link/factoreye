@@ -43,11 +43,28 @@ class Settings:
     # 控え（AWS）が置いた縮小ダンプの読み込み元（ディレクトリか s3://<バケット>/<接頭辞>/handoff-inc）。
     # 無ければ、引き継ぎからの書き戻しは使えない
     handoff_source: str | None = None
+    # R2 の WAL-G のバックアップから復旧するための設定（本番の walg.env と同じ形式）。
+    # 無ければ「R2 から復旧する」は使えない。鍵は読み取りの権限で足りる
+    walg_env: dict[str, str] | None = None
+    # R2 から復元した DB の作業用の場所（使い終わったら消す。本番の DB と同じ大きさの空きが要る）
+    r2_work_dir: Path = Path("/var/lib/recovery/r2restore")
 
 
 def normalize_dsn(dsn: str) -> str:
     """FactorEye の `.env` の書き方（postgresql+asyncpg://）でも受け付ける。"""
     return dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def _load_walg_env(path: str | None) -> dict[str, str] | None:
+    """WAL-G の設定ファイル（walg.env と同じ形式）を読む。ファイルが無ければ、機能を使わない。"""
+    if not path or not Path(path).is_file():
+        return None
+    from recovery.walg import parse_env_file
+
+    env = parse_env_file(Path(path).read_text())
+    if not (env.get("WALG_S3_PREFIX") or env.get("WALG_FILE_PREFIX")):
+        raise ConfigError("WALG_ENV_FILE に WALG_S3_PREFIX（s3://factoreye-db）がありません")
+    return env
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:
@@ -90,4 +107,6 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         s3_endpoint_url=e.get("S3_ENDPOINT_URL") or None,
         snapshot_dir=Path(e.get("RECOVERY_SNAPSHOT_DIR", "/var/lib/recovery/snapshots")),
         handoff_source=e.get("HANDOFF_SOURCE") or None,
+        walg_env=_load_walg_env(e.get("WALG_ENV_FILE")),
+        r2_work_dir=Path(e.get("R2_RESTORE_DIR", "/var/lib/recovery/r2restore")),
     )

@@ -100,6 +100,30 @@ async def _request(method: str, path: str, json: dict[str, Any] | None = None) -
     return body
 
 
+async def r2_status() -> dict[str, Any]:
+    return await _request("GET", "/api/r2restore")
+
+
+async def r2_start() -> dict[str, Any]:
+    """R2 の最新のベースの取得と WAL の再生を、復旧ツールの裏で始める（すぐ返る）。"""
+    return await _request("POST", "/api/r2restore/start")
+
+
+async def r2_reset() -> dict[str, Any]:
+    """復元した作業用の DB を止めて、消す。"""
+    return await _request("DELETE", "/api/r2restore")
+
+
+async def run_r2_failback(
+    handoff: str | None, apply: bool, expected_inserted: int | None
+) -> dict[str, Any]:
+    """R2 の復元（と引き継ぎ）を、1 つのトランザクションで本番に足す。試算は apply=False。"""
+    body: dict[str, Any] = {"apply": apply, "handoff": handoff}
+    if expected_inserted is not None:
+        body["expected_inserted"] = expected_inserted
+    return await _request("POST", "/api/r2restore/failback", json=body)
+
+
 async def list_handoffs() -> dict[str, Any]:
     return await _request("GET", "/api/handoffs")
 

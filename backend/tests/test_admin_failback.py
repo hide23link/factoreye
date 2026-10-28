@@ -240,3 +240,76 @@ async def test_not_mounted_in_the_self_hosted_app(client: httpx.AsyncClient) -> 
     paths = {getattr(r, "path", "") for r in main_app.routes}
     assert not any(p.startswith("/api/admin/failback") for p in paths)
     assert (await client.get("/api/admin/failback/handoffs")).status_code == 404
+
+
+# ── R2 の WAL-G のバックアップからの復旧 ────────────────────────────────────
+
+R2_STATUS = {
+    "configured": True, "state": "ready", "message": None,
+    "info": {"base_name": "base_000000010000000000000002", "base_time": "2026-10-28T03:00:00Z",
+             "wal_last_time": "2026-10-28T09:59:00+00:00", "alembic": "abc",
+             "latest_reading": "2026-10-28T09:58:30+00:00"},
+}
+
+
+async def test_r2_status_start_and_reset_pass_through(api: httpx.AsyncClient) -> None:
+    seen = _fake_recovery(lambda r: httpx.Response(200, json=R2_STATUS))
+    h = await _headers(api)
+
+    r = await api.get("/api/admin/failback/r2", headers=h)
+    assert r.status_code == 200 and r.json()["info"]["baseName"].startswith("base_")
+    assert (await api.post("/api/admin/failback/r2/start", headers=h)).status_code == 200
+    assert (await api.delete("/api/admin/failback/r2", headers=h)).status_code == 200
+    assert [(x.method, x.url.path) for x in seen] == [
+        ("GET", "/api/r2restore"), ("POST", "/api/r2restore/start"), ("DELETE", "/api/r2restore"),
+    ]
+
+
+async def test_r2_endpoints_require_admin(api: httpx.AsyncClient) -> None:
+    seen = _fake_recovery(lambda r: httpx.Response(200, json=R2_STATUS))
+    assert (await api.get("/api/admin/failback/r2")).status_code == 401
+    assert (await api.post("/api/admin/failback/r2/start")).status_code == 401
+    assert (await api.delete("/api/admin/failback/r2")).status_code == 401
+    assert (await api.post("/api/admin/failback/r2/preview", json={})).status_code == 401
+    assert (await api.post("/api/admin/failback/r2/apply",
+                           json={"expectedInserted": 1})).status_code == 401
+    assert seen == []
+
+
+async def test_r2_preview_and_apply_with_handoff_return_parts(api: httpx.AsyncClient) -> None:
+    tables: list[Any] = PLAN["tables"]  # type: ignore[assignment]
+    plan = {**PLAN, "parts": [{"tables": tables}, {"tables": tables[:1]}],
+            "r2": R2_STATUS["info"]}
+    seen = _fake_recovery(lambda r: httpx.Response(200, json=plan))
+    h = await _headers(api)
+
+    r = await api.post("/api/admin/failback/r2/preview", json={"handoff": NAME}, headers=h)
+    assert r.status_code == 200, r.text
+    assert len(r.json()["parts"]) == 2 and r.json()["r2"]["alembic"] == "abc"
+    assert json.loads(seen[0].content) == {"apply": False, "handoff": NAME}
+
+    r = await api.post("/api/admin/failback/r2/apply",
+                       json={"handoff": None, "expectedInserted": 5}, headers=h)
+    assert r.status_code == 200, r.text
+    assert json.loads(seen[1].content) == {"apply": True, "handoff": None, "expected_inserted": 5}
+
+
+async def test_r2_apply_requires_count_and_valid_handoff_name(api: httpx.AsyncClient) -> None:
+    seen = _fake_recovery(lambda r: httpx.Response(200, json=PLAN))
+    h = await _headers(api)
+    assert (await api.post("/api/admin/failback/r2/apply", json={}, headers=h)).status_code == 422
+    bad = {"handoff": "../x", "expectedInserted": 1}
+    assert (await api.post("/api/admin/failback/r2/apply", json=bad, headers=h)).status_code == 422
+    assert seen == []
+
+
+async def test_r2_schema_mismatch_shows_both_versions(api: httpx.AsyncClient) -> None:
+    detail = {"code": "schema_mismatch", "message": "スキーマの版が違います",
+              "handoff_alembic": "aaa", "current_alembic": "bbb"}
+    _fake_recovery(lambda r: httpx.Response(409, json={"detail": detail}))
+    r = await api.post("/api/admin/failback/r2/preview", json={}, headers=await _headers(api))
+    assert r.status_code == 409 and r.json()["detail"] == detail
+
+
+async def test_default_timeout_is_long_enough_for_a_restore() -> None:
+    assert settings.failback_timeout_seconds >= 600

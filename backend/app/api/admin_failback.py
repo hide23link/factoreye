@@ -10,6 +10,8 @@
   POST /api/admin/failback/preview    → 試算（追加される件数。何も書かない）
   POST /api/admin/failback/apply      → 実行（試算の件数と一致したときだけ。
                                          直前の控えを取り、1 トランザクション）
+  GET/POST/DELETE /api/admin/failback/r2   → R2 の WAL-G のバックアップの復元の状態／開始／破棄
+  POST /api/admin/failback/r2/{preview,apply} → R2（＋引き継ぎ）からの試算／実行
 
 制限: 控えの稼働中の、既存の行の更新・削除（パスワード変更など）は戻らない。
 すべて require_admin（管理者トークン）で守る。
@@ -71,6 +73,37 @@ class FailbackTable(CamelModel):
     closed: int = 0
 
 
+class FailbackPart(CamelModel):
+    """複数の元（R2 の復元・引き継ぎ）を合わせるときの、元ごとの表の件数。"""
+
+    tables: list[FailbackTable]
+
+
+class R2Info(CamelModel):
+    base_name: str | None = None
+    base_time: str | None = None
+    wal_last_time: str | None = None
+    alembic: str | None = None
+    latest_reading: str | None = None
+
+
+class R2Status(CamelModel):
+    configured: bool
+    # idle / fetching（ベースを取得中）/ replaying（WAL を再生中）/ ready / failed
+    state: str
+    message: str | None = None
+    info: R2Info | None = None
+
+
+class R2PreviewRequest(CamelModel):
+    # 合わせて合流する引き継ぎ（省略すると R2 の復元だけ）
+    handoff: str | None = Field(default=None, pattern=_NAME_PATTERN)
+
+
+class R2ApplyRequest(R2PreviewRequest):
+    expected_inserted: int = Field(ge=0)
+
+
 class FailbackResult(CamelModel):
     name: str
     applied: bool
@@ -78,6 +111,10 @@ class FailbackResult(CamelModel):
     tables: list[FailbackTable]
     # 実行したときの、直前の本番の控え（before-merge-*.sql.gz）。試算では None
     snapshot: str | None = None
+    # 元が 2 つ以上のとき（R2 ＋ 引き継ぎ）だけ。tables は合計
+    parts: list[FailbackPart] = []
+    # R2 の復元のときの、バックアップの内容
+    r2: R2Info | None = None
 
 
 def _raise(error: failback_client.FailbackError) -> HTTPException:
@@ -94,6 +131,8 @@ def _result(name: str, body: dict[str, Any]) -> FailbackResult:
         total_inserted=sum(t.inserted for t in tables),
         tables=tables,
         snapshot=body.get("snapshot"),
+        parts=[FailbackPart.model_validate(p) for p in body.get("parts", [])],
+        r2=R2Info.model_validate(body["r2"]) if body.get("r2") else None,
     )
 
 
@@ -137,5 +176,75 @@ async def apply(
     _logger.warning(
         "admin %s finished failback of %s: inserted %d rows (snapshot %s)",
         admin_id, body.name, out.total_inserted, out.snapshot,
+    )
+    return out
+
+
+# ── R2 の WAL-G のバックアップからの復旧（本番が消えた・データが不完全なとき） ──────────────
+# 時間のかかる復元（ベースの取得・WAL の再生）は、復旧ツールが裏で進める。ここでは状態を見るだけ。
+# 試算・実行は、復元が終わってから（ready）。本番の DB が空（スキーマだけ）でも、一部だけでもよい。
+
+
+def _r2_status(body: dict[str, Any]) -> R2Status:
+    return R2Status.model_validate(body)
+
+
+@router.get("/r2", response_model=R2Status)
+async def r2_status(_admin_id: Annotated[str, Depends(require_admin)]) -> R2Status:
+    try:
+        return _r2_status(await failback_client.r2_status())
+    except failback_client.FailbackError as e:
+        raise _raise(e) from None
+
+
+@router.post("/r2/start", response_model=R2Status)
+async def r2_start(admin_id: Annotated[str, Depends(require_admin)]) -> R2Status:
+    """R2 の最新のベースを取り、WAL を最新まで再生する（裏で進む）。"""
+    _logger.warning("admin %s started the R2 restore", admin_id)
+    try:
+        return _r2_status(await failback_client.r2_start())
+    except failback_client.FailbackError as e:
+        raise _raise(e) from None
+
+
+@router.delete("/r2", response_model=R2Status)
+async def r2_reset(admin_id: Annotated[str, Depends(require_admin)]) -> R2Status:
+    """復元した作業用の DB を消す（本番には触れない）。"""
+    _logger.warning("admin %s discarded the R2 restore", admin_id)
+    try:
+        return _r2_status(await failback_client.r2_reset())
+    except failback_client.FailbackError as e:
+        raise _raise(e) from None
+
+
+@router.post("/r2/preview", response_model=FailbackResult)
+async def r2_preview(
+    body: R2PreviewRequest, _admin_id: Annotated[str, Depends(require_admin)]
+) -> FailbackResult:
+    """試算。本番には何も書かない。"""
+    try:
+        result = await failback_client.run_r2_failback(body.handoff, False, None)
+    except failback_client.FailbackError as e:
+        raise _raise(e) from None
+    return _result("r2", result)
+
+
+@router.post("/r2/apply", response_model=FailbackResult)
+async def r2_apply(
+    body: R2ApplyRequest, admin_id: Annotated[str, Depends(require_admin)]
+) -> FailbackResult:
+    """実行。R2 の復元（と引き継ぎ）の、本番に無い行だけを足す。件数が試算と違えば中止（409）。"""
+    _logger.warning("admin %s started failback from R2 (handoff %s)", admin_id, body.handoff)
+    try:
+        result = await failback_client.run_r2_failback(
+            body.handoff, True, body.expected_inserted
+        )
+    except failback_client.FailbackError as e:
+        _logger.warning("admin %s failback from R2 failed: %s", admin_id, e.message)
+        raise _raise(e) from None
+    out = _result("r2", result)
+    _logger.warning(
+        "admin %s finished failback from R2: inserted %d rows (snapshot %s)",
+        admin_id, out.total_inserted, out.snapshot,
     )
     return out
