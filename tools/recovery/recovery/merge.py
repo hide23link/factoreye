@@ -25,6 +25,8 @@ from recovery.dbinfo import list_tables
 _BATCH = 5000
 # 書き戻しの 1 つの SQL の上限（測定値が多いワークスペースでも終わるように、閲覧より長くする）
 MERGE_STATEMENT_TIMEOUT_MS = 600_000
+# 測定値の表のロックを待つ上限（取れなければ、書き込まずに中止する）
+READINGS_LOCK_TIMEOUT = "10s"
 
 
 class MergeError(Exception):
@@ -420,8 +422,9 @@ async def merge_many(
         # 書き戻しの間、測定値の挿入（機器からの再送を含む）を待たせる。readings には
         # (sensor_id, recorded_at) の一意制約が無く、割り込まれると重複ができるため。
         # SHARE ROW EXCLUSIVE は、読み取りは止めず、挿入・更新・削除と、別の書き戻しを待たせる
-        if "readings" in dst_tables:
-            await dst.execute("LOCK TABLE public.readings IN SHARE ROW EXCLUSIVE MODE")
+        # 試算は最後に取り消すだけなので、ロックは実行のときだけ取る。取れなければ中止する
+        if apply and "readings" in dst_tables:
+            await _lock_readings(dst)
         for j, ((src, sel), tables_in_src) in enumerate(zip(sources, src_tables, strict=True)):
             results.append(
                 MergeResult(
@@ -436,6 +439,19 @@ async def merge_many(
     else:
         await tr.rollback()
     return results
+
+
+async def _lock_readings(dst: asyncpg.Connection) -> None:
+    await dst.execute(f"SET LOCAL lock_timeout = '{READINGS_LOCK_TIMEOUT}'")
+    try:
+        await dst.execute("LOCK TABLE public.readings IN SHARE ROW EXCLUSIVE MODE")
+    except asyncpg.LockNotAvailableError:
+        raise MergeError(
+            f"測定値の表のロックを {READINGS_LOCK_TIMEOUT} 以内に取れませんでした"
+            "（機器からの取り込みが続いています）。取り込みを止めるか減らして、"
+            "もう一度実行してください。何も書き込んでいません"
+        ) from None
+    await dst.execute("SET LOCAL lock_timeout = 0")  # 以降の処理は、待たされても止めない
 
 
 async def _merge_source(

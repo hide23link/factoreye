@@ -27,4 +27,6 @@ def build() -> FastAPI:
             make_source(settings.handoff_source, settings.cache_dir, settings.s3_endpoint_url)
         )
     r2 = R2Restore(settings.walg_env, settings.r2_work_dir) if settings.walg_env else None
+    if r2 is not None:
+        r2.cleanup_stale()  # 前回の落ちた残りを消す
     return create_app(settings, source, Scratch(settings.scratch_dsn), handoff, r2)

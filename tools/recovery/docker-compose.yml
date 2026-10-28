@@ -16,6 +16,9 @@ services:
     # 本番は root（0）。ラズパイなどでは、offsite-pull.sh を動かす利用者のグループの ID にする
     group_add:
       - "${BACKUP_GID:-0}"
+      # walg.env（権限 640 の運用）を読むグループ。所有者が root などで uid 10001 でないとき、
+      # ファイルのグループの ID を WALG_GID に設定する
+      - "${WALG_GID:-0}"
     volumes:
       # バックアップは読むだけ（ツールから消したり書き換えたりできないように :ro）
       - ${BACKUP_DIR:-../../backups}:/backups:ro

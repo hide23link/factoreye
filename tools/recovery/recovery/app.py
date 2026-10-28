@@ -174,6 +174,7 @@ def create_app(
             "merge_enabled": settings.target_write_dsn is not None,
             "handoff_configured": handoff is not None,
             "r2_configured": r2 is not None,
+            "r2_error": settings.walg_error,
             "target_mode": settings.target_mode,
         }
 
@@ -409,7 +410,17 @@ def create_app(
                     422, "引き継ぎの .sha256 がありません。検証できないため、書き戻しません"
                 )
             latest = await asyncio.to_thread(h.latest)
-            if latest is not None and latest[1].kind != "reduced":
+            if latest is None:
+                # 種類を確かめられないものは使わない（latest.json が無い・読めない）
+                raise HTTPException(
+                    422, "latest.json を読めず、引き継ぎの種類を確かめられません。書き戻しません"
+                )
+            if latest[0] != name:
+                # 記録は最新の 1 件だけ。古いものは、種類（全体のダンプかなど）を確かめられない
+                raise HTTPException(
+                    422, "最新の引き継ぎだけ書き戻せます。一覧の先頭を選んでください"
+                )
+            if latest[1].kind != "reduced":
                 # 縮小ダンプ以外（全体のダンプなど）は、この経路の想定外。何も書かない
                 raise HTTPException(
                     422,
@@ -480,7 +491,9 @@ def create_app(
     @app.get("/api/r2restore")
     async def r2_status() -> dict[str, object]:
         if r2 is None:
-            return {"configured": False, "state": "idle", "message": None, "info": None}
+            return {
+                "configured": False, "state": "idle", "message": settings.walg_error, "info": None,
+            }
         return {"configured": True, **r2.status()}
 
     @app.post("/api/r2restore/start")
@@ -490,6 +503,11 @@ def create_app(
         job = require_r2()
         if job.busy:
             raise HTTPException(409, "R2 からの復元は、すでに進んでいます")
+        if job.state == "ready":
+            # 準備完了の作業用 DB は書き戻しの入力。作り直すと、進行中の書き戻しの入力が消える
+            raise HTTPException(
+                409, "作業用の復元が残っています。使い終わったら「作業用の復元を消す」で消します"
+            )
         job.start()
         return {"configured": True, **job.status()}
 

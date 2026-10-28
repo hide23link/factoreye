@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 from dataclasses import asdict, dataclass
@@ -40,16 +41,67 @@ _TAIL = 1500
 # restore_command に使う。「無い」(74) は正常（再生の終わり）。それ以外の失敗（R2 への接続断など）で
 # 0 以外を返すと、PostgreSQL は「WAL が無い」と解釈して古い時点で昇格してしまう。127 を返すと
 # PostgreSQL が異常終了するので、失敗に気づける（infra の復元と同じ）
+# 鍵は PostgreSQL のプロセスの環境には置かず、権限 600 のファイルからこの包みが読む
 _FETCH_SCRIPT = """#!/bin/sh
+set -a
+. "{secrets}"
+set +a
 wal-g wal-fetch "$1" "$2"
 r=$?
 [ $r -eq 0 ] || [ $r -eq 74 ] || exit 127
 exit $r
 """
 
+# 復元した PostgreSQL の設定は、バックアップの中身を使わず、最小の自前のものに置き換える
+# （改ざんされたバックアップの shared_preload_libraries などで、コードを実行されないため）
+_HBA = "local all all trust\n"
+_CONF = """listen_addresses = ''
+unix_socket_directories = '{sock}'
+port = {port}
+archive_mode = off
+restore_command = '{script} %f %p'
+hot_standby = on
+shared_buffers = 128MB
+shared_preload_libraries = ''
+session_preload_libraries = ''
+local_preload_libraries = ''
+archive_library = ''
+max_connections = {max_connections}
+max_worker_processes = {max_worker_processes}
+max_wal_senders = {max_wal_senders}
+max_prepared_transactions = {max_prepared_transactions}
+max_locks_per_transaction = {max_locks_per_transaction}
+wal_level = {wal_level}
+"""
+# 復旧中の設定は、元のサーバー以上でなければ再生が止まる。pg_controldata から元の値を読む
+_CONTROL_KEYS = {
+    "max_connections setting": "max_connections",
+    "max_worker_processes setting": "max_worker_processes",
+    "max_wal_senders setting": "max_wal_senders",
+    "max_prepared_xacts setting": "max_prepared_transactions",
+    "max_locks_per_xact setting": "max_locks_per_transaction",
+    "wal_level setting": "wal_level",
+}
+_CONTROL_DEFAULTS = {
+    "max_connections": "100", "max_worker_processes": "8", "max_wal_senders": "10",
+    "max_prepared_transactions": "0", "max_locks_per_transaction": "64", "wal_level": "replica",
+}
+_SECRET_NAME_PARTS = ("KEY", "SECRET", "TOKEN", "PASS")
+_SAFETY_MARGIN_BYTES = 512 * 1024 * 1024
+
+
+def free_bytes(path: Path) -> int:
+    return shutil.disk_usage(path).free
+
 
 class RestoreError(Exception):
     pass
+
+
+async def _kill(proc: asyncio.subprocess.Process) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+    await proc.wait()
 
 
 @dataclass
@@ -85,11 +137,13 @@ class R2Restore:
         self.message: str | None = None
         self.info = RestoreInfo()
         self._task: asyncio.Task[None] | None = None
+        self._procs: set[asyncio.subprocess.Process] = set()
 
     # ── 外から見るもの ───────────────────────────────────────────────
 
     def status(self) -> dict[str, object]:
-        return {"state": self.state, "message": self.message, "info": asdict(self.info)}
+        message = self.redact(self.message) if self.message else None
+        return {"state": self.state, "message": message, "info": asdict(self.info)}
 
     @property
     def busy(self) -> bool:
@@ -107,8 +161,19 @@ class R2Restore:
         self.state, self.message, self.info = "fetching", None, RestoreInfo()
         self._task = asyncio.create_task(self._run())
 
+    def cleanup_stale(self) -> None:
+        """起動時に、前回の残り（落ちたときの作業用の場所）を消す。"""
+        shutil.rmtree(self._work, ignore_errors=True)
+
+    def redact(self, text: str) -> str:
+        """メッセージから、鍵の値を伏せる（失敗の文に鍵が混ざらないように）。"""
+        for key, value in self._env.items():
+            if len(value) >= 4 and any(part in key.upper() for part in _SECRET_NAME_PARTS):
+                text = text.replace(value, "***")
+        return text
+
     async def reset(self) -> None:
-        """PostgreSQL を止めて、作業用の場所を消す。"""
+        """実行中の処理を止め、PostgreSQL を止めて、作業用の場所を消す。"""
         if self._task and not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -118,23 +183,32 @@ class R2Restore:
 
     # ── 中身 ──────────────────────────────────────────────────────────
 
-    def _child_env(self) -> dict[str, str]:
-        # WAL-G の設定と最小限の環境だけを渡す（recovery 自身の秘密は渡さない）
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8"}
-        env.update(self._env)
-        return env
+    def _base_env(self) -> dict[str, str]:
+        # recovery 自身の秘密は渡さない最小の環境。PostgreSQL にはこれだけを渡す（鍵は含まない）
+        return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8"}
 
-    async def _exec(self, *cmd: str, check: bool = True) -> tuple[int, str, str]:
+    async def _exec(
+        self, *cmd: str, check: bool = True, with_secrets: bool = False
+    ) -> tuple[int, str, str]:
+        """コマンドを実行する。with_secrets=True（wal-g）のときだけ、WAL-G の設定を環境に渡す。"""
+        env = self._base_env()
+        if with_secrets:
+            env.update(self._env)
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self._child_env(),
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
         )
-        out, err = await proc.communicate()
+        self._procs.add(proc)
+        try:
+            out, err = await proc.communicate()
+        except asyncio.CancelledError:
+            # 止められたら、子プロセスも止める（作業用の場所に書き続けないように）
+            await _kill(proc)
+            raise
+        finally:
+            self._procs.discard(proc)
         code = proc.returncode or 0
         if check and code != 0:
-            tail = err.decode("utf-8", errors="replace")[-_TAIL:]
+            tail = self.redact(err.decode("utf-8", errors="replace"))[-_TAIL:]
             raise RestoreError(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''} が失敗しました: {tail}")
         return code, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
 
@@ -150,11 +224,13 @@ class R2Restore:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # 失敗は画面に出す（原因を message に）
-            self.state, self.message = "failed", str(e) or type(e).__name__
+            self.state, self.message = "failed", self.redact(str(e) or type(e).__name__)
             await self._stop_and_clean()
 
     async def _fetch_base(self, pgdata: Path) -> None:
-        _, out, _ = await self._exec("wal-g", "backup-list", "--detail", "--json")
+        _, out, _ = await self._exec(
+            "wal-g", "backup-list", "--detail", "--json", with_secrets=True
+        )
         try:
             backups = json.loads(out)
         except ValueError:
@@ -164,22 +240,46 @@ class R2Restore:
         latest = backups[-1]
         self.info.base_name = str(latest.get("backup_name") or latest.get("name") or "")
         self.info.base_time = str(latest.get("time") or latest.get("start_time") or "") or None
-        await self._exec("wal-g", "backup-fetch", str(pgdata), "LATEST")
+        needed = int(latest.get("uncompressed_size") or 0)
+        if needed:
+            self._work.mkdir(parents=True, exist_ok=True)
+            required = int(needed * 1.1) + _SAFETY_MARGIN_BYTES
+            free = free_bytes(self._work)
+            if free < required:
+                raise RestoreError(
+                    f"作業用の領域の空きが足りません（要: 約 {required // 2**20} MB、"
+                    f"空き: {free // 2**20} MB）。{self._work} の空きを増やしてください"
+                )
+        await self._exec("wal-g", "backup-fetch", str(pgdata), "LATEST", with_secrets=True)
 
     async def _replay(self, pgdata: Path) -> None:
         os.chmod(pgdata, 0o700)
+        # 鍵は権限 600 のファイルに置き、restore_command の包みが読む（PostgreSQL の環境に置かない）
+        secrets = self._work / "walg-secrets.sh"
+        lines = "".join(f"{k}={shlex.quote(v)}\nexport {k}\n" for k, v in self._env.items())
+        fd = os.open(secrets, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(lines)
         script = self._work / "walg-fetch.sh"
-        script.write_text(_FETCH_SCRIPT)
-        script.chmod(0o755)
-        (pgdata / "recovery.signal").touch()
-        # 本番の設定（archive_command など）は、起動時の -c で上書きする。restore_command だけ足す
-        with (pgdata / "postgresql.auto.conf").open("a") as f:
-            f.write(f"\nrestore_command = '{script} %f %p'\n")
+        script.write_text(_FETCH_SCRIPT.format(secrets=secrets))
+        script.chmod(0o700)
         # unix ソケットのパスは長さに上限があるため、短い一時ディレクトリに置く
         self._sock = Path(tempfile.mkdtemp(prefix="r2r-"))
+        control = await self._controldata(pgdata)
+        # バックアップの設定（postgresql.conf・pg_hba.conf など）は使わず、最小の自前のものにする
+        (pgdata / "postgresql.conf").write_text(
+            _CONF.format(sock=self._sock, port=PG_PORT, script=script, **control)
+        )
+        (pgdata / "postgresql.auto.conf").write_text("")
+        (pgdata / "pg_hba.conf").write_text(_HBA)
+        (pgdata / "pg_ident.conf").write_text("")
+        (pgdata / "standby.signal").unlink(missing_ok=True)
+        (pgdata / "recovery.signal").touch()
         opts = (
-            f"-c archive_mode=off -c archive_command=/bin/true -c listen_addresses='' "
-            f"-c unix_socket_directories={self._sock} -c port={PG_PORT}"
+            "-c archive_mode=off -c shared_preload_libraries= -c session_preload_libraries= "
+            "-c local_preload_libraries= -c archive_library= "
+            f"-c config_file={pgdata}/postgresql.conf -c hba_file={pgdata}/pg_hba.conf "
+            f"-c ident_file={pgdata}/pg_ident.conf"
         )
         await self._exec(
             "pg_ctl", "-D", str(pgdata), "-o", opts, "-W", "-l", str(self._work / "pg.log"), "start"
@@ -227,12 +327,25 @@ class R2Restore:
             ts = await conn.fetchval("SELECT max(recorded_at) FROM readings")
             self.info.latest_reading = ts.isoformat() if ts else None
 
+    async def _controldata(self, pgdata: Path) -> dict[str, str]:
+        """元のサーバーの設定（復旧中の PostgreSQL は、これ以上でなければ再生が止まる）。"""
+        _, out, _ = await self._exec("pg_controldata", str(pgdata), check=False)
+        values = dict(_CONTROL_DEFAULTS)
+        for line in out.splitlines():
+            key, _, value = line.partition(":")
+            name = _CONTROL_KEYS.get(key.strip())
+            if name and value.strip():
+                values[name] = value.strip()
+        return values
+
     def _log_tail(self) -> str:
         with contextlib.suppress(OSError):
-            return (self._work / "pg.log").read_text(errors="replace")[-_TAIL:]
+            return self.redact((self._work / "pg.log").read_text(errors="replace")[-_TAIL:])
         return ""
 
     async def _stop_and_clean(self) -> None:
+        for proc in list(self._procs):  # 残っている子プロセス（wal-g など）を止める
+            await _kill(proc)
         pgdata = self._work / "pgdata"
         if (pgdata / "postmaster.pid").exists():
             await self._exec("pg_ctl", "-D", str(pgdata), "-m", "fast", "-w", "stop", check=False)

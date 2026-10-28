@@ -12,12 +12,11 @@ RUN python -m venv /opt/venv && \
 # WAL-G（R2 の本番の DB のバックアップから復旧するために使う。読み取りのコマンドだけ）。
 # バージョンとハッシュを固定して取る（本番の infra/cloud/postgres/Dockerfile と同じ。更新するときは両方を変える）
 FROM python:3.12-slim-bookworm AS walg
-ARG TARGETARCH
 ARG WALG_VERSION=v3.0.9
 ARG SHA_AMD64=d6795c663894d836ba20840bffe8970aed81bbe25d3151bd4951f6f9c362def9
 ARG SHA_AARCH64=072eb4a4a119f817e1fa888c64a776b01e3453b2e0d967a67d149adb18fde652
 RUN set -eux; \
-    case "$TARGETARCH" in amd64) A=amd64; H="$SHA_AMD64";; arm64) A=aarch64; H="$SHA_AARCH64";; *) echo "非対応の CPU: $TARGETARCH"; exit 1;; esac; \
+    case "$(uname -m)" in x86_64) A=amd64; H="$SHA_AMD64";; aarch64) A=aarch64; H="$SHA_AARCH64";; *) echo "非対応の CPU: $(uname -m)"; exit 1;; esac; \
     apt-get update; apt-get install -y --no-install-recommends curl ca-certificates; \
     curl -fsSL -o /wal-g "https://github.com/wal-g/wal-g/releases/download/${WALG_VERSION}/wal-g-pg-22.04-${A}"; \
     echo "${H}  /wal-g" | sha256sum -c -; chmod 755 /wal-g

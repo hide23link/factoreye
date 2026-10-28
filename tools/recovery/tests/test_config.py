@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from recovery.config import ConfigError, load_settings
@@ -46,3 +48,31 @@ def test_handoff_source_is_optional() -> None:
     assert load_settings(BASE).handoff_source is None
     s = load_settings({**BASE, "HANDOFF_SOURCE": "s3://factoreye-backup/handoff-inc"})
     assert s.handoff_source == "s3://factoreye-backup/handoff-inc"
+
+
+def test_unreadable_walg_env_disables_only_r2_and_still_starts(tmp_path: Path) -> None:
+    import os
+
+    f = tmp_path / "walg.env"
+    f.write_text("WALG_S3_PREFIX=s3://factoreye-db\n")
+    f.chmod(0)
+    if os.access(f, os.R_OK):
+        pytest.skip("root は権限を無視して読めてしまう")
+    s = load_settings({**BASE, "WALG_ENV_FILE": str(f)})  # 例外にならない（既存の機能は動く）
+    assert s.walg_env is None and s.walg_error and "WALG_GID" in s.walg_error
+
+
+def test_walg_env_without_prefix_disables_r2_with_a_reason(tmp_path: Path) -> None:
+    f = tmp_path / "walg.env"
+    f.write_text("AWS_REGION=auto\n")
+    s = load_settings({**BASE, "WALG_ENV_FILE": str(f)})
+    assert s.walg_env is None and "WALG_S3_PREFIX" in (s.walg_error or "")
+
+
+def test_walg_env_is_read_when_valid_and_absent_file_is_silent(tmp_path: Path) -> None:
+    f = tmp_path / "walg.env"
+    f.write_text("WALG_S3_PREFIX=s3://factoreye-db\nAWS_REGION=auto\n")
+    s = load_settings({**BASE, "WALG_ENV_FILE": str(f)})
+    assert s.walg_env == {"WALG_S3_PREFIX": "s3://factoreye-db", "AWS_REGION": "auto"}
+    missing = load_settings({**BASE, "WALG_ENV_FILE": str(tmp_path / "none.env")})
+    assert missing.walg_env is None and missing.walg_error is None

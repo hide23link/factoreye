@@ -353,3 +353,196 @@ async def test_missing_backup_fails_with_a_message(tmp_path: Path) -> None:
     finally:
         await job.reset()
         await s.drop(target)
+
+
+# ── 2 回目の QA で足した試験 ─────────────────────────────────────────────
+
+SECRET = "SUPERSECRETVALUE123"
+
+
+def _fake_walg(tmp: Path, body: str) -> Path:
+    """PATH の先頭に置く、偽の wal-g。"""
+    bin_dir = tmp / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "wal-g"
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o755)
+    return bin_dir
+
+
+async def test_restore_survives_tampered_config_and_keeps_keys_out_of_postgres_env(
+    stack: tuple[Scratch, R2Restore, Path], walg_repo: Path
+) -> None:
+    s, _, tmp = stack
+
+    class Tampered(R2Restore):
+        async def _fetch_base(self, pgdata: Path) -> None:
+            await super()._fetch_base(pgdata)
+            # 改ざんされたバックアップ: 任意のライブラリの読み込みと、外からの接続の許可
+            with (pgdata / "postgresql.conf").open("a") as f:
+                f.write("\nshared_preload_libraries = '/nonexistent/evil.so'\n")
+                f.write("listen_addresses = '*'\narchive_command = 'touch /tmp/evil-ran'\n")
+            with (pgdata / "postgresql.auto.conf").open("a") as f:
+                f.write("\nlocal_preload_libraries = '/nonexistent/evil2.so'\n")
+            with (pgdata / "pg_hba.conf").open("a") as f:
+                f.write("\nhost all all 0.0.0.0/0 trust\n")
+
+    job = Tampered({"WALG_FILE_PREFIX": str(walg_repo), "AWS_SECRET_ACCESS_KEY": SECRET},
+                   tmp / "r2work")
+    try:
+        job.start()
+        for _ in range(240):
+            if job.state in ("ready", "failed"):
+                break
+            await asyncio.sleep(1)
+        assert job.state == "ready", job.message
+        pgdata = tmp / "r2work" / "pgdata"
+        # 設定は自前の最小のものに置き換わっている
+        assert (pgdata / "pg_hba.conf").read_text() == "local all all trust\n"
+        conf = (pgdata / "postgresql.conf").read_text()
+        assert "evil" not in conf and "listen_addresses = ''" in conf
+        assert (pgdata / "postgresql.auto.conf").read_text() == ""
+        assert not Path("/tmp/evil-ran").exists()
+        # 一時 PostgreSQL のプロセスの環境に、鍵が残っていない
+        pid = int((pgdata / "postmaster.pid").read_text().splitlines()[0])
+        environ = Path(f"/proc/{pid}/environ").read_bytes()
+        assert SECRET.encode() not in environ
+        # 鍵のファイルは自分だけが読める
+        assert ((tmp / "r2work" / "walg-secrets.sh").stat().st_mode & 0o777) == 0o600
+    finally:
+        await job.reset()
+
+
+def test_fetch_script_reads_keys_from_file_and_maps_exit_codes(tmp_path: Path) -> None:
+    from recovery.walg import _FETCH_SCRIPT
+
+    secrets = tmp_path / "secrets.sh"
+    secrets.write_text(f"AWS_SECRET_ACCESS_KEY={SECRET}\nexport AWS_SECRET_ACCESS_KEY\n")
+    seen = tmp_path / "seen"
+    script = tmp_path / "fetch.sh"
+    script.write_text(_FETCH_SCRIPT.format(secrets=secrets))
+    script.chmod(0o755)
+
+    def run(code: int) -> int:
+        bin_dir = _fake_walg(tmp_path, f'echo "$AWS_SECRET_ACCESS_KEY" > {seen}\nexit {code}\n')
+        env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}  # 鍵は環境に無い
+        return subprocess.run([str(script), "f", "p"], env=env).returncode
+
+    assert run(0) == 0
+    assert seen.read_text().strip() == SECRET  # ファイルから読んだ
+    assert run(74) == 74  # 「WAL が無い」は正常（再生の終わり）
+    # それ以外の失敗は 127: PostgreSQL が異常終了して、古い時点での昇格を防ぐ
+    assert run(3) == 127
+    assert run(1) == 127
+
+
+def test_redact_hides_secret_values_only() -> None:
+    job = R2Restore(
+        {"AWS_ACCESS_KEY_ID": "AKIAEXAMPLE1234", "AWS_SECRET_ACCESS_KEY": SECRET,
+         "WALG_S3_PREFIX": "s3://factoreye-db"},
+        Path("/nonexistent"),
+    )
+    text = job.redact(f"failed key=AKIAEXAMPLE1234 secret={SECRET} bucket s3://factoreye-db")
+    assert "AKIAEXAMPLE1234" not in text and SECRET not in text
+    assert "s3://factoreye-db" in text and text.count("***") == 2
+
+
+async def test_failure_message_does_not_contain_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = _fake_walg(tmp_path, f'echo "auth failed for {SECRET}" >&2\nexit 1\n')
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    s = Scratch(SCRATCH_DSN)
+    job = R2Restore({"WALG_S3_PREFIX": "s3://x", "AWS_SECRET_ACCESS_KEY": SECRET}, tmp_path / "w")
+    target = _name()
+    try:
+        async with await _client(tmp_path, s, job, target, _target_sql("")) as c:
+            assert (await c.post("/api/r2restore/start")).status_code == 200
+            for _ in range(30):
+                r = await c.get("/api/r2restore")
+                if r.json()["state"] == "failed":
+                    break
+                await asyncio.sleep(0.5)
+            assert r.json()["state"] == "failed"
+            assert "***" in r.json()["message"] and SECRET not in r.text
+    finally:
+        await job.reset()
+        await s.drop(target)
+
+
+async def test_reset_while_fetching_kills_the_child_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pidfile = tmp_path / "pid"
+    bin_dir = _fake_walg(
+        tmp_path,
+        'case "$1" in backup-list) echo \'[{"backup_name":"b","time":"t"}]\';;\n'
+        f'backup-fetch) mkdir -p "$2"; echo $$ > {pidfile}; exec sleep 120;; esac\n',
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    job = R2Restore({"WALG_S3_PREFIX": "s3://x"}, tmp_path / "w")
+    job.start()
+    for _ in range(50):
+        if pidfile.exists():
+            break
+        await asyncio.sleep(0.2)
+    pid = int(pidfile.read_text())
+    await job.reset()
+
+    assert job.state == "idle" and not (tmp_path / "w").exists()
+    await asyncio.sleep(0.3)
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)  # 子プロセスが残っていない
+
+
+async def test_start_is_refused_while_ready_or_running(
+    stack: tuple[Scratch, R2Restore, Path],
+) -> None:
+    s, job, tmp = stack
+    target = _name()
+    try:
+        async with await _client(tmp, s, job, target, _target_sql("")) as c:
+            first, second = await asyncio.gather(
+                c.post("/api/r2restore/start"), c.post("/api/r2restore/start")
+            )
+            assert sorted([first.status_code, second.status_code]) == [200, 409]  # 同時の start
+            for _ in range(240):
+                if job.state in ("ready", "failed"):
+                    break
+                await asyncio.sleep(1)
+            assert job.state == "ready", job.message
+            # 準備完了の最中は、作り直さない（進行中の書き戻しの入力が消えるため）
+            r = await c.post("/api/r2restore/start")
+            assert r.status_code == 409 and "作業用の復元が残っています" in r.json()["detail"]
+            assert job.state == "ready"
+    finally:
+        await s.drop(target)
+
+
+async def test_not_enough_free_disk_fails_fast_with_a_reason(
+    stack: tuple[Scratch, R2Restore, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import recovery.walg as walg_module
+
+    s, job, tmp = stack
+    monkeypatch.setattr(walg_module, "free_bytes", lambda _p: 1000)
+    target = _name()
+    try:
+        async with await _client(tmp, s, job, target, _target_sql("")) as c:
+            assert (await c.post("/api/r2restore/start")).status_code == 200
+            for _ in range(60):
+                st = (await c.get("/api/r2restore")).json()
+                if st["state"] == "failed":
+                    break
+                await asyncio.sleep(0.5)
+            assert st["state"] == "failed" and "空きが足りません" in st["message"]
+            assert not (tmp / "r2work" / "pgdata").exists()
+    finally:
+        await s.drop(target)
+
+
+def test_cleanup_stale_removes_the_previous_work_area(tmp_path: Path) -> None:
+    work = tmp_path / "r2work"
+    (work / "pgdata").mkdir(parents=True)
+    R2Restore({"WALG_S3_PREFIX": "s3://x"}, work).cleanup_stale()
+    assert not work.exists()

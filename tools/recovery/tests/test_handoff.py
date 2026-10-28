@@ -522,3 +522,94 @@ async def test_merge_holds_a_lock_that_blocks_concurrent_reading_inserts(
         )
     finally:
         await conn.close()
+
+
+@needs_db
+async def test_api_refuses_when_the_kind_cannot_be_confirmed(
+    tmp_path: Path, dbs: tuple[Scratch, str, str]
+) -> None:
+    s, _, prod = dbs
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    settings = _settings(tmp_path, s, prod)
+
+    # A: latest.json が無い（種類を確かめられない）
+    no_latest = _put_handoff(inc, "20261028-090000", HANDOFF_SQL)
+    (inc / "latest.json").unlink()
+    async with _client(settings, s, HandoffSource(LocalSource(inc))) as c:
+        r = await c.post(f"/api/handoffs/{no_latest}/failback", json={})
+        assert r.status_code == 422 and "latest.json" in r.json()["detail"]
+
+    # B: latest は reduced だが、指定したのは古いもの（記録が無く、全体のダンプかもしれない）
+    old = _put_handoff(inc, "20261028-100000", HANDOFF_SQL)
+    newest = _put_handoff(inc, "20261028-110000", HANDOFF_SQL)
+    async with _client(settings, s, HandoffSource(LocalSource(inc))) as c:
+        r = await c.post(f"/api/handoffs/{old}/failback", json={})
+        assert r.status_code == 422 and "最新" in r.json()["detail"]
+        ok = await c.post(f"/api/handoffs/{newest}/failback", json={})
+        assert ok.status_code == 200, ok.text
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM readings"))[0][0] == 2
+
+
+@needs_db
+async def test_dry_run_does_not_take_the_readings_lock(
+    dbs: tuple[Scratch, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s, handoff, prod = dbs
+    original = merge._merge_table
+    inserted: list[bool] = []
+
+    async def spy(*args: object, **kwargs: object) -> merge.TableResult:
+        if not inserted:
+            conn = await asyncpg.connect(s.dsn_for(prod))
+            try:
+                await conn.execute("SET lock_timeout = '300ms'")
+                await conn.execute(  # ロックが無ければ、試算の最中でも挿入できる
+                    "INSERT INTO readings (sensor_id, value, recorded_at)"
+                    f" VALUES ('{S1}', 7.0, '2026-10-05T09:00:00Z')"
+                )
+                inserted.append(True)
+            finally:
+                await conn.close()
+        return await original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(merge, "_merge_table", spy)
+    await _failback(s, handoff, prod, apply=False)
+    assert inserted == [True]
+
+
+@needs_db
+async def test_apply_aborts_with_a_clear_error_when_the_lock_cannot_be_taken(
+    dbs: tuple[Scratch, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s, handoff, prod = dbs
+    monkeypatch.setattr(merge, "READINGS_LOCK_TIMEOUT", "300ms")
+    # 取り込みが続いている状態（測定値の挿入のトランザクションが開いたまま）
+    blocker = await asyncpg.connect(s.dsn_for(prod))
+    tx = blocker.transaction()
+    await tx.start()
+    await blocker.execute(
+        "INSERT INTO readings (sensor_id, value, recorded_at)"
+        f" VALUES ('{S1}', 8.0, '2026-10-05T08:00:00Z')"
+    )
+    try:
+        with pytest.raises(merge.MergeError, match="ロックを 300ms 以内に取れませんでした"):
+            await _failback(s, handoff, prod, apply=True)
+    finally:
+        await tx.rollback()
+        await blocker.close()
+    # 何も書かれていない
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM users"))[0][0] == 1
+    assert (await _fetch(s.dsn_for(prod), "SELECT count(*) FROM readings"))[0][0] == 2
+
+
+@needs_db
+async def test_r2_status_shows_why_it_is_disabled(
+    tmp_path: Path, dbs: tuple[Scratch, str, str]
+) -> None:
+    s, _, prod = dbs
+    reason = "WALG_ENV_FILE を読めません（PermissionError）。"
+    async with _client(_settings(tmp_path, s, prod, walg_error=reason), s, None) as c:
+        st = (await c.get("/api/r2restore")).json()
+        assert st["configured"] is False and st["message"] == reason
+        assert (await c.get("/api/info")).json()["r2_error"] == reason
