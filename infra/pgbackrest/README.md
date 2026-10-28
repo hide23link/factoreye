@@ -9,58 +9,85 @@
 | `init.sh` | 有効にする（初回だけ。何度実行しても安全）。ステンザ作成 → archive 設定 → 再起動 → check |
 | `backup.sh full｜diff` | ベースバックアップ（全体は週 1 回、差分は毎日） |
 | `check.sh` | `check`（WAL が R2 に届くか）と `verify`（欠け・破損がないか）。毎日 |
-| `test.sh` | 上の 3 つと復元を、ローカルの Docker で通して確かめる試験（R2 には送らない） |
+| `monitor.sh` | **WAL を R2 に送れなくなっていないか、ディスクが埋まりそうでないか**を見る。10 分ごと。異常なら Discord に通知 |
+| `test.sh` | 上のスクリプトと復元を、ローカルの Docker で通して確かめる試験（R2 には送らない） |
 
 ## 本番を停止して入れる手順（初回）
 
-前提: `main` に、このディレクトリのスクリプトと、`docker-compose.cloud.yml`（pgBackRest 入りの postgres）が入っている。R2 の Access Key ID と Secret（バケット `factoreye-backup` の Object Read & Write）を用意する。
+前提: R2 の Access Key ID と Secret（バケット `factoreye-backup` の Object Read & Write）を用意する。
 
-1. **事前**
-   - DR コンソール（`https://factoreye.hide23.link/admin/dr`）の「自動切り替え」が**無効**なことを確認する（停止中に、控えへ切り替わらないように）。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
-2. **アプリを止める**（DB は動かしたまま）
+### 0. 事前（アプリは動かしたまま）
+
+1. **設定ファイルを置く**（Git 管理外。所有者は postgres＝uid 70、権限 600）。**デプロイの前に置く**（コンテナが、この場所をマウントするため）
    ```bash
-   cd /opt/factoreye
-   docker compose -f docker-compose.cloud.yml stop backend frontend caddy
-   ```
-3. **新しいイメージで、PostgreSQL を作り直す**（`main` のマージで、自動デプロイが走っていれば済んでいる。そうでなければ）
-   ```bash
-   git pull origin main
-   docker compose -f docker-compose.cloud.yml up -d --build postgres
-   ```
-4. **設定ファイルを置く**（Git 管理外。所有者は postgres＝uid 70、権限 600）
-   ```bash
+   cd /opt/factoreye && git pull origin main
    sudo mkdir -p /opt/factoreye/pgbackrest
    sudo install -o 70 -g 70 -m 600 infra/pgbackrest/pgbackrest.conf.example /opt/factoreye/pgbackrest/pgbackrest.conf
    sudo -e /opt/factoreye/pgbackrest/pgbackrest.conf     # <アカウント ID>、<R2 の Access Key ID>、<R2 の Secret Access Key> を埋める
    sudo chown 70:70 /opt/factoreye/pgbackrest/pgbackrest.conf && sudo chmod 600 /opt/factoreye/pgbackrest/pgbackrest.conf
    ```
-5. **有効にする**
+2. **Discord の通知（任意）**: `monitor.sh` の通知先。Webhook の URL を 1 行だけ書いたファイルを置く（無ければ、通知なしで、ログだけ）
    ```bash
-   infra/pgbackrest/init.sh
+   sudo install -m 600 /dev/null /opt/factoreye/pgbackrest/discord-webhook && sudo -e /opt/factoreye/pgbackrest/discord-webhook
    ```
-   最後に `check` が成功すること。途中で PostgreSQL が数秒、再起動する（`archive_mode` の変更に必要）。
-6. **最初の全体のバックアップ**
+3. DR コンソール（`https://factoreye.hide23.link/admin/dr`）の「自動切り替え」が**無効**なことを確認する（停止中に、控えへ切り替わらないように）。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
+4. **`main` にマージして、自動デプロイを先に済ませる**（PostgreSQL が、pgBackRest 入りの新しいイメージで作り直される。数秒、DB が再起動する。アーカイブは、まだ無効）。デプロイが終わったことを確認:
    ```bash
-   infra/pgbackrest/backup.sh full
+   docker compose -f docker-compose.cloud.yml exec -T postgres pgbackrest version
    ```
-   DB が小さい間は、数秒〜数十秒。`info` の出力に `full backup` が 1 つ出ること。
-7. **cron を設定する**（`crontab -e`。時刻は、LXC の時刻＝JST）
-   ```cron
-   # 全体（日曜）・差分（月〜土）・確認（毎日）。ログは /var/log/factoreye-pgbackrest.log
-   30 3 * * 0   cd /opt/factoreye && infra/pgbackrest/backup.sh full >> /var/log/factoreye-pgbackrest.log 2>&1
-   30 3 * * 1-6 cd /opt/factoreye && infra/pgbackrest/backup.sh diff >> /var/log/factoreye-pgbackrest.log 2>&1
-   30 4 * * *   cd /opt/factoreye && infra/pgbackrest/check.sh       >> /var/log/factoreye-pgbackrest.log 2>&1
-   # 設定ファイルの暗号化バックアップだけ（DB のダンプはやめた）。従来の 03:00 の行を、これに置き換える
-   0 3 * * *    cd /opt/factoreye && BACKUP_DB=off OFFSITE_S3_URI=s3://factoreye-backup COMPOSE_FILE=docker-compose.cloud.yml BACKUP_PASSPHRASE_FILE=/root/.factoreye-backup-passphrase ./infra/backup.sh >> /var/log/factoreye-backup.log 2>&1
-   ```
-8. **アプリを起動して、確認**
-   ```bash
-   docker compose -f docker-compose.cloud.yml up -d
-   curl -s localhost/health            # {"status":"ok",...}
-   ```
-   DR コンソールが「正常」に戻ること。1〜2 分後、R2 の `pgbackrest/prod/archive/` に、WAL が増え続けること（60 秒ごと）。
-9. **古いダンプを消す**（任意。現在データがないので消してよい）
-   - R2 の直下の `factoreye-*.sql.gz`（と `.sha256`）。バケットのロック（30 日）で、消せない場合は、期限を待つ。**設定ファイルのバックアップ（`-config.tar.gz.enc`）は、消さない。**
+   バージョンを控えておく（DR の控えと、そろえるため。下の「バージョン」）。
+
+### 1. アプリを止める（DB は動かしたまま）
+
+```bash
+cd /opt/factoreye
+docker compose -f docker-compose.cloud.yml stop backend frontend caddy
+```
+
+### 2. 有効にする
+
+```bash
+infra/pgbackrest/init.sh
+```
+最後に `check` が成功すること。途中で PostgreSQL が数秒、再起動する（`archive_mode` の変更に必要）。
+
+- **`check` が失敗したら**: `archive_mode` は有効のままなので、WAL が R2 に送れず、`pg_wal` が溜まり続ける。放置しない。
+  ① `/opt/factoreye/pgbackrest/pgbackrest.conf` を直して（エンドポイントは `https://` なし、鍵、バケット名）、`init.sh` を**もう一度**実行する（安全）。
+  ② 直せないなら、下の「戻し方」で、`archive_mode` を元に戻す。
+
+### 3. 最初の全体のバックアップ
+
+```bash
+infra/pgbackrest/backup.sh full
+```
+DB が小さい間は、数秒〜数十秒。`info` の出力に `full backup` が 1 つ出ること。
+
+### 4. cron を設定する
+
+`crontab -e`。時刻は、LXC の時刻（JST）。
+```cron
+# 全体（日曜）・差分（月〜土）・確認（毎日）。ログは /var/log/factoreye-pgbackrest.log
+30 3 * * 0   cd /opt/factoreye && infra/pgbackrest/backup.sh full >> /var/log/factoreye-pgbackrest.log 2>&1
+30 3 * * 1-6 cd /opt/factoreye && infra/pgbackrest/backup.sh diff >> /var/log/factoreye-pgbackrest.log 2>&1
+30 4 * * *   cd /opt/factoreye && infra/pgbackrest/check.sh       >> /var/log/factoreye-pgbackrest.log 2>&1
+# WAL を送れなくなっていないか（10 分ごと。異常なら Discord に通知）
+*/10 * * * * cd /opt/factoreye && infra/pgbackrest/monitor.sh     >> /var/log/factoreye-pgbackrest.log 2>&1
+# 設定ファイルの暗号化バックアップだけ（DB のダンプはやめた）。従来の 03:00 の行を、これに置き換える
+0 3 * * *    cd /opt/factoreye && BACKUP_DB=off OFFSITE_S3_URI=s3://factoreye-backup COMPOSE_FILE=docker-compose.cloud.yml BACKUP_PASSPHRASE_FILE=/root/.factoreye-backup-passphrase ./infra/backup.sh >> /var/log/factoreye-backup.log 2>&1
+```
+
+### 5. アプリを起動して、確認
+
+```bash
+docker compose -f docker-compose.cloud.yml up -d
+curl -s localhost/health            # {"status":"ok",...}
+infra/pgbackrest/monitor.sh         # OK と出ること
+```
+DR コンソールが「正常」に戻ること。1〜2 分後、R2 の `pgbackrest/prod/archive/` に、WAL が増え続けること（60 秒ごと）。
+
+### 6. 古いダンプを消す（任意）
+
+現在データがないので、消してよい。R2 の直下の `factoreye-*.sql.gz`（と `.sha256`）。バケットのロック（30 日）で消せない場合は、期限を待つ。**設定ファイルのバックアップ（`-config.tar.gz.enc`）は、消さない**（DR の控えの起動に必要）。
 
 ## 日々の確認
 
@@ -69,8 +96,21 @@ docker compose -f docker-compose.cloud.yml exec -T -u postgres postgres pgbackre
 tail -50 /var/log/factoreye-pgbackrest.log
 ```
 
-- 失敗すると、スクリプトの終了コードが 0 以外になる。ログに `エラー` や `ERROR` が出ていないか見る。
-- **WAL が R2 に送られなくなると、`pg_wal` が溜まり続け、ディスクが埋まる。** `df -h /` と、`docker compose ... exec postgres du -sh /var/lib/postgresql/data/pg_wal` を、ときどき見る。
+失敗すると、スクリプトの終了コードが 0 以外になる。ログに `エラー` や `ERROR` が出ていないか見る。`monitor.sh` の異常は、Discord にも通知される。
+
+## 異常のとき（`monitor.sh` の通知、または、ログに異常が出たとき）
+
+**WAL を R2 に送れないと、PostgreSQL は WAL を消せず、`pg_wal` が溜まり続ける。ディスクが埋まると、DB が止まり、アプリが止まる。** 最悪で、1 日に数 GB〜20 GB 溜まる（書き込みが続く場合）。
+
+1. 状況を見る:
+   ```bash
+   docker compose -f docker-compose.cloud.yml exec -T -u postgres postgres psql -U factoreye -d factoreye -c "select * from pg_stat_archiver"
+   docker compose -f docker-compose.cloud.yml exec -T postgres du -sh /var/lib/postgresql/data/pg_wal
+   df -h /
+   infra/pgbackrest/check.sh
+   ```
+2. 原因を直す。よくある原因: R2 の鍵の失効・変更、R2 の障害、LXC の回線の断。鍵を変えたら、`pgbackrest.conf` を直す。直れば、溜まっていた WAL が、自動で順に送られる。
+3. **基準:** 1 時間以内に直せない、かつ、`pg_wal` が 5 GB を超える（またはディスクが 90% を超える）なら、**下の「戻し方」で、アーカイブを止める**（DB を止めないことを優先する）。直ってから、`init.sh` で再び有効にし、`backup.sh full` を取り直す。
 
 ## 戻し方（有効にしたあとで、元に戻したいとき）
 
@@ -80,9 +120,16 @@ docker compose -f docker-compose.cloud.yml restart postgres
 ```
 cron の行も消す。データのボリューム（DB 本体）は、そのまま使える。
 
+## バージョン
+
+- **pgBackRest のバージョンは、本番と、DR の控えで、そろえる**（復元の互換性）。どちらも、`infra/cloud/postgres/Dockerfile` から作ったイメージを使う（Dockerfile は、バージョンを固定していない）。
+- 本番のイメージを作り直したら（デプロイで再ビルド）、**ecopower の `tools/aws-dr/publish-images.sh` を実行して、控えのイメージも更新する**（`docs/factoreye-architecture.md` の本番運用ルール）。`pgbackrest version` を、更新の記録に残す。
+
 ## 注意
 
 - **順番が大事**: ステンザを作ってから、`archive_mode` を有効にする（`init.sh` がその順で行う）。逆にすると、WAL の送信が失敗し続ける。
 - 本番の DB の管理者のロールは `factoreye`。設定の `pg1-user`・`pg1-database` で指定している（既定の `postgres` ロールは、存在しない）。
 - 設定ファイルには R2 の鍵が入る。Git に入れない。権限は 600、所有者は uid 70。
+- `check.sh` の `verify` は、毎日 R2 の全ファイルを読む。DB が大きくなったら、週 1 回にする（外向きの通信は無料）。
+- pgBackRest のログは、コンテナの中（`/var/log/pgbackrest`）にあり、コンテナを作り直すと消える。cron のログ（`/var/log/factoreye-pgbackrest.log`）は残る。
 - 復元（控えの EC2 での起動）は、ecopower の `tools/aws-dr/standby-boot.sh`。

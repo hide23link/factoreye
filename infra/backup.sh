@@ -136,7 +136,12 @@ if [ -n "$OFFSITE_S3_URI" ]; then
   if [ -f "$CONFIG_DEST" ]; then
     uploads+=("$CONFIG_DEST" "$CONFIG_DEST.sha256")
   fi
-  "$REPO_ROOT/infra/offsite-s3.sh" "${uploads[@]}" || status=1
+  if [ "${#uploads[@]}" -gt 0 ]; then
+    "$REPO_ROOT/infra/offsite-s3.sh" "${uploads[@]}" || status=1
+  else
+    log "外部へ送るファイルがありません（設定ファイルの保存に失敗したか、対象がない）"
+    status=1
+  fi
 fi
 
 log "保持期間（${RETENTION_DAYS}日）を過ぎたバックアップを削除します"

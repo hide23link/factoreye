@@ -46,6 +46,21 @@ step "$HERE/backup.sh" full || fail "backup.sh full が失敗"; ok "backup.sh fu
 SQLX "insert into t(v) select random() from generate_series(1,100000)" >/dev/null
 step "$HERE/backup.sh" diff || fail "backup.sh diff が失敗"; ok "backup.sh diff"
 "$HERE/backup.sh" bogus >/dev/null 2>&1 && fail "不正な種類で成功してしまった"; ok "backup.sh は不正な種類を拒否する"
+# 2b. monitor.sh: 正常なら成功。アーカイブが失敗し続けると、異常（終了コード 2）。直ると、回復する
+step "$HERE/monitor.sh" || fail "monitor.sh が、正常なのに失敗"; ok "monitor.sh（正常）"
+SQLX "alter system set archive_command = '/bin/false'" >/dev/null; SQLX "select pg_reload_conf()" >/dev/null
+SQLX "insert into t(v) select random() from generate_series(1,1000)" >/dev/null; SQLX "select pg_switch_wal()" >/dev/null
+DETECT=0; for i in $(seq 1 45); do
+  set +e; "$HERE/monitor.sh" >/dev/null 2>&1; RC=$?; set -e
+  [ "$RC" = 2 ] && { DETECT=1; break; }; sleep 2
+done
+[ "$DETECT" = 1 ] || fail "アーカイブの失敗を、monitor.sh が検知できない"; ok "monitor.sh（アーカイブの失敗を検知。終了コード 2）"
+SQLX "alter system set archive_command = 'pgbackrest --stanza=factoreye archive-push %p'" >/dev/null; SQLX "select pg_reload_conf()" >/dev/null
+RECOVER=0; for i in $(seq 1 60); do
+  set +e; "$HERE/monitor.sh" >/dev/null 2>&1; RC=$?; set -e
+  [ "$RC" = 0 ] && { RECOVER=1; break; }; sleep 3
+done
+[ "$RECOVER" = 1 ] || fail "archive_command を直しても、monitor.sh が回復しない"; ok "monitor.sh（回復を確認）"
 SQLX "insert into t(v) select random() from generate_series(1,50000)" >/dev/null
 SQLX "select pg_switch_wal()" >/dev/null
 EXPECT=$(SQLX "select count(*) from t")
