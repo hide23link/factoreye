@@ -4,13 +4,13 @@
 # 異常があれば、終了コード 2 で、標準出力に理由を出し、Discord に通知する（1 時間に 1 回まで）。
 #   見るもの: ① アーカイブが今、失敗している（pg_stat_archiver）② pg_wal の大きさ ③ ホストの / の使用率
 # 環境変数: MAX_WAL_MB（既定 2048）、DISK_PCT（既定 85）、
-#   WEBHOOK_FILE（Discord の Webhook の URL を入れたファイル。既定 /opt/factoreye/pgbackrest/discord-webhook。無ければ通知しない）
+#   WEBHOOK_FILE（Discord の Webhook の URL を入れたファイル。既定 /opt/factoreye/walg/discord-webhook。無ければ通知しない）
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 MAX_WAL_MB="${MAX_WAL_MB:-2048}"
 DISK_PCT="${DISK_PCT:-85}"
-WEBHOOK_FILE="${WEBHOOK_FILE:-/opt/factoreye/pgbackrest/discord-webhook}"
-STATE_FILE="${STATE_FILE:-/var/tmp/factoreye-pgbackrest-alert}"
+WEBHOOK_FILE="${WEBHOOK_FILE:-/opt/factoreye/walg/discord-webhook}"
+STATE_FILE="${STATE_FILE:-/var/tmp/factoreye-walg-alert}"
 
 wait_ready
 if [ "$(sql 'show archive_mode')" != "on" ]; then
@@ -44,7 +44,7 @@ if [ "${#alerts[@]}" -eq 0 ]; then
   exit 0
 fi
 
-msg="factoreye 本番の DB のバックアップに異常: $(IFS=' / '; echo "${alerts[*]}")。対応は infra/pgbackrest/README.md の「異常のとき」"
+msg="factoreye 本番の DB のバックアップに異常: $(IFS=' / '; echo "${alerts[*]}")。対応は infra/walg/README.md の「異常のとき」"
 log "異常: $msg"
 
 # Discord に通知（Webhook のファイルがあるときだけ。1 時間に 1 回まで）

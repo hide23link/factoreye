@@ -11,7 +11,7 @@
 #   factoreye-<日時>-config.tar.gz.enc.sha256
 # OFFSITE_S3_URI を設定すると、作ったファイルを infra/offsite-s3.sh で S3 にも送る。
 # BACKUP_DB=off にすると、DB のダンプを取らず、設定ファイルのバックアップだけを作る（既定は on）。
-#   クラウド版は DB のバックアップを pgBackRest（WAL の追記＋ベース）で R2 に送るため、毎晩のダンプはやめた（infra/pgbackrest/README.md）。
+#   クラウド版は DB のバックアップを WAL-G（WAL の追記＋ベース）で R2 に送るため、毎晩のダンプはやめた（infra/walg/README.md）。
 #   設定ファイルのバックアップは、DR の控えの起動に必要なので、残す。
 set -euo pipefail
 
@@ -120,7 +120,7 @@ if [ "$BACKUP_DB" = "on" ]; then
   write_checksum "$DEST"
   log "バックアップ完了: $DEST ($(du -h "$DEST" | cut -f1))"
 else
-  log "DB のダンプは取りません（BACKUP_DB=off。DB は pgBackRest で R2 へ）。設定ファイルだけを保存します"
+  log "DB のダンプは取りません（BACKUP_DB=off。DB は WAL-G で R2 へ）。設定ファイルだけを保存します"
 fi
 
 # 設定ファイル・外部保管に失敗しても、DB のバックアップと保持期間の削除は続ける。

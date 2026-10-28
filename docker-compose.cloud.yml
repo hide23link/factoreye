@@ -49,7 +49,7 @@ services:
       - backend
 
   postgres:
-    # postgres:15-alpine に pgBackRest を足したイメージ（DR のバックアップ用。infra/cloud/postgres/Dockerfile）
+    # postgres:15（Debian）に WAL-G を足したイメージ（DR のバックアップ用。infra/cloud/postgres/Dockerfile）
     build: ./infra/cloud/postgres
     image: factoreye-postgres:15
     restart: unless-stopped
@@ -57,10 +57,12 @@ services:
       - POSTGRES_USER=factoreye
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD を .env に設定してください}
       - POSTGRES_DB=factoreye
+    # WAL-G の設定（R2 の鍵を含む。Git 管理外。権限 600）。無くても PostgreSQL は起動する（archive_mode は、init.sh を実行するまで off）
+    env_file:
+      - path: /opt/factoreye/walg/walg.env
+        required: false
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # pgBackRest の設定（R2 の鍵を含む。Git 管理外。権限 600、所有者は postgres＝uid 70）。無くても PostgreSQL は起動する
-      - /opt/factoreye/pgbackrest:/etc/pgbackrest
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U factoreye"]
       interval: 5s
