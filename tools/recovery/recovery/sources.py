@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import re
 import zlib
 from dataclasses import dataclass
@@ -105,6 +106,11 @@ class LocalSource:
                 )
         return sorted(entries, key=lambda e: e.modified, reverse=True)
 
+    def read_text(self, name: str) -> str | None:
+        """ディレクトリ直下の小さなテキストファイル（latest.json など）を読む。無ければ None。"""
+        path = self._dir / name
+        return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else None
+
     def fetch(self, name: str) -> FetchedBackup:
         path = self._dir / validate_name(name)
         if not path.is_file():
@@ -137,6 +143,15 @@ class S3Source:
                 if BACKUP_NAME_RE.fullmatch(name):
                     entries.append(BackupEntry(name, obj["Size"], obj["LastModified"]))
         return sorted(entries, key=lambda e: e.modified, reverse=True)
+
+    def read_text(self, name: str) -> str | None:
+        """置き場直下の小さなテキストファイル（latest.json など）を読む。無ければ None。"""
+        try:
+            body = self._client.get_object(Bucket=self._bucket, Key=self._key(name))["Body"].read()
+        except ClientError:
+            # 無い場合、読むだけの鍵では NoSuchKey ではなく AccessDenied が返る。どちらも「無い」
+            return None
+        return body.decode("utf-8", errors="replace")
 
     def fetch(self, name: str) -> FetchedBackup:
         validate_name(name)
@@ -187,6 +202,76 @@ class CompositeSource:
             except SourceError as e:
                 errors.append(str(e))
         raise SourceError(errors[-1] if errors else f"バックアップが見つかりません: {name}")
+
+
+# 控え（AWS）が置く「増加分の縮小ダンプ」（R2 の handoff-inc/。tools/aws-dr/handoff.sh が書く）。
+# 本来のバックアップと名前が重ならないよう、画面・API では先頭に handoff- を付けた名前で扱う
+HANDOFF_NAME_PREFIX = "handoff-"
+HANDOFF_NAME_RE = re.compile(r"^handoff-factoreye-\d{8}-\d{6}\.sql\.gz$")
+HANDOFF_LATEST = "latest.json"
+
+
+@dataclass(frozen=True)
+class HandoffInfo:
+    """latest.json の記録（最新の縮小ダンプだけに付く）。"""
+
+    kind: str | None
+    watermark: str | None
+    alembic: str | None
+    instance: str | None
+    region: str | None
+    created_at: str | None
+
+
+def validate_handoff_name(name: str) -> str:
+    if not HANDOFF_NAME_RE.fullmatch(name):
+        raise SourceError(f"引き継ぎの名前が不正です: {name}")
+    return name
+
+
+class HandoffSource:
+    """引き継ぎ（縮小ダンプ）の置き場を、本来のバックアップと同じ形で読む。読むだけで、書かない。"""
+
+    def __init__(self, inner: BackupSource) -> None:
+        self._inner = inner
+
+    def describe(self) -> str:
+        return self._inner.describe()
+
+    def list(self) -> list[BackupEntry]:
+        return [
+            BackupEntry(HANDOFF_NAME_PREFIX + e.name, e.size, e.modified)
+            for e in self._inner.list()
+            # factoreye-<日時>.sql.gz の形だけ（手で置かれた別の名前は出さない）
+            if HANDOFF_NAME_RE.fullmatch(HANDOFF_NAME_PREFIX + e.name)
+        ]
+
+    def fetch(self, name: str) -> FetchedBackup:
+        return self._inner.fetch(validate_handoff_name(name).removeprefix(HANDOFF_NAME_PREFIX))
+
+    def latest(self) -> tuple[str, HandoffInfo] | None:
+        """latest.json が指す最新の縮小ダンプ（画面の名前で）と記録。無い・読めなければ None。"""
+        reader = getattr(self._inner, "read_text", None)
+        text = reader(HANDOFF_LATEST) if reader else None
+        if not text:
+            return None
+        try:
+            d = json.loads(text)
+            name = HANDOFF_NAME_PREFIX + str(d["name"])
+        except (ValueError, KeyError, TypeError):
+            return None
+        if not HANDOFF_NAME_RE.fullmatch(name):
+            return None
+
+        def field(key: str) -> str | None:
+            v = d.get(key) if isinstance(d, dict) else None
+            return str(v) if v else None
+
+        info = HandoffInfo(
+            field("kind"), field("watermark"), field("alembic"), field("instance"),
+            field("region"), field("createdAt"),
+        )
+        return name, info
 
 
 def make_source(spec: str, cache_dir: Path, s3_endpoint_url: str | None = None) -> BackupSource:

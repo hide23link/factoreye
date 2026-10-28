@@ -28,6 +28,11 @@ services:
       # CORS 許可オリジン。Cloudflare Tunnel のドメインを設定する
       - FRONTEND_URL=https://${DOMAIN:?DOMAIN を .env に設定してください}
       - AUTH_MODE=multi_tenant
+      # 管理画面の「書き戻し」が呼ぶ、復旧ツール（tools/recovery。同じネットワーク factoreye-cloud に入る）。
+      # パスワードは .env に設定する（復旧ツールの RECOVERY_PASSWORD と同じ値）。空なら書き戻しは使えない
+      - FAILBACK_RECOVERY_URL=${FAILBACK_RECOVERY_URL:-http://recovery:8090}
+      - FAILBACK_RECOVERY_USERNAME=${FAILBACK_RECOVERY_USERNAME:-admin}
+      - FAILBACK_RECOVERY_PASSWORD=${FAILBACK_RECOVERY_PASSWORD:-}
     volumes:
       # 管理者アカウント（ID:bcryptハッシュ）をホストに置く。DBには入れない。
       # 初回は ./admin/admins.txt を作成し、app.admin_cli set-admin で管理者を追加する

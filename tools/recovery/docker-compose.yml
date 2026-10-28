@@ -10,6 +10,8 @@ services:
     environment:
       # 下の volumes で手元のバックアップを /backups に見せる。S3 を使う場合は .env で s3://... に変える
       BACKUP_SOURCE: ${BACKUP_SOURCE:-/backups}
+      # R2 の WAL-G のバックアップから復旧する設定ファイル（下の walg ディレクトリの walg.env。無ければこの機能は使えない）
+      WALG_ENV_FILE: /etc/recovery/walg/walg.env
     # バックアップのファイルは 640（infra/backup.sh）。そのグループに入って読む。
     # 本番は root（0）。ラズパイなどでは、offsite-pull.sh を動かす利用者のグループの ID にする
     group_add:
@@ -18,6 +20,9 @@ services:
       # バックアップは読むだけ（ツールから消したり書き換えたりできないように :ro）
       - ${BACKUP_DIR:-../../backups}:/backups:ro
       - recovery-data:/var/lib/recovery
+      # walg.env（本番と同じ形式。R2 の鍵は読み取りだけで足りる。権限 600）を置くディレクトリ。
+      # ファイルでなくディレクトリで渡す（無いときに Docker がディレクトリを作ってしまうのを避ける）
+      - ${WALG_DIR:-./walg}:/etc/recovery/walg:ro
     ports:
       # 既定は自分のマシンからだけ開ける。Docker の公開ポートは ufw を素通りするため、
       # 0.0.0.0 にはしない。Tailscale から開く場合は RECOVERY_BIND に Tailscale の IP を入れる

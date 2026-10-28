@@ -12,6 +12,8 @@ import { AdminApiError, fetchAdminOverview, fetchAdminUsers } from "../../lib/ad
 import type { AdminUserSummary } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
 import { AdminUserModal } from "./AdminUserModal";
+import { FailbackCard } from "./FailbackCard";
+import { R2RestoreCard } from "./R2RestoreCard";
 import { IngestLimitCard } from "./IngestLimitCard";
 
 // 親（AdminApp）から受け取る値: 管理者トークンと、認証の失効を知らせる関数
@@ -71,6 +73,8 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
   return (
     <div>
       <IngestLimitCard token={token} onAuthError={onAuthError} />
+      <FailbackCard token={token} onAuthError={onAuthError} />
+      <R2RestoreCard token={token} onAuthError={onAuthError} />
       <RecoveryToolCard />
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="ユーザー数" value={overview.data?.userCount} />
