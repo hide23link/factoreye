@@ -4,7 +4,7 @@
 7日より古いファイルは自動削除する。各ファイルの隣に sha256（`.sha256`）を書く。
 
 - 設定ファイル（`.env`・管理者ファイル・cloudflared の設定）も、暗号化して一緒に保存できる（下の「設定ファイルの控え」）
-- 本番の外にも控えを置く: S3 に送る（`offsite-s3.sh`）か、ラズパイなどから取りに行く（`offsite-pull.sh`）
+- 本番の外にも控えを置く: S3 か Cloudflare R2 に送る（`offsite-s3.sh`）か、ラズパイなどから取りに行く（`offsite-pull.sh`）
 - 中身の確認・比較・書き出しは、復旧ツール（[`tools/recovery/`](../tools/recovery/README.md)）で行う
 
 ## セットアップ（本番運用者向け）
@@ -138,6 +138,42 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:<合言葉のファ�
 4. cron の行に `OFFSITE_S3_URI=s3://<バケット>/factoreye` を足す。`backup.sh` が作ったファイルを送る（aws CLI は Docker のイメージで動かすので、ホストに入れなくてよい）
 
 復旧ツールで S3 から読むときは、別の IAM ユーザー（`s3:ListBucket` と `s3:GetObject` だけ）を使う。
+
+### Cloudflare R2 に送る（`offsite-s3.sh` をそのまま使う）
+
+R2 は S3 互換なので、スクリプトは変えずに、認証情報のファイルで宛先を R2 に向ける。保管料は 10GB まで無料で、外向き通信も無料（最新の料金は Cloudflare の料金ページで確認する）。
+
+1. Cloudflare のダッシュボードの R2 で、バケットを作る（例: `factoreye-backup`。場所のヒントはアジア太平洋）
+2. R2 の API トークンを作る。権限は「Object Read & Write」、対象は**このバケットだけ**。Access Key ID・Secret Access Key・アカウント ID を控える。R2 のトークンは、S3 のような「追加だけ」にできない（削除もできる）
+3. **削除・上書きを防ぐため、バケットのロックを設定する**。`factoreye/` の接頭辞に、保持期間（例: 30 日）のルールを付ける。トークンが盗まれても、期間内は消せない（[Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/)）。古い控えの削除は、ライフサイクルのルール（例: 90 日）で行う。ロックのほうが優先される
+4. 認証情報を `/opt/factoreye/.offsite-s3.env`（権限 600、Git 管理外）に書く:
+
+   ```bash
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   AWS_DEFAULT_REGION=auto
+   AWS_ENDPOINT_URL=https://<アカウントID>.r2.cloudflarestorage.com
+   ```
+
+5. cron の行に `OFFSITE_S3_URI=s3://<バケット>/factoreye` を足す
+6. 最初の 1 回は手で実行し、R2 にファイルが入ったことと、`.sha256` の一致を確かめる
+
+注意:
+- `AWS_CLI_IMAGE` は **2.23 より前の版**のままにする（既定の 2.17.0）。2.23 以降は、既定のチェックサムの扱いが R2 と合わない（Cloudflare の aws CLI の案内）。
+- 復旧ツールで読むときは、別のトークン（「Object Read only」）を使う。
+- 実機の R2 での送信は、まだ確認していない（`AWS_ENDPOINT_URL` が使われることは、ローカルで確認した）。
+
+### AWS の控え（パイロットライト）
+
+平常時は、AWS に EC2・EBS・パブリック IPv4 を置かない（月 $0〜2）。災害時だけ、次の手順で立ち上げる。**まだ訓練していない手順の案**であり、実際に動かして直す。
+
+1. 準備（平常時）: 設定済みの EC2（OS・Docker・イメージ。**秘密情報とデータは入れない**）の AMI（スナップショット）を 1 つ作っておく（暗号化。月 $0.2〜0.4）。更新したら作り直す
+2. 災害時: AMI から EC2（スポットまたはオンデマンド）を起動し、EBS を足す
+3. R2 から最新のバックアップを取り、`restore.sh` で戻す（設定ファイルは、合言葉で復号して戻す）
+4. Cloudflare Tunnel の向き先を、AWS 側のトンネルに切り替える
+5. 復旧後、`/health` と `/api/info` を確かめる
+
+目安は復旧に 30〜60 分、欠損は最大でバックアップの間隔ぶん（日次なら 24 時間）。EBS は台が止まると使えないので、データの控えは R2 に置く。
 
 ### ラズパイなどから取りに行く（`offsite-pull.sh`）
 
