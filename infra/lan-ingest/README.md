@@ -34,7 +34,7 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 2. 窓口を起動する（`LAN_INGEST_BIND` は、このホストの LAN の IP。`0.0.0.0` にしない。未設定だと 127.0.0.1 になり、LAN の機器からは届かない）:
 
    ```bash
-   LAN_INGEST_BIND=192.168.0.72 docker compose \
+   LAN_INGEST_BIND=192.168.0.62 docker compose \
      -f docker-compose.yml -f infra/lan-ingest/docker-compose.lan-ingest.yml up -d lan-ingest
    ```
 
@@ -44,7 +44,7 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 
    ```
    COMPOSE_FILE=docker-compose.yml:infra/lan-ingest/docker-compose.lan-ingest.yml
-   LAN_INGEST_BIND=192.168.0.72
+   LAN_INGEST_BIND=192.168.0.62
    ```
 
    （区切りは Linux の `:`。Windows は `;`。窓口を持たない別のホストで同じ `.env` を使い回さない。`-f` を付けたコマンドは、`COMPOSE_FILE` より `-f` が優先される）
@@ -54,13 +54,13 @@ FactorEye の画面・管理者 API・センサーの一覧など、ほかの AP
 5. LAN の別のマシン（機器と同じ立場）から確かめる:
 
    ```bash
-   ./infra/lan-ingest/verify.sh http://192.168.0.72:8001
-   ./infra/lan-ingest/verify.sh http://192.168.0.72:8001 --rate-test   # レート制限が偽装で避けられないか（約 1 分、制限を使い切る）
+   ./infra/lan-ingest/verify.sh http://192.168.0.62:8001
+   ./infra/lan-ingest/verify.sh http://192.168.0.62:8001 --rate-test   # レート制限が偽装で避けられないか（約 1 分、制限を使い切る）
    ```
 
    「すべて期待どおりです」と出ればよい。センサーは作らず、データも増えない（わざと壊した本文を送る）。
 
-6. 機器（FactorEyeNode など）のサーバーアドレスを `http://192.168.0.72:8001` にする。API キーは空でよい。
+6. 機器（FactorEyeNode など）のサーバーアドレスを `http://192.168.0.62:8001` にする。API キーは空でよい。
 
 ## 止める・戻す
 
