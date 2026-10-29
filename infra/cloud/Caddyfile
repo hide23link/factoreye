@@ -2,6 +2,14 @@
 # TLS は Cloudflare Tunnel が処理するため、ここでは :80 で HTTP のみ受け付ける
 
 :80 {
+    # セキュリティヘッダー（HSTS と nosniff は Cloudflare 側で付く。ここでは残りを足す）
+    # CSP は、SPA の読み込みを壊すおそれがあるため、まだ入れない（別途、画面で確かめてから）
+    header {
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+    }
+
     # REST API + Ingest（FastAPI）
     handle /api/* {
         reverse_proxy backend:8000
