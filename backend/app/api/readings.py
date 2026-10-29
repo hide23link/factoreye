@@ -1,6 +1,6 @@
-"""GET /api/readings — ダッシュボードpolling用の直近測定値一覧。
+"""GET /api/readings — 直近の測定値の一覧（公開 API）。
 
-画面は数秒ごとにこの API を呼んで、新しい測定値を取り直す。
+画面（フロントエンド）からは呼ばれていない。外部の利用者向けの公開 API として残す（判断は docs/decisions.md、2026-10-29）。
 件数は limit で制限する（既定 1000、最大 10000）。
 
 【呼ばれ方】GET /api/readings?sensor_id=<センサーのID>&limit=500
