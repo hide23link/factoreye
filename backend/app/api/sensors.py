@@ -252,7 +252,7 @@ async def get_sensor_readings(
 
     # 新しい順に、limit 件まで返す（グラフ用）。期間は from / to で絞る
     # 使う列だけを読む（ORM のオブジェクトを作らないため、CPU を使わない）
-    query = select(Reading.id, Reading.sensor_id, Reading.value, Reading.recorded_at).where(
+    query = select(Reading.sensor_id, Reading.value, Reading.recorded_at).where(
         Reading.sensor_id == sensor_id
     )
     if from_ is not None:
@@ -279,7 +279,7 @@ async def get_sensor_readings_aggregate(
     """
     await _get_active_sensor(session, sensor_id, workspace_id)
 
-    # func.count(Reading.id)はSQLModelのクラス属性がmypyには素のPython型(int | None)に
+    # func.count(Reading.sensor_id)のように列を渡すと、SQLModelのクラス属性がmypyには素のPython型に
     # 見えてしまい弾かれるため、カラムを渡さずCOUNT(1)として行数を数える
     query = select(func.sum(Reading.value), func.count(1)).where(
         Reading.sensor_id == sensor_id, Reading.recorded_at >= from_

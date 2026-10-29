@@ -6,16 +6,21 @@ docs/architecture.md §12 テスト のシナリオ（認証・不正ペイロ�
 import asyncio
 import logging
 import time
-from datetime import UTC, datetime
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from sqlalchemy import func
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 import app.ingest_buffer as ingest_buffer
 import app.main as main_module
 from app.config import AuthMode, IngestAuth, settings
-from app.ingest_buffer import IngestBuffer, PendingReading, flush_once
+from app.db.models import Reading
+from app.db.session import engine
+from app.ingest_buffer import IngestBuffer, PendingReading, buffer, flush_once
 from app.main import app, start_and_stop
 
 VALID_HEADERS = {"X-API-Key": settings.ingest_api_key}
@@ -139,6 +144,110 @@ async def test_ingest_batch_handles_many_readings(client: httpx.AsyncClient) -> 
 
     flushed = await flush_once()
     assert flushed == 1000
+
+
+async def test_batch_with_several_values_keeps_every_value(client: httpx.AsyncClient) -> None:
+    # 回帰: 測定値の主キーは (sensor_id, recorded_at)。1 回の送信内の値が同じ時刻のままだと、
+    # 2 件目以降が主キー重複になる。送信内の i 番目の値は i マイクロ秒ずらして、全部残す
+    sensor_id = await _create_sensor(client, "same-request-sensor")
+    values = [1.0, 2.0, 3.0, 4.0, 5.0]
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "same-request-sensor", "readings": [{"value": v} for v in values]},
+    )
+    assert resp.status_code == 202
+
+    await flush_once()
+
+    body = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
+    assert body["total"] == len(values)
+    # 新しい順に返る。送った順（古い→新しい）に時刻が進んでいる
+    assert [r["value"] for r in body["readings"]] == list(reversed(values))
+    times = [r["recordedAt"] for r in body["readings"]]
+    assert len(set(times)) == len(values)
+
+
+async def test_flush_ignores_same_sensor_and_time_instead_of_failing(
+    client: httpx.AsyncClient,
+) -> None:
+    # 別々の送信が同じマイクロ秒に重なる、または flush を再試行して同じ値が二度届いても、
+    # 主キー重複でバッチ全体が失敗しない（他のセンサーの値も書ける）
+    sensor_id = await _create_sensor(client, "duplicate-time-sensor")
+    other_id = await _create_sensor(client, "duplicate-time-other")
+    at = datetime.now(UTC)
+    for sid, value in (
+        (sensor_id, 1.0),
+        (sensor_id, 2.0),  # 同じセンサー・同じ時刻
+        (other_id, 7.0),
+    ):
+        await buffer.add(PendingReading(sensor_id=UUID(sid), value=value, recorded_at=at))
+
+    # 戻り値は、実際に書けた件数（同じセンサー・同じ時刻の 2 件目は数えない）
+    assert await flush_once() == 2
+
+    first = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
+    other = (await client.get(f"/api/sensors/{other_id}/readings")).json()
+    assert first["total"] == 1  # 先に届いた 1 件だけ
+    assert first["readings"][0]["value"] == 1.0
+    assert other["total"] == 1
+
+
+async def _count_readings(sensor_id: str) -> int:
+    async with AsyncSession(engine) as session:
+        result = await session.exec(
+            select(func.count(1)).select_from(Reading).where(Reading.sensor_id == UUID(sensor_id))
+        )
+        return int(result.one())
+
+
+async def test_flush_handles_more_readings_than_one_statement_can_hold(
+    client: httpx.AsyncClient,
+) -> None:
+    # 回帰: 全行を 1 つの INSERT 文に入れると、asyncpg のパラメータ上限（32,767）を超える
+    # 1 万件余りで失敗し続け、バッファが減らず取り込み全体が止まる。区切って全件書く
+    sensor_id = await _create_sensor(client, "huge-flush-sensor")
+    t0 = datetime.now(UTC)
+    total = 11_000  # 1 文なら 33,000 パラメータで上限超え
+    for i in range(total):
+        await buffer.add(
+            PendingReading(
+                sensor_id=UUID(sensor_id),
+                value=float(i),
+                recorded_at=t0 + timedelta(microseconds=i),
+            )
+        )
+
+    assert await flush_once() == total
+
+    assert await _count_readings(sensor_id) == total
+    assert await flush_once() == 0  # バッファは空になっている（詰まっていない）
+
+
+async def test_close_requests_to_the_same_sensor_never_share_a_time(
+    client: httpx.AsyncClient,
+) -> None:
+    # 1,000 件の送信の直後（1 ms 未満）に、同じセンサーへ別の送信が来ても、どの値も失われない。
+    # 送信内の値は 1 µs ずつ進めるため、後の送信の時刻が前の送信の途中に重なりうる。
+    # センサーごとに前の最後の時刻を覚えて、後の送信はその後ろから始める
+    sensor_id = await _create_sensor(client, "close-requests-sensor")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "close-requests-sensor", "readings": [{"value": 1.0}] * 1000},
+    )
+    assert resp.status_code == 202
+    for _ in range(3):
+        resp = await client.post(
+            "/api/ingest/readings",
+            headers=VALID_HEADERS,
+            json={"ingestKey": "close-requests-sensor", "value": 2.0},
+        )
+        assert resp.status_code == 202
+
+    assert await flush_once() == 1003
+
+    assert await _count_readings(sensor_id) == 1003
 
 
 async def test_flush_once_with_empty_buffer_returns_zero() -> None:

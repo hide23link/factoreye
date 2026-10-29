@@ -25,9 +25,9 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import ValidationError
@@ -49,6 +49,12 @@ from app.schemas import IngestAccepted, IngestRequest  # 届く本文の形 / �
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
 logger = logging.getLogger(__name__)
+
+# センサーごとに、前の送信に割り当てた最後の recorded_at を覚える（プロセス内。センサー数だけ）。
+# 取り込みの時刻を、これより必ず _STEP 以上進める（理由は ingest_readings 内）
+_STEP = timedelta(microseconds=1)
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+_last_assigned: dict[UUID, datetime] = {}
 
 # INGEST_RATE_LIMIT=off のときは制限を付けない（実機テスト用の解除モード）。
 # 既定値（100/minute）は本番と同じ。解除中は起動時にログで警告する。
@@ -232,10 +238,15 @@ async def ingest_readings(
 
     # ⑤ バッファに入れる。時刻は、機器の時計ではなく、サーバーが受け取った時刻を使う
     # （機器の timestamp は信頼しない。docs/architecture.md §3 データモデル参照）
-    received_at = datetime.now(UTC)
-    for reading in readings:
+    # 測定値の主キーは (sensor_id, recorded_at) で、同じ時刻の値は 1 件だけ（app/db/models.py）。
+    # このため、センサーごとに「前に割り当てた時刻」を覚え、それより必ず 1 マイクロ秒以上進める。
+    # 1 回の送信内の複数の値も、別々の送信も、時刻が重ならない（時計が戻っても重ならない）。
+    # await を挟まずに割り当てるので、同時に来た送信どうしでも重ならない
+    start = max(datetime.now(UTC), _last_assigned.get(sensor.id, _EPOCH) + _STEP)
+    _last_assigned[sensor.id] = start + _STEP * (len(readings) - 1)
+    for i, reading in enumerate(readings):
         await buffer.add(
-            PendingReading(sensor_id=sensor.id, value=reading.value, recorded_at=received_at)
+            PendingReading(sensor_id=sensor.id, value=reading.value, recorded_at=start + _STEP * i)
         )
 
     return IngestAccepted(accepted=len(readings))

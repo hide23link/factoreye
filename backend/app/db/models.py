@@ -129,18 +129,19 @@ class Sensor(SQLModel, table=True):
 # ──────────────────────────────────────────────────────────────
 class Reading(SQLModel, table=True):
     __tablename__ = "readings"
-    # 複合インデックス: 時系列範囲検索 `WHERE sensor_id = ? AND recorded_at BETWEEN ? AND ?` 用
-    # （TimescaleDB代替、docs/decisions.md（TimescaleDB は見送り）参照）
-    __table_args__ = (Index("ix_reading_sensor_recorded", "sensor_id", "recorded_at"),)
+    # 主キーは (sensor_id, recorded_at)。測定値は「どのセンサーの、いつの値か」で決まるので、
+    # 連番の id と、時系列範囲検索 `WHERE sensor_id = ? AND recorded_at BETWEEN ? AND ?` 用の索引を
+    # 別々に持たず、主キーの索引 1 本で兼ねる（容量が約 4 割減り、書き込みも速い。
+    # 実測は docs/decisions.md（readings の主キーを統合）、TimescaleDB を見送った経緯も同じ）。
+    # 同じセンサーで同じ時刻の値は持てない。取り込みは、1 回の送信内の値の時刻を
+    # マイクロ秒ずつずらして一意にする（app/api/ingest.py）。
 
-    # BigSerial: 時系列データの大量蓄積を想定しBIGINT必須
-    id: int | None = Field(default=None, primary_key=True)
     # センサー削除時に測定値も一緒に物理削除する（2026-10-02、運用者の判断。
     # 旧soft-delete方式は削除済みセンサーと同名・同ingestKeyで再登録できない問題があったため撤廃）
-    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE")
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", primary_key=True)
     value: float
     # ingest時刻を採用（デバイス時刻は信頼しない、Phase 0の簡潔さ重視）
-    recorded_at: datetime = Field(default_factory=_utcnow)
+    recorded_at: datetime = Field(default_factory=_utcnow, primary_key=True)
 
     sensor: Sensor = Relationship(back_populates="readings")
 

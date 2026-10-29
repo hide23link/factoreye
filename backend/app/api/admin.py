@@ -190,7 +190,7 @@ async def _load_user_summaries(
         reading_rows = await session.exec(
             select(
                 col(Sensor.workspace_id),
-                func.count(col(Reading.id)),
+                func.count(1),
                 func.max(col(Reading.recorded_at)),
             )
             .join(Reading, col(Reading.sensor_id) == col(Sensor.id))
@@ -270,7 +270,8 @@ async def overview(
     ).one()
     reading_count = (
         await session.exec(
-            select(func.count(col(Reading.id)))
+            select(func.count(1))
+            .select_from(Reading)
             .join(Sensor, col(Sensor.id) == col(Reading.sensor_id))
             .where(col(Sensor.workspace_id).is_not(None))
         )
@@ -391,7 +392,7 @@ async def get_user(
             reading_rows = await session.exec(
                 select(
                     col(Reading.sensor_id),
-                    func.count(col(Reading.id)),
+                    func.count(1),
                     func.max(col(Reading.recorded_at)),
                 )
                 .where(col(Reading.sensor_id).in_(sensor_ids))

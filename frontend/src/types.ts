@@ -64,7 +64,6 @@ export interface Sensor {
 
 /** 測定値1件（時刻と値）。 */
 export interface Reading {
-  id: number;
   sensorId: string;
   value: number;
   recordedAt: string;

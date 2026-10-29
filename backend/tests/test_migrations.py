@@ -141,3 +141,96 @@ def test_email_lower_index_downgrade_drops_only_lower_index(
     names = _index_names(sync_url)
     assert "ix_users_email_lower" not in names
     assert "ix_users_email" in names
+
+
+# ── readings の主キーを (sensor_id, recorded_at) に統合（g7b8c9d0e1f2） ──────────────
+
+
+def _insert_sensor(sync_url: str) -> str:
+    sensor_id = str(uuid4())
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO sensors (id, name, ingest_key, unit, enabled, created_at, updated_at, "
+            "threshold_dead_band) VALUES (%s, 'テスト', %s, '℃', true, now(), now(), 0)",
+            (sensor_id, uuid4().hex),
+        )
+    return sensor_id
+
+
+def test_readings_pk_migration_keeps_all_rows_including_same_time_duplicates(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    _alembic(async_url, "downgrade", "-1")  # 旧スキーマ（id 主キー）へ
+    sensor_id = _insert_sensor(sync_url)
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        # 旧スキーマでは、同じ時刻の値を複数入れられた。id が小さい 1 行（値 1.0）は元の時刻、
+        # 残り（値 2.0・4.0）は空いている時刻へずらして、すべて残る。
+        # 00:00:00.000001 は別の行（値 5.0）が使っているので、飛ばして .000002・.000003 に入る
+        conn.execute(
+            "INSERT INTO readings (sensor_id, value, recorded_at) VALUES "
+            "(%s, 1.0, '2026-10-25 00:00:00+00'), (%s, 2.0, '2026-10-25 00:00:00+00'), "
+            "(%s, 3.0, '2026-10-25 00:00:01+00'), (%s, 4.0, '2026-10-25 00:00:00+00'), "
+            "(%s, 5.0, '2026-10-25 00:00:00.000001+00')",
+            (sensor_id, sensor_id, sensor_id, sensor_id, sensor_id),
+        )
+
+    _alembic(async_url, "upgrade", "head")
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        columns = [
+            r[0]
+            for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'readings' ORDER BY ordinal_position"
+            )
+        ]
+        rows = conn.execute(
+            "SELECT value, to_char(recorded_at AT TIME ZONE 'UTC', 'HH24:MI:SS.US') "
+            "FROM readings ORDER BY recorded_at"
+        ).fetchall()
+        pk = conn.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'readings'::regclass AND contype = 'p'"
+        ).fetchone()
+        index_rows = conn.execute("SELECT indexname FROM pg_indexes WHERE tablename = 'readings'")
+        indexes = [r[0] for r in index_rows]
+        # 外部キーの CASCADE が残っている（センサーを消すと、測定値も消える）
+        conn.execute("DELETE FROM sensors WHERE id = %s", (sensor_id,))
+        remaining = conn.execute("SELECT count(*) FROM readings").fetchone()
+
+    assert columns == ["sensor_id", "recorded_at", "value"]
+    assert rows == [
+        (1.0, "00:00:00.000000"),
+        (5.0, "00:00:00.000001"),
+        (2.0, "00:00:00.000002"),
+        (4.0, "00:00:00.000003"),
+        (3.0, "00:00:01.000000"),
+    ]
+    assert pk == ("PRIMARY KEY (sensor_id, recorded_at)",)
+    assert indexes == ["readings_pkey"]  # 索引は主キーの 1 本だけ
+    assert remaining == (0,)
+
+
+def test_readings_pk_migration_downgrade_restores_id_and_rows(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    sensor_id = _insert_sensor(sync_url)
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO readings (sensor_id, value, recorded_at) VALUES "
+            "(%s, 1.0, '2026-10-25 00:00:00+00'), (%s, 2.0, '2026-10-25 00:00:01+00')",
+            (sensor_id, sensor_id),
+        )
+
+    _alembic(async_url, "downgrade", "-1")
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        rows = conn.execute("SELECT id, value FROM readings ORDER BY id").fetchall()
+        # アプリ（旧版）と同じく、id を省略して INSERT できる
+        new_id = conn.execute(
+            "INSERT INTO readings (sensor_id, value, recorded_at) "
+            "VALUES (%s, 9.0, '2026-10-25 00:00:02+00') RETURNING id",
+            (sensor_id,),
+        ).fetchone()
+    assert [r[1] for r in rows] == [1.0, 2.0]
+    assert new_id is not None and new_id[0] > rows[-1][0]

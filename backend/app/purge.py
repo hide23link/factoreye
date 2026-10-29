@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, tuple_
 from sqlalchemy.engine import CursorResult
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -50,9 +50,9 @@ async def purge_old_readings() -> int:
     # self-hosted のセンサーは、この条件に入らないので消えない
     multi_tenant_sensor_ids = select(col(Sensor.id)).where(col(Sensor.workspace_id).is_not(None))
 
-    # 1 回分の対象（古い順に、上限まで）。id（主キー）で絞って消す
-    batch_ids = (
-        select(col(Reading.id))
+    # 1 回分の対象（古い順に、上限まで）。主キー (sensor_id, recorded_at) の組で絞って消す
+    batch_keys = (
+        select(col(Reading.sensor_id), col(Reading.recorded_at))
         .where(
             col(Reading.recorded_at) < cutoff,
             col(Reading.sensor_id).in_(multi_tenant_sensor_ids),
@@ -62,7 +62,7 @@ async def purge_old_readings() -> int:
     )
     stmt = (
         delete(Reading)
-        .where(col(Reading.id).in_(batch_ids))
+        .where(tuple_(col(Reading.sensor_id), col(Reading.recorded_at)).in_(batch_keys))
         .execution_options(synchronize_session=False)
     )
 

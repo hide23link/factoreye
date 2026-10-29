@@ -175,7 +175,7 @@ async def workspaces(conn: asyncpg.Connection) -> list[WorkspaceRow]:
     if not {"sensors", "readings"} <= tables:
         return []
     per_ws = await conn.fetch(
-        "SELECT s.workspace_id, count(DISTINCT s.id) AS sensors, count(r.id) AS readings,"
+        "SELECT s.workspace_id, count(DISTINCT s.id) AS sensors, count(r.sensor_id) AS readings,"
         " max(r.recorded_at) AS latest"
         " FROM sensors s LEFT JOIN readings r ON r.sensor_id = s.id GROUP BY s.workspace_id"
     )

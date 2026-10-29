@@ -114,7 +114,7 @@ describe("SensorSettingsPanel", () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({
-      readings: [{ id: 1, sensorId: "s1", value: 25.3, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      readings: [{ sensorId: "s1", value: 25.3, recordedAt: "2024-01-01T00:00:00.000Z" }],
       total: 1,
     });
     vi.mocked(api.createSensor).mockResolvedValue(sensor);

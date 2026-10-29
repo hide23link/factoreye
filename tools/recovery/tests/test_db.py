@@ -14,7 +14,15 @@ from recovery.app import create_app
 from recovery.config import Settings
 from recovery.scratch import LoadError, Scratch, db_name_for, scan_roles
 from recovery.sources import LocalSource
-from tests.conftest import DUMP_SQL, SCRATCH_DSN, WS_A, WS_B, needs_db, write_dump
+from tests.conftest import (
+    DUMP_SQL,
+    OLD_READINGS_DUMP_SQL,
+    SCRATCH_DSN,
+    WS_A,
+    WS_B,
+    needs_db,
+    write_dump,
+)
 
 pytestmark = needs_db
 
@@ -82,6 +90,23 @@ async def test_load_and_summarize(tmp_path: Path, scratch: Scratch) -> None:
 
     await scratch.drop(name)
     assert not await scratch.is_loaded(name)
+
+
+async def test_load_and_summarize_backup_with_readings_id(
+    tmp_path: Path, scratch: Scratch
+) -> None:
+    # 主キー統合の前に取ったバックアップ（readings に id 列がある）も、件数を数えられる
+    name = _unique()
+    await scratch.load(name, write_dump(tmp_path, name, OLD_READINGS_DUMP_SQL))
+
+    async with dbinfo.read_only(scratch.dsn_for(name)) as conn:
+        s = await dbinfo.summarize(conn)
+        ws = await dbinfo.workspaces(conn)
+    assert s.table_counts["readings"] == 3
+    a = next(w for w in ws if w.id == WS_A)
+    assert (a.sensors, a.readings) == (1, 2)
+
+    await scratch.drop(name)
 
 
 async def test_failed_load_leaves_no_database(tmp_path: Path, scratch: Scratch) -> None:

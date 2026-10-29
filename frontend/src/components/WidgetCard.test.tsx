@@ -111,7 +111,7 @@ describe("WidgetCard", () => {
       },
     ]);
     vi.mocked(api.fetchSensorReadings).mockResolvedValue({
-      readings: [{ id: 1, sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
+      readings: [{ sensorId: "s1", value: 5, recordedAt: "2024-01-01T00:00:00.000Z" }],
       total: 1,
     });
 
