@@ -25,10 +25,25 @@ from recovery.dbinfo import list_tables
 _BATCH = 5000
 # 書き戻しの 1 つの SQL の上限（測定値が多いワークスペースでも終わるように、閲覧より長くする）
 MERGE_STATEMENT_TIMEOUT_MS = 600_000
+# 測定値の表のロックを待つ上限（取れなければ、書き込まずに中止する）
+READINGS_LOCK_TIMEOUT = "10s"
 
 
 class MergeError(Exception):
     pass
+
+
+class SchemaMismatch(MergeError):
+    """スキーマの版（Alembic）が違う。列の意味が違いうるので、書き戻さない。"""
+
+    def __init__(self, backup: str | None, current: str | None) -> None:
+        if current is None:
+            hint = "今の DB にスキーマがありません。本番のスタックを起動してください"
+        else:
+            hint = "同じ版のバックアップを使うか、本番を同じ版のコードで起動し直してください"
+        super().__init__(f"スキーマの版が違います（バックアップ {backup} / 今 {current}）。{hint}")
+        self.backup = backup
+        self.current = current
 
 
 @dataclass(frozen=True)
@@ -317,6 +332,28 @@ async def _advance_sequence(dst: asyncpg.Connection, table: str) -> None:
         await dst.execute("SELECT setval($1::regclass, $2, true)", seq, max_id)
 
 
+_KEY_COLUMNS_RE = re.compile(r"^Key \(([^)]*)\)=")
+
+
+def describe_pg_error(table: str, e: asyncpg.PostgresError) -> str:
+    """DB のエラーを、人が読める文にする。行の値（メールなど）は出さず、表・制約・列の名前だけ。"""
+    detail = getattr(e, "detail", None) or ""
+    m = _KEY_COLUMNS_RE.match(detail)
+    columns = f"、列 {m.group(1)}" if m else ""
+    constraint = getattr(e, "constraint_name", None)
+    name = f"（制約 {constraint}{columns}）" if constraint else ""
+    if isinstance(e, asyncpg.UniqueViolationError):
+        what = f"一意制約の衝突{name}: 同じ値の別の行が、今の DB にあります"
+    elif isinstance(e, asyncpg.ForeignKeyViolationError):
+        what = f"外部キーの違反{name}: 参照先の行が、今の DB にありません"
+    else:
+        what = f"DB のエラー（{type(e).__name__}）"
+    return (
+        f"{table}: {what}。何も書き込んでいません。"
+        "衝突した行を今の DB 側で直してから、もう一度実行してください"
+    )
+
+
 def _rowcount(status: str) -> int:
     return int(status.rsplit(" ", 1)[-1])
 
@@ -346,14 +383,10 @@ def check_mode(sel: MergeSelection, target_mode: str | None) -> None:
             )
 
 
-async def merge(
-    src: asyncpg.Connection,
-    dst: asyncpg.Connection,
-    sel: MergeSelection,
-    apply: bool,
-    target_mode: str | None = None,
-) -> MergeResult:
-    """src（展開したバックアップ）から dst（今の DB）へ。apply=False なら最後に取り消す。"""
+async def _check_source(
+    src: asyncpg.Connection, dst: asyncpg.Connection, sel: MergeSelection, target_mode: str | None
+) -> set[str]:
+    """書き戻しの前提（選択・所属・スキーマの版）を確かめ、src にある表の集合を返す。"""
     if not sel.workspace_ids and not sel.include_self_hosted:
         raise MergeError("書き戻すワークスペースを選んでください")
     check_mode(sel, target_mode)
@@ -364,35 +397,40 @@ async def merge(
     src_ver, dst_ver = await _alembic(src), await _alembic(dst)
     if src_ver != dst_ver:
         # 列の意味が版で変わっている可能性があるため、同じ版どうしに限る
-        raise MergeError(
-            f"スキーマの版が違います（バックアップ {src_ver} / 今 {dst_ver}）。"
-            "同じ版のバックアップを使ってください"
-        )
-    src_tables = set(await list_tables(src))
+        raise SchemaMismatch(src_ver, dst_ver)
+    return set(await list_tables(src))
+
+
+async def merge_many(
+    sources: list[tuple[asyncpg.Connection, MergeSelection]],
+    dst: asyncpg.Connection,
+    apply: bool,
+    target_mode: str | None = None,
+) -> list[MergeResult]:
+    """複数の元（R2 の復旧と引き継ぎなど）を、順に、1 つのトランザクションで dst に足す。
+
+    後の元は、先の元が足した行も「既にある」として数える（件数は、順に足した結果と一致する）。
+    apply=False なら最後に取り消す。
+    """
+    src_tables = [await _check_source(src, dst, sel, target_mode) for src, sel in sources]
     dst_tables = set(await list_tables(dst))
 
-    results: list[TableResult] = []
+    results: list[MergeResult] = []
     tr = dst.transaction()
     await tr.start()
     try:
-        for i, spec in enumerate(specs_for(sel)):
-            if spec.table not in src_tables or spec.table not in dst_tables:
-                results.append(TableResult(spec.table, 0, 0, 0, "テーブルが無いため飛ばしました"))
-                continue
-            if (
-                not sel.remaps
-                and spec.table == "notification_settings"
-                and spec.nullable_key
-                and not sel.include_self_hosted
-            ):
-                continue
-            try:
-                results.append(
-                    await _merge_table(src, dst, spec, sel, f"_merge_{i}_{spec.table}", apply)
+        # 書き戻しの間、測定値の挿入（機器からの再送を含む）を待たせる。readings には
+        # (sensor_id, recorded_at) の一意制約が無く、割り込まれると重複ができるため。
+        # SHARE ROW EXCLUSIVE は、読み取りは止めず、挿入・更新・削除と、別の書き戻しを待たせる
+        # 試算は最後に取り消すだけなので、ロックは実行のときだけ取る。取れなければ中止する
+        if apply and "readings" in dst_tables:
+            await _lock_readings(dst)
+        for j, ((src, sel), tables_in_src) in enumerate(zip(sources, src_tables, strict=True)):
+            results.append(
+                MergeResult(
+                    apply, await _merge_source(src, dst, sel, j, tables_in_src, dst_tables, apply)
                 )
-            except asyncpg.PostgresError as e:
-                # 外部キー・一意制約の違反（例: 同じメールの別のユーザーが今の DB にいる）
-                raise MergeError(f"{spec.table}: {e}") from e
+            )
     except BaseException:
         await tr.rollback()
         raise
@@ -400,4 +438,59 @@ async def merge(
         await tr.commit()
     else:
         await tr.rollback()
-    return MergeResult(apply, results)
+    return results
+
+
+async def _lock_readings(dst: asyncpg.Connection) -> None:
+    await dst.execute(f"SET LOCAL lock_timeout = '{READINGS_LOCK_TIMEOUT}'")
+    try:
+        await dst.execute("LOCK TABLE public.readings IN SHARE ROW EXCLUSIVE MODE")
+    except asyncpg.LockNotAvailableError:
+        raise MergeError(
+            f"測定値の表のロックを {READINGS_LOCK_TIMEOUT} 以内に取れませんでした"
+            "（機器からの取り込みが続いています）。取り込みを止めるか減らして、"
+            "もう一度実行してください。何も書き込んでいません"
+        ) from None
+    await dst.execute("SET LOCAL lock_timeout = 0")  # 以降の処理は、待たされても止めない
+
+
+async def _merge_source(
+    src: asyncpg.Connection,
+    dst: asyncpg.Connection,
+    sel: MergeSelection,
+    index: int,
+    src_tables: set[str],
+    dst_tables: set[str],
+    apply: bool,
+) -> list[TableResult]:
+    results: list[TableResult] = []
+    for i, spec in enumerate(specs_for(sel)):
+        if spec.table not in src_tables or spec.table not in dst_tables:
+            results.append(TableResult(spec.table, 0, 0, 0, "テーブルが無いため飛ばしました"))
+            continue
+        if (
+            not sel.remaps
+            and spec.table == "notification_settings"
+            and spec.nullable_key
+            and not sel.include_self_hosted
+        ):
+            continue
+        try:
+            results.append(
+                await _merge_table(src, dst, spec, sel, f"_merge_{index}_{i}_{spec.table}", apply)
+            )
+        except asyncpg.PostgresError as e:
+            # 外部キー・一意制約の違反（例: 同じメールの別のユーザーが今の DB にいる）
+            raise MergeError(describe_pg_error(spec.table, e)) from e
+    return results
+
+
+async def merge(
+    src: asyncpg.Connection,
+    dst: asyncpg.Connection,
+    sel: MergeSelection,
+    apply: bool,
+    target_mode: str | None = None,
+) -> MergeResult:
+    """src（展開したバックアップ）から dst（今の DB）へ。apply=False なら最後に取り消す。"""
+    return (await merge_many([(src, sel)], dst, apply, target_mode))[0]

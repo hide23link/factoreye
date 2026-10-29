@@ -40,11 +40,11 @@ export const DEFAULT_RANGE: TimeRange = { mode: "relative", durationMs: HOUR };
 const MIN_DURATION_MS = MINUTE;
 
 /**
- * 表示できる最長の期間。SaaS（Free Tier）は測定値の保持が 90 日のため 90 日まで。
+ * 表示できる最長の期間。SaaS（Free Tier）は測定値の保持が 14 日のため 14 日まで。
  * self-hosted は保持期間の制限が無いので、上限を設けない。
  */
 export function maxRangeMs(isMultiTenant: boolean): number {
-  return isMultiTenant ? 90 * DAY : Number.POSITIVE_INFINITY;
+  return isMultiTenant ? 14 * DAY : Number.POSITIVE_INFINITY;
 }
 
 /** このビルド（VITE_AUTH_MODE）での、表示できる最長の期間 */
@@ -172,7 +172,8 @@ export function fromSearchParams(search: string): TimeRange | null {
   const rangeKey = params.get("range");
   if (rangeKey) {
     const durationMs = parseDuration(rangeKey);
-    return durationMs === null ? null : { mode: "relative", durationMs };
+    // 保持期間より長い範囲（古い URL の ?range=30d など）は、表示できる最長に丸める（空のグラフと食い違う表示を避ける）
+    return durationMs === null ? null : { mode: "relative", durationMs: Math.min(durationMs, maxRangeForBuild()) };
   }
   const fromText = params.get("from");
   const toText = params.get("to");

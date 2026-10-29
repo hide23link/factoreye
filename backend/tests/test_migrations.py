@@ -157,19 +157,22 @@ def _insert_sensor(sync_url: str) -> str:
     return sensor_id
 
 
-def test_readings_pk_migration_keeps_rows_and_drops_same_time_duplicates(
+def test_readings_pk_migration_keeps_all_rows_including_same_time_duplicates(
     migrated_db: tuple[str, str],
 ) -> None:
     async_url, sync_url = migrated_db
     _alembic(async_url, "downgrade", "-1")  # 旧スキーマ（id 主キー）へ
     sensor_id = _insert_sensor(sync_url)
     with psycopg.connect(sync_url, autocommit=True) as conn:
-        # 旧スキーマでは、同じ時刻の値を複数入れられた。id が小さい 1 行（値 1.0）だけが残る
+        # 旧スキーマでは、同じ時刻の値を複数入れられた。id が小さい 1 行（値 1.0）は元の時刻、
+        # 残り（値 2.0・4.0）は空いている時刻へずらして、すべて残る。
+        # 00:00:00.000001 は別の行（値 5.0）が使っているので、飛ばして .000002・.000003 に入る
         conn.execute(
             "INSERT INTO readings (sensor_id, value, recorded_at) VALUES "
             "(%s, 1.0, '2026-10-25 00:00:00+00'), (%s, 2.0, '2026-10-25 00:00:00+00'), "
-            "(%s, 3.0, '2026-10-25 00:00:01+00')",
-            (sensor_id, sensor_id, sensor_id),
+            "(%s, 3.0, '2026-10-25 00:00:01+00'), (%s, 4.0, '2026-10-25 00:00:00+00'), "
+            "(%s, 5.0, '2026-10-25 00:00:00.000001+00')",
+            (sensor_id, sensor_id, sensor_id, sensor_id, sensor_id),
         )
 
     _alembic(async_url, "upgrade", "head")
@@ -181,7 +184,10 @@ def test_readings_pk_migration_keeps_rows_and_drops_same_time_duplicates(
                 "WHERE table_name = 'readings' ORDER BY ordinal_position"
             )
         ]
-        rows = conn.execute("SELECT value FROM readings ORDER BY recorded_at").fetchall()
+        rows = conn.execute(
+            "SELECT value, to_char(recorded_at AT TIME ZONE 'UTC', 'HH24:MI:SS.US') "
+            "FROM readings ORDER BY recorded_at"
+        ).fetchall()
         pk = conn.execute(
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
             "WHERE conrelid = 'readings'::regclass AND contype = 'p'"
@@ -193,7 +199,13 @@ def test_readings_pk_migration_keeps_rows_and_drops_same_time_duplicates(
         remaining = conn.execute("SELECT count(*) FROM readings").fetchone()
 
     assert columns == ["sensor_id", "recorded_at", "value"]
-    assert [r[0] for r in rows] == [1.0, 3.0]
+    assert rows == [
+        (1.0, "00:00:00.000000"),
+        (5.0, "00:00:00.000001"),
+        (2.0, "00:00:00.000002"),
+        (4.0, "00:00:00.000003"),
+        (3.0, "00:00:01.000000"),
+    ]
     assert pk == ("PRIMARY KEY (sensor_id, recorded_at)",)
     assert indexes == ["readings_pkey"]  # 索引は主キーの 1 本だけ
     assert remaining == (0,)

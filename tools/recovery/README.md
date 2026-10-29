@@ -42,6 +42,54 @@ DB を丸ごと戻す場合は、`infra/restore.sh` を使います。
 - 直前の控えから DB を丸ごと戻すと、控えを取った後に届いた測定値は失われます
 - バックアップと今の DB のスキーマの版（Alembic）が違うときは、書き戻せません
 
+### 引き継ぎからの書き戻し（控え＝AWS が稼いだデータ）
+
+本番が止まっている間、AWS の控えが動き、**増加分の縮小ダンプ**を R2 の `handoff-inc/` に置きます（`tools/aws-dr/handoff.sh`。小さい表は全体、`readings`・`alarms` は起点以降の行だけ。`latest.json` に種類・起点・スキーマの版・台の ID・リージョン）。本番に復帰したら、そのうち**本番に無い行だけ**を足します（今ある行は変えない・消さない。何度実行しても二重にならない）。
+
+- **使い方（普通）**: 本番アプリの管理画面（`/admin`）の「書き戻し」で、一覧 → 試算 → 確認 → 実行。本番アプリ（backend）が、内部ネットワークでこのツールの API を呼びます
+- **使い方（直接）**: このツールの画面・API でも行えます。`GET /api/handoffs`（一覧）、`POST /api/handoffs/<handoff-factoreye-日時.sql.gz>/failback`（本文 `{}` が試算、`{"apply": true, "expected_inserted": <試算の合計>}` が実行）
+- **設定**: `HANDOFF_SOURCE=s3://<バケット>/<接頭辞>/handoff-inc`（ディレクトリでもよい）。鍵と `S3_ENDPOINT_URL`（R2）は `BACKUP_SOURCE` と同じものを読む（`s3:ListBucket` と `s3:GetObject` だけの鍵）。書き戻しには `TARGET_WRITE_DATABASE_URL` と `TARGET_MODE`（SaaS 版は `saas`）も必要です。backend から呼ぶには、このツールが本番のネットワーク（`factoreye-cloud`。`docker-compose.lxc.yml`）に入っていて、backend の `FAILBACK_RECOVERY_PASSWORD` がここの `RECOVERY_PASSWORD` と同じ値であること
+- **処理**: 引き継ぎを取得 → sha256・gzip を検証（壊れていれば使わない）→ 作業用の Postgres に展開 → 書き戻し（試算・実行は上の「書き戻し」と同じ処理: 直前の本番の控え `before-merge-*`、1 つのトランザクション、試算の件数との再確認）→ 展開を消す。対象は縮小ダンプの全ワークスペース（OSS 版の今の DB なら、ワークスペースに属さないデータ）
+- **規則**: 測定値は（センサー, 時刻）で重複を避け、id は今の DB で採番する。アラームは id で判定し、今の DB の同じセンサーに発生中のものがあれば、足すほうを解除済みにする。int の連番（OSS 版の通知設定）は、足した最大の id まで進める。親の行が無い子の行（縮小ダンプにセンサーが無い測定値など）は足さない
+- **前提**: 本番と控えのスキーマの版（Alembic）が同じこと。違えば書き込まずに 409 で警告します
+- **制限**: 控えの稼働中の、既存の行の更新・削除（パスワードの変更など）は戻りません。起点より前に発生して、起点以降に解除されたアラームの変化も戻りません
+- **削除済みの行が復活します**: 本番に復帰したあとに利用者が削除したセンサー・ダッシュボード・ウィジェット・Webhook・利用者は、縮小ダンプに残っていれば戻ります（「無い行を足す」ため、削除と区別できません）。復帰後に削除が多かった場合は、書き戻す前に試算の件数を確かめてください
+- **書き戻す前に**: 取り込み（機器からの送信）を止めるか減らしてください。書き戻しの**実行**の間（試算では取りません）、`readings` に `SHARE ROW EXCLUSIVE` のロックを取り、測定値の挿入を待たせます（再送の割り込みで（センサー, 時刻）の重複ができないように。安全ですが、待たされます）。ロックを 10 秒以内に取れなければ、何も書かずに中止します（取り込みを止めるか減らして、もう一度）
+- **取り消し**: 直前の控え `before-merge-*` から DB 全体を戻すと、控えの後に届いた新しい行も消えます。**書き戻した行だけを消す手順はありません**。実行前に、試算で確認してください
+- **検証**: `.sha256` が無い、または一致しない引き継ぎは使いません（強制する口はありません）。種類は `latest.json` の記録で確かめるので、**最新の 1 件だけ**書き戻せます（`latest.json` が無い・読めない、記録の名前と違う、種類が `reduced` でない、のいずれも拒否）
+- **一意制約の衝突**: 本番に同じ値の別の行があると（例: 同じメールの別のユーザー）、全体を取り消して止まります（何も書きません）。画面には、表・制約・列の名前だけが出ます（行の値は出しません）。衝突した行を本番側で直してから、もう一度実行します
+
+### R2 から復旧する（Proxmox が消えたとき・データが不完全なとき）
+
+本番（Proxmox の LXC）が消えた、またはデータが一部しか無いときに、R2 のバケット `factoreye-db` に残っている WAL-G のバックアップ（ベース ＋ WAL）から、**本番に無い行だけ**を足します。毎晩の pg_dump は廃止済みなので、論理ダンプの全体はありません。引き継ぎ（上の節）は、控えの稼働中の増加分だけです。
+
+- **仕組み**: 復旧ツールのコンテナの中で、WAL-G の `backup-fetch LATEST` で最新のベースを作業用の領域（専用の PGDATA）に展開 → `recovery.signal` と `restore_command`（`wal-g wal-fetch`）を置き、一時的な PostgreSQL 15（TCP を開かず unix ソケットだけ、`archive_mode=off`）で WAL を最新まで再生 → 昇格後の DB を、書き戻し（merge）の入力にする。使い終わったら（画面の「作業用の復元を消す」）PostgreSQL を止めて、作業用の領域を消します
+- **使う WAL-G のコマンドは読み取りだけ**: `backup-list`・`backup-fetch`・`wal-fetch`。書き込み・削除系（`backup-push`・`wal-push`・`delete`）はコードにありません（試験で R2 の代わりの置き場を作るときだけ、試験の準備で使います）。鍵は、本番の `walg.env` のもの（読み書き）をそのまま使えます。読み取りだけの鍵でも動きます
+- **設定**: `tools/recovery/walg/walg.env` に、本番の `walg.env` と同じ形式で書く（`infra/walg/walg.env.example` を参照。`AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_ENDPOINT`・`AWS_S3_FORCE_PATH_STYLE`・`AWS_REGION`・`WALG_S3_PREFIX=s3://factoreye-db`）。権限 600、Git 管理外（`.gitignore` 済み）。compose がこのディレクトリを `/etc/recovery/walg` に読み取り専用で渡し、`WALG_ENV_FILE` が指します。ファイルが無ければ、この機能は使えません。書き戻しには、`TARGET_WRITE_DATABASE_URL`・`TARGET_MODE` も要ります
+- **walg.env の所有者・権限・グループ**: コンテナは uid 10001（`recovery`）で動きます。次のいずれかにします。(a) 所有者を uid 10001、権限 600（`sudo chown 10001 walg/walg.env && sudo chmod 600 walg/walg.env`）。(b) 権限 640 にして、ファイルのグループを `BACKUP_GID`（バックアップを読むグループ。既定 0）に合わせる（`sudo chgrp <BACKUP_GID> walg/walg.env`。コンテナは `group_add` でそのグループに入る）。(c) グループを `BACKUP_GID` と別にしたいときだけ、`.env` に `WALG_GID`（`stat -c %g walg/walg.env`）を設定し、`docker-compose.walg.yml` を重ねる（`-f docker-compose.yml -f docker-compose.lxc.yml -f docker-compose.walg.yml`）。**同じ値を 2 つ渡すと docker compose がエラーにする**ので、(c) は `BACKUP_GID` と違うときだけです。**読めないときも、復旧ツールは起動します**（他の機能は使えます）。R2 からの復旧だけが無効になり、画面に理由（`WALG_ENV_FILE を読めません`）が出ます。UTF-8 でないファイルも同様です。`GET /api/info` の `r2_error` でも分かります
+- **設定の扱い（安全策）**: 復元した PostgreSQL は、バックアップの `postgresql.conf`・`pg_hba.conf`・`postgresql.auto.conf` を**使わず**、最小の自前の設定に置き換えて起動します（`shared_preload_libraries` などで、改ざんされたバックアップのコードを実行されないため。`pg_hba.conf` は `local all all trust` だけ）。R2 の鍵は PostgreSQL のプロセスの環境には渡さず、権限 600 のファイルから `restore_command` の包みが読みます（作業領域と一緒に消えます）。失敗の文にも、鍵の値は出しません（`***` に伏せる。長い値から先に置き換え、切り出しの前に伏せる）。バックアップにシンボリックリンクが仕込まれていても、リンク先は書き換えません（リンクを消して新しく作る）。merge の元は、昇格後の DB に作る管理者ではない読み取りロール（`pg_read_all_data`）で読みます。作業領域は `R2_RESTORE_DIR` の中の `work` だけを消します（`R2_RESTORE_DIR` 自体と、ほかのファイルは消しません）
+- **空き容量の確認**: 復元の前に、ベースの大きさ ＋ 余裕を `R2_RESTORE_DIR` の空きと比べ、足りなければすぐ失敗して理由を出します。復旧ツールの起動時に、前回の落ちた残りを消します
+- **作業用の復元が残っている間**（準備完了）は、もう一度「復元する」ことはできません（進行中の書き戻しの入力が消えるため）。「作業用の復元を消す」を先に押します
+- **イメージ**: PostgreSQL 15（Debian 版）と WAL-G（v3.0.9。バージョンとハッシュを固定）が入ります（本番の `infra/cloud/postgres/Dockerfile` と同じ）。イメージは大きくなります
+- **空き容量**: 作業用の領域（`R2_RESTORE_DIR`、既定 `/var/lib/recovery/r2restore`、ボリューム `recovery-data`）に、本番の DB と同じ大きさ（と WAL の分）の空きが要ります
+- **流れ（管理画面 `/admin` の「R2 から復旧する」）**: ① 復元を始める（取得中 → 再生中 → 準備完了。数分かかる。裏で進むので画面を閉じても進む）と、最新のベースの日時・WAL の最終時刻・最新の測定値の時刻・スキーマの版が出る → ② 試算（表ごとの、本番に無い行数。何も書かない）→ ③ 確認の小窓 → ④ 実行（直前の控え `before-merge-*` → 1 つのトランザクション。試算の件数と実行の直前の件数が一致したときだけ）→ ⑤ 結果。「引き継ぎも合わせる」を選ぶと、R2 → 引き継ぎの順に、同じトランザクションで足します（件数は、順に足した結果と一致します）
+- **スキーマの版（Alembic）**: 本番と R2 のバックアップで違うときは、書き込まずに拒否し、版を 2 つ表示します。本番を、バックアップと同じ版のコードで起動し直してください。本番の DB にスキーマが無いとき（backend が一度も起動していない）も拒否します
+- **時間**: 復元は復旧ツールの裏のジョブで進みます。試算・実行は同期で、backend の時間切れは既定 600 秒（`FAILBACK_TIMEOUT_SECONDS`、上限 900）。時間切れ（504）になっても復旧ツールの処理は続くことがあります。再度試算して、追加が 0 件なら、書き戻しは完了しています
+- **戻らないもの**: ログインの状態（`refresh_tokens`）は戻しません。利用者は、ログインし直します。バックアップの最終時刻より後のデータは、R2 にありません
+
+#### 手順: Proxmox が消えたとき
+
+1. LXC を作り直し、本番のスタック（`docker-compose.cloud.yml`）を起動する。DB は空だが、backend が起動時にスキーマ（Alembic）を作る。**backend のコードは、R2 のバックアップと同じ版にする**（古い版のバックアップなら、その版のコードで起動）
+2. 復旧ツール（`docker-compose.yml` ＋ `docker-compose.lxc.yml`）を起動する。`.env`（`RECOVERY_PASSWORD`・`TARGET_DATABASE_URL`・`TARGET_WRITE_DATABASE_URL`・`TARGET_MODE=saas`・`HANDOFF_SOURCE`）と `walg/walg.env` を置く。backend の `.env` に `FAILBACK_RECOVERY_PASSWORD`（`RECOVERY_PASSWORD` と同じ値）を設定する
+3. `/admin` の「R2 から復旧する」で、復元 → 試算 → 実行。AWS の控えが動いていたなら、「引き継ぎも合わせる」を選ぶ
+4. 結果を確かめ（利用者の数・センサー・最新の測定値）、再度試算して 0 件であることを確かめ、「作業用の復元を消す」
+5. 本番が完全に空のときは、物理の復元（`infra/walg/` に復元スクリプトを足し、ボリュームへ復元）のほうが速く確実です。これは別の変更で扱います（この変更では足していません）
+
+#### 手順: データが不完全なとき
+
+本番は動いているが、一部の利用者・期間のデータが無いとき。本番のスタックはそのまま、「R2 から復旧する」で試算し、本番に無い行だけを足します（今ある行は変わりません）。バックアップの最終時刻より新しいデータは、もともと本番にだけあります。
+
+
 ### OSS 版 ⇄ SaaS 版
 
 バックアップと今の DB の版（OSS 版・SaaS 版）が違っても、所属を付け替えて書き戻せます。今の DB がどちらかは `TARGET_MODE` で指定します（データの中身からは判断しません。空の SaaS 版は OSS 版と見分けられないため）。
@@ -128,6 +176,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE factoreye IN SCHEMA public GRANT SELECT ON TAB
 | `TARGET_DATABASE_URL` | なし | 今の DB。読み取り専用で接続する |
 | `TARGET_WRITE_DATABASE_URL` | なし | 書き戻しに使う、今の DB への書き込みできる接続。無ければ書き戻しは使えない。設定するには `TARGET_DATABASE_URL` と `TARGET_MODE` も必要（無いと起動時にエラー） |
 | `TARGET_MODE` | なし（書き戻しを使うなら必須） | 今の DB が SaaS 版なら `saas`、OSS 版なら `oss` |
+| `WALG_ENV_FILE` | なし（compose では `/etc/recovery/walg/walg.env`） | R2 の WAL-G のバックアップから復旧する設定ファイル（`walg.env` と同じ形式）。無ければ「R2 から復旧する」は使えない |
+| `R2_RESTORE_DIR` | `/var/lib/recovery/r2restore` | R2 から復元した DB の作業用の領域（使い終わったら消す） |
+| `HANDOFF_SOURCE` | なし | 控え（AWS）が置いた縮小ダンプの読み込み元（`s3://<バケット>/<接頭辞>/handoff-inc` かディレクトリ）。無ければ、引き継ぎからの書き戻しは使えない |
 | `AWS_ACCESS_KEY_ID` など | なし | S3 の認証。`s3:ListBucket` と `s3:GetObject` だけの鍵にする |
 | `S3_ENDPOINT_URL` | なし | S3 互換のサービス（MinIO など） |
 | `BACKUP_GID` | `0` | バックアップのファイル（640）のグループ。コンテナはこのグループで読む |

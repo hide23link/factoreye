@@ -1,6 +1,6 @@
-"""定期削除バッチ（Free Tier の 90日データ、期限切れのリフレッシュトークン）。
+"""定期削除バッチ（Free Tier の 14日データ、期限切れのリフレッシュトークン）。
 
-毎日 UTC 03:00 に実行し、90日以上前の Reading と、有効期限が切れたリフレッシュトークンを削除する。
+毎日 UTC 03:00 に実行し、14日以上前の Reading と、有効期限が切れたリフレッシュトークンを削除する。
 Reading は self-hosted（workspace_id IS NULL のセンサー）を対象外とする。
 
 なぜ SaaS だけか: OSS（self-hosted）の利用者は、測定値を無期限に残すかどうかを自分で決める。
@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, tuple_
 from sqlalchemy.engine import CursorResult
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -23,39 +23,57 @@ from app.db.models import Reading, RefreshToken, Sensor
 from app.db.session import engine
 
 # 測定値を残す日数（SaaS の無料枠の上限）
-_RETENTION_DAYS = 90
+_RETENTION_DAYS = 14
 # 有効期限が切れてから、リフレッシュトークンを残す日数。
 # 期限切れのトークンは更新に使えない（auth.refresh が拒否する）ので、削除しても挙動は変わらない。
 # 時計のずれや、障害調査で直近の行を見たい場合に備えて、少しだけ残す
 _REFRESH_TOKEN_GRACE_DAYS = 7
-# 1 回の DELETE で消す最大件数。大量にあっても、長いロックを取らないための区切り
+# 1 回の DELETE で消す最大件数（リフレッシュトークン）。
+# 大量にあっても、長いロックを取らないための区切り
 _PURGE_BATCH_SIZE = 1000
+# 測定値は件数が桁違いに多い（初回は数百万行）ので、区切りを大きくする。
+# 1 回ごとにコミットするので、WAL は少しずつ増える
+_READINGS_PURGE_BATCH_SIZE = 10000
 _logger = logging.getLogger(__name__)
 
 
 async def purge_old_readings() -> int:
-    """90日以上前の Reading を削除し、削除件数を返す。"""
+    """14日以上前の Reading を削除し、削除件数を返す。
+
+    _READINGS_PURGE_BATCH_SIZE 件ずつ、別のトランザクションで消す。
+    初回など、一度に数百万行が対象になるときも、長いロックを取らず、
+    WAL（バックアップの送信）を一度に増やさないため。
+    """
     cutoff = datetime.now(UTC) - timedelta(days=_RETENTION_DAYS)
 
     # 対象は、ワークスペースに属するセンサー（workspace_id が NULL でないもの）の測定値だけ。
     # self-hosted のセンサーは、この条件に入らないので消えない
     multi_tenant_sensor_ids = select(col(Sensor.id)).where(col(Sensor.workspace_id).is_not(None))
 
-    stmt = (
-        delete(Reading)
+    # 1 回分の対象（古い順に、上限まで）。主キー (sensor_id, recorded_at) の組で絞って消す
+    batch_keys = (
+        select(col(Reading.sensor_id), col(Reading.recorded_at))
         .where(
             col(Reading.recorded_at) < cutoff,
             col(Reading.sensor_id).in_(multi_tenant_sensor_ids),
         )
+        .order_by(col(Reading.recorded_at))
+        .limit(_READINGS_PURGE_BATCH_SIZE)
+    )
+    stmt = (
+        delete(Reading)
+        .where(tuple_(col(Reading.sensor_id), col(Reading.recorded_at)).in_(batch_keys))
         .execution_options(synchronize_session=False)
     )
 
-    # 削除は1回の SQL で行う（件数が多くても、1件ずつ消さない）
-    async with AsyncSession(engine) as session:
-        result = cast(CursorResult[Any], await session.execute(stmt))
-        await session.commit()
-
-    deleted = result.rowcount
+    deleted = 0
+    while True:
+        async with AsyncSession(engine) as session:
+            result = cast(CursorResult[Any], await session.execute(stmt))
+            await session.commit()
+        deleted += result.rowcount
+        if result.rowcount < _READINGS_PURGE_BATCH_SIZE:  # 最後の回（対象が尽きた）
+            break
     _logger.info("purge_old_readings: deleted %d rows (cutoff=%s)", deleted, cutoff.date())
     return deleted
 

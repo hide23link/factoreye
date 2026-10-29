@@ -26,7 +26,7 @@ import {
 } from "../lib/timeRange";
 import { useTimeRangeStore } from "../store/useTimeRangeStore";
 
-// ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS は保持期間（90 日）まで
+// ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS は保持期間（14 日）まで
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
 
 /** ミリ秒を、datetime-local の入力欄の書式（YYYY-MM-DDTHH:mm、ローカル時刻）にする */
@@ -51,6 +51,9 @@ export function TimeRangeControls() {
   const now = Date.now();
   const maxMs = maxRangeMs(IS_MULTI_TENANT);
   const bounds = resolveRange(range, now);
+  // 保持期間（maxMs）を超えるプリセット（例: 30 日）は、選択肢に出さない
+  const presetKey = presetKeyOf(range);
+  const visiblePresetKey = PRESETS.some((p) => p.key === presetKey && p.durationMs <= maxMs) ? presetKey : null;
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -131,19 +134,19 @@ export function TimeRangeControls() {
       <span className="inline-block">
       <select
         aria-label="表示期間"
-        value={presetKeyOf(range) ?? "custom"}
+        value={visiblePresetKey ?? "custom"}
         onChange={(event) => {
           const preset = PRESETS.find((p) => p.key === event.target.value);
           if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
         }}
         className="rounded border border-gray-300 px-2 py-1"
       >
-        {PRESETS.map((p) => (
+        {PRESETS.filter((p) => p.durationMs <= maxMs).map((p) => (
           <option key={p.key} value={p.key}>
             {p.label}
           </option>
         ))}
-        {presetKeyOf(range) === null && <option value="custom">{describeRange(range)}</option>}
+        {visiblePresetKey === null && <option value="custom">{describeRange(range)}</option>}
       </select>
       </span>
 

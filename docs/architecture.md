@@ -257,7 +257,7 @@ Grafana と同じように、グラフの表示する時間範囲を操作でき
 - 確認済みが 100 件を超えると、古いものはこの表示には出ない（設定画面では見られる）
 
 **制限と注意**
-- SaaS（Free Tier）は測定値の保持が 90 日（§10）のため、選べる範囲は 90 日までとする。self-hosted は保持期間の制限なし
+- SaaS（Free Tier）は測定値の保持が 14 日（§10）のため、選べる範囲は 14 日までとする（30 日のプリセットは出さない）。self-hosted は保持期間の制限なし
 - 範囲が長いと点が多すぎるため、グラフは `readings/downsampled` で取得する。生データ（`readings`）は、表示の詳細確認のためだけに使う
 - 表示の時刻はブラウザの地域時刻（日本では JST）。保存と API は UTC
 
@@ -287,7 +287,7 @@ Grafana と同じように、グラフの表示する時間範囲を操作でき
 
 ### Free Tier の制限
 - センサーは **1 ワークスペースあたり 10 個まで**。11 個目の登録は 402
-- 測定値は **90 日**を超えたものを毎日 03:00（UTC）に削除する。**SaaS のセンサーだけが対象**（self-hosted は無期限）
+- 測定値は **14 日**を超えたものを毎日 03:00（UTC）に削除する（2026-10-28 に 90 日から変更。DR のバックアップ量と復旧時間を小さくするため）。**SaaS のセンサーだけが対象**（self-hosted は無期限）
 - 有効期限が切れて 7 日を過ぎたリフレッシュトークンも、同じ時刻に削除する（期限内の行は、失効済みでも残す）
 - ダッシュボード・ウィジェット・アラームは無制限
 
@@ -348,7 +348,22 @@ DB に接続できない場合は `status` が `degraded` になる。
 - バックアップ（ディレクトリか S3）の一覧・検証、今の DB との比較、閲覧・CSV の書き出し、書き戻し（今の DB に**無い行だけ**を足す。今ある行は変えない・消さない）ができる
 - バックアップは、乗っ取られた本番で書き換えられている前提で展開する（`.sha256` も一緒に作り直せるため）。管理者ではないロールで流し込み、psql のメタコマンドを止める
 - OSS 版 ⇄ SaaS 版は、所属を付け替えて書き戻せる。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須）。SaaS → OSS のワークスペース単位の移し替えは、§10.1 のデータ移行でもできる（通知設定の上書きの指定など、移行に特化した機能はそちら）
+- 控え（AWS）が稼いだ増加分（縮小ダンプ。R2 の `handoff-inc/`）は、本番に復帰したあと、管理画面（`/admin`）の「書き戻し」で本番に足す（下の「引き継ぎからの書き戻し」）
 - 書き戻しの規則・展開の安全策・設定の一覧・起動手順は [`tools/recovery/README.md`](../tools/recovery/README.md) を正とする
+
+### 引き継ぎからの書き戻し（管理画面）
+- 流れ: 一覧 → 試算（追加される件数。何も書かない）→ 確認の小窓 → 実行（直前に本番の控え `before-merge-*` を取り、1 つのトランザクション）→ 結果。実行は、試算の件数と実行の直前の件数が一致したときだけ
+- API: `GET /api/admin/failback/handoffs`、`POST /api/admin/failback/preview`、`POST /api/admin/failback/apply`（`backend/app/api/admin_failback.py`。管理者トークンが必要。`AUTH_MODE=multi_tenant` のときだけマウントする）
+- 書き込みは backend が直接は行わず、内部ネットワーク（`factoreye-cloud`）で復旧ツールの `POST /api/handoffs/{name}/failback` を呼ぶ（`backend/app/failback_client.py`）。設定は `FAILBACK_RECOVERY_URL`（既定 `http://recovery:8090`）・`FAILBACK_RECOVERY_USERNAME`・`FAILBACK_RECOVERY_PASSWORD`（復旧ツールの Basic 認証と同じ値。空なら無効）・`FAILBACK_TIMEOUT_SECONDS`（既定 600）
+- 本番と控えのスキーマの版（Alembic）が違うときは、書き戻さずに警告する（409）。引き継ぎの sha256・gzip が壊れていれば使わない
+- 制限: 控えの稼働中の、既存の行の更新・削除（パスワードの変更など）は戻らない。起点より前に発生して起点以降に解除されたアラームの変化も戻らない。本番に復帰したあとに削除した行は、縮小ダンプに残っていれば復活する
+- 書き戻しの間、`readings` に `SHARE ROW EXCLUSIVE` のロックを取り、測定値の挿入を待たせる（再送の割り込みによる重複を防ぐ）。書き戻す前に取り込みを止めるか減らす。書き戻した行だけを消す手順は無い（`before-merge-*` からの全体の復元は、新しい行も消える）
+
+### R2 の WAL-G のバックアップからの復旧（管理画面）
+- 本番（Proxmox の LXC）が消えた・データが不完全なときに、R2 の `factoreye-db`（ベース ＋ WAL）から、本番に無い行だけを足す。API: `GET/POST/DELETE /api/admin/failback/r2`（状態・開始・破棄）、`POST /api/admin/failback/r2/{preview,apply}`（`handoff` を渡すと R2 → 引き継ぎの順に、1 つのトランザクションで足す）
+- 復旧ツールが、`wal-g backup-fetch LATEST` → `recovery.signal` ＋ `restore_command` → 一時的な PostgreSQL 15（unix ソケットだけ）で WAL を再生 → 昇格後の DB を merge の入力にする。時間のかかる復元は復旧ツールの裏のジョブで、画面は状態（取得中 / 再生中 / 準備完了 / 失敗）を見る。使う WAL-G のコマンドは読み取りだけ（`backup-list`・`backup-fetch`・`wal-fetch`）
+- 復元した PostgreSQL は、バックアップの設定を使わず最小の自前の設定で起動する。鍵は環境に渡さず権限 600 のファイルから読む。`walg.env` が読めなくても復旧ツールは起動し、R2 の機能だけ無効になる（理由を画面に出す）
+- 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は [`tools/recovery/README.md`](../tools/recovery/README.md)
 
 ### 設定（環境変数）
 | 変数 | 既定 | 内容 |
@@ -369,6 +384,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `ADMIN_ACCESS_EXPIRE_MINUTES` | `60` | 管理者トークンの有効期限（分） |
 | `IMPERSONATION_EXPIRE_MINUTES` | `15` | 管理者が利用者として閲覧するときのトークンの有効期限（分） |
 | `ADMIN_CREDENTIALS_FILE` | `admin/admins.txt` | 管理者アカウントのファイル |
+| `FAILBACK_RECOVERY_URL` / `FAILBACK_RECOVERY_USERNAME` / `FAILBACK_RECOVERY_PASSWORD` | `http://recovery:8090` / `admin` / 空 | 管理画面の「書き戻し」が呼ぶ復旧ツールのアドレスと Basic 認証（SaaS 版。値は `.env` にだけ置く） |
 | `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（ブラウザから見える API のアドレスと、画面の認証モード）。変えるにはビルドし直す |
 
 環境変数の例は、リポジトリ直下の `.env.example`（docker compose 用）、`backend/.env.example`（`uvicorn` を直接起動する場合）、`infra/cloud/.env.cloud.example`（クラウド版）。
