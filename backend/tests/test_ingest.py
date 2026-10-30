@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 import app.api.ingest as ingest_module
@@ -841,7 +841,7 @@ async def _stored_times(sensor_id: str) -> list[datetime]:
         rows = await session.exec(
             select(Reading.recorded_at)
             .where(Reading.sensor_id == UUID(sensor_id))
-            .order_by(Reading.recorded_at)
+            .order_by(col(Reading.recorded_at))
         )
         return list(rows.all())
 
