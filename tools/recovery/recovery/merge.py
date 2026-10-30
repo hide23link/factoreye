@@ -89,6 +89,8 @@ class TableSpec:
     single_row: bool = False
     # id をこの値にして入れる（OSS 版の通知設定は、backend が id=1 を読むため）
     force_id: int | None = None
+    # 入れる前に NULL にする列（書き戻し先に、参照先の行が無い外部キーなど）
+    clear_columns: tuple[str, ...] = ()
 
 
 def _ws(alias: str = "") -> str:
@@ -102,6 +104,8 @@ _SENSORS = f"sensor_id IN (SELECT id FROM sensors WHERE {_ws()})"
 SPECS: tuple[TableSpec, ...] = (
     TableSpec("users", "id IN (SELECT owner_id FROM workspaces WHERE id = ANY(:ids))", ("id",)),
     TableSpec("workspaces", "id = ANY(:ids)", ("id",)),
+    # 機器ごとのキー（self-hosted だけ）。sensors.device_id の参照先なので、センサーより先に入れる
+    TableSpec("ingest_devices", ":self_hosted", ("id",)),
     TableSpec("sensors", _ws(), ("id",)),
     TableSpec(
         "readings", _SENSORS, ("sensor_id", "recorded_at"), drop_id=True,
@@ -130,7 +134,8 @@ SPECS: tuple[TableSpec, ...] = (
 # 所属を変えて書き戻すとき（OSS 版 ⇄ SaaS 版）。ユーザー・ワークスペースの行は入れない
 # （書き戻し先のワークスペース、または OSS 版に入れるため、元の所属の情報は使わない）
 _REMAP_SPECS: tuple[TableSpec, ...] = (
-    TableSpec("sensors", _ws(), ("id",), remap_workspace=True),
+    # 機器（ingest_devices）は持ち込まないので、センサーの所属（device_id）は外す
+    TableSpec("sensors", _ws(), ("id",), remap_workspace=True, clear_columns=("device_id",)),
     TableSpec(
         "readings", _SENSORS, ("sensor_id", "recorded_at"), drop_id=True,
         time_column="recorded_at",
@@ -283,6 +288,9 @@ async def _merge_table(
     if spec.remap_workspace and sel.remaps:
         # OSS 版として入れるときは NULL（into_workspace_id が None）
         await dst.execute(f"UPDATE {s_} SET workspace_id = $1::uuid", sel.into_workspace_id)
+    for column in spec.clear_columns:
+        if column in cols:
+            await dst.execute(f"UPDATE {s_} SET {_ident(column)} = NULL")
     if spec.single_row and source > 1:
         await dst.execute(f"DELETE FROM {s_} WHERE ctid NOT IN (SELECT ctid FROM {s_} LIMIT 1)")
         source = 1
