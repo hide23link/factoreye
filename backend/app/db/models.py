@@ -65,6 +65,21 @@ class AlarmSeverity(StrEnum):
 # ──────────────────────────────────────────────────────────────
 # Sensor
 # ──────────────────────────────────────────────────────────────
+class IngestDevice(SQLModel, table=True):
+    """取り込みの機器（現場の 1 台）。機器ごとのキーで、自分のセンサーだけに送れる（自前ホスト）。
+
+    キーそのものは保存しない。SHA-256 のハッシュだけを保存する（発行の時に 1 回だけ画面に出す）。
+    """
+
+    __tablename__ = "ingest_devices"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(max_length=100, unique=True)
+    key_hash: str = Field(max_length=64, unique=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+    revoked_at: datetime | None = None
+
+
 class Sensor(SQLModel, table=True):
     __tablename__ = "sensors"
     # センサー名はワークスペース内で一意（別のワークスペースには同じ名前を許す）。
@@ -89,6 +104,10 @@ class Sensor(SQLModel, table=True):
     # Phase 0.5: NULL = self-hosted（ワークスペースなし）、UUID = multi-tenant のワークスペース
     workspace_id: UUID | None = Field(
         default=None, foreign_key="workspaces.id", index=True, ondelete="CASCADE"
+    )
+    # 機器ごとのキーで送る機器（NULL = 機器のキーに紐づかない。従来どおり）
+    device_id: UUID | None = Field(
+        default=None, foreign_key="ingest_devices.id", index=True, ondelete="SET NULL"
     )
     name: str = Field(max_length=100)
     # ingest_key は取り込みAPIがキーだけでセンサーを特定するため、ワークスペースをまたいでも一意

@@ -24,6 +24,8 @@ docker compose up -d --build
 LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` を作り（[`.env.example`](.env.example) を参照）、`VITE_API_URL` と `FRONTEND_URL` をホストの IP アドレスに変更します。
 
 本番で使う前に、`INGEST_API_KEY` を必ず変更してください（`ENVIRONMENT=production` では、既定値のままだと起動しません）。SaaS モード（`AUTH_MODE=multi_tenant`）では、`JWT_SECRET` も変更します。
+機器ごとにキーを発行して、そのキーで送る方法（自前ホスト）は [`docs/device-keys.md`](docs/device-keys.md) を参照してください。
+
 機器に API キーを入れたくない運用では、`INGEST_AUTH=off` でキーなしの取り込みにできます。センサーの ingestKey を知っていれば誰でも値を書けるので、取り込みの口を LAN などに限定してください。環境変数の一覧は [`docs/architecture.md`](docs/architecture.md) §11 を参照してください。
 
 ---

@@ -27,7 +27,10 @@ from app.db.session import get_session
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) -> None:
+async def verify_ingest_api_key(
+    x_api_key: str | None = Header(default=None),
+    x_device_key: str | None = Header(default=None),
+) -> None:
     """Ingest エンドポイント認証。
     - AUTH_MODE=disabled (self-hosted): X-API-Key ヘッダーと .env の共有シークレットを比較
       （INGEST_AUTH=off のときは比較しない。送られてきたヘッダーは無視する）
@@ -37,6 +40,9 @@ async def verify_ingest_api_key(x_api_key: str | None = Header(default=None)) ->
     """
     if not settings.ingest_requires_key:
         return  # SaaS または INGEST_AUTH=off: body の ingest_key がセンサー単位の識別になる
+    if x_device_key is not None:
+        # 機器ごとのキー（X-Device-Key）で認証する。検査は ingest.py（共通キーは使わない）
+        return
     # 比較にかかる時間からキーを推測されないよう、一定時間で比較する。
     # 文字列のままだと ASCII 以外で TypeError（500）になるため、バイト列にする
     if x_api_key is None or not hmac.compare_digest(

@@ -83,6 +83,10 @@ async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
         )
     elif settings.ingest_auto_create:
         logger.warning("INGEST_AUTO_CREATE=on は、SaaS（multi_tenant）では使えません。無視します")
+    if settings.ingest_device_time_active:
+        logger.info("INGEST_DEVICE_TIME=on: 機器が付けた timestamp を、測定値の時刻にします")
+    elif settings.ingest_device_time:
+        logger.warning("INGEST_DEVICE_TIME=on は、SaaS（multi_tenant）では使えません。無視します")
     flush_task = asyncio.create_task(flush_loop())
     purge_task = asyncio.create_task(purge_loop())
     yield

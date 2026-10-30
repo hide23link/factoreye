@@ -7,6 +7,11 @@
     本文（JSON）:
         {"ingestKey": "line1-temp", "value": 23.5}                      ← 1件
         {"ingestKey": "line1-temp", "readings": [{"value": 23.5}, ...]} ← まとめて複数件
+    INGEST_DEVICE_TIME=on（self-hosted だけ）なら、各値に "timestamp"（時差つきの ISO 8601 か
+    UNIX 秒）を付けて、測った時刻（秒単位に切り捨て）で保存できる（付けなければ受信時刻）。
+    範囲外・時差なし・ミリ秒の数値は 400。
+        {"sensors": [{"ingestKey": "a", "readings": [...]}, ...]}      ← センサーごとにまとめる
+        {"samples": [{"timestamp": ..., "values": {"a": 1, "b": 2}}]}  ← 時刻ごとにまとめる
     返事: 202 {"accepted": 件数}
     失敗: 400 本文が間違い / 401 鍵が違う / 403 センサーが無効（自動で作る上限に達したときも）
           / 404 ingestKey が未登録 / 409 自動で作るときに、名前が重なり続けた（まれ）/ 429 送りすぎ
@@ -25,25 +30,36 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import ingest_limit_toggle  # 管理画面から、期限付きで回数の制限を外す仕組み
+from app import device_keys, ingest_limit_toggle  # 機器のキー / 回数の制限を外す仕組み
 from app.api.deps import verify_ingest_api_key  # 機器の認証（X-API-Key の確認）
-from app.config import settings
+from app.config import AuthMode, settings
 from app.db.models import Sensor
 from app.db.session import get_session
 from app.ingest_buffer import PendingReading, buffer  # buffer = DB に書く前の、一時的な置き場
 from app.rate_limit import limiter  # 回数の制限をかける道具
-from app.schemas import IngestAccepted, IngestRequest  # 届く本文の形 / 返事の形
+from app.schemas import (
+    MAX_READINGS_PER_MULTI_REQUEST,
+    MAX_READINGS_PER_REQUEST,
+    MAX_SAMPLES_PER_REQUEST,
+    MAX_SENSORS_PER_REQUEST,
+    IngestAccepted,
+    IngestRejected,
+    IngestRequest,
+    ReadingIn,
+    SensorReadings,
+)  # 届く本文の形 / 返事の形
 
 # URL の頭が /api/ingest のものを、このファイルが受け持つ（main.py で登録される）
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -55,6 +71,12 @@ logger = logging.getLogger(__name__)
 _STEP = timedelta(microseconds=1)
 _EPOCH = datetime.min.replace(tzinfo=UTC)
 _last_assigned: dict[UUID, datetime] = {}
+
+# 機器の測定時刻（INGEST_DEVICE_TIME=on）として受け付ける範囲。範囲外の timestamp を含む送信は、
+# 全体を 400 にする（機器に、時計のずれを知らせるため）。
+# 未来は NTP のずれと通信の揺らぎ分だけ、過去は通信が切れて溜めた分を後から送れる長さにする
+DEVICE_TIME_MAX_FUTURE = timedelta(seconds=10)
+DEVICE_TIME_MAX_PAST = timedelta(days=30)
 
 # INGEST_RATE_LIMIT=off のときは制限を付けない（実機テスト用の解除モード）。
 # 既定値（100/minute）は本番と同じ。解除中は起動時にログで警告する。
@@ -81,6 +103,96 @@ def limit_ingest_rate(original_function: Callable[..., Any]) -> Callable[..., An
         return await limited(*args, **kwargs)
 
     return check_and_run
+
+
+# 機器の timestamp は、UNIX 秒の数値、または ISO 8601 の文字列（時差つき）だけ受け付ける
+MAX_DEVICE_UNIX_SECONDS = 1e11
+# 本文の大きさの上限（70,000 件でも約 1.3MB。余裕を見て 8MB）。これを超えると 413
+MAX_BODY_BYTES = 8 * 1024 * 1024  # これを超える数値（ミリ秒など）は 400
+
+
+TIMESTAMP_TYPE_DETAIL = "timestamp must be a UNIX seconds number or an ISO 8601 string"
+
+
+def _device_time_error(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _to_device_time(value: object, now: datetime) -> datetime:
+    """機器の timestamp を、秒単位の時刻（UTC）にする。使えない時刻は 400。
+
+    範囲: 未来は now + 10 秒まで、過去は now − 30 日まで。
+    時差の無い時刻は、いつか決まらないので受け付けない。
+    時刻は秒で管理する（小数の秒は切り捨てて保存する）。
+    """
+    if isinstance(value, bool):
+        raise _device_time_error(TIMESTAMP_TYPE_DETAIL)
+    try:
+        if isinstance(value, int | float):
+            if not abs(value) < MAX_DEVICE_UNIX_SECONDS:
+                raise _device_time_error("numeric timestamp must be UNIX seconds")
+            moment = datetime.fromtimestamp(value, UTC)
+        elif isinstance(value, str):
+            moment = datetime.fromisoformat(value)
+        else:
+            raise _device_time_error(TIMESTAMP_TYPE_DETAIL)
+    except (ValueError, OverflowError, OSError) as error:
+        raise _device_time_error("timestamp is not a valid time") from error
+    if moment.tzinfo is None:
+        raise _device_time_error("timestamp must include a time zone (e.g. 2026-10-30T12:00:00Z)")
+    moment = moment.astimezone(UTC)
+    if moment > now + DEVICE_TIME_MAX_FUTURE:
+        raise _device_time_error("timestamp is in the future (check the device clock)")
+    if moment < now - DEVICE_TIME_MAX_PAST:
+        raise _device_time_error("timestamp is too old")
+    return moment.replace(microsecond=0)
+
+
+def _check_device_times(readings: list[ReadingIn], now: datetime) -> None:
+    """測定値の timestamp を、すべて検査する（1 つでも使えなければ、送信全体を 400）。"""
+    for reading in readings:
+        if reading.timestamp is not None:
+            _to_device_time(reading.timestamp, now)
+
+
+def _check_raw_limits(raw_body: object) -> None:
+    """Pydantic で組み立てる前に、件数を数える（大きな本文で、メモリを使い切らないため）。
+
+    組み立ての後に数えると、200 万件級の本文でピークのメモリが約 1.5GB まで増える（QA で実測）。
+    """
+    if not isinstance(raw_body, dict):
+        return
+    too_many = _error_too_many()
+    readings = raw_body.get("readings")
+    if isinstance(readings, list) and len(readings) > MAX_READINGS_PER_REQUEST:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"too many readings (max {MAX_READINGS_PER_REQUEST} per request)",
+        )
+    total = 0
+    samples = raw_body.get("samples")
+    if isinstance(samples, list):
+        if len(samples) > MAX_SAMPLES_PER_REQUEST:
+            raise too_many
+        for sample in samples:
+            if isinstance(sample, dict) and isinstance(sample.get("values"), dict):
+                total += len(sample["values"])
+    sensors = raw_body.get("sensors")
+    if isinstance(sensors, list):
+        if len(sensors) > MAX_SENSORS_PER_REQUEST:
+            raise too_many
+        for sensor in sensors:
+            if isinstance(sensor, dict) and isinstance(sensor.get("readings"), list):
+                total += len(sensor["readings"])
+    if total > MAX_READINGS_PER_MULTI_REQUEST:
+        raise too_many
+
+
+def _error_too_many() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"too many readings (max {MAX_READINGS_PER_MULTI_REQUEST} in total)",
+    )
 
 
 # 自動で作るときの ingestKey に使える文字と長さ（打ち間違いで、センサーが増えないように）。
@@ -132,7 +244,9 @@ def _name_candidates(name: str, ingest_key: str) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))  # 重複と空を除く
 
 
-async def _auto_create_sensor(session: AsyncSession, data: IngestRequest) -> Sensor:
+async def _auto_create_sensor(
+    session: AsyncSession, ingest_key: str, name: str | None, unit: str | None
+) -> Sensor:
     """未登録の ingestKey のセンサーを、自動で作る。使えない設定のときは、404（未登録）にする。
 
     使えるのは、INGEST_AUTO_CREATE=on の self-hosted だけ。
@@ -147,7 +261,7 @@ async def _auto_create_sensor(session: AsyncSession, data: IngestRequest) -> Sen
     """
     if not settings.ingest_auto_create_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown ingestKey")
-    if not AUTO_CREATE_KEY_PATTERN.fullmatch(data.ingest_key):
+    if not AUTO_CREATE_KEY_PATTERN.fullmatch(ingest_key):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ingestKey for auto-create: A-Z a-z 0-9 . _ - only, up to 64 characters",
@@ -155,7 +269,7 @@ async def _auto_create_sensor(session: AsyncSession, data: IngestRequest) -> Sen
 
     # ここから、同時に 1 つずつ（トランザクションの終わりで、自動で外れる）
     await session.exec(text(f"SELECT pg_advisory_xact_lock({_AUTO_CREATE_LOCK_ID})"))  # type: ignore[call-overload]
-    existing = await _find_sensor(session, data.ingest_key)
+    existing = await _find_sensor(session, ingest_key)
     if existing is not None:  # 順番を待つ間に、同じ ingestKey が先に作られた
         return existing
     count_query = select(func.count()).select_from(Sensor).where(col(Sensor.workspace_id).is_(None))
@@ -166,12 +280,12 @@ async def _auto_create_sensor(session: AsyncSession, data: IngestRequest) -> Sen
             detail=f"auto-create limit reached ({settings.ingest_auto_create_max_sensors} sensors)",
         )
 
-    name = clean_text(data.name, 100) or data.ingest_key
-    unit = clean_text(data.unit, 20) or AUTO_CREATE_DEFAULT_UNIT
-    for candidate in _name_candidates(name, data.ingest_key):
+    clean_name = clean_text(name, 100) or ingest_key
+    clean_unit = clean_text(unit, 20) or AUTO_CREATE_DEFAULT_UNIT
+    for candidate in _name_candidates(clean_name, ingest_key):
         if await _name_is_taken(session, candidate):
             continue
-        sensor = Sensor(workspace_id=None, name=candidate, ingest_key=data.ingest_key, unit=unit)
+        sensor = Sensor(workspace_id=None, name=candidate, ingest_key=ingest_key, unit=clean_unit)
         session.add(sensor)
         try:
             await session.commit()
@@ -199,18 +313,30 @@ async def _auto_create_sensor(session: AsyncSession, data: IngestRequest) -> Sen
 )
 @limit_ingest_rate
 async def ingest_readings(
-    request: Request, session: AsyncSession = Depends(get_session)
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    x_device_key: str | None = Header(default=None),
 ) -> IngestAccepted:
-    """測定値を受け付ける。本文は JSON（単発の value か、readings の配列）。"""
-    # ① 本文を JSON として読む
+    """測定値を受け付ける。本文は JSON（単発の value か、readings の配列）。
+
+    機器ごとのキー（X-Device-Key、self-hosted だけ）を付けると、
+    その機器に所属するセンサーだけに送れる。
+    """
+    # ① 本文を JSON として読む（大きすぎる本文は、読む前に断る）
+    content_length = request.headers.get("content-length", "")
+    if content_length.isdigit() and int(content_length) > MAX_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="body too large"
+        )
     try:
-        raw_body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raw_body = await _read_json_body(request)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="invalid JSON body"
         ) from error
 
-    # ② 中身が決めた形か検査する（ingestKey は必須、value は数値、など）
+    # ② 件数を、組み立てる前に数える。そのあと、中身が決めた形か検査する
+    _check_raw_limits(raw_body)
     try:
         request_data = IngestRequest.model_validate(raw_body)
     except ValidationError as error:
@@ -219,34 +345,197 @@ async def ingest_readings(
             detail=error.errors(include_input=False),
         ) from error
 
-    # ③ 「1件」「複数件」の2通りの書き方を、測定値のリストにそろえる
-    readings = request_data.to_readings()
+    # ③ 1 センサーの形（ingestKey）と、複数センサーの形（sensors）に分ける
+    use_device_time = settings.ingest_device_time_active
+    now = datetime.now(UTC)
+    # 機器ごとのキー（self-hosted だけ。SaaS では無視する）
+    device_key_given = x_device_key is not None and settings.auth_mode != AuthMode.MULTI_TENANT
+    caller_device_id: UUID | None = None
+    if device_key_given:
+        assert x_device_key is not None
+        device = await device_keys.find_active_device(session, x_device_key)
+        if device is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid device key"
+            )
+        caller_device_id = device.id
+    scope = _DeviceScope(key_given=device_key_given, device_id=caller_device_id)
+
+    items = request_data.to_sensor_items()
+    if items is None:
+        # 従来の形: 問題があれば、そのまま 4xx を返す
+        # IngestRequest の検査で、ingestKey か sensors のどちらか 1 つは必ずある
+        assert request_data.ingest_key is not None
+        sensor_id, readings = await _resolve_sensor(
+            session, request_data, request_data.ingest_key, None, scope
+        )
+        accepted = await _buffer_readings(sensor_id, readings, use_device_time, now)
+        return IngestAccepted(accepted=accepted)
+
+    # 複数センサーの形（sensors か samples）: センサーごとに結果を出す。
+    # 1 つのセンサーの問題（未登録・無効など）で、
+    # ほかのセンサーを捨てない。送信全体の問題（件数の超過・時刻の不正）は、全体を 400 にする
+    if sum(len(item.to_readings()) for item in items) > MAX_READINGS_PER_MULTI_REQUEST:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"too many readings (max {MAX_READINGS_PER_MULTI_REQUEST} in total)",
+        )
+    if use_device_time:
+        for item in items:
+            _check_device_times(item.to_readings(), now)
+    # 登録済みのセンサーは、1 回の問い合わせでまとめて探す（未登録だけ、個別に処理する）。
+    # 自動登録の commit で、読んだ Sensor が期限切れになる（セッションの既定）ので、
+    # Sensor そのものではなく、使う値（id と enabled）だけを取り出して持つ
+    keys = {item.ingest_key for item in items}
+    found = (await session.exec(select(Sensor).where(col(Sensor.ingest_key).in_(keys)))).all()
+    known = {sensor.ingest_key: (sensor.id, sensor.enabled, sensor.device_id) for sensor in found}
+
+    # 第 1 段: すべてのセンサーを確かめる（ここではバッファに入れない）。
+    # 途中で予期しない例外が出ても、一部だけがバッファに残って、再送で二重にならない
+    resolved: list[tuple[UUID, list[ReadingIn]]] = []
+    rejected: list[IngestRejected] = []
+    for item in items:
+        try:
+            resolved.append(await _resolve_sensor(session, item, item.ingest_key, known, scope))
+        except HTTPException as error:
+            rejected.append(
+                IngestRejected(
+                    ingest_key=item.ingest_key,
+                    status=error.status_code,
+                    detail=error.detail if isinstance(error.detail, str) else "invalid",
+                )
+            )
+    # 第 2 段: バッファに入れる（DB には触れない。ここから先で失敗する要因は無い）
+    accepted = 0
+    for sensor_id, readings in resolved:
+        accepted += await _buffer_readings(sensor_id, readings, use_device_time, now)
+    return IngestAccepted(accepted=accepted, rejected=rejected)
+
+
+async def _resolve_sensor(
+    session: AsyncSession,
+    data: IngestRequest | SensorReadings,
+    ingest_key: str,
+    known: dict[str, tuple[UUID, bool, UUID | None]] | None,
+    scope: "_DeviceScope",
+) -> tuple[UUID, list[ReadingIn]]:
+    """1 つのセンサー分を確かめて、(センサーの id, 測定値のリスト) を返す。
+
+    問題があれば HTTPException（400 値が無い / 403 無効 / 404 未登録 など）。
+    known は、複数センサーの形で先にまとめて探した結果 {ingestKey: (id, enabled)}
+    （従来の形では None）。
+    """
+    # 「1件」「複数件」の2通りの書き方を、測定値のリストにそろえる
+    readings = data.to_readings()
     if not readings:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="value or readings is required"
         )
 
-    # ④ ingestKey でセンサーを探す（キーは全体で一意。SaaS でも self-hosted でも、キーだけで決まる）
-    sensor_query = select(Sensor).where(Sensor.ingest_key == request_data.ingest_key)
-    result = await session.exec(sensor_query)
-    sensor = result.first()
-    if sensor is None:
-        # 未登録: INGEST_AUTO_CREATE=on（self-hosted）なら作る。そうでなければ 404
-        sensor = await _auto_create_sensor(session, request_data)
-    if not sensor.enabled:
+    # ingestKey でセンサーを探す（キーは全体で一意。SaaS でも self-hosted でも、キーだけで決まる）
+    if known is not None and ingest_key in known:
+        sensor_id, enabled, device_id = known[ingest_key]
+    else:
+        sensor = await _find_sensor(session, ingest_key) if known is None else None
+        if sensor is None and scope.key_given:
+            # 機器のキーで、未登録のセンサーには送れない（自動登録で、所属のないセンサーを作らない）
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="sensor is not attached to this device",
+            )
+        if sensor is None:
+            # 未登録: INGEST_AUTO_CREATE=on（self-hosted）なら作る。そうでなければ 404
+            sensor = await _auto_create_sensor(session, ingest_key, data.name, data.unit)
+        sensor_id, enabled, device_id = sensor.id, sensor.enabled, sensor.device_id
+        if known is not None:
+            # 同じ送信内の同じキーは、作り直さない
+            known[ingest_key] = (sensor_id, enabled, device_id)
+    _check_device_scope(scope, device_id)
+    if not enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="sensor disabled")
+    return sensor_id, readings
 
-    # ⑤ バッファに入れる。時刻は、機器の時計ではなく、サーバーが受け取った時刻を使う
-    # （機器の timestamp は信頼しない。docs/architecture.md §3 データモデル参照）
-    # 測定値の主キーは (sensor_id, recorded_at) で、同じ時刻の値は 1 件だけ（app/db/models.py）。
-    # このため、センサーごとに「前に割り当てた時刻」を覚え、それより必ず 1 マイクロ秒以上進める。
-    # 1 回の送信内の複数の値も、別々の送信も、時刻が重ならない（時計が戻っても重ならない）。
-    # await を挟まずに割り当てるので、同時に来た送信どうしでも重ならない
-    start = max(datetime.now(UTC), _last_assigned.get(sensor.id, _EPOCH) + _STEP)
-    _last_assigned[sensor.id] = start + _STEP * (len(readings) - 1)
-    for i, reading in enumerate(readings):
-        await buffer.add(
-            PendingReading(sensor_id=sensor.id, value=reading.value, recorded_at=start + _STEP * i)
+
+@dataclass(frozen=True)
+class _DeviceScope:
+    """この送信が、機器のキーで送られたか（key_given）と、その機器（device_id）。"""
+
+    key_given: bool
+    device_id: UUID | None
+
+
+def _check_device_scope(scope: "_DeviceScope", sensor_device_id: UUID | None) -> None:
+    """センサーの所属と、送った機器が合うか確かめる。
+
+    - 機器のキーが無い送信で、所属のあるセンサーには送れない（401: 機器のキーが要る）
+    - 機器のキーで送るなら、そのセンサーがその機器に所属していること（403）
+    SaaS（multi_tenant）では、機器のキーを使わないので、所属は見ない（締め出さない）。
+    """
+    if settings.auth_mode == AuthMode.MULTI_TENANT:
+        return
+    if not scope.key_given:
+        if sensor_device_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="device key (X-Device-Key) is required for this sensor",
+            )
+        return
+    if sensor_device_id != scope.device_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="sensor is not attached to this device",
         )
 
-    return IngestAccepted(accepted=len(readings))
+
+async def _read_json_body(request: Request) -> object:
+    """本文を、読みながら大きさを数えて JSON にする。上限を超えたら、残りは読まずに 413 にする。
+
+    Content-Length が無い（chunked）送信も、同じ上限で止める。
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_BODY_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="body too large"
+            )
+        chunks.append(chunk)
+    return json.loads(b"".join(chunks))
+
+
+async def _buffer_readings(
+    sensor_id: UUID, readings: list[ReadingIn], use_device_time: bool, now: datetime
+) -> int:
+    """1 つのセンサー分の測定値を、バッファに入れる。入れた件数を返す。
+
+    時刻は、既定では機器の時計ではなく、サーバーが受け取った時刻を使う
+    （機器の timestamp は信頼しない。docs/architecture.md §3 データモデル参照）。
+    ただし INGEST_DEVICE_TIME=on の self-hosted では、timestamp を付けた値は、その時刻で保存する
+    （付けない値は、受信時刻のまま。一部だけ付けた送信も受け付ける）。
+    測定値の主キーは (sensor_id, recorded_at) で、同じ時刻の値は 1 件だけ（app/db/models.py）。
+    このため、受信時刻を割り当てる値は、センサーごとに「前に割り当てた時刻」を覚え、
+    それより必ず 1 マイクロ秒以上進める。
+    1 回の送信内の複数の値も、別々の送信も、時刻が重ならない（時計が戻っても重ならない）。
+    受信時刻の割り当ては await を挟まずに行うので、同時に来た送信どうしでも重ならない。
+    機器の時刻どうしが同じ（再送など）場合は、後の値で上書きする（二重にならない。
+    応答の accepted は受け付けた件数で、保存した件数ではない）
+    """
+    if use_device_time:
+        _check_device_times(readings, now)
+    uses_device_time = [use_device_time and r.timestamp is not None for r in readings]
+    server_time_count = sum(1 for used in uses_device_time if not used)
+    start = max(now, _last_assigned.get(sensor_id, _EPOCH) + _STEP)
+    if server_time_count:
+        _last_assigned[sensor_id] = start + _STEP * (server_time_count - 1)
+    server_time_index = 0
+    for reading, used in zip(readings, uses_device_time, strict=True):
+        if used:
+            recorded_at = _to_device_time(reading.timestamp, now)
+        else:
+            recorded_at = start + _STEP * server_time_index
+            server_time_index += 1
+        await buffer.add(
+            PendingReading(sensor_id=sensor_id, value=reading.value, recorded_at=recorded_at)
+        )
+    return len(readings)

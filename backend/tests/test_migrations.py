@@ -161,7 +161,8 @@ def test_readings_pk_migration_keeps_all_rows_including_same_time_duplicates(
     migrated_db: tuple[str, str],
 ) -> None:
     async_url, sync_url = migrated_db
-    _alembic(async_url, "downgrade", "-1")  # 旧スキーマ（id 主キー）へ
+    # 旧スキーマ（id 主キー）へ。h8c9d0e1f2a3（機器のキー）と g7b8c9d0e1f2 を戻す
+    _alembic(async_url, "downgrade", "a7b8c9d0e1f2")
     sensor_id = _insert_sensor(sync_url)
     with psycopg.connect(sync_url, autocommit=True) as conn:
         # 旧スキーマでは、同じ時刻の値を複数入れられた。id が小さい 1 行（値 1.0）は元の時刻、
@@ -223,7 +224,7 @@ def test_readings_pk_migration_downgrade_restores_id_and_rows(
             (sensor_id, sensor_id),
         )
 
-    _alembic(async_url, "downgrade", "-1")
+    _alembic(async_url, "downgrade", "a7b8c9d0e1f2")  # 旧スキーマ（id 主キー）へ
     with psycopg.connect(sync_url, autocommit=True) as conn:
         rows = conn.execute("SELECT id, value FROM readings ORDER BY id").fetchall()
         # アプリ（旧版）と同じく、id を省略して INSERT できる

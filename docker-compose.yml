@@ -9,6 +9,8 @@ services:
       # 未登録の ingestKey のセンサーを自動で作る（self-hosted だけ。既定は作らない）。作る数の上限は MAX_SENSORS
       - INGEST_AUTO_CREATE=${INGEST_AUTO_CREATE:-false}
       - INGEST_AUTO_CREATE_MAX_SENSORS=${INGEST_AUTO_CREATE_MAX_SENSORS:-100}
+      # 機器が付けた測定時刻（timestamp）を使う（self-hosted だけ。既定は受信時刻）
+      - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
       - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで

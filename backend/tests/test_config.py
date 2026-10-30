@@ -152,3 +152,18 @@ def test_auto_create_max_sensors_must_be_in_range(
     monkeypatch.setenv("INGEST_AUTO_CREATE_MAX_SENSORS", bad)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+# ---- INGEST_DEVICE_TIME ----
+
+
+def test_device_time_is_off_by_default() -> None:
+    s = _make(environment="development")
+    assert not s.ingest_device_time and not s.ingest_device_time_active
+
+
+def test_device_time_is_active_only_for_self_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INGEST_DEVICE_TIME", "true")
+    assert Settings(_env_file=None).ingest_device_time_active
+    monkeypatch.setenv("AUTH_MODE", "multi_tenant")
+    assert not Settings(_env_file=None).ingest_device_time_active  # SaaS では使えない
