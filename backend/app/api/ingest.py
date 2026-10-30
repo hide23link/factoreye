@@ -165,7 +165,10 @@ def _check_raw_limits(raw_body: object) -> None:
     too_many = _error_too_many()
     readings = raw_body.get("readings")
     if isinstance(readings, list) and len(readings) > MAX_READINGS_PER_REQUEST:
-        raise too_many
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"too many readings (max {MAX_READINGS_PER_REQUEST} per request)",
+        )
     total = 0
     samples = raw_body.get("samples")
     if isinstance(samples, list):
@@ -327,7 +330,7 @@ async def ingest_readings(
         )
     try:
         raw_body = await _read_json_body(request)
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="invalid JSON body"
         ) from error
@@ -434,6 +437,12 @@ async def _resolve_sensor(
         sensor_id, enabled, device_id = known[ingest_key]
     else:
         sensor = await _find_sensor(session, ingest_key) if known is None else None
+        if sensor is None and scope.key_given:
+            # 機器のキーで、未登録のセンサーには送れない（自動登録で、所属のないセンサーを作らない）
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="sensor is not attached to this device",
+            )
         if sensor is None:
             # 未登録: INGEST_AUTO_CREATE=on（self-hosted）なら作る。そうでなければ 404
             sensor = await _auto_create_sensor(session, ingest_key, data.name, data.unit)
@@ -460,7 +469,10 @@ def _check_device_scope(scope: "_DeviceScope", sensor_device_id: UUID | None) ->
 
     - 機器のキーが無い送信で、所属のあるセンサーには送れない（401: 機器のキーが要る）
     - 機器のキーで送るなら、そのセンサーがその機器に所属していること（403）
+    SaaS（multi_tenant）では、機器のキーを使わないので、所属は見ない（締め出さない）。
     """
+    if settings.auth_mode == AuthMode.MULTI_TENANT:
+        return
     if not scope.key_given:
         if sensor_device_id is not None:
             raise HTTPException(

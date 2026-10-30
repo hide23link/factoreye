@@ -20,6 +20,7 @@ from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import device_keys
+from app.config import AuthMode, settings
 from app.db.models import IngestDevice, Sensor
 from app.db.session import engine
 
@@ -72,6 +73,9 @@ def _fmt(moment: datetime) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if settings.auth_mode == AuthMode.MULTI_TENANT:
+        print("機器のキーは、自前ホスト（AUTH_MODE=disabled）専用です", file=sys.stderr)
+        return 1
     parser = argparse.ArgumentParser(prog="python -m app.device_cli", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     create_p = sub.add_parser("create", help="機器を作り、キーを発行する")
