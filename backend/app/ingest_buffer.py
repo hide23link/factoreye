@@ -288,41 +288,42 @@ async def flush_once() -> int:
 async def _insert_readings(
     session: AsyncSession, readings: list[PendingReading]
 ) -> list[PendingReading]:
-    """測定値を書き、実際に書けたものだけを返す（元の順序のまま）。
+    """測定値を書き、書いたものを返す。
 
-    主キー (sensor_id, recorded_at) が同じ値は書かない（ON CONFLICT DO NOTHING）。
-    1 つの INSERT 文に入れる行数を _INSERT_CHUNK_SIZE に区切る。PostgreSQL のドライバ（asyncpg）は
+    主キー (sensor_id, recorded_at) が同じ値は、後から来た値で上書きする（最後の 1 件が残る）。
+    同じ送信の中の重複は、先に 1 件にまとめる
+    （PostgreSQL は、1 文の中で同じ行を 2 回更新できないため）。
+    1 つの INSERT 文に入れる行数を _INSERT_CHUNK_SIZE に区切る。
+    PostgreSQL のドライバ（asyncpg）は
     1 文のパラメータが 32,767 個までで、1 行 3 個なので、全行を 1 文にすると 1 万件余りで失敗し、
     バッファが減らず取り込み全体が止まる。
     """
-    inserted: set[tuple[UUID, datetime]] = set()
-    for start in range(0, len(readings), _INSERT_CHUNK_SIZE):
-        chunk = readings[start : start + _INSERT_CHUNK_SIZE]
-        result = await session.execute(
-            pg_insert(Reading)
-            .values(
-                [
-                    {"sensor_id": p.sensor_id, "value": p.value, "recorded_at": p.recorded_at}
-                    for p in chunk
-                ]
-            )
-            .on_conflict_do_nothing(index_elements=["sensor_id", "recorded_at"])
-            .returning(col(Reading.sensor_id), col(Reading.recorded_at))
-        )
-        inserted.update((row[0], row[1]) for row in result.all())
-
-    written: list[PendingReading] = []
+    latest: dict[tuple[UUID, datetime], PendingReading] = {}
     for p in readings:
-        key = (p.sensor_id, p.recorded_at)
-        if key in inserted:
-            written.append(p)
-            inserted.discard(key)  # 同じ主キーが 2 つあれば、書けたのは先の 1 つだけ
-    if len(written) < len(readings):
-        logger.warning(
-            "skipped %d readings with the same sensor and time as an existing one",
-            len(readings) - len(written),
+        latest[(p.sensor_id, p.recorded_at)] = p  # 同じ時刻は、後の値で置き換える
+    unique = list(latest.values())
+    replaced = len(readings) - len(unique)
+
+    for start in range(0, len(unique), _INSERT_CHUNK_SIZE):
+        chunk = unique[start : start + _INSERT_CHUNK_SIZE]
+        rows = [
+            {"sensor_id": p.sensor_id, "value": p.value, "recorded_at": p.recorded_at}
+            for p in chunk
+        ]
+        insert = pg_insert(Reading).values(rows)
+        await session.execute(
+            insert.on_conflict_do_update(
+                index_elements=["sensor_id", "recorded_at"],
+                set_={"value": insert.excluded.value},
+            )
         )
-    return written
+
+    if replaced:
+        logger.info(
+            "overwrote %d readings with the same sensor and time (the latest value is kept)",
+            replaced,
+        )
+    return unique
 
 
 async def _write_and_evaluate(

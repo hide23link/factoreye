@@ -16,11 +16,11 @@ docs/architecture.md §6 アラーム評価 参照。
 5. それ以外は、発生中のアラームを解除する
 """
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlmodel import select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models import (
@@ -122,6 +122,19 @@ async def evaluate_alarms(
     )
     open_alarms = {a.sensor_id: a for a in open_result.all()}
 
+    # センサーごとの、直近の解決時刻。解決より前の超過（溜めて後から届いた値）で、
+    # 新しい発生中のアラームを作らないために使う（機器の時刻のとき。受信時刻では起きない）
+    resolved_result = await session.exec(
+        select(Alarm.sensor_id, func.max(Alarm.resolved_at))
+        .where(Alarm.sensor_id.in_(sensor_ids), col(Alarm.resolved_at).is_not(None))  # type: ignore[attr-defined]
+        .group_by(Alarm.sensor_id)  # type: ignore[arg-type]
+    )
+    last_resolved: dict[UUID, datetime] = {
+        sensor_id: resolved_at
+        for sensor_id, resolved_at in resolved_result.all()
+        if resolved_at is not None
+    }
+
     notifications: list[AlarmNotification] = []
 
     # 測定時刻の順に判定する。受信時刻のときは到着順と同じ。
@@ -140,6 +153,11 @@ async def evaluate_alarms(
             # 発生中のアラームより古い測定値（溜めて後から送られた分）。
             # 解決も再通知もしない（時刻が逆転するため）
             continue
+        if breach is not None and existing is None:
+            resolved_at = last_resolved.get(reading.sensor_id)
+            if resolved_at is not None and reading.recorded_at < resolved_at:
+                # 解決より前の超過。新しい発生として扱わない（時刻が逆転するため）
+                continue
 
         if breach is not None:
             breached, severity = breach
@@ -224,5 +242,6 @@ async def evaluate_alarms(
             existing.status = AlarmStatus.RESOLVED
             session.add(existing)
             del open_alarms[reading.sensor_id]
+            last_resolved[reading.sensor_id] = reading.recorded_at
 
     return notifications

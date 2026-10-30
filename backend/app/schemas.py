@@ -15,17 +15,10 @@ Python/DB側はsnake_case（PEP 8）のまま、alias_generatorで変換する�
 DB のテーブルの設計図は、db/models.py（ここは API の入出力の形だけ）。
 """
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
@@ -125,22 +118,9 @@ class SensorRead(CamelModel):
 # ──────────────────────────────────────────────────────────────
 
 
-# 数値の時刻として受け付ける上限（UNIX 秒）。これを超える数値（ミリ秒など）は 400 にする。
-# 約 5138 年。pydantic は大きな数値をミリ秒と見なすので、その自動判別を使わせない
-MAX_UNIX_SECONDS = 1e11
-
-
-def _reject_non_seconds(value: Any) -> Any:
-    """数値の時刻は、UNIX 秒だけ受け付ける（ミリ秒・マイクロ秒は 400）。文字列はそのまま渡す。"""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int | float) and abs(value) >= MAX_UNIX_SECONDS:
-        raise PydanticCustomError("invalid_timestamp", "numeric timestamp must be UNIX seconds")
-    return value
-
-
-# 時刻（ISO 8601 の文字列、または UNIX 秒の数値）。時刻は秒で管理する
-Timestamp = Annotated[datetime, BeforeValidator(_reject_non_seconds)]
+# 機器の timestamp は、ここでは検査しない（INGEST_DEVICE_TIME=on のときだけ ingest.py で検査）。
+# 既定（off）では、timestamp を付けられても無視する（従来の挙動を壊さないため）
+DeviceTimestamp = Any
 
 
 class ReadingIn(CamelModel):
@@ -150,7 +130,7 @@ class ReadingIn(CamelModel):
     """
 
     value: float = Field(allow_inf_nan=False)
-    timestamp: Timestamp | None = None
+    timestamp: DeviceTimestamp = None
 
 
 def _reject_nul_in_key(value: str | None) -> str | None:
@@ -169,7 +149,7 @@ class _SensorFields(CamelModel):
     """
 
     value: float | None = Field(default=None, allow_inf_nan=False)
-    timestamp: Timestamp | None = None
+    timestamp: DeviceTimestamp = None
     # センサーを自動で作るとき（INGEST_AUTO_CREATE=on）だけ使う、名前と単位。
     # 登録済みのセンサーには、使わない（上書きしない）
     # ここでは検査しない（登録済みのセンサーへの送信を、名前の不正で 400 にしないため）。
@@ -194,7 +174,7 @@ class SampleIn(CamelModel):
     values は {ingestKey: 値}。timestamp を省略すると、サーバーが受信した時刻を使う。
     """
 
-    timestamp: Timestamp | None = None
+    timestamp: DeviceTimestamp = None
     values: dict[str, float] = Field(max_length=MAX_SENSORS_PER_REQUEST)
 
     @field_validator("values")

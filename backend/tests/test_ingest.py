@@ -184,14 +184,27 @@ async def test_flush_ignores_same_sensor_and_time_instead_of_failing(
     ):
         await buffer.add(PendingReading(sensor_id=UUID(sid), value=value, recorded_at=at))
 
-    # 戻り値は、実際に書けた件数（同じセンサー・同じ時刻の 2 件目は数えない）
+    # 戻り値は、書いた件数（同じセンサー・同じ時刻は 1 件に数える）
     assert await flush_once() == 2
 
     first = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
     other = (await client.get(f"/api/sensors/{other_id}/readings")).json()
-    assert first["total"] == 1  # 先に届いた 1 件だけ
-    assert first["readings"][0]["value"] == 1.0
+    assert first["total"] == 1
+    assert first["readings"][0]["value"] == 2.0  # 後から来た値で上書き（最後の 1 件が残る）
     assert other["total"] == 1
+
+
+async def test_later_flush_overwrites_same_sensor_and_time(client: httpx.AsyncClient) -> None:
+    """別々の flush で同じ (センサー, 時刻) が来たら、後の値で上書きする（L-1 の決定）。"""
+    sensor_id = await _create_sensor(client, "overwrite-sensor")
+    at = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=5)
+    await buffer.add(PendingReading(sensor_id=UUID(sensor_id), value=1.0, recorded_at=at))
+    await flush_once()
+    await buffer.add(PendingReading(sensor_id=UUID(sensor_id), value=5.0, recorded_at=at))
+    await flush_once()
+    body = (await client.get(f"/api/sensors/{sensor_id}/readings")).json()
+    assert body["total"] == 1
+    assert body["readings"][0]["value"] == 5.0
 
 
 async def _count_readings(sensor_id: str) -> int:
@@ -1243,13 +1256,25 @@ async def test_samples_form_rejects_only_bad_sensors(client: httpx.AsyncClient) 
         {"samples": [{"values": {"a": "x"}}]},
         {"samples": [{"values": {"a": 1}}], "sensors": []},
         {"samples": [{"values": {"a": 1}}], "ingestKey": "a", "value": 1},
-        {"samples": [{"timestamp": "x", "values": {"a": 1}}]},
     ],
-    ids=["empty-key", "nul-key", "bad-value", "with-sensors", "with-ingest-key", "bad-time"],
+    ids=["empty-key", "nul-key", "bad-value", "with-sensors", "with-ingest-key"],
 )
 async def test_samples_form_bad_shape_returns_400(
     client: httpx.AsyncClient, body: dict[str, object]
 ) -> None:
+    resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
+    assert resp.status_code == 400
+
+
+async def test_samples_bad_time_is_rejected_only_when_on(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """壊れた時刻は、INGEST_DEVICE_TIME=on のときだけ 400。off では無視して 202。"""
+    await _create_sensor(client, "samp-bad")
+    body = {"samples": [{"timestamp": "x", "values": {"samp-bad": 1}}]}
+    resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
+    assert resp.status_code == 202
+    monkeypatch.setattr(settings, "ingest_device_time", True)
     resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
     assert resp.status_code == 400
 
@@ -1315,3 +1340,95 @@ async def test_saas_mode_ignores_device_time_for_samples_and_sensors(
     assert [(r["ingestKey"], r["status"]) for r in body["rejected"]] == [("saas-nope", 404)]
     (stored,) = await _stored_times(sensor_id)
     assert stored > datetime.now(UTC) - timedelta(minutes=1)  # 5 日前ではなく、受信時刻
+
+
+# ---- QA 再レビューの指摘（H-D・H-C・H-B）の回帰テスト ----
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [1730000000000, "garbage", 0, True, "2026-10-30"],
+    ids=["ms-number", "garbage-string", "zero", "bool", "date-only"],
+)
+async def test_device_time_shape_is_ignored_when_off(
+    client: httpx.AsyncClient, stamp: object
+) -> None:
+    """INGEST_DEVICE_TIME=off（既定）では、timestamp はどんな値でも無視する（202 のまま）。"""
+    sensor_id = await _create_sensor(client, "off-shape")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "off-shape", "value": 1, "timestamp": stamp},
+    )
+    assert resp.status_code == 202
+    (stored,) = await _stored_times(sensor_id)
+    assert stored > datetime.now(UTC) - timedelta(minutes=1)
+
+
+async def test_device_time_zero_is_rejected_when_on(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """timestamp の 0 は、機器の時刻として 0（1970 年）になるので、過去の範囲外で 400。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    await _create_sensor(client, "on-zero")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "on-zero", "value": 1, "timestamp": 0},
+    )
+    assert resp.status_code == 400
+
+
+async def test_resolved_then_older_breach_does_not_open_new_alarm(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """解決より前の超過が、あとから届いても、新しい発生中のアラームを作らない（QA H-C）。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    resp = await client.post(
+        "/api/sensors",
+        json={"name": "hc", "ingestKey": "hc", "unit": "C", "thresholdMaxCritical": 10.0},
+    )
+    assert resp.status_code == 201
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=5)
+
+    async def send(value: float, seconds: int) -> None:
+        resp = await client.post(
+            "/api/ingest/readings",
+            headers=VALID_HEADERS,
+            json={
+                "ingestKey": "hc",
+                "value": value,
+                "timestamp": (base + timedelta(seconds=seconds)).isoformat(),
+            },
+        )
+        assert resp.status_code == 202
+        await flush_once()
+
+    await send(30, 0)  # 超過 → 発生
+    await send(1, 20)  # 正常 → 解決（20 秒時点）
+    await send(40, 10)  # 解決より前の超過（あとから届いた）
+    active = (await client.get("/api/alarms", params={"status": "active"})).json()["alarms"]
+    assert active == []
+    all_alarms = (await client.get("/api/alarms")).json()["alarms"]
+    assert len(all_alarms) == 1
+
+
+async def test_body_over_limit_is_rejected_before_parsing(client: httpx.AsyncClient) -> None:
+    """本文が上限（8MB）を超えると、読む前に 413 にする（QA H-B）。"""
+    await _create_sensor(client, "big-body")
+    huge = {"ingestKey": "big-body", "value": 1, "pad": "x" * (9 * 1024 * 1024)}
+    resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=huge)
+    assert resp.status_code == 413
+
+
+async def test_too_many_samples_values_rejected_before_building(
+    client: httpx.AsyncClient,
+) -> None:
+    """件数の超過は、組み立ての前に 400（大量の値をバッファに入れない）。"""
+    values = {f"k{i}": 1.0 for i in range(2000)}
+    # 72,000 件（上限 70,000 を超える）
+    samples = [{"values": values} for _ in range(36)]
+    resp = await client.post(
+        "/api/ingest/readings", headers=VALID_HEADERS, json={"samples": samples}
+    )
+    assert resp.status_code == 400
