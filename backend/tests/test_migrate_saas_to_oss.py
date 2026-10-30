@@ -384,7 +384,7 @@ def _write_bundle(
 
     header = {
         "format": "factoreye-workspace-export",
-        "version": 2,
+        "version": 3,
         "workspace_id": "00000000-0000-4000-8000-000000000001",
         "exported_at": "2026-10-04T00:00:00+00:00",
         "alembic_version": alembic_version,

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **データ移行で、機器ごとのキーも移る（書き出しの形式を版 3 に）**: self-hosted の書き出しに、機器の表（名前とキーのハッシュ）を入れ、センサーの所属ごと移す。移行先でも、同じキーのまま送れる。これまでは、機器に所属したセンサーを取り込むと、外部キー違反で取り込みが中止されていた。版 2 のファイルは、取り込めない（版の不一致）
 - **機器ごとのキー（self-hosted だけ）**: `X-Device-Key` ヘッダーで、機器（現場の 1 台）のキーで送れる。キーは発行時に 1 回だけ表示し、ハッシュで保存する（マイグレーション `h8c9d0e1f2a3`、`python -m app.device_cli create / attach / revoke / list`）。所属のあるセンサーには、その機器のキーでしか送れない
 - **本文の上限を、読みながら数える（chunked を含む）**: Content-Length が無い送信も、8MB を超えたら 413
 - **取り込みで、複数センサーを 1 回で送れるようにした（`sensors` 配列）**: `{"sensors": [{"ingestKey": ..., "readings": [...]}, ...]}`。1 リクエスト 2,000 センサー・合計 70,000 件まで。時刻ごとにまとめる `samples` 形（`{"samples": [{"timestamp": ..., "values": {"ingestKey": 値}}]}`）も追加した。時刻は秒単位に切り捨て、数値の時刻は UNIX 秒だけ。センサーごとの問題は応答の `rejected` に出し、残りは受け付ける。従来の形はそのまま使え、応答に `rejected`（空の配列）が増える
