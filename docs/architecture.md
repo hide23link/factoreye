@@ -56,13 +56,14 @@ flowchart LR
 
 | テーブル | 役割 | 主な内容 |
 |---|---|---|
-| `sensors` | センサー | 名前（ワークスペース内で一意）、`ingest_key`（全体で一意。取り込みAPIがキーだけで特定するため）、単位、しきい値4項目、不感帯、有効/無効 |
-| `readings` | 測定値 | sensor_id、値、`recorded_at`（取り込んだサーバー時刻）。主キーは `(sensor_id, recorded_at)`（連番の `id` は無い。同じセンサーで同じ時刻の値は持てないため、1 回の送信内の i 番目の値は i マイクロ秒ずらして保存する。重複は書かずに続ける） |
+| `sensors` | センサー | 名前（ワークスペース内で一意）、`ingest_key`（全体で一意。取り込みAPIがキーだけで特定するため）、単位、しきい値4項目、不感帯、有効/無効、`device_id`（所属する機器。NULL は機器のキーに紐づかない。機器ごとのキーは §5） |
+| `readings` | 測定値 | sensor_id、値、`recorded_at`（既定は取り込んだサーバー時刻。`INGEST_DEVICE_TIME=on` では機器が付けた測定時刻で、秒単位）。主キーは `(sensor_id, recorded_at)`（連番の `id` は無い。同じセンサーで同じ時刻の値は持てない。サーバー時刻のときは、1 回の送信内の i 番目の値を i マイクロ秒ずらして保存する。同じ時刻の値は後から来た値で上書きする） |
 | `alarms` | アラーム | sensor_id、状態（active / acknowledged / resolved）、重要度（warning / critical）、しきい値方向（min / max）、確認者、`last_notified_at`。ユーザー操作では削除しない（センサーを削除すると関連分も削除される） |
 | `dashboards` | ダッシュボード | 名前、説明、レイアウト設定。削除は論理削除（`deleted_at`） |
 | `widgets` | ウィジェット | ダッシュボードの配置（12列グリッド）、種別、センサーとの紐付け、設定 |
 | `notification_settings` | 通知設定 | ワークスペースごとに1行（self-hosted は NULL の1行）。重故障・軽故障それぞれの Discord Webhook URL、有効/無効、重故障の再通知 |
 | `webhook_subscriptions` | Webhook 購読 | イベント種別、送信先 URL、有効/無効 |
+| `ingest_devices` | 機器ごとのキー（self-hosted のみ） | 機器の名前（一意）、キーの SHA-256 ハッシュ（キーそのものは保存しない）、作成日時、失効日時。センサーの `device_id` の参照先 |
 | `users` / `workspaces` / `refresh_tokens` | 認証（SaaS のみ） | ユーザー、ワークスペース（テナント）、リフレッシュトークン |
 
 - センサーの `workspace_id` などテナント列は SaaS モードで使う（`NULL` が self-hosted）
