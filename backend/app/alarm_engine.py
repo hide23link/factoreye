@@ -124,8 +124,11 @@ async def evaluate_alarms(
 
     notifications: list[AlarmNotification] = []
 
-    for reading in pending:
-        # 測定値の順に、判定する。センサーが削除されていれば、何もしない
+    # 測定時刻の順に判定する。受信時刻のときは到着順と同じ。
+    # 機器の時刻（INGEST_DEVICE_TIME=on）では、送信の中で時刻が前後することがあり、
+    # そのまま処理すると、解決の時刻が発生より前になる
+    for reading in sorted(pending, key=lambda r: r.recorded_at):
+        # センサーが削除されていれば、何もしない
         sensor = sensors_by_id.get(reading.sensor_id)
         if sensor is None:
             continue
@@ -133,6 +136,10 @@ async def evaluate_alarms(
 
         breach = _check_threshold(sensor, reading.value)
         existing = open_alarms.get(reading.sensor_id)
+        if existing is not None and reading.recorded_at < existing.triggered_at:
+            # 発生中のアラームより古い測定値（溜めて後から送られた分）。
+            # 解決も再通知もしない（時刻が逆転するため）
+            continue
 
         if breach is not None:
             breached, severity = breach

@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     # 自動で作ってよいセンサーの上限（センサー全体の数）。
     # LAN の誰かに大量に作られて、一覧が埋まるのを防ぐ
     ingest_auto_create_max_sensors: int = Field(default=100, ge=1, le=10000)
+    # 機器が本文に付けた測定時刻（timestamp）を、測定値の時刻にする（self-hosted だけ）。
+    # 既定は off（従来どおり、サーバーの受信時刻を使い、timestamp は無視する）。
+    # on にすると、timestamp を付けた値は、その時刻で保存する（付けない値は、受信時刻のまま）。
+    # 機器の時計が NTP などで合っていることが前提。1 秒サンプリングを溜めてまとめ送りする使い方向け
+    ingest_device_time: bool = False
     # Webhook送信先に社内ネットワーク（プライベートIP・http）を許可する。既定は禁止（SSRF対策）。
     # 社内LANの自動化基盤（n8n等）へ送る自己ホスト利用者だけ true にする
     webhook_allow_private_networks: bool = False
@@ -143,6 +148,14 @@ class Settings(BaseSettings):
         使えない（常に False）。
         """
         return self.ingest_auto_create and self.auth_mode != AuthMode.MULTI_TENANT
+
+    @property
+    def ingest_device_time_active(self) -> bool:
+        """測定時刻を機器のものにするか。self-hosted で INGEST_DEVICE_TIME=on のときだけ True。
+
+        SaaS では、他の利用者の機器の時計を信用できないので、使えない（常に False）。
+        """
+        return self.ingest_device_time and self.auth_mode != AuthMode.MULTI_TENANT
 
     @property
     def ingest_requires_key(self) -> bool:

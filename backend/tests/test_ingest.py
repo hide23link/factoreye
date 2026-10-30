@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+import app.api.ingest as ingest_module
 import app.ingest_buffer as ingest_buffer
 import app.main as main_module
 from app.config import AuthMode, IngestAuth, settings
@@ -816,3 +817,501 @@ async def test_auto_create_with_readings_array(
     resp = await client.post("/api/ingest/readings", json=body)
     assert resp.status_code == 202 and resp.json()["accepted"] == 2
     assert (await _sensors(client))[0]["name"] == "バッチ"
+
+
+# ---- INGEST_DEVICE_TIME（機器が付けた測定時刻を使う） ----
+
+
+async def _stored_times(sensor_id: str) -> list[datetime]:
+    await flush_once()
+    async with AsyncSession(engine) as session:
+        rows = await session.exec(
+            select(Reading.recorded_at)
+            .where(Reading.sensor_id == UUID(sensor_id))
+            .order_by(Reading.recorded_at)
+        )
+        return list(rows.all())
+
+
+async def test_device_time_is_ignored_by_default(client: httpx.AsyncClient) -> None:
+    """既定（off）では、timestamp を付けても受信時刻で保存する（従来どおり）。"""
+    sensor_id = await _create_sensor(client, "dt-default")
+    sent = datetime.now(UTC) - timedelta(hours=1)
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "dt-default", "value": 1, "timestamp": sent.isoformat()},
+    )
+    assert resp.status_code == 202
+    (stored,) = await _stored_times(sensor_id)
+    assert stored > datetime.now(UTC) - timedelta(minutes=1)
+
+
+async def test_device_time_is_used_when_on(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "dt-on")
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=30)
+    readings = [
+        {"value": i, "timestamp": (base + timedelta(seconds=i)).isoformat()} for i in range(5)
+    ]
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "dt-on", "readings": readings},
+    )
+    assert resp.status_code == 202
+    assert await _stored_times(sensor_id) == [base + timedelta(seconds=i) for i in range(5)]
+
+
+async def test_device_time_accepts_unix_seconds(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "dt-unix")
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=30)
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "dt-unix", "value": 1, "timestamp": int(base.timestamp())},
+    )
+    assert resp.status_code == 202
+    assert await _stored_times(sensor_id) == [base]
+
+
+async def test_device_time_resend_does_not_duplicate(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同じ時刻の値を送り直しても、二重に保存しない（通信失敗後の再送のため）。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "dt-resend")
+    body = {
+        "ingestKey": "dt-resend",
+        "value": 1,
+        "timestamp": (datetime.now(UTC) - timedelta(seconds=5)).isoformat(),
+    }
+    for _ in range(2):
+        resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
+        assert resp.status_code == 202
+        await flush_once()
+    assert len(await _stored_times(sensor_id)) == 1
+
+
+async def test_device_time_mixed_with_server_time(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """timestamp の無い値は受信時刻のまま、付いた値は機器の時刻で保存する。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "dt-mixed")
+    sent = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "ingestKey": "dt-mixed",
+            "readings": [{"value": 1, "timestamp": sent.isoformat()}, {"value": 2}, {"value": 3}],
+        },
+    )
+    assert resp.status_code == 202
+    times = await _stored_times(sensor_id)
+    assert times[0] == sent
+    assert len(times) == 3
+    assert times[2] - times[1] == timedelta(microseconds=1)
+    assert times[1] > datetime.now(UTC) - timedelta(minutes=1)
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [timedelta(seconds=11), timedelta(days=-31)],
+    ids=["future", "too-old"],
+)
+async def test_device_time_out_of_range_returns_400(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, offset: timedelta
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "dt-range")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "ingestKey": "dt-range",
+            "readings": [
+                {"value": 1},
+                {"value": 2, "timestamp": (datetime.now(UTC) + offset).isoformat()},
+            ],
+        },
+    )
+    assert resp.status_code == 400
+    assert await _stored_times(sensor_id) == []  # 全体を受け付けない
+
+
+async def test_device_time_without_time_zone_returns_400(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    await _create_sensor(client, "dt-naive")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "dt-naive", "value": 1, "timestamp": "2026-10-30T12:00:00"},
+    )
+    assert resp.status_code == 400
+
+
+# ---- 複数センサーを 1 回で送る（sensors） ----
+
+
+async def _count(sensor_id: str) -> int:
+    await flush_once()
+    async with AsyncSession(engine) as session:
+        return (
+            await session.exec(
+                select(func.count())
+                .select_from(Reading)
+                .where(Reading.sensor_id == UUID(sensor_id))
+            )
+        ).one()
+
+
+async def test_multi_sensor_request_saves_every_sensor(client: httpx.AsyncClient) -> None:
+    ids = {key: await _create_sensor(client, key) for key in ("m-a", "m-b", "m-c")}
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "sensors": [
+                {"ingestKey": "m-a", "value": 1},
+                {"ingestKey": "m-b", "readings": [{"value": 2}, {"value": 3}]},
+                {"ingestKey": "m-c", "readings": [{"value": 4}] * 3},
+            ]
+        },
+    )
+    assert resp.status_code == 202
+    assert resp.json() == {"accepted": 6, "rejected": []}
+    assert [await _count(ids[k]) for k in ("m-a", "m-b", "m-c")] == [1, 2, 3]
+
+
+async def test_multi_sensor_request_keeps_going_past_a_bad_sensor(
+    client: httpx.AsyncClient,
+) -> None:
+    """未登録・無効・値なしのセンサーは rejected に出し、ほかは受け付ける。"""
+    good = await _create_sensor(client, "mp-good")
+    off = await _create_sensor(client, "mp-off")
+    resp = await client.put(f"/api/sensors/{off}", json={"enabled": False})
+    assert resp.status_code == 200
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "sensors": [
+                {"ingestKey": "mp-nope", "value": 1},
+                {"ingestKey": "mp-off", "value": 1},
+                {"ingestKey": "mp-good", "value": 1},
+                {"ingestKey": "mp-good", "readings": []},
+            ]
+        },
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] == 1
+    assert [(r["ingestKey"], r["status"]) for r in body["rejected"]] == [
+        ("mp-nope", 404),
+        ("mp-off", 403),
+        ("mp-good", 400),
+    ]
+    assert await _count(good) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"ingestKey": "x", "value": 1, "sensors": [{"ingestKey": "x", "value": 1}]},
+        {"sensors": [{"value": 1}]},
+        {"value": 1},
+    ],
+    ids=["both-forms", "sensor-without-key", "neither-form"],
+)
+async def test_multi_sensor_bad_shape_returns_400(
+    client: httpx.AsyncClient, body: dict[str, object]
+) -> None:
+    resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
+    assert resp.status_code == 400
+
+
+async def test_multi_sensor_total_limit_returns_400(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.api.ingest.MAX_READINGS_PER_MULTI_REQUEST", 3)
+    await _create_sensor(client, "ml-a")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"sensors": [{"ingestKey": "ml-a", "readings": [{"value": 1}] * 4}]},
+    )
+    assert resp.status_code == 400
+
+
+async def test_multi_sensor_with_device_time(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    a = await _create_sensor(client, "md-a")
+    b = await _create_sensor(client, "md-b")
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=30)
+    stamp = [(base + timedelta(seconds=i)).isoformat() for i in range(3)]
+    sensors = [
+        {"ingestKey": key, "readings": [{"value": i, "timestamp": t} for i, t in enumerate(stamp)]}
+        for key in ("md-a", "md-b")
+    ]
+    resp = await client.post(
+        "/api/ingest/readings", headers=VALID_HEADERS, json={"sensors": sensors}
+    )
+    assert resp.status_code == 202
+    expected = [base + timedelta(seconds=i) for i in range(3)]
+    assert await _stored_times(a) == expected
+    assert await _stored_times(b) == expected
+    # 1 つでも範囲外の時刻があれば、全体を受け付けない
+    bad = {"ingestKey": "md-a", "value": 1, "timestamp": (base + timedelta(days=1)).isoformat()}
+    resp = await client.post(
+        "/api/ingest/readings", headers=VALID_HEADERS, json={"sensors": [sensors[1], bad]}
+    )
+    assert resp.status_code == 400
+
+
+async def test_multi_sensor_auto_creates_missing_sensors(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_auto_create", True)
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "sensors": [
+                {"ingestKey": "ma-1", "name": "電圧1", "unit": "V", "value": 1},
+                {"ingestKey": "ma-2", "name": "電流1", "unit": "mA", "value": 2},
+            ]
+        },
+    )
+    assert resp.status_code == 202
+    assert resp.json()["accepted"] == 2
+    sensors = (await client.get("/api/sensors")).json()
+    assert {s["ingestKey"]: s["unit"] for s in sensors} == {"ma-1": "V", "ma-2": "mA"}
+
+
+async def test_multi_sensor_known_sensors_after_auto_created_one(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自動登録の commit のあとでも、登録済みのセンサーを処理できる（QA C-1 の回帰）。"""
+    monkeypatch.setattr(settings, "ingest_auto_create", True)
+    a = await _create_sensor(client, "c1-a")
+    b = await _create_sensor(client, "c1-b")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "sensors": [
+                {"ingestKey": "c1-a", "value": 1},
+                {"ingestKey": "c1-new", "value": 2},
+                {"ingestKey": "c1-b", "value": 3},
+                {"ingestKey": "c1-new", "value": 4},
+            ]
+        },
+    )
+    assert resp.status_code == 202
+    assert resp.json() == {"accepted": 4, "rejected": []}
+    assert await _count(a) == 1
+    assert await _count(b) == 1
+
+
+async def test_multi_sensor_unexpected_error_leaves_nothing_in_buffer(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """途中で予期しない例外が出ても、一部だけがバッファに残らない（再送で二重にならない）。"""
+    sensor_id = await _create_sensor(client, "c2-a")
+    await _create_sensor(client, "c2-b")
+    real_find = ingest_module._auto_create_sensor
+
+    async def boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(ingest_module, "_auto_create_sensor", boom)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as quiet:
+        resp = await quiet.post(
+            "/api/ingest/readings",
+            headers=VALID_HEADERS,
+            json={
+                "sensors": [{"ingestKey": "c2-a", "value": 1}, {"ingestKey": "c2-x", "value": 2}]
+            },
+        )
+    assert resp.status_code == 500
+    monkeypatch.setattr(ingest_module, "_auto_create_sensor", real_find)
+    assert await _count(sensor_id) == 0
+
+
+async def test_device_time_out_of_order_does_not_break_alarm_times(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """時刻が前後した送信でも、解決の時刻が発生より前にならない（QA H-1 の回帰）。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    resp = await client.post(
+        "/api/sensors",
+        json={"name": "h1", "ingestKey": "h1", "unit": "C", "thresholdMaxCritical": 10.0},
+    )
+    assert resp.status_code == 201
+    base = datetime.now(UTC).replace(microsecond=0)
+    # 到着順は [超過 -10s, 正常 -20s, 超過 -30s]。時刻順では 超過(-30) → 正常(-20) → 超過(-10)
+    readings = [
+        {"value": 20, "timestamp": (base - timedelta(seconds=10)).isoformat()},
+        {"value": 5, "timestamp": (base - timedelta(seconds=20)).isoformat()},
+        {"value": 30, "timestamp": (base - timedelta(seconds=30)).isoformat()},
+    ]
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "h1", "readings": readings},
+    )
+    assert resp.status_code == 202
+    await flush_once()
+    alarms = (await client.get("/api/alarms")).json()["alarms"]
+    assert len(alarms) == 2
+    for alarm in alarms:
+        if alarm["resolvedAt"] is not None:
+            assert alarm["resolvedAt"] >= alarm["triggeredAt"]
+    # 古い正常値が、あとから来ても、発生中のアラームを解決しない
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "ingestKey": "h1",
+            "value": 1,
+            "timestamp": (base - timedelta(seconds=100)).isoformat(),
+        },
+    )
+    assert resp.status_code == 202
+    await flush_once()
+    active = (await client.get("/api/alarms", params={"status": "active"})).json()["alarms"]
+    assert len(active) == 1
+
+
+# ---- 時刻ごとにまとめる形（samples）と、秒単位の時刻 ----
+
+
+async def test_samples_form_saves_each_value_at_its_time(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    ids = {key: await _create_sensor(client, key) for key in ("s-v", "s-i", "s-e")}
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=30)
+    samples = [
+        {
+            "timestamp": (base + timedelta(seconds=i)).isoformat(),
+            "values": {"s-v": 12.0 + i, "s-i": 0.5, "s-e": -1.2},
+        }
+        for i in range(3)
+    ]
+    resp = await client.post(
+        "/api/ingest/readings", headers=VALID_HEADERS, json={"samples": samples}
+    )
+    assert resp.status_code == 202
+    assert resp.json() == {"accepted": 9, "rejected": []}
+    expected = [base + timedelta(seconds=i) for i in range(3)]
+    for key in ids:
+        assert await _stored_times(ids[key]) == expected
+
+
+async def test_samples_form_rejects_only_bad_sensors(client: httpx.AsyncClient) -> None:
+    good = await _create_sensor(client, "sr-good")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"samples": [{"values": {"sr-good": 1, "sr-nope": 2}}]},
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] == 1
+    assert [(r["ingestKey"], r["status"]) for r in body["rejected"]] == [("sr-nope", 404)]
+    assert await _count(good) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"samples": [{"values": {"": 1}}]},
+        {"samples": [{"values": {"a\x00b": 1}}]},
+        {"samples": [{"values": {"a": "x"}}]},
+        {"samples": [{"values": {"a": 1}}], "sensors": []},
+        {"samples": [{"values": {"a": 1}}], "ingestKey": "a", "value": 1},
+        {"samples": [{"timestamp": "x", "values": {"a": 1}}]},
+    ],
+    ids=["empty-key", "nul-key", "bad-value", "with-sensors", "with-ingest-key", "bad-time"],
+)
+async def test_samples_form_bad_shape_returns_400(
+    client: httpx.AsyncClient, body: dict[str, object]
+) -> None:
+    resp = await client.post("/api/ingest/readings", headers=VALID_HEADERS, json=body)
+    assert resp.status_code == 400
+
+
+async def test_device_time_is_cut_to_whole_seconds(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    sensor_id = await _create_sensor(client, "sec-cut")
+    base = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=30)
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={
+            "ingestKey": "sec-cut",
+            "readings": [
+                {"value": 1, "timestamp": (base + timedelta(milliseconds=900)).isoformat()},
+                {"value": 2, "timestamp": (base + timedelta(milliseconds=100)).isoformat()},
+            ],
+        },
+    )
+    assert resp.status_code == 202
+    # 同じ秒の 2 件は、1 件にまとまる（後の 1 件を捨てる）
+    assert await _stored_times(sensor_id) == [base]
+
+
+@pytest.mark.parametrize("unit_value", [1.7e12, 1.7e15, 1e11])
+async def test_numeric_timestamp_must_be_seconds(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, unit_value: float
+) -> None:
+    """ミリ秒・マイクロ秒の数値は、時刻として受け付けない。"""
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    await _create_sensor(client, "num-ms")
+    resp = await client.post(
+        "/api/ingest/readings",
+        headers=VALID_HEADERS,
+        json={"ingestKey": "num-ms", "value": 1, "timestamp": unit_value},
+    )
+    assert resp.status_code == 400
+
+
+async def test_saas_mode_ignores_device_time_for_samples_and_sensors(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SaaS（multi_tenant）では、INGEST_DEVICE_TIME=on でも機器の時刻を使わない。
+    samples・sensors の形でも、受信時刻で保存し、未登録は自動登録しない（404）。"""
+    sensor_id = await _create_sensor(client, "saas-s1")
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+    monkeypatch.setattr(settings, "ingest_auto_create", True)
+    old = (datetime.now(UTC) - timedelta(days=5)).replace(microsecond=0).isoformat()
+    resp = await client.post(
+        "/api/ingest/readings",
+        json={
+            "samples": [
+                {"timestamp": old, "values": {"saas-s1": 1, "saas-nope": 2}},
+            ]
+        },
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] == 1
+    assert [(r["ingestKey"], r["status"]) for r in body["rejected"]] == [("saas-nope", 404)]
+    (stored,) = await _stored_times(sensor_id)
+    assert stored > datetime.now(UTC) - timedelta(minutes=1)  # 5 日前ではなく、受信時刻
