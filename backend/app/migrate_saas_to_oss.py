@@ -51,9 +51,10 @@ import app.db.models  # noqa: F401
 # 書き出しファイルの識別子と版。取り込み側は、この2つが一致しないファイルを拒否する。
 # 形式を変えたら VERSION を上げる（版 1 は未リリースのため、互換性は持たない）
 FORMAT = "factoreye-workspace-export"
-VERSION = 2
+VERSION = 3  # 3: 機器ごとのキーの表（ingest_devices）を追加
 # 書き出し・取り込みの順序。外部キーの参照先が先に来る（取り込みはこの順で流す）
 TABLES = [
+    "ingest_devices",  # sensors.device_id の参照先。センサーより先に入れる
     "sensors",
     "dashboards",
     "widgets",
@@ -154,7 +155,7 @@ async def export_workspace(
     """
     t = _tables()
     sensors, dashboards, widgets = t["sensors"], t["dashboards"], t["widgets"]
-    alarms = t["alarms"]
+    alarms, devices = t["alarms"], t["ingest_devices"]
     webhooks, notifications = t["webhook_subscriptions"], t["notification_settings"]
 
     sensor_ids = sa.select(sensors.c.id).where(_ws_eq(sensors.c.workspace_id, workspace_id))
@@ -168,6 +169,11 @@ async def export_workspace(
     # - 測定値（readings）は _export_readings で別に書く（件数が多く、形式を圧縮するため）
     # - ユーザーやリフレッシュトークンは、OSS には不要なので対象外
     queries: dict[str, sa.Select[Any]] = {
+        # 機器ごとのキー（self-hosted だけ）。名前とキーのハッシュを移す（元のキーには戻せない）。
+        # ワークスペース単位の書き出し（SaaS）には機器が無いので、何も出さない
+        "ingest_devices": sa.select(devices)
+        if workspace_id is None
+        else sa.select(devices).where(sa.false()),
         "sensors": sa.select(sensors).where(_ws_eq(sensors.c.workspace_id, workspace_id)),
         "dashboards": sa.select(dashboards).where(
             _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)

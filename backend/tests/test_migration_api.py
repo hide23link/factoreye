@@ -217,3 +217,44 @@ async def test_import_conflict_returns_409(
     )
     assert response.status_code == 409
     assert await _count("SELECT COUNT(*) FROM sensors WHERE workspace_id IS NULL") == 0
+
+
+@pytest.mark.asyncio
+async def test_oss_export_import_keeps_devices_and_attached_sensors(
+    client: httpx.AsyncClient, alembic_table: None
+) -> None:
+    """機器に所属したセンサーも、機器とキー（ハッシュ）ごと移る。移行先でも、同じキーが使える。"""
+    from app import device_keys
+
+    resp = await client.post(
+        "/api/sensors", json={"name": "dev-s", "ingestKey": "dev-s", "unit": "V"}
+    )
+    assert resp.status_code == 201
+    async with AsyncSession(engine) as session:
+        key = await device_keys.create_device(session, "dev-1")
+        device = await device_keys.get_device_by_name(session, "dev-1")
+        assert device is not None
+        await device_keys.attach_sensors(session, device, ["dev-s"])
+
+    exported = await client.get("/api/settings/migration/export")
+    assert exported.status_code == 200
+    # 移行先を模して、機器もセンサーも空にする
+    async with engine.begin() as conn:
+        await conn.execute(sa.text("DELETE FROM sensors"))
+        await conn.execute(sa.text("DELETE FROM ingest_devices"))
+
+    real = await client.post(
+        "/api/settings/migration/import",
+        content=exported.content,
+        headers={"Content-Type": "application/gzip"},
+    )
+    assert real.status_code == 200
+    assert real.json()["counts"]["ingest_devices"] == 1
+    assert await _count("SELECT COUNT(*) FROM sensors WHERE device_id IS NOT NULL") == 1
+    # 同じキーで、そのまま送れる（機器側の設定を変えなくてよい）
+    sent = await client.post(
+        "/api/ingest/readings",
+        headers={"X-Device-Key": key},
+        json={"ingestKey": "dev-s", "value": 1},
+    )
+    assert sent.status_code == 202

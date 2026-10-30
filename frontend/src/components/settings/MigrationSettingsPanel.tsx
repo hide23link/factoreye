@@ -20,6 +20,7 @@ import type { MigrationImportResult } from "../../types";
 
 // テーブル名を、画面に出す日本語の名前にする（一覧に出す件数の見出し）
 const TABLE_LABELS: Record<string, string> = {
+  ingest_devices: "機器（取り込みのキー）",
   sensors: "センサー",
   readings: "測定値",
   alarms: "アラーム",
