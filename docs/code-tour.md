@@ -97,16 +97,17 @@ sequenceDiagram
 ### 各ステップの要点
 
 1. **受け付け**（`api/ingest.py`）
-   - 認証: self-hosted は `X-API-Key` ヘッダー、SaaS は本文の `ingestKey`（センサーごとの鍵）。
-   - `ingestKey` からセンサーを 1 つ特定する。無ければ 404、無効化されていれば 403。
-   - 時刻は**サーバーが受け取った時刻**を使う（機器の時計は信頼しない）。
+   - 認証: self-hosted は `X-API-Key`（共有シークレット）または機器ごとのキー `X-Device-Key`、SaaS は本文の `ingestKey`（センサーごとの鍵）。機器のキーを付けると、その機器に所属するセンサーにだけ送れる（`device_keys.py`）。
+   - 本文は 4 つの形: 1 センサー（`ingestKey` ＋ `value` / `readings`）、`sensors`（センサーごと）、`samples`（時刻ごと、複数センサー）。上限は本文 8MB、`sensors`・`samples` は合計 70,000 件。
+   - `ingestKey` からセンサーを特定する。無ければ 404、無効化されていれば 403。複数センサーの形では、センサーごとの問題を `rejected` に出して、残りを受け付ける。照合（機器のキー・センサー）は 5 秒だけ覚える（`ingest_cache.py`、`INGEST_CACHE_SECONDS`）。
+   - 時刻は既定で**サーバーが受け取った時刻**（機器の時計は信頼しない）。`INGEST_DEVICE_TIME=on`（self-hosted だけ）では、機器が付けた `timestamp` を秒単位で使う。
    - バッファに入れて、すぐ `202` を返す。DB は待たない。
 2. **バッファ**（`ingest_buffer.py` の `IngestBuffer`）
    - メモリ上のリスト。複数のリクエストが同時に入れても壊れないよう `lock` で守る。
    - 最大 1 秒分は、サーバーが落ちると失われうる（許容している）。
    - DB が止まって書けないときは、`put_back` で戻して次回に再試行する（上限 10 万件、超えたら古いものから捨てる）。
 3. **flush**（`flush_once`、1 秒ごとに `flush_loop` が呼ぶ）
-   - `Reading` を INSERT → `evaluate_alarms` でアラーム評価 → **commit**。
+   - `Reading` を INSERT（同じ（センサー, 時刻）は後の値で上書き）→ `evaluate_alarms` でアラーム評価（測定時刻の順）→ **commit**。
    - **commit の後**に、Webhook と Discord を送る。送信に失敗しても、DB は確定済みなので巻き戻らない。
    - commit 前に失敗したら、値をバッファに戻す。commit 後は戻さない（二重に書かないため）。
 4. **送信**（`run_in_background`）
@@ -199,7 +200,7 @@ erDiagram
 | | self-hosted（`disabled`、既定） | SaaS（`multi_tenant`） |
 |---|---|---|
 | ログイン | なし | あり（JWT） |
-| 取り込みの認証 | `X-API-Key`（共有シークレット） | 本文の `ingestKey` |
+| 取り込みの認証 | `X-API-Key`（共有シークレット）、または機器ごとのキー `X-Device-Key` | 本文の `ingestKey` |
 | データの分け方 | 分けない（`workspace_id` = NULL） | ワークスペースごと |
 | `/api/auth/*`・`/api/admin/*` | 登録されない（404） | 登録される |
 | 古い測定値の削除 | しない | 14 日より前を毎日削除（`purge.py`） |
