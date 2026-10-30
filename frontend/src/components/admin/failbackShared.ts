@@ -21,6 +21,7 @@ export const TIMEOUT_HINT = "再度試算して、追加が 0 件なら、書き
 export const TABLE_LABELS: Record<string, string> = {
   users: "利用者",
   workspaces: "ワークスペース",
+  ingest_devices: "機器（取り込みのキー）",
   sensors: "センサー",
   readings: "測定値",
   alarms: "アラーム",

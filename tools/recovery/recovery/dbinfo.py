@@ -20,7 +20,7 @@ from uuid import UUID
 import asyncpg
 
 # 画面・CSV に出さない列（復旧に要らず、漏れると困るもの）
-MASKED_COLUMNS = frozenset({"password_hash", "token_hash"})
+MASKED_COLUMNS = frozenset({"password_hash", "token_hash", "key_hash"})
 MASK = "***"
 # URL の列。Webhook の送信先（Discord など）は、パスに秘密のトークンを含むため、
 # ホスト名と末尾だけ出す

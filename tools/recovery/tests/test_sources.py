@@ -191,6 +191,7 @@ def test_csv_cell_neutralizes_formulas() -> None:
     assert to_csv_cell("name", "@SUM(A1)") == "'@SUM(A1)"
     assert to_csv_cell("value", -1.5) == "-1.5"  # 数値はそのまま
     assert to_csv_cell("password_hash", "=secret") == MASK
+    assert to_csv_cell("key_hash", "abc123") == MASK  # 機器のキーのハッシュも出さない
 
 
 def test_composite_requires_primary_but_not_optional(tmp_path: Path) -> None:
