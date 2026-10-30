@@ -25,7 +25,8 @@ from app.db.models import IngestDevice, Sensor
 from app.db.session import engine
 
 
-async def _run(args: argparse.Namespace) -> int:
+async def run_command(args: argparse.Namespace) -> int:
+    """コマンドを実行する。テストからも呼べるよう、引数を受け取る（終了コードを返す）。"""
     async with AsyncSession(engine) as session:
         if args.command == "create":
             if await device_keys.get_device_by_name(session, args.name) is not None:
@@ -72,10 +73,7 @@ def _fmt(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%d %H:%M")
 
 
-def main(argv: list[str] | None = None) -> int:
-    if settings.auth_mode == AuthMode.MULTI_TENANT:
-        print("機器のキーは、自前ホスト（AUTH_MODE=disabled）専用です", file=sys.stderr)
-        return 1
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m app.device_cli", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     create_p = sub.add_parser("create", help="機器を作り、キーを発行する")
@@ -86,8 +84,14 @@ def main(argv: list[str] | None = None) -> int:
     revoke_p = sub.add_parser("revoke", help="機器のキーを失効させる")
     revoke_p.add_argument("name")
     sub.add_parser("list", help="機器の一覧")
-    args = parser.parse_args(argv)
-    return asyncio.run(_run(args))
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    if settings.auth_mode == AuthMode.MULTI_TENANT:
+        print("機器のキーは、自前ホスト（AUTH_MODE=disabled）専用です", file=sys.stderr)
+        return 1
+    return asyncio.run(run_command(parse_args(argv)))
 
 
 if __name__ == "__main__":
