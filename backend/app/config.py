@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     # 自動で作ってよいセンサーの上限（センサー全体の数）。
     # LAN の誰かに大量に作られて、一覧が埋まるのを防ぐ
     ingest_auto_create_max_sensors: int = Field(default=100, ge=1, le=10000)
+    # 取り込みの照合（機器のキー・センサー）を覚えておく秒数。0 でキャッシュを使わない。
+    # 変更・失効の反映が、別のプロセスでは最大この秒数遅れる（app/ingest_cache.py）
+    ingest_cache_seconds: float = Field(default=5.0, ge=0, le=300)
     # 機器が本文に付けた測定時刻（timestamp）を、測定値の時刻にする（self-hosted だけ）。
     # 既定は off（従来どおり、サーバーの受信時刻を使い、timestamp は無視する）。
     # on にすると、timestamp を付けた値は、その時刻で保存する（付けない値は、受信時刻のまま）。
