@@ -8,10 +8,12 @@
 import hashlib
 import secrets
 from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app import ingest_cache
 from app.db.models import IngestDevice, Sensor
 
 
@@ -24,6 +26,7 @@ async def create_device(session: AsyncSession, name: str) -> str:
     key = secrets.token_urlsafe(32)
     session.add(IngestDevice(name=name, key_hash=hash_device_key(key)))
     await session.commit()
+    ingest_cache.clear()
     return key
 
 
@@ -36,6 +39,27 @@ async def find_active_device(session: AsyncSession, key: str) -> IngestDevice | 
         )
     )
     return result.first()
+
+
+async def find_active_device_id(session: AsyncSession, key: str) -> UUID | None:
+    """キーに対応する、失効していない機器の id。数秒のキャッシュを使う（app/ingest_cache.py）。
+
+    見つからない・失効している場合は None（その結果は覚えない）。
+    """
+    key_hash = hash_device_key(key)
+    cached = ingest_cache.get_device(key_hash)
+    if cached is not None:
+        return cached
+    result = await session.exec(
+        select(IngestDevice.id).where(
+            IngestDevice.key_hash == key_hash,
+            col(IngestDevice.revoked_at).is_(None),
+        )
+    )
+    device_id = result.first()
+    if device_id is not None:
+        ingest_cache.put_device(key_hash, device_id)
+    return device_id
 
 
 async def get_device_by_name(session: AsyncSession, name: str) -> IngestDevice | None:
@@ -57,6 +81,7 @@ async def attach_sensors(
         sensor.device_id = device.id
         session.add(sensor)
     await session.commit()
+    ingest_cache.clear()
     return missing
 
 
@@ -65,3 +90,4 @@ async def revoke_device(session: AsyncSession, device: IngestDevice) -> None:
     device.revoked_at = datetime.now(UTC)
     session.add(device)
     await session.commit()
+    ingest_cache.clear()

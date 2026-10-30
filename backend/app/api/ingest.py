@@ -42,7 +42,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import device_keys, ingest_limit_toggle  # 機器のキー / 回数の制限を外す仕組み
+from app import (  # 機器のキー / 回数の制限を外す仕組み
+    device_keys,
+    ingest_cache,
+    ingest_limit_toggle,
+)
 from app.api.deps import verify_ingest_api_key  # 機器の認証（X-API-Key の確認）
 from app.config import AuthMode, settings
 from app.db.models import Sensor
@@ -219,6 +223,11 @@ def clean_text(text: str | None, max_length: int) -> str:
     return _UNSAFE_TEXT_CHARS.sub("", text).strip()[:max_length]
 
 
+def _info_of(sensor: Sensor) -> ingest_cache.SensorInfo:
+    """取り込みに使う値だけを取り出す（DB のオブジェクトは、キャッシュに持たない）。"""
+    return ingest_cache.SensorInfo(sensor.id, sensor.enabled, sensor.device_id)
+
+
 async def _find_sensor(session: AsyncSession, ingest_key: str) -> Sensor | None:
     return (await session.exec(select(Sensor).where(Sensor.ingest_key == ingest_key))).first()
 
@@ -353,12 +362,12 @@ async def ingest_readings(
     caller_device_id: UUID | None = None
     if device_key_given:
         assert x_device_key is not None
-        device = await device_keys.find_active_device(session, x_device_key)
-        if device is None:
+        found_device_id = await device_keys.find_active_device_id(session, x_device_key)
+        if found_device_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid device key"
             )
-        caller_device_id = device.id
+        caller_device_id = found_device_id
     scope = _DeviceScope(key_given=device_key_given, device_id=caller_device_id)
 
     items = request_data.to_sensor_items()
@@ -383,12 +392,25 @@ async def ingest_readings(
     if use_device_time:
         for item in items:
             _check_device_times(item.to_readings(), now)
-    # 登録済みのセンサーは、1 回の問い合わせでまとめて探す（未登録だけ、個別に処理する）。
+    # 登録済みのセンサーは、覚えていなければ、1 回の問い合わせでまとめて探す
+    # （未登録だけ、個別に処理する）。
     # 自動登録の commit で、読んだ Sensor が期限切れになる（セッションの既定）ので、
-    # Sensor そのものではなく、使う値（id と enabled）だけを取り出して持つ
-    keys = {item.ingest_key for item in items}
-    found = (await session.exec(select(Sensor).where(col(Sensor.ingest_key).in_(keys)))).all()
-    known = {sensor.ingest_key: (sensor.id, sensor.enabled, sensor.device_id) for sensor in found}
+    # Sensor そのものではなく、使う値（id・enabled・device_id）だけを取り出して持つ
+    known: dict[str, tuple[UUID, bool, UUID | None]] = {}
+    missing_keys: set[str] = set()
+    for item in items:
+        info = ingest_cache.get_sensor(item.ingest_key)
+        if info is None:
+            missing_keys.add(item.ingest_key)
+        else:
+            known[item.ingest_key] = (info.id, info.enabled, info.device_id)
+    if missing_keys:
+        found = (
+            await session.exec(select(Sensor).where(col(Sensor.ingest_key).in_(missing_keys)))
+        ).all()
+        for sensor in found:
+            known[sensor.ingest_key] = (sensor.id, sensor.enabled, sensor.device_id)
+            ingest_cache.put_sensor(sensor.ingest_key, _info_of(sensor))
 
     # 第 1 段: すべてのセンサーを確かめる（ここではバッファに入れない）。
     # 途中で予期しない例外が出ても、一部だけがバッファに残って、再送で二重にならない
@@ -436,7 +458,14 @@ async def _resolve_sensor(
     if known is not None and ingest_key in known:
         sensor_id, enabled, device_id = known[ingest_key]
     else:
-        sensor = await _find_sensor(session, ingest_key) if known is None else None
+        sensor = None
+        if known is None:
+            info = ingest_cache.get_sensor(ingest_key)
+            if info is not None:
+                return await _finish_resolve(info.id, info.enabled, info.device_id, scope, readings)
+            sensor = await _find_sensor(session, ingest_key)
+            if sensor is not None:
+                ingest_cache.put_sensor(ingest_key, _info_of(sensor))
         if sensor is None and scope.key_given:
             # 機器のキーで、未登録のセンサーには送れない（自動登録で、所属のないセンサーを作らない）
             raise HTTPException(
@@ -450,6 +479,17 @@ async def _resolve_sensor(
         if known is not None:
             # 同じ送信内の同じキーは、作り直さない
             known[ingest_key] = (sensor_id, enabled, device_id)
+    return await _finish_resolve(sensor_id, enabled, device_id, scope, readings)
+
+
+async def _finish_resolve(
+    sensor_id: UUID,
+    enabled: bool,
+    device_id: UUID | None,
+    scope: "_DeviceScope",
+    readings: list[ReadingIn],
+) -> tuple[UUID, list[ReadingIn]]:
+    """センサーの所属と有効かを確かめて、(センサーの id, 測定値のリスト) を返す。"""
     _check_device_scope(scope, device_id)
     if not enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="sensor disabled")

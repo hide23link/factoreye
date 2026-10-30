@@ -11,6 +11,8 @@ services:
       - INGEST_AUTO_CREATE_MAX_SENSORS=${INGEST_AUTO_CREATE_MAX_SENSORS:-100}
       # 機器が付けた測定時刻（timestamp）を使う（self-hosted だけ。既定は受信時刻）
       - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
+      # 取り込みの照合（機器のキー・センサー）を覚えておく秒数。0 で無効
+      - INGEST_CACHE_SECONDS=${INGEST_CACHE_SECONDS:-5}
       - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで

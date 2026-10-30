@@ -39,6 +39,14 @@ async def _clean_tables() -> AsyncGenerator[None, None]:
             await conn.execute(table.delete())
 
 
+@pytest.fixture(autouse=True)
+def _clear_ingest_cache() -> None:
+    """取り込みの照合のキャッシュ（app/ingest_cache.py）を、テストごとに空にする。"""
+    from app import ingest_cache
+
+    ingest_cache.clear()
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     transport = ASGITransport(app=app)

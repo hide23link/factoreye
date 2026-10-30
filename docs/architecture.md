@@ -128,6 +128,8 @@ flowchart LR
 **センサーの自動登録（self-hosted だけ）**: `INGEST_AUTO_CREATE=on` のとき、未登録の `ingestKey` は 404 にせず、センサーを自動で作る。本文に `"name"`・`"unit"` を付けると、その名前・単位で作る（付けなければ、名前は `ingestKey`、単位は `-`）。登録済みのセンサーは、`name`・`unit` で上書きしない。決まり: `ingestKey` は、英数字と `.` `_` `-` だけ・64 文字まで（違えば 400。末尾の改行も不可）／センサーの総数（無効なものも数える）が `INGEST_AUTO_CREATE_MAX_SENSORS`（既定 100）に達したら、作らない（403）／`name`・`unit` は、拒否せずに整える（制御文字・NUL・表示の向きを変える文字を除き、前後の空白を削り、名前は 100 文字・単位は 20 文字に切る。空なら、名前は `ingestKey`、単位は `-`）。登録済みのセンサーでは、`name`・`unit` を見ない（変な値でも 400 にならない）／名前が重なるときは、「名前 (ingestKey)」→ `ingestKey` → 乱数つき、の順に使う／作る処理は、PostgreSQL の advisory lock で、同時に 1 つずつ行うので、同時に大量に来ても、上限を超えず、同じ `ingestKey` も 1 つだけ作る。**既定は off**。on の間は、打ち間違いの ID でも、センサーができる。削除したセンサーも、次の送信で、また作られる。**SaaS（`multi_tenant`）では使えない**（`ingestKey` だけでは、どのワークスペースかが決まらないため。無視する）。起動時に警告をログに出す。
 バッチは `readings` 配列（各要素に `value` と任意の `timestamp`）で送る。`readings` は 1 リクエストあたり 1,000 件まで。`value` も `readings` も無い場合、1,001 件以上の場合、`value` が NaN・Infinity の場合は 400。
 
+**照合のキャッシュ**: 取り込みのたびの DB の問い合わせ（機器のキーの照合、センサーの検索）を、`INGEST_CACHE_SECONDS`（既定 5 秒）だけ覚えておく（`app/ingest_cache.py`）。覚えるのは見つかった結果だけ（間違ったキー・未登録のセンサーは覚えない）。同じプロセスでのセンサーの更新・削除、機器の作成・所属・失効は、すぐ反映する。**別のプロセス（`--workers`）や CLI からの変更は、最大で保持秒数だけ遅れる**（失効したキーが最大 5 秒は通る、無効にしたセンサーが最大 5 秒は受け付ける）。SaaS にも同じ仕組みが入る。
+
 **機器ごとのキー（self-hosted だけ）**: 機器（現場の 1 台）ごとにキーを発行し、`X-Device-Key` ヘッダーで送る。キーは発行の時に 1 回だけ表示し、DB には SHA-256 のハッシュだけを保存する（`ingest_devices` 表）。センサーは `device_id` で機器に所属させる（`python -m app.device_cli attach <機器名> <ingestKey>...`）。
 - 所属のあるセンサーには、そのセンサーの機器のキーでしか送れない（キーが無いと 401、別の機器のキーは 403。`sensors`・`samples` では `rejected` に出し、残りは受け付ける）
 - 所属のないセンサーには、機器のキーでは送れない（403）。機器のキーが無い送信（従来の形）は、所属のないセンサーにだけ送れる
@@ -393,6 +395,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 |---|---|---|
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では必ず変更する |
 | `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する（`INGEST_AUTH=off` のときは使わない） |
+| `INGEST_CACHE_SECONDS` | `5` | 取り込みの照合（機器のキー・センサーの検索）を覚えておく秒数（0〜300。0 で無効。§5） |
 | `INGEST_DEVICE_TIME` | `false` | 機器が付けた `timestamp` を測定値の時刻にする（self-hosted だけ。§5）。SaaS では無視する |
 | `INGEST_AUTO_CREATE` | `false` | 未登録の `ingestKey` のセンサーを、自動で作る（self-hosted だけ。§5）。SaaS では無視する |
 | `INGEST_AUTO_CREATE_MAX_SENSORS` | `100` | 自動で作ってよい、センサー全体の数の上限（1〜10000） |

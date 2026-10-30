@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app import ingest_cache
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
 from app.api.updates import apply_update
@@ -223,6 +224,7 @@ async def update_sensor(
             status_code=status.HTTP_409_CONFLICT, detail="name already in use"
         ) from error
     await session.refresh(sensor)
+    ingest_cache.clear()  # 無効にした・所属を変えたセンサーを、取り込みがすぐ反映できるように
     return sensor
 
 
@@ -237,6 +239,7 @@ async def delete_sensor(
     sensor = await _get_active_sensor(session, sensor_id, workspace_id)
     await session.delete(sensor)
     await session.commit()
+    ingest_cache.clear()
 
 
 @router.get("/{sensor_id}/readings", response_model=ReadingListResponse)
