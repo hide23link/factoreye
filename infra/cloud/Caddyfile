@@ -11,7 +11,11 @@
     }
 
     # REST API + Ingest（FastAPI）
+    # 本文の上限は 8MB（backend の MAX_BODY_BYTES と同じ。超えると 413）。Content-Length が無い送信も止める
     handle /api/* {
+        request_body {
+            max_size 8MB
+        }
         reverse_proxy backend:8000
     }
 
