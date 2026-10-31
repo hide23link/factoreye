@@ -65,7 +65,7 @@ describe("MultiSensorComparisonWidget", () => {
     expect(screen.getByText("比較対象のセンサーが設定されていません")).toBeInTheDocument();
   });
 
-  it("センサーIDが設定されているとき複数センサー比較ラベルを表示する", async () => {
+  it("センサーIDが設定されているとき、複数センサー比較の見出しは出さない", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "温度センサー")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
       bucketSeconds: 60,
@@ -78,7 +78,7 @@ describe("MultiSensorComparisonWidget", () => {
       />,
     );
 
-    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+    expect(screen.queryByText("複数センサー比較")).toBeNull();
   });
 
   it("全センサーを、同じ範囲・同じ区間数で取得する（時間軸を揃えるため）", async () => {
