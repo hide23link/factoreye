@@ -327,3 +327,21 @@ describe("graphAxisSides（縦軸の左右）", () => {
     expect(r.leftUnit).toBe("");
   });
 });
+
+describe("graphAxisSides の単位の入力（axisUnits）", () => {
+  const units: Record<string, string> = { a: "V", c: "A" };
+  const unitOf = (id: string) => units[id];
+
+  it("入力した単位は、自動の単位より優先する。空欄（空白だけ）は自動に戻る", () => {
+    const config = { axisUnits: { left: " 電圧[V] ", right: "  " } };
+    const r = graphAxisSides(config, ["a", "c"], unitOf);
+    expect(r.leftUnit).toBe("電圧[V]");
+    expect(r.rightUnit).toBe("A");
+  });
+
+  it("一軸のときも、入力した単位を左の軸に使う", () => {
+    const r = graphAxisSides({ axisUnits: { left: "kW" } }, ["a"], unitOf);
+    expect(r.dual).toBe(false);
+    expect(r.leftUnit).toBe("kW");
+  });
+});

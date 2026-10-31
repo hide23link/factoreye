@@ -191,6 +191,40 @@ const THRESHOLD_OPTIONS: ReadonlyArray<{ value: ThresholdMode; label: string }> 
   { value: "both", label: "両方" },
 ];
 
+/** 縦軸の単位の文字を入力する欄。確定は、フォーカスを外したときと Enter。空欄は自動（センサーの単位）に戻す */
+function AxisUnitField({
+  label,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-500">
+      {label}
+      <input
+        aria-label={label}
+        className="w-24 rounded border border-gray-300 px-1 py-0.5 text-sm text-gray-800"
+        value={draft ?? value}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft !== null && draft !== value) onCommit(draft);
+          setDraft(null);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+    </label>
+  );
+}
+
 function GraphSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const config = widget.config;
@@ -325,6 +359,20 @@ function GraphSettings({ widget, actions }: SectionProps) {
                   />
                 </div>
               ))}
+              <div className="flex flex-wrap gap-3">
+                <AxisUnitField
+                  label="左の軸の単位"
+                  value={config.axisUnits?.left ?? ""}
+                  placeholder={axis.leftUnit || "自動"}
+                  onCommit={(left) => void changeConfig(actions, widget, { axisUnits: { ...config.axisUnits, left: left.trim() || undefined } })}
+                />
+                <AxisUnitField
+                  label="右の軸の単位"
+                  value={config.axisUnits?.right ?? ""}
+                  placeholder={axis.rightUnit || "自動"}
+                  onCommit={(right) => void changeConfig(actions, widget, { axisUnits: { ...config.axisUnits, right: right.trim() || undefined } })}
+                />
+              </div>
             </>
           )}
           {options.stackable && (

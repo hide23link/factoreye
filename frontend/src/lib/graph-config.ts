@@ -279,10 +279,12 @@ export function graphAxisSides(
   }
   const unitsOn = (side: AxisSide) =>
     [...new Set(sensorIds.filter((id) => sides[id] === side).map((id) => unitOf(id) ?? ""))].filter((u) => u !== "");
+  // 単位の文字は、設定で入力したものを優先する（空欄は自動に戻る）
+  const custom = (value: string | undefined) => (value?.trim() ? value.trim() : undefined);
   return {
     sides,
-    leftUnit: unitsOn("left").join(" / "),
-    rightUnit: unitsOn("right").join(" / "),
+    leftUnit: custom(config.axisUnits?.left) ?? unitsOn("left").join(" / "),
+    rightUnit: custom(config.axisUnits?.right) ?? unitsOn("right").join(" / "),
     dual: sensorIds.some((id) => sides[id] === "right"),
   };
 }

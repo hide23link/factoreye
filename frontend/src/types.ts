@@ -178,6 +178,8 @@ export interface WidgetConfig {
   axisMode?: "shared" | "normalized";
   // グラフ用（センサー2つ以上・実際の値）: センサーごとの縦軸の左右（センサーID → 左か右）。未指定は単位で決める
   axisSides?: Record<string, "left" | "right">;
+  // グラフ用: 縦軸に出す単位の文字（左・右）。未指定・空欄なら、軸に載るセンサーの単位を自動で出す
+  axisUnits?: { left?: string; right?: string };
   // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
   stack?: "none" | "normal" | "percent";
   // しきい値の表示（線・色の帯・両方・なし）。未指定なら showThresholds に従う（true は「線」）
