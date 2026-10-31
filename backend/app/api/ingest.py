@@ -551,7 +551,8 @@ async def _buffer_readings(
 
     時刻は、既定では機器の時計ではなく、サーバーが受け取った時刻を使う
     （機器の timestamp は信頼しない。docs/architecture.md §3 データモデル参照）。
-    ただし INGEST_DEVICE_TIME=on（self-hosted と SaaS）では、timestamp を付けた値は、その時刻で保存する
+    ただし INGEST_DEVICE_TIME=on（self-hosted と SaaS）では、
+    timestamp を付けた値は、その時刻で保存する
     （付けない値は、受信時刻のまま。一部だけ付けた送信も受け付ける）。
     測定値の主キーは (sensor_id, recorded_at) で、同じ時刻の値は 1 件だけ（app/db/models.py）。
     このため、受信時刻を割り当てる値は、センサーごとに「前に割り当てた時刻」を覚え、

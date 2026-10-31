@@ -1319,7 +1319,7 @@ async def test_numeric_timestamp_must_be_seconds(
 async def test_saas_mode_uses_device_time_for_samples_and_sensors(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SaaS（multi_tenant）でも、INGEST_DEVICE_TIME=on なら機器の時刻を使う（self-hosted と同じ API）。
+    """SaaS（multi_tenant）でも、INGEST_DEVICE_TIME=on なら機器の時刻を使う。
     範囲内（30 日より前まで）の時刻は、そのまま保存する。未登録は自動登録しない（404）。"""
     sensor_id = await _create_sensor(client, "saas-s1")
     monkeypatch.setattr(settings, "ingest_device_time", True)
