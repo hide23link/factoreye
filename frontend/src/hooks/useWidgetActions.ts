@@ -53,6 +53,12 @@ function withoutUndefined(config: WidgetConfig): WidgetConfig {
 const sameContent = (a: Widget, b: Widget) =>
   a.sensorId === b.sensorId && JSON.stringify(a.config) === JSON.stringify(b.config);
 
+/** 一括追加の結果: 追加できたセンサーと、できなかったセンサー */
+export interface AddSensorsResult {
+  added: Sensor[];
+  failed: Sensor[];
+}
+
 export function useWidgetActions(dashboard: DashboardDetail) {
   const queryClient = useQueryClient();
   const queryKey = ["dashboard", dashboard.id];
@@ -364,6 +370,21 @@ export function useWidgetActions(dashboard: DashboardDetail) {
       });
     });
 
+  /**
+   * 複数のセンサーを、それぞれ新しいウィジェットとして追加する（センサー棚の一括追加）。
+   * addSensor と違い、選択中のグラフには重ねない（選んだ全員が 1 つのグラフに入ってしまうため）。
+   * 1 つ失敗しても続け、追加できたセンサーとできなかったセンサーを返す。元に戻す履歴は、ウィジェット 1 つにつき 1 回分。
+   */
+  const addSensors = (sensors: Sensor[]): Promise<AddSensorsResult> =>
+    enqueue(async () => {
+      const result: AddSensorsResult = { added: [], failed: [] };
+      for (const sensor of sensors) {
+        const created = await doCreate(defaultWidgetFor(guessSensorKind(sensor)), { sensorId: sensor.id });
+        (created ? result.added : result.failed).push(sensor);
+      }
+      return result;
+    });
+
   const changeType = (widget: Widget, type: WidgetType) => enqueue(() => doChangeType(widget.id, type));
 
   const duplicate = (widget: Widget) =>
@@ -418,5 +439,5 @@ export function useWidgetActions(dashboard: DashboardDetail) {
       if (!ok) forget(snapshot);
     });
 
-  return { addByType, addSensor, assign, patch, patchConfig, patchFromLatest, duplicate, remove, saveLayout, undo, changeType };
+  return { addByType, addSensor, addSensors, assign, patch, patchConfig, patchFromLatest, duplicate, remove, saveLayout, undo, changeType };
 }

@@ -111,6 +111,10 @@ class SensorRead(CamelModel):
     enabled: bool
     created_at: datetime
     updated_at: datetime
+    # 所属する取り込みの機器（self-hosted の機器ごとのキー）。画面が機器ごとに分けるために使う。
+    # SaaS・所属のないセンサーは None（device_name は一覧と詳細だけが入れる）
+    device_id: UUID | None = None
+    device_name: str | None = None
 
 
 # ──────────────────────────────────────────────────────────────

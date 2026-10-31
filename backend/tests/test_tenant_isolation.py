@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
-from app.db.models import NotificationSettings, Sensor, User, Workspace
+from app.db.models import IngestDevice, NotificationSettings, Sensor, User, Workspace
 from app.db.session import engine
 from app.ingest_buffer import PendingReading, buffer, flush_once
 from app.main import app
@@ -351,3 +351,24 @@ async def test_widget_update_rejects_sensor_of_another_workspace_or_unknown(
     resp = await client.put(f"/api/widgets/{widget_id}", json={"sensorId": None})
     assert resp.status_code == 200
     assert resp.json()["sensorId"] is None
+
+
+async def test_saas_responses_never_include_the_device(
+    client: httpx.AsyncClient, session: AsyncSession, as_workspace: Any
+) -> None:
+    """機器ごとのキーは self-hosted だけの機能。SaaS の応答には、機器の id・名前を出さない。"""
+    ws = await _make_workspace(session)
+    sensor = await _make_sensor(session, ws, "機器つき")
+    device = IngestDevice(name="r-saas-guard", key_hash="h" * 64)
+    session.add(device)
+    await session.commit()
+    sensor.device_id = device.id  # SaaS では起きない状態を作り、応答が漏らさないことを確かめる
+    session.add(sensor)
+    await session.commit()
+    as_workspace(ws)
+
+    listed = (await client.get("/api/sensors")).json()
+    detail = (await client.get(f"/api/sensors/{sensor.id}")).json()
+    updated = (await client.put(f"/api/sensors/{sensor.id}", json={"unit": "A"})).json()
+    for item in (listed[0], detail, updated):
+        assert item["deviceId"] is None and item["deviceName"] is None
