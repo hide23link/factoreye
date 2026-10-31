@@ -6,6 +6,7 @@ import {
   GRAPH_COLORS,
   effectiveBounds,
   effectiveRange,
+  graphAxisSides,
   graphColor,
   graphSensorIds,
   graphSensorPatch,
@@ -282,5 +283,47 @@ describe("bandEnds", () => {
   it("データもしきい値も無いときは、0〜1。値がすべて同じでも幅を持たせる", () => {
     expect(bandEnds({}, [], [])).toEqual({ low: 0, high: 1 });
     expect(bandEnds({}, [5, 5], [5])).toEqual({ low: 4, high: 6 });
+  });
+});
+
+describe("graphAxisSides（縦軸の左右）", () => {
+  const units: Record<string, string> = { a: "V", b: "V", c: "A", d: "℃" };
+  const unitOf = (id: string) => units[id];
+
+  it("単位が同じセンサーは同じ軸（1種類なら右の軸は使わない）", () => {
+    const r = graphAxisSides({}, ["a", "b"], unitOf);
+    expect(r.sides).toEqual({ a: "left", b: "left" });
+    expect(r.dual).toBe(false);
+    expect(r.leftUnit).toBe("V");
+  });
+
+  it("単位が2種類なら、最初の単位を左、次の単位を右にする", () => {
+    const r = graphAxisSides({}, ["a", "c", "b"], unitOf);
+    expect(r.sides).toEqual({ a: "left", c: "right", b: "left" });
+    expect(r.dual).toBe(true);
+    expect(r.leftUnit).toBe("V");
+    expect(r.rightUnit).toBe("A");
+  });
+
+  it("3種類目以降の単位は、既定では左", () => {
+    const r = graphAxisSides({}, ["c", "a", "d"], unitOf);
+    expect(r.sides).toEqual({ c: "left", a: "right", d: "left" });
+    expect(r.leftUnit).toBe("A / ℃");
+    expect(r.rightUnit).toBe("V");
+  });
+
+  it("設定で選んだ左右は既定より優先する（不正な値は無視）", () => {
+    const config = { axisSides: { a: "right", c: "left", b: "bogus" } } as unknown as Parameters<typeof graphAxisSides>[0];
+    const r = graphAxisSides(config, ["a", "b", "c"], unitOf);
+    expect(r.sides).toEqual({ a: "right", b: "left", c: "left" });
+    expect(r.dual).toBe(true);
+    expect(r.leftUnit).toBe("V / A");
+    expect(r.rightUnit).toBe("V");
+  });
+
+  it("単位が不明のセンサーは空の単位として扱い、軸の単位には出さない", () => {
+    const r = graphAxisSides({}, ["x", "a"], () => undefined);
+    expect(r.sides).toEqual({ x: "left", a: "left" });
+    expect(r.leftUnit).toBe("");
   });
 });

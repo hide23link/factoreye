@@ -7,11 +7,13 @@
  */
 import { useState } from "react";
 
+import { useSensors } from "../../hooks/queries";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import {
   MAX_LINE_WIDTH,
   REFRESH_SECONDS_OPTIONS,
+  graphAxisSides,
   graphColor,
   graphDataOptions,
   graphSensorIds,
@@ -194,6 +196,11 @@ function GraphSettings({ widget, actions }: SectionProps) {
   const config = widget.config;
   const style = graphStyle(config);
   const options = graphDataOptions(config, ids.length);
+  const { data: sensors } = useSensors();
+  const unitOf = (id: string) => sensors?.find((s) => s.id === id)?.unit;
+  const nameOfSensor = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  // 縦軸の左右（実際の値のとき。設定が無ければ単位で決まる既定を表示する）
+  const axis = graphAxisSides(config, ids, unitOf);
   // 縦軸を手動で決められるのは、実際の値で描くとき（0〜100% や 100% 積み上げでは、軸が決まっている）
   const axisIsFixed = options.axisMode === "normalized" || options.stack === "percent";
   // 縦軸は、値があれば手動。値を入れる前でも入力欄を出し続けるため、「手動にした」操作だけ覚えておく
@@ -299,6 +306,27 @@ function GraphSettings({ widget, actions }: SectionProps) {
             options={AXIS_MODE_OPTIONS}
             onChange={(axisMode) => void changeConfig(actions, widget, { axisMode })}
           />
+          {options.axisMode === "shared" && (
+            <>
+              <div className="text-xs text-gray-500">縦軸の左右（単位が2種類以上のとき、右に載せたセンサーは右の軸で表示）</div>
+              {ids.map((id) => (
+                <div key={id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate">
+                    {nameOfSensor(id)}（{unitOf(id) || "単位なし"}）
+                  </span>
+                  <Segmented
+                    label={`${nameOfSensor(id)} の縦軸`}
+                    value={axis.sides[id]}
+                    options={[
+                      { value: "left", label: "左" },
+                      { value: "right", label: "右" },
+                    ]}
+                    onChange={(side) => void changeConfig(actions, widget, { axisSides: { ...axis.sides, [id]: side } })}
+                  />
+                </div>
+              ))}
+            </>
+          )}
           {options.stackable && (
             <>
               <div className="text-xs text-gray-500">積み上げ</div>

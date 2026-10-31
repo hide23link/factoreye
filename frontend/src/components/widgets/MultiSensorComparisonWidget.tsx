@@ -46,6 +46,7 @@ import {
   effectiveRange,
   graphColor,
   bandEnds,
+  graphAxisSides,
   graphDataOptions,
   graphSensorIds,
   graphYAxisPlan,
@@ -138,6 +139,9 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     percent: (v: number) => `${Math.round(v)}%`,
     percentStack: (v: number) => `${Math.round(v * 100)}%`,
   }[axisPlan.scale];
+  // 単位が2種類以上なら、縦軸を左右の2つにする（実際の値のときだけ。積み上げ・0〜100% は1つの軸）
+  const axis = graphAxisSides(widget.config, sensorIds, (id) => sensors?.find((s) => s.id === id)?.unit);
+  const dualAxis = axis.dual && options.axisMode === "shared" && options.stack === "none";
   // ツールチップの値は、有効数字 4 桁＋センサーの単位。0〜100% にそろえたときは、グラフの値が換算後なので、元の値を出す
   const tooltipValueFormatter = (value: unknown, _name: unknown, item: { dataKey?: unknown; payload?: unknown }) => {
     const unit = sensors?.find((s) => s.id === item.dataKey)?.unit;
@@ -159,7 +163,30 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       tickFormatter={formatTime}
       tick={{ fontSize: 10 }}
     />,
-    <YAxis key="y" domain={axisPlan.domain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYAxis} />,
+    ...(dualAxis
+      ? [
+          <YAxis
+            key="y-left"
+            yAxisId="left"
+            orientation="left"
+            domain={axisPlan.domain}
+            width={52}
+            tick={{ fontSize: 10 }}
+            tickFormatter={formatYTick}
+            label={axis.leftUnit ? { value: axis.leftUnit, position: "top", fontSize: 10 } : undefined}
+          />,
+          <YAxis
+            key="y-right"
+            yAxisId="right"
+            orientation="right"
+            domain={["auto", "auto"]}
+            width={52}
+            tick={{ fontSize: 10 }}
+            tickFormatter={formatYTick}
+            label={axis.rightUnit ? { value: axis.rightUnit, position: "top", fontSize: 10 } : undefined}
+          />,
+        ]
+      : [<YAxis key="y" domain={axisPlan.domain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYAxis} />]),
     style.showTooltip ? (
       <Tooltip
         key="tip"
@@ -185,13 +212,26 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   // 線は connectNulls で自分の点だけを繋ぐ。5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
   const series = sensorIds.map((sensorId, i) => {
     const color = graphColor(widget, i);
+    // 二軸のときは、センサーごとに載せる軸を指定する（指定しないと、どの軸にも載らない）
+    const yAxisId = dualAxis ? axis.sides[sensorId] : undefined;
     if (graphType === "bar") {
-      return <Bar key={sensorId} dataKey={sensorId} name={nameOf(sensorId)} fill={color} stackId={stackId} isAnimationActive={false} />;
+      return (
+        <Bar
+          key={sensorId}
+          yAxisId={yAxisId}
+          dataKey={sensorId}
+          name={nameOf(sensorId)}
+          fill={color}
+          stackId={stackId}
+          isAnimationActive={false}
+        />
+      );
     }
     if (graphType === "area") {
       return (
         <Area
           key={sensorId}
+          yAxisId={yAxisId}
           dataKey={sensorId}
           name={nameOf(sensorId)}
           stroke={color}
@@ -209,6 +249,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     return (
       <Line
         key={sensorId}
+        yAxisId={yAxisId}
         type={style.curveType}
         dataKey={sensorId}
         name={nameOf(sensorId)}
