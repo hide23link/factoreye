@@ -186,7 +186,20 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
             label={axis.rightUnit ? { value: axis.rightUnit, position: "top", fontSize: 10 } : undefined}
           />,
         ]
-      : [<YAxis key="y" domain={axisPlan.domain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYAxis} />]),
+      : [
+          <YAxis
+            key="y"
+            domain={axisPlan.domain}
+            width={44}
+            tick={{ fontSize: 10 }}
+            tickFormatter={formatYAxis}
+            label={
+              options.axisMode === "shared" && options.stack === "none" && axis.leftUnit
+                ? { value: axis.leftUnit, position: "top", fontSize: 10 }
+                : undefined
+            }
+          />,
+        ]),
     style.showTooltip ? (
       <Tooltip
         key="tip"
