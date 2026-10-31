@@ -10,6 +10,7 @@ import secrets
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -21,13 +22,46 @@ def hash_device_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-async def create_device(session: AsyncSession, name: str) -> str:
-    """機器を作り、キーを返す（この 1 回だけ、キーが画面に出る）。"""
+# 系統の名前の最大の長さ（文字数）。IngestDevice.line の列の長さと同じ
+MAX_LINE_LENGTH = 40
+
+
+def normalize_line(line: str | None) -> str | None:
+    """系統の名前を整える。前後の空白を除き、空なら None（系統なし）。長すぎれば ValueError。"""
+    cleaned = (line or "").strip()
+    if len(cleaned) > MAX_LINE_LENGTH:
+        raise ValueError(f"系統は {MAX_LINE_LENGTH} 文字までです")
+    return cleaned or None
+
+
+async def create_device(session: AsyncSession, name: str, line: str | None = None) -> str:
+    """機器を作り、キーを返す（この 1 回だけ、キーが画面に出る）。line は任意の系統。"""
     key = secrets.token_urlsafe(32)
-    session.add(IngestDevice(name=name, key_hash=hash_device_key(key)))
+    session.add(IngestDevice(name=name, key_hash=hash_device_key(key), line=normalize_line(line)))
     await session.commit()
     ingest_cache.clear()
     return key
+
+
+async def set_device_line(
+    session: AsyncSession, device: IngestDevice, line: str | None
+) -> str | None:
+    """機器の系統を付ける・変える（None か空で外す）。保存した系統（外したら None）を返す。
+
+    センサー一覧の版（ETag）は updated_at から作るので、所属するセンサーの updated_at も進める
+    （進めないと、画面が古い系統のまま 304 を受け取る）。
+    """
+    await session.refresh(device)  # 前の commit で期限切れになっていても読めるようにする
+    saved = normalize_line(line)  # 長すぎれば、ここで ValueError（何も変えない）
+    device.line = saved
+    session.add(device)
+    await session.exec(
+        update(Sensor)
+        .where(col(Sensor.device_id) == device.id)
+        .values(updated_at=datetime.now(UTC))
+    )
+    await session.commit()
+    return saved
 
 
 async def find_active_device(session: AsyncSession, key: str) -> IngestDevice | None:

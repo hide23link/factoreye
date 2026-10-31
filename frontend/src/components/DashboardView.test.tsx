@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { act, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
+import { act, cleanup, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
 import { useEditorStore } from "../store/useEditorStore";
 import * as panelPlacement from "../lib/panel-placement";
 import { useUiStore } from "../store/useUiStore";
@@ -758,17 +758,17 @@ describe("DashboardView", () => {
         pointer("pointerUp", 90000, 90000);
       });
 
-      it("「位置をもとに戻す」で既定の場所に戻り、保存も消える", async () => {
+      it("「もとの位置・大きさ」で既定の場所に戻り、保存も消える", async () => {
         const user = await openEditor();
-        expect(screen.queryByRole("button", { name: /センサー棚の位置をもとに戻す/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /センサー棚の位置と大きさをもとに戻す/ })).not.toBeInTheDocument();
         handle().focus();
         await user.keyboard("{ArrowRight}");
-        await user.click(screen.getByRole("button", { name: /センサー棚の位置をもとに戻す/ }));
+        await user.click(screen.getByRole("button", { name: /センサー棚の位置と大きさをもとに戻す/ }));
 
         expect(aside().style.left).toBe("8px");
         expect(aside().style.bottom).not.toBe("");
         expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
-        expect(screen.queryByRole("button", { name: /センサー棚の位置をもとに戻す/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /センサー棚の位置と大きさをもとに戻す/ })).not.toBeInTheDocument();
       });
 
       it("次に編集を始めたとき、保存した位置に出る", async () => {
@@ -899,6 +899,170 @@ describe("DashboardView", () => {
       });
     });
 
+    describe("センサー棚・設定パネルの大きさを変えられる", () => {
+      const SHELF_SIZE_KEY = "factoreye.sensorShelfSize";
+      const aside = () => screen.getByRole("complementary", { name: "センサー棚" });
+      const px = (value: string) => Number.parseInt(value, 10);
+
+      beforeEach(() => {
+        window.localStorage.clear();
+        useEditorStore.getState().reset();
+      });
+      afterEach(() => window.localStorage.clear());
+
+      async function openEditor() {
+        const user = userEvent.setup();
+        vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+        return user;
+      }
+
+      /** 座標つきのポインター操作を、つかみ部分に送る */
+      function drag(testId: string, from: [number, number], to: [number, number]) {
+        const target = screen.getByTestId(testId);
+        const send = (type: "pointerDown" | "pointerMove" | "pointerUp", [x, y]: [number, number]) => {
+          const event = createEvent[type](target);
+          Object.defineProperty(event, "pointerId", { value: 1 });
+          Object.defineProperty(event, "clientX", { value: x });
+          Object.defineProperty(event, "clientY", { value: y });
+          fireEvent(target, event);
+        };
+        send("pointerDown", from);
+        send("pointerMove", to);
+        return () => send("pointerUp", to);
+      }
+
+      it("右下をつかんで幅・高さを変えられる。途中は保存せず、離したときに位置と一緒に保存する", async () => {
+        await openEditor();
+        const release = drag("shelf-resize-corner", [100, 100], [260, 180]);
+        // jsdom は実測値が 0 なので、最小（272 × 160）から始まる
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([272 + 160, 160 + 80]);
+        expect(window.localStorage.getItem(SHELF_SIZE_KEY)).toBeNull();
+
+        release();
+        expect(JSON.parse(window.localStorage.getItem(SHELF_SIZE_KEY)!)).toEqual({ width: 432, height: 240 });
+        expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).not.toBeNull();
+      });
+
+      it("右辺は幅だけ、下辺は高さだけを変える", async () => {
+        await openEditor();
+        drag("shelf-resize-right", [0, 0], [100, 300])();
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([372, 160]);
+        drag("shelf-resize-bottom", [0, 0], [500, 120])();
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([372, 280]);
+      });
+
+      it("最小より小さくならず、最大は画面内に収まる範囲", async () => {
+        await openEditor();
+        drag("shelf-resize-corner", [500, 500], [0, 0])();
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([272, 160]);
+
+        drag("shelf-resize-corner", [0, 0], [99999, 99999])();
+        const left = px(aside().style.left);
+        const top = px(aside().style.top);
+        expect(px(aside().style.width)).toBe(window.innerWidth - left - 8);
+        expect(px(aside().style.height)).toBe(window.innerHeight - top - 8);
+      });
+
+      it("つかみ部分にフォーカスして矢印キーで変えられる（Shift で大きく）。右辺は左右、下辺は上下だけ", async () => {
+        const user = await openEditor();
+        screen.getByTestId("shelf-resize-corner").focus();
+        await user.keyboard("{ArrowRight}");
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([272 + 16, 160]);
+        await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+        expect(px(aside().style.height)).toBe(160 + 64);
+        expect(JSON.parse(window.localStorage.getItem(SHELF_SIZE_KEY)!)).toEqual({ width: 288, height: 224 });
+
+        screen.getByTestId("shelf-resize-right").focus();
+        await user.keyboard("{ArrowDown}{ArrowRight}");
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([288 + 16, 224]);
+        screen.getByTestId("shelf-resize-bottom").focus();
+        await user.keyboard("{ArrowRight}{ArrowUp}");
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([304, 224 - 16]);
+      });
+
+      it("「もとの位置・大きさ」で、位置と一緒に大きさも既定に戻り、保存も消える", async () => {
+        const user = await openEditor();
+        drag("shelf-resize-corner", [0, 0], [100, 100])();
+        expect(aside().style.width).not.toBe("");
+        await user.click(screen.getByRole("button", { name: /センサー棚の位置と大きさをもとに戻す/ }));
+
+        expect(aside().style.left).toBe("8px");
+        expect(aside().style.width).toBe("");
+        expect(window.localStorage.getItem(SHELF_SIZE_KEY)).toBeNull();
+        expect(window.localStorage.getItem("factoreye.sensorShelfPosition")).toBeNull();
+      });
+
+      it("次に編集を始めたとき、保存した位置と大きさに出る。壊れた大きさは無視する", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 300, y: 100 }));
+        window.localStorage.setItem(SHELF_SIZE_KEY, JSON.stringify({ width: 500, height: 400 }));
+        await openEditor();
+        expect([px(aside().style.width), px(aside().style.height)]).toEqual([500, 400]);
+
+        cleanup();
+        useEditorStore.getState().reset();
+        window.localStorage.setItem(SHELF_SIZE_KEY, "{oops");
+        await openEditor();
+        expect(px(aside().style.width)).toBe(272); // 大きさは既定（位置は保存どおり）
+        expect(px(aside().style.left)).toBe(300);
+      });
+
+      it("位置を復元できない窓（位置の保存が無い・画面の外）は、保存した大きさも使わない", async () => {
+        window.localStorage.setItem(SHELF_SIZE_KEY, JSON.stringify({ width: 500, height: 400 }));
+        await openEditor(); // 位置の保存が無い
+        expect(aside().style.left).toBe("8px");
+        expect(aside().style.width).toBe("");
+        expect(useEditorStore.getState().shelfSize).toBeNull();
+
+        cleanup();
+        useEditorStore.getState().reset();
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 5000, y: 100 })); // 画面の外
+        await openEditor();
+        expect(aside().style.width).toBe("");
+        expect(useEditorStore.getState().shelfSize).toBeNull();
+      });
+
+      it("画面が小さくなって収まらないときは、収まる大きさに丸めて表示する（保存した値は残す）", async () => {
+        window.localStorage.setItem("factoreye.sensorShelfPosition", JSON.stringify({ x: 100, y: 100 }));
+        window.localStorage.setItem(SHELF_SIZE_KEY, JSON.stringify({ width: 1400, height: 400 }));
+        await openEditor();
+        expect(px(aside().style.width)).toBe(1400);
+
+        Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event("resize"));
+        });
+        await waitFor(() => expect(px(aside().style.width)).toBe(1000 - 100 - 8));
+        expect(JSON.parse(window.localStorage.getItem(SHELF_SIZE_KEY)!)).toEqual({ width: 1400, height: 400 });
+      });
+
+      it("640px 未満は下寄せの固定で、大きさのつかみ部分を出さない", async () => {
+        Object.defineProperty(window, "innerWidth", { value: 600, configurable: true });
+        const user = userEvent.setup();
+        vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+        renderWithQueryClient(<DashboardView dashboardId="d1" />);
+        await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+        await user.click(await screen.findByRole("button", { name: "センサー" }));
+        await screen.findByRole("complementary", { name: "センサー棚" });
+
+        expect(screen.queryByTestId("shelf-resize-corner")).not.toBeInTheDocument();
+      });
+
+      it("設定パネルも、同じ仕組みで大きさを変えられ、別のキーで保存する", async () => {
+        const user = await openEditor();
+        await user.click(screen.getByRole("button", { name: "設定" }));
+        const panel = screen.getByRole("complementary", { name: "設定パネル" });
+        screen.getByTestId("panel-resize-corner").focus();
+        await user.keyboard("{Shift>}{ArrowRight}{/Shift}");
+
+        expect(px(panel.style.width)).toBe(316 + 64);
+        expect(JSON.parse(window.localStorage.getItem("factoreye.settingsPanelSize")!)).toEqual({ width: 380, height: 160 });
+        expect(window.localStorage.getItem(SHELF_SIZE_KEY)).toBeNull();
+      });
+    });
+
     describe("設定パネルも動かせる（センサー棚と同じ仕組み）", () => {
       const panel = () => screen.getByRole("complementary", { name: "設定パネル" });
       const panelHandle = () => screen.getByTestId("panel-handle");
@@ -976,12 +1140,12 @@ describe("DashboardView", () => {
         expect([panel().style.left, panel().style.top]).toEqual(pos);
       });
 
-      it("「もとの位置」で自動配置に戻り、保存も消える", async () => {
+      it("「もとの位置・大きさ」で自動配置に戻り、保存も消える", async () => {
         const user = await openPanel();
-        expect(screen.queryByRole("button", { name: /設定パネルの位置をもとに戻す/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /設定パネルの位置と大きさをもとに戻す/ })).not.toBeInTheDocument();
         panelHandle().focus();
         await user.keyboard("{ArrowRight}");
-        await user.click(screen.getByRole("button", { name: /設定パネルの位置をもとに戻す/ }));
+        await user.click(screen.getByRole("button", { name: /設定パネルの位置と大きさをもとに戻す/ }));
 
         expect(panel()).not.toHaveAttribute("data-placement", "moved");
         expect(window.localStorage.getItem(KEY)).toBeNull();

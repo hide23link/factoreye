@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { addWidget, deleteWidget, updateWidget } from "../lib/api";
 import { describeActionError } from "../lib/errors";
+import { graphSensorPatch } from "../lib/graph-config";
 import { bottomRow, findFreeSpot } from "../lib/grid-placement";
 import { pendingSaves } from "../lib/pending-saves";
 import { guessSensorKind } from "../lib/sensor-kind";
@@ -53,10 +54,25 @@ function withoutUndefined(config: WidgetConfig): WidgetConfig {
 const sameContent = (a: Widget, b: Widget) =>
   a.sensorId === b.sensorId && JSON.stringify(a.config) === JSON.stringify(b.config);
 
-/** 一括追加の結果: 追加できたセンサーと、できなかったセンサー */
+/**
+ * 一括追加の結果。added = 追加できたセンサー、failed = できなかったセンサー、
+ * graphed = added のうち、グラフにまとめたセンサー、graphCount = 作ったグラフの数。
+ */
 export interface AddSensorsResult {
   added: Sensor[];
   failed: Sensor[];
+  graphed: Sensor[];
+  graphCount: number;
+}
+
+/** 一括追加で、1 つのグラフに載せるセンサーの数の上限の既定。これを超えると読みにくいので、呼ぶ側が確認する */
+export const GRAPH_SENSOR_LIMIT = 12;
+
+/** 配列を size 個ずつに分ける */
+function chunked<T>(items: T[], size: number): T[][] {
+  const groups: T[][] = [];
+  for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
+  return groups;
 }
 
 export function useWidgetActions(dashboard: DashboardDetail) {
@@ -371,14 +387,34 @@ export function useWidgetActions(dashboard: DashboardDetail) {
     });
 
   /**
-   * 複数のセンサーを、それぞれ新しいウィジェットとして追加する（センサー棚の一括追加）。
-   * addSensor と違い、選択中のグラフには重ねない（選んだ全員が 1 つのグラフに入ってしまうため）。
-   * 1 つ失敗しても続け、追加できたセンサーとできなかったセンサーを返す。元に戻す履歴は、ウィジェット 1 つにつき 1 回分。
+   * 複数のセンサーを追加する（センサー棚の一括追加）。選択中のウィジェットには重ねない。
+   * - 計測値のセンサーは、新しいグラフ 1 つにまとめる（graphLimit 個を超えるときは、その数ずつ複数のグラフに分ける）。
+   *   単位が複数あるとき（電圧 V と電流 A など）は、縦軸をセンサーごとの 0〜100% にそろえる（実際の値だと、小さいほうが潰れて読めないため）
+   * - 生産数・稼働のセンサーは、グラフに載せるのが不自然なので、これまでどおり種類に合う既定のウィジェットを 1 つずつ作る
+   * 1 つ失敗しても続け、追加できたセンサーとできなかったセンサーを返す（グラフが作れなければ、そのグラフの全センサーが失敗）。
+   * 元に戻す履歴は、ウィジェット 1 つにつき 1 回分。
    */
-  const addSensors = (sensors: Sensor[]): Promise<AddSensorsResult> =>
+  const addSensors = (sensors: Sensor[], options: { graphLimit?: number } = {}): Promise<AddSensorsResult> =>
     enqueue(async () => {
-      const result: AddSensorsResult = { added: [], failed: [] };
-      for (const sensor of sensors) {
+      const result: AddSensorsResult = { added: [], failed: [], graphed: [], graphCount: 0 };
+      const measures = sensors.filter((s) => guessSensorKind(s) === "measure");
+      const others = sensors.filter((s) => guessSensorKind(s) !== "measure");
+      const graphConfigBase = widgetKind("SensorGraph")?.defaultConfig ?? {};
+
+      for (const batch of chunked(measures, options.graphLimit ?? Number.POSITIVE_INFINITY)) {
+        const patch = graphSensorPatch({ type: "SensorGraph", config: graphConfigBase }, batch.map((s) => s.id), []);
+        const units = new Set(batch.map((s) => s.unit.trim()));
+        const config = units.size > 1 ? { ...patch.config, axisMode: "normalized" as const } : patch.config;
+        const created = await doCreate("SensorGraph", { sensorId: patch.sensorId, config });
+        if (!created) {
+          result.failed.push(...batch);
+          continue;
+        }
+        result.added.push(...batch);
+        result.graphed.push(...batch);
+        result.graphCount += 1;
+      }
+      for (const sensor of others) {
         const created = await doCreate(defaultWidgetFor(guessSensorKind(sensor)), { sensorId: sensor.id });
         (created ? result.added : result.failed).push(sensor);
       }

@@ -10,7 +10,15 @@
 import { create } from "zustand";
 
 import { NARROW_VIEWPORT } from "../lib/panel-placement";
-import { loadWindowPosition, saveWindowPosition, type WindowPosition } from "../lib/window-position";
+import {
+  loadWindowPosition,
+  loadWindowSize,
+  saveWindowPosition,
+  saveWindowSize,
+  type MovableWindow,
+  type WindowPosition,
+  type WindowSize,
+} from "../lib/window-position";
 import type { Widget } from "../types";
 
 /** ドラッグしているもの: 棚のセンサー、または棚のウィジェットの種類 */
@@ -40,6 +48,9 @@ interface EditorState {
   shelfPos: WindowPosition | null;
   // 設定パネル（動かせる窓）の位置。null は自動配置（選んだウィジェットと棚を避ける）。保存は localStorage
   panelPos: WindowPosition | null;
+  // 棚・パネルの大きさ。null は既定の大きさ。位置を持つ窓にだけある（位置を null に戻すと、大きさも null になる）。保存は localStorage
+  shelfSize: WindowSize | null;
+  panelSize: WindowSize | null;
   // 棚をつかんで動かしている最中か（その間は、設定パネルのためのスクロールをしない）
   shelfMoving: boolean;
   setShelfMoving: (moving: boolean) => void;
@@ -61,6 +72,9 @@ interface EditorState {
   /** 棚の位置を変える。persist=false は移動の途中（保存は、動かし終えたときに 1 回） */
   setShelfPos: (pos: WindowPosition | null, options?: { persist?: boolean }) => void;
   setPanelPos: (pos: WindowPosition | null, options?: { persist?: boolean }) => void;
+  /** 棚・パネルの大きさを変える。persist=false は大きさを変えている途中（保存は、終えたときに 1 回） */
+  setShelfSize: (size: WindowSize | null, options?: { persist?: boolean }) => void;
+  setPanelSize: (size: WindowSize | null, options?: { persist?: boolean }) => void;
   setPanelOpen: (open: boolean) => void;
   setPartsOpen: (open: boolean) => void;
   setDragging: (payload: DragPayload | null) => void;
@@ -77,6 +91,13 @@ interface EditorState {
 
 let nextToastId = 1;
 
+/** 保存した窓の位置と大きさを読む。大きさは位置を持つ窓にだけあるので、位置を復元できなければ大きさも使わない */
+function loadWindowBox(kind: MovableWindow): { pos: WindowPosition | null; size: WindowSize | null } {
+  if (typeof window === "undefined") return { pos: null, size: null };
+  const pos = loadWindowPosition(kind, window.innerWidth, window.innerHeight);
+  return { pos, size: pos ? loadWindowSize(kind) : null };
+}
+
 const isNarrow = () => typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT;
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -85,6 +106,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   shelfOpen: false,
   shelfPos: null,
   panelPos: null,
+  shelfSize: null,
+  panelSize: null,
   shelfMoving: false,
   setShelfMoving: (moving) => set({ shelfMoving: moving }),
   panelOpen: false,
@@ -94,19 +117,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   history: [],
   toast: null,
   // 広い画面（1024px 以上）では、センサー棚を最初から出す。狭い画面では、キャンバスを隠さないよう閉じておく
-  startEditing: (options) =>
+  startEditing: (options) => {
+    const shelfWindow = loadWindowBox("shelf");
+    const panelWindow = loadWindowBox("panel");
     set({
       editing: true,
       selectedWidgetId: null,
       shelfOpen: typeof window !== "undefined" && window.innerWidth >= SHELF_OPEN_MIN_WIDTH && !options?.focusName,
       // 名前を付けるときは、設定パネルを開く（棚は閉じて、キャンバスを隠さない）
-      // 前回動かした棚の位置を復元する（保存が無い・いまの画面の外なら、既定の場所）
-      shelfPos: typeof window !== "undefined" ? loadWindowPosition("shelf", window.innerWidth, window.innerHeight) : null,
-      panelPos: typeof window !== "undefined" ? loadWindowPosition("panel", window.innerWidth, window.innerHeight) : null,
+      // 前回動かした棚・パネルの位置と大きさを復元する（保存が無い・いまの画面の外なら、既定の場所・大きさ）
+      shelfPos: shelfWindow.pos,
+      shelfSize: shelfWindow.size,
+      panelPos: panelWindow.pos,
+      panelSize: panelWindow.size,
       panelOpen: options?.focusName === true,
       partsOpen: false,
       focusName: options?.focusName === true,
-    }),
+    });
+  },
   clearFocusName: () => set({ focusName: false }),
   stopEditing: () =>
     set({
@@ -125,13 +153,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   openSettings: (id) =>
     set((s) => ({ selectedWidgetId: id, panelOpen: true, focusName: false, shelfOpen: isNarrow() ? false : s.shelfOpen })),
   setShelfOpen: (open) => set((s) => ({ shelfOpen: open, panelOpen: open && isNarrow() ? false : s.panelOpen })),
+  // 位置を null（既定の場所）に戻すときは、大きさも一緒に既定へ戻す
   setShelfPos: (pos, options) => {
-    set({ shelfPos: pos });
-    if (options?.persist !== false) saveWindowPosition("shelf", pos);
+    set(pos === null ? { shelfPos: null, shelfSize: null } : { shelfPos: pos });
+    if (options?.persist === false) return;
+    saveWindowPosition("shelf", pos);
+    if (pos === null) saveWindowSize("shelf", null);
   },
   setPanelPos: (pos, options) => {
-    set({ panelPos: pos });
-    if (options?.persist !== false) saveWindowPosition("panel", pos);
+    set(pos === null ? { panelPos: null, panelSize: null } : { panelPos: pos });
+    if (options?.persist === false) return;
+    saveWindowPosition("panel", pos);
+    if (pos === null) saveWindowSize("panel", null);
+  },
+  setShelfSize: (size, options) => {
+    set({ shelfSize: size });
+    if (options?.persist !== false) saveWindowSize("shelf", size);
+  },
+  setPanelSize: (size, options) => {
+    set({ panelSize: size });
+    if (options?.persist !== false) saveWindowSize("panel", size);
   },
   setPanelOpen: (open) => set((s) => ({ panelOpen: open, shelfOpen: open && isNarrow() ? false : s.shelfOpen })),
   setPartsOpen: (open) => set({ partsOpen: open }),
@@ -153,6 +194,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       shelfOpen: false,
       shelfPos: null,
       panelPos: null,
+      shelfSize: null,
+      panelSize: null,
       panelOpen: false,
       partsOpen: false,
       focusName: false,

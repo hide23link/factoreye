@@ -63,7 +63,7 @@ flowchart LR
 | `widgets` | ウィジェット | ダッシュボードの配置（12列グリッド）、種別、センサーとの紐付け、設定 |
 | `notification_settings` | 通知設定 | ワークスペースごとに1行（self-hosted は NULL の1行）。重故障・軽故障それぞれの Discord Webhook URL、有効/無効、重故障の再通知 |
 | `webhook_subscriptions` | Webhook 購読 | イベント種別、送信先 URL、有効/無効 |
-| `ingest_devices` | 機器ごとのキー（self-hosted のみ） | 機器の名前（一意）、キーの SHA-256 ハッシュ（キーそのものは保存しない）、作成日時、失効日時。センサーの `device_id` の参照先 |
+| `ingest_devices` | 機器ごとのキー（self-hosted のみ） | 機器の名前（一意）、キーの SHA-256 ハッシュ（キーそのものは保存しない）、作成日時、失効日時、任意の系統（`line`、40 文字まで。センサー棚の「系統 › 機器」用）。センサーの `device_id` の参照先 |
 | `users` / `workspaces` / `refresh_tokens` | 認証（SaaS のみ） | ユーザー、ワークスペース（テナント）、リフレッシュトークン |
 
 - センサーの `workspace_id` などテナント列は SaaS モードで使う（`NULL` が self-hosted）
@@ -80,7 +80,7 @@ flowchart LR
 |---|---|---|---|
 | GET | `/health` | 稼働確認。DB 接続状態を返す（`ok` / `degraded`） | なし |
 | POST | `/api/ingest/readings` | センサー値の取り込み（単発・バッチ） | APIキー（self-hosted。`INGEST_AUTH=off` でなし） |
-| GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成。応答に所属する機器の `deviceId`・`deviceName`（所属なし・SaaS は null）を含む | なし |
+| GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成。応答に所属する機器の `deviceId`・`deviceName`・`deviceLine`（系統。所属なし・系統なし・SaaS は null）を含む | なし |
 | GET / PUT / DELETE | `/api/sensors/{id}` | 詳細・更新・削除（物理削除） | なし |
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`） | なし |
 | GET | `/api/sensors/{id}/readings/downsampled` | グラフ用の間引き。`from` / `to` の範囲を `buckets` 区間（既定 500・上限 1000）に分け、区間ごとの最小・平均・最大・件数を返す | なし |

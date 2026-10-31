@@ -22,7 +22,7 @@ import { useDashboard } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
 import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
-import { isWindowPositionInside, WINDOW_WIDTH } from "../lib/window-position";
+import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
 import { useEditorStore } from "../store/useEditorStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -283,14 +283,28 @@ function LoadedDashboard({
   // 640px 未満は動かせないので、従来どおり自動配置（下寄せ）。「もとの位置」で自動配置に戻る
   const panelPos = useEditorStore((s) => s.panelPos);
   const movedPanel = panelPos && !narrowNow ? panelPos : null;
-  const panelHeight = movedPanel ? Math.max(160, Math.min(window.innerHeight - 164, window.innerHeight - movedPanel.y - 8)) : 0;
   const placement = movedPanel ? "moved" : slot.placement;
-  // 動かした棚の高さ。最初に動かしたときに急に縮まないよう、既定の位置の高さ（画面の高さ − 164）を上限にする
-  const shelfHeight = movedShelf ? Math.max(160, Math.min(window.innerHeight - 164, window.innerHeight - movedShelf.y - 8)) : 0;
+  // 動かした窓の大きさ。利用者が大きさを変えていれば、それを（画面に収まる範囲に丸めて）使う。
+  // 変えていなければ、幅は既定、高さは最初に動かしたときに急に縮まないよう、既定の位置の高さ（画面の高さ − 164）を上限にする
+  const shelfSize = useEditorStore((s) => s.shelfSize);
+  const panelSize = useEditorStore((s) => s.panelSize);
+  const boxOf = (kind: "shelf" | "panel", pos: { x: number; y: number }, size: typeof shelfSize) =>
+    clampWindowSize(
+      kind,
+      size ?? {
+        width: WINDOW_WIDTH[kind],
+        height: Math.max(MIN_WINDOW_HEIGHT, Math.min(window.innerHeight - 164, window.innerHeight - pos.y - 8)),
+      },
+      pos,
+      window.innerWidth,
+      window.innerHeight,
+    );
+  const panelBox = movedPanel ? boxOf("panel", movedPanel, panelSize) : null;
+  const shelfBox = movedShelf ? boxOf("shelf", movedShelf, shelfSize) : null;
   const shelfRect: ViewRect | null = !shelfOpen
     ? null
-    : movedShelf
-      ? { left: movedShelf.x, top: movedShelf.y, right: movedShelf.x + WINDOW_WIDTH.shelf, bottom: movedShelf.y + shelfHeight }
+    : movedShelf && shelfBox
+      ? { left: movedShelf.x, top: movedShelf.y, right: movedShelf.x + shelfBox.width, bottom: movedShelf.y + shelfBox.height }
       : { left: 8, top: drawerTop, right: 8 + WINDOW_WIDTH.shelf, bottom: window.innerHeight - (narrowNow ? BOTTOM_NAV_HEIGHT + 8 : 8) };
   // 既定の位置の棚は、上端が時間の操作に追従してスクロールで変わる。それを鍵に含めると、スクロールのたびに
   // 設定パネルの位置が測り直されて切り替わるので、既定の位置は「default」とだけ区別する
@@ -453,8 +467,8 @@ function LoadedDashboard({
         <aside
           aria-label="センサー棚"
           style={
-            movedShelf
-              ? { top: movedShelf.y, left: movedShelf.x, height: shelfHeight }
+            movedShelf && shelfBox
+              ? { top: movedShelf.y, left: movedShelf.x, width: shelfBox.width, height: shelfBox.height }
               : { top: drawerTop, bottom: drawerBottom, left: 8 }
           }
           className={`${drawerBase} w-[272px] max-w-[calc(100vw-1rem)] ${hiddenClass}`}
@@ -467,8 +481,8 @@ function LoadedDashboard({
           aria-label="設定パネル"
           data-placement={placement}
           style={
-            movedPanel
-              ? { top: movedPanel.y, left: movedPanel.x, height: panelHeight }
+            movedPanel && panelBox
+              ? { top: movedPanel.y, left: movedPanel.x, width: panelBox.width, height: panelBox.height }
               : placement === "bottom"
               ? // 下に出すときは、開いているセンサー棚を避けた範囲に出す（棚と重ならない）
                 { height: "45vh", bottom: drawerBottom, left: slot.placement === "bottom" ? slot.left : 8, right: slot.placement === "bottom" ? slot.right : 8 }

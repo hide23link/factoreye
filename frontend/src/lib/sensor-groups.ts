@@ -1,8 +1,9 @@
 /**
- * センサー棚の「機器ごと」の並べ方に使う、グループ分けと検索の部品（画面を持たない計算だけ）。
+ * センサー棚の「機器ごと」「系統 › 機器」の並べ方に使う、グループ分けと検索の部品（画面を持たない計算だけ）。
  *
  * 【誰が使うか】EditorShelf。
  * 機器（取り込みの機器）に所属するセンサーは機器ごとに、所属しないものは「未所属」にまとめる。
+ * 「系統 › 機器」では、機器をさらに系統（機器の任意の項目。例: 第1ライン）にまとめ、系統のない機器は「系統なし」に入れる。
  */
 import type { Sensor } from "../types";
 
@@ -15,6 +16,15 @@ export interface SensorGroup {
   id: string;
   name: string;
   sensors: Sensor[];
+}
+
+/** 系統のない機器（と、機器に所属しないセンサー）をまとめる系統の id と、画面に出す名前 */
+export const NO_LINE_GROUP_ID = "no-line";
+export const NO_LINE_GROUP_NAME = "系統なし";
+
+/** 系統のグループ。sensors は系統全体のセンサー、devices はその中の機器ごとのグループ */
+export interface LineGroup extends SensorGroup {
+  devices: SensorGroup[];
 }
 
 /** 機器の名前の並びは、数字の大きさで比べる（r-load-2 が r-load-10 より前に来る） */
@@ -44,14 +54,48 @@ export function groupByDevice(sensors: Sensor[]): SensorGroup[] {
   });
 }
 
+/** 系統を持つ機器のセンサーが 1 つでもあるか（無ければ「系統 › 機器」の並べ方は意味がない） */
+export function hasLines(sensors: Sensor[]): boolean {
+  return sensors.some((s) => Boolean(s.deviceLine));
+}
+
 /**
- * 検索の文字（小文字にしたもの）に合うか。機器の名前に合えば、その機器のセンサーはすべて合う。
+ * 系統 › 機器 に分ける。系統の名前順（数字は大きさで比べる）に並べ、「系統なし」は最後。
+ * 系統のない機器、機器に所属しないセンサー（「未所属」）は、「系統なし」に入る。
+ */
+export function groupByLine(sensors: Sensor[]): LineGroup[] {
+  // キーが null のものが「系統なし」（名前の文字では見分けない。利用者が同じ名前の系統を付けても混ざらない）
+  const byLine = new Map<string | null, Sensor[]>();
+  for (const sensor of sensors) {
+    const line = sensor.deviceLine || null;
+    const members = byLine.get(line);
+    if (members) members.push(sensor);
+    else byLine.set(line, [sensor]);
+  }
+  const lines = [...byLine].map(
+    ([line, members]): LineGroup => ({
+      id: line === null ? NO_LINE_GROUP_ID : `line:${line}`,
+      name: line ?? NO_LINE_GROUP_NAME,
+      sensors: members,
+      devices: groupByDevice(members),
+    }),
+  );
+  return lines.sort((a, b) => {
+    if (a.id === NO_LINE_GROUP_ID) return 1;
+    if (b.id === NO_LINE_GROUP_ID) return -1;
+    return compareNames(a.name, b.name);
+  });
+}
+
+/**
+ * 検索の文字（小文字にしたもの）に合うか。機器・系統の名前に合えば、その機器・系統のセンサーはすべて合う。
  * 文字が空なら、すべて合う。
  */
 export function matchesQuery(sensor: Sensor, needle: string): boolean {
   if (needle === "") return true;
   const device = sensor.deviceName ?? "";
-  return `${sensor.name} ${sensor.ingestKey} ${device}`.toLowerCase().includes(needle);
+  const line = sensor.deviceLine ?? "";
+  return `${sensor.name} ${sensor.ingestKey} ${device} ${line}`.toLowerCase().includes(needle);
 }
 
 /** 未対応のアラームの重さ（グループの見出しの点に使う）。重いほうを残す */

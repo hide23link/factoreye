@@ -2,6 +2,7 @@
 # 試験の準備: センサーと機器を作り、機器ごとのキーを KEYS_DIR/key-NN に保存する。
 #   使い方: setup_devices.sh <か所の数> [KEYS_DIR（既定 ./keys）]
 #   環境変数: TARGET  ssh の宛先（例 user@192.0.2.10）。空なら、このマシンの Docker を使う
+#             LINES   系統の数（任意）。指定すると機器を均等に「第1ライン」…に分ける。既定は付けない
 #             BACKEND バックエンドのコンテナ名（既定 factoreye-backend-1）
 # キーは秘密情報。画面には出さず、権限 600 のファイルにだけ保存する。試験が終わったら必ず消す（cleanup）。
 set -euo pipefail
@@ -14,9 +15,9 @@ chmod 600 "$TMP"
 trap 'rm -f "$TMP"' EXIT
 
 if [ -n "${TARGET:-}" ]; then
-  ssh -o BatchMode=yes "$TARGET" "docker exec -i -e SITES=$SITES $BACKEND python -" < "$HERE/create_devices.py" > "$TMP"
+  ssh -o BatchMode=yes "$TARGET" "docker exec -i -e SITES=$SITES -e LINES=${LINES:-0} $BACKEND python -" < "$HERE/create_devices.py" > "$TMP"
 else
-  docker exec -i -e SITES="$SITES" "$BACKEND" python - < "$HERE/create_devices.py" > "$TMP"
+  docker exec -i -e SITES="$SITES" -e LINES="${LINES:-0}" "$BACKEND" python - < "$HERE/create_devices.py" > "$TMP"
 fi
 
 mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"

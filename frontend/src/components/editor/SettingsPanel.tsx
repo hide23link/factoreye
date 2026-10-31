@@ -27,7 +27,7 @@ export function SettingsPanel({ dashboard }: { dashboard: DashboardDetail }) {
 }
 
 function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
-  const { handleProps, resetButton } = useMovableWindow("panel", "設定パネル");
+  const { handleProps, resetButton, resizeHandles } = useMovableWindow("panel", "設定パネル");
   const queryClient = useQueryClient();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   // 入力中の値。null は「保存済みの値をそのまま出す」
@@ -185,6 +185,7 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
           }}
         />
       )}
+      {resizeHandles}
     </>
   );
 }

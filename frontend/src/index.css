@@ -30,3 +30,31 @@
 .layout > .react-grid-item:hover > .react-resizable-handle.react-resizable-handle-s {
   background: rgba(37, 99, 235, 0.25);
 }
+
+/*
+ * センサー棚: 窓を広げたとき（中身の幅が 380px 以上）は、センサー名を折り返さず 1 行にして、値・推移線を名前の右に並べる。
+ * 狭いとき（既定の幅）は、従来どおり名前を 2 行まで折り返し、値・推移線を名前の下に出す。
+ * 窓の幅は利用者が変えられるので、画面の幅ではなく、棚そのものの幅（container query）で切り替える。
+ */
+.shelf-scroll {
+  container: shelf / inline-size;
+}
+@container shelf (min-width: 380px) {
+  .shelf-row-main {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .shelf-row-name {
+    display: block;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shelf-row-meta {
+    flex-shrink: 0;
+    margin-top: 0;
+  }
+}

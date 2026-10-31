@@ -63,6 +63,8 @@ export interface Sensor {
   // 所属する取り込みの機器（self-hosted の機器ごとのキー）。SaaS・所属なしは null、古い API では項目なし
   deviceId?: string | null;
   deviceName?: string | null;
+  // 機器の系統（ライン）。付けていない機器・所属なし・SaaS は null、古い API では項目なし
+  deviceLine?: string | null;
 }
 
 /** 測定値1件（時刻と値）。 */

@@ -29,12 +29,12 @@ const dashboard: DashboardDetail = {
   updatedAt: "2024-01-01T00:00:00.000Z",
 };
 
-function makeSensor(id: string, name: string, device?: string): Sensor {
+function makeSensor(id: string, name: string, device?: string, line?: string, unit = "V"): Sensor {
   return {
     id,
     name,
     ingestKey: id,
-    unit: "V",
+    unit,
     thresholdMinWarning: null,
     thresholdMinCritical: null,
     thresholdMaxWarning: null,
@@ -45,6 +45,7 @@ function makeSensor(id: string, name: string, device?: string): Sensor {
     updatedAt: "2024-01-01T00:00:00.000Z",
     deviceId: device ? `dev-${device}` : null,
     deviceName: device ?? null,
+    deviceLine: line ?? null,
   };
 }
 
@@ -192,9 +193,15 @@ describe("センサー棚: チェックして一度に追加", () => {
     expect((groupCheck as HTMLInputElement).checked).toBe(false);
   });
 
-  it("検索を変えても選択は残り、「N 個を追加」で選んだ分を追加して選択を解除する", async () => {
-    const user = userEvent.setup();
+  /** addWidget が作ったウィジェットを返すモック（センサーの id をウィジェット id に使う） */
+  const mockAddWidget = () =>
     vi.mocked(api.addWidget).mockImplementation(async (_dashboardId, body) => makeWidget(`w-${body.sensorId}`, body.sensorId as string));
+  /** addWidget の呼び出しの引数（グラフの本文） */
+  const addedBodies = () => vi.mocked(api.addWidget).mock.calls.map((call) => call[1]);
+
+  it("検索を変えても選択は残り、「N 個を追加」で選んだ計測値を 1 つのグラフにまとめて追加し、選択を解除する", async () => {
+    const user = userEvent.setup();
+    mockAddWidget();
     renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
     await screen.findByText("r-1");
 
@@ -205,28 +212,19 @@ describe("センサー棚: チェックして一度に追加", () => {
 
     await user.click(screen.getByRole("button", { name: "3 個を追加" }));
 
-    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(3));
-    const sensorIds = vi.mocked(api.addWidget).mock.calls.map((call) => call[1].sensorId).sort();
-    expect(sensorIds).toEqual(["s1", "s2", "s4"]);
+    // 1 つのグラフ（addWidget 1 回）に、3 つのセンサー。単位がそろっているので、縦軸は実際の値のまま
+    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
+    const [graph] = addedBodies();
+    expect(graph.type).toBe("SensorGraph");
+    expect(graph.config?.sensorIds).toEqual(["s1", "s2", "s4"]);
+    expect(graph.config?.axisMode).toBeUndefined();
     await waitFor(() => expect(screen.getByText("チェックして、まとめて追加")).toBeInTheDocument());
+    expect(useEditorStore.getState().toast?.message).toBe("グラフ 1 つに 3 個を追加しました");
   });
 
-  it("「表示中をすべて選択」は表示中の分だけを選び、もう一度押すと外す", async () => {
+  it("機器の「すべて追加」は、チェックなしでその機器の表示中のセンサーを 1 つのグラフにまとめる", async () => {
     const user = userEvent.setup();
-    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
-    await screen.findByText("r-1");
-
-    await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "電圧");
-    await user.click(screen.getByRole("button", { name: "表示中をすべて選択" }));
-    expect(screen.getByText(/^2 個を選択中/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "表示中の選択を外す" }));
-    expect(screen.getByText("チェックして、まとめて追加")).toBeInTheDocument();
-  });
-
-  it("機器の「すべて追加」は、チェックなしでその機器のセンサーを追加する", async () => {
-    const user = userEvent.setup();
-    vi.mocked(api.addWidget).mockImplementation(async (_dashboardId, body) => makeWidget(`w-${body.sensorId}`, body.sensorId as string));
+    mockAddWidget();
     renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
     await screen.findByText("r-1");
 
@@ -234,14 +232,15 @@ describe("センサー棚: チェックして一度に追加", () => {
     expect(within(header.parentElement as HTMLElement).getByText("r-1")).toBeInTheDocument();
     await user.click(header);
 
-    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
+    expect(addedBodies()[0].config?.sensorIds).toEqual(["s1", "s2"]);
   });
 
-  it("選択中のグラフがあっても、一括追加はグラフに重ねず、センサーごとに新しいウィジェットを作る", async () => {
+  it("選択中のグラフがあっても、一括追加はそのグラフに重ねず、新しいグラフを 1 つ作る", async () => {
     const user = userEvent.setup();
     const graph = { ...makeWidget("w-graph", "s4"), type: "SensorGraph" as const };
     const withGraph = { ...dashboard, widgets: [graph] };
-    vi.mocked(api.addWidget).mockImplementation(async (_dashboardId, body) => makeWidget(`w-${body.sensorId}`, body.sensorId as string));
+    mockAddWidget();
     useEditorStore.getState().select("w-graph");
     renderWithQueryClient(<EditorShelf dashboard={withGraph} />);
     await screen.findByText("r-1");
@@ -249,24 +248,86 @@ describe("センサー棚: チェックして一度に追加", () => {
     await user.click(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" }));
     await user.click(screen.getByRole("button", { name: "2 個を追加" }));
 
-    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
     expect(api.updateWidget).not.toHaveBeenCalled();
-    expect(vi.mocked(api.addWidget).mock.calls.map((call) => call[1].sensorId).sort()).toEqual(["s1", "s2"]);
+    expect(addedBodies()[0].config?.sensorIds).toEqual(["s1", "s2"]);
+  });
+
+  describe("種類・単位が混ざるとき", () => {
+    const mixed = [
+      makeSensor("v1", "ld01 電圧", "r-1", undefined, "V"),
+      makeSensor("a1", "ld01 電流", "r-1", undefined, "A"),
+      makeSensor("c1", "ld01 生産数", "r-1", undefined, "個"),
+      makeSensor("t1", "ld01 稼働", "r-1", undefined, ""),
+    ];
+
+    it("計測値だけを 1 つのグラフにまとめ、生産数・稼働は、種類に合う既定のウィジェットを 1 つずつ作る（通知は 1 つ）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchSensors).mockResolvedValue(mixed);
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "4 個を追加" }));
+
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(3));
+      expect(addedBodies().map((b) => [b.type, b.sensorId])).toEqual([
+        ["SensorGraph", "v1"],
+        ["ProductionPlan", "c1"],
+        ["ProductionStatus", "t1"],
+      ]);
+      expect(addedBodies()[0].config?.sensorIds).toEqual(["v1", "a1"]);
+      await waitFor(() => expect(useEditorStore.getState().toast?.message).toBe("グラフ 1 つに 2 個、ほかに 2 個を追加しました"));
+    });
+
+    it("単位が違う計測値（V と A）が混ざるときは、縦軸をセンサーごとの 0〜100% にそろえる", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchSensors).mockResolvedValue(mixed);
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(groupToggle("r-1"));
+      await user.click(screen.getByRole("checkbox", { name: "ld01 電圧を選ぶ" }));
+      await user.click(screen.getByRole("checkbox", { name: "ld01 電流を選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "2 個を追加" }));
+
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
+      expect(addedBodies()[0].config).toMatchObject({ sensorIds: ["v1", "a1"], axisMode: "normalized" });
+    });
   });
 
   it("途中で失敗したら、成功と失敗の数を 1 つの通知にまとめ、失敗したセンサーだけ選択に残す", async () => {
     const user = userEvent.setup();
-    vi.mocked(api.addWidget)
-      .mockResolvedValueOnce(makeWidget("w-ok", "s1"))
-      .mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(api.fetchSensors).mockResolvedValue([
+      makeSensor("v1", "ld01 電圧", "r-1"),
+      makeSensor("v2", "ld01 電流", "r-1"),
+      makeSensor("c1", "ld01 生産数", "r-1", undefined, "個"),
+    ]);
+    vi.mocked(api.addWidget).mockResolvedValueOnce(makeWidget("w-ok", "v1")).mockRejectedValueOnce(new Error("boom"));
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("r-1");
+
+    await user.click(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" }));
+    await user.click(screen.getByRole("button", { name: "3 個を追加" })); // グラフは作れ、生産数のウィジェットが失敗する
+
+    await waitFor(() => expect(useEditorStore.getState().toast?.message).toBe("グラフ 1 つに 2 個を追加しました（1 個は失敗）"));
+    expect(screen.getByText(/^1 個を選択中/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" })).not.toBeChecked();
+  });
+
+  it("グラフが作れなかったときは、そのグラフの全センサーが失敗として選択に残る", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.addWidget).mockRejectedValue(new Error("boom"));
     renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
     await screen.findByText("r-1");
 
     await user.click(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" }));
     await user.click(screen.getByRole("button", { name: "2 個を追加" }));
 
-    await waitFor(() => expect(useEditorStore.getState().toast?.message).toBe("2 個中 1 個を追加しました（1 個は失敗）"));
-    expect(screen.getByText(/^1 個を選択中/)).toBeInTheDocument();
+    await waitFor(() => expect(useEditorStore.getState().toast?.message).toBe("2 個すべての追加に失敗しました"));
+    expect(screen.getByText(/^2 個を選択中/)).toBeInTheDocument();
   });
 
   it("追加中は「追加」と「すべて追加」を押せず、二重に実行されない", async () => {
@@ -292,23 +353,90 @@ describe("センサー棚: チェックして一度に追加", () => {
     expect(api.addWidget).toHaveBeenCalledTimes(1);
   });
 
-  it("30 個を超える一括追加は、確認してから実行する（やめれば何も追加しない）", async () => {
+  describe("多いときの確認", () => {
+    const measureSensors = (count: number) =>
+      Array.from({ length: count }, (_, index) => makeSensor(`m${index}`, `多数 ${index}`, "r-many"));
+
+    it("計測値が 12 個を超えると、「1 つのグラフに入れる」か「12 本ずつ分ける」かを確認する（やめれば何も追加しない）", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchSensors).mockResolvedValue(measureSensors(30));
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-many");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-manyの表示中のセンサーをすべて選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "30 個を追加" }));
+      expect(screen.getByText(/30 個を 1 つのグラフに入れます。多いと見にくくなります/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "キャンセル" }));
+      expect(api.addWidget).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "30 個を追加" }));
+      await user.click(screen.getByRole("button", { name: "1 つのグラフに入れる" }));
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
+      expect(addedBodies()[0].config?.sensorIds).toHaveLength(30);
+    });
+
+    it("「12 本ずつ分ける」を選ぶと、12・12・6 本のグラフ 3 つになる", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchSensors).mockResolvedValue(measureSensors(30));
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-many");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-manyの表示中のセンサーをすべて選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "30 個を追加" }));
+      await user.click(screen.getByRole("button", { name: "12 本ずつ分ける" }));
+
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(3));
+      expect(addedBodies().map((b) => b.config?.sensorIds?.length)).toEqual([12, 12, 6]);
+      await waitFor(() => expect(useEditorStore.getState().toast?.message).toBe("グラフ 3 つに 30 個を追加しました"));
+    });
+
+    it("ちょうど 12 個までは、確認せずに 1 つのグラフにまとめる", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.fetchSensors).mockResolvedValue(measureSensors(12));
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-many");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-manyの表示中のセンサーをすべて選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "12 個を追加" }));
+
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(1));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("グラフにまとめない（生産数など）センサーが 30 個を超えるときは、それぞれ別のウィジェットになると確認する", async () => {
+      const user = userEvent.setup();
+      const counts = Array.from({ length: 31 }, (_, index) => makeSensor(`c${index}`, `生産数 ${index}`, "r-count", undefined, "個"));
+      vi.mocked(api.fetchSensors).mockResolvedValue(counts);
+      mockAddWidget();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-count");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-countの表示中のセンサーをすべて選ぶ" }));
+      await user.click(screen.getByRole("button", { name: "31 個を追加" }));
+      expect(screen.getByText(/31 個のセンサーを、それぞれ新しいウィジェットとして追加します/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "キャンセル" }));
+      expect(api.addWidget).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "31 個を追加" }));
+      await user.click(screen.getByRole("button", { name: "追加" }));
+      await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(31));
+    });
+  });
+
+  it("「表示中をすべて選択」は表示中の分だけを選び、もう一度押すと外す", async () => {
     const user = userEvent.setup();
-    const many = Array.from({ length: 31 }, (_, index) => makeSensor(`m${index}`, `多数 ${index}`, "r-many"));
-    vi.mocked(api.fetchSensors).mockResolvedValue(many);
-    vi.mocked(api.addWidget).mockImplementation(async (_dashboardId, body) => makeWidget(`w-${body.sensorId}`, body.sensorId as string));
     renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
-    await screen.findByText("r-many");
+    await screen.findByText("r-1");
 
-    await user.click(screen.getByRole("checkbox", { name: "r-manyの表示中のセンサーをすべて選ぶ" }));
-    await user.click(screen.getByRole("button", { name: "31 個を追加" }));
-    expect(screen.getByText(/31 個のセンサーを、それぞれ新しいウィジェットとして追加します/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "キャンセル" }));
-    expect(api.addWidget).not.toHaveBeenCalled();
+    await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "電圧");
+    await user.click(screen.getByRole("button", { name: "表示中をすべて選択" }));
+    expect(screen.getByText(/^2 個を選択中/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "31 個を追加" }));
-    await user.click(screen.getByRole("button", { name: "追加" }));
-    await waitFor(() => expect(api.addWidget).toHaveBeenCalledTimes(31));
+    await user.click(screen.getByRole("button", { name: "表示中の選択を外す" }));
+    expect(screen.getByText("チェックして、まとめて追加")).toBeInTheDocument();
   });
 
   it("表示外の選択があるときは、棚の下に件数を出す", async () => {
@@ -451,5 +579,203 @@ describe("センサー棚: チェックして一度に追加", () => {
       expect(chip("電圧")).toBeInTheDocument();
       expect(chip("電位")).toBeInTheDocument();
     });
+  });
+});
+
+/** 系統の見出しの開閉ボタン（名前は「系統名（N 機器 / M 個）」） */
+const lineToggle = (lineName: string) => screen.getByRole("button", { name: new RegExp(`^${lineName}（`) });
+
+// 第1ライン: r-1（電圧・電流）、r-2（電圧）／ 第2ライン: r-3（電圧）／ 系統なし: r-4（電圧）と、機器に所属しない 1 つ
+const lineSensors = [
+  makeSensor("s1", "ld01 電圧", "r-1", "第1ライン"),
+  makeSensor("s2", "ld01 電流", "r-1", "第1ライン"),
+  makeSensor("s3", "ld02 電圧", "r-2", "第1ライン"),
+  makeSensor("s4", "ld03 電圧", "r-3", "第2ライン"),
+  makeSensor("s5", "ld04 電圧", "r-4"),
+  makeSensor("s6", "乾燥炉 温度"),
+];
+
+describe("センサー棚: 系統 › 機器", () => {
+  beforeEach(() => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(lineSensors);
+  });
+
+  it("系統があると既定は「系統 › 機器」。系統が名前順に並び、「系統なし」は最後で、開くまで機器・行は出ない", async () => {
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    const headings = screen.getAllByRole("button", { name: /個）$/ }).map((b) => b.getAttribute("aria-label"));
+    expect(headings).toEqual(["第1ライン（2 機器 / 3 個）", "第2ライン（1 機器 / 1 個）", "系統なし（2 機器 / 2 個）"]);
+    expect(screen.getByRole("button", { name: "系統 › 機器" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("r-1")).not.toBeInTheDocument();
+  });
+
+  it("系統を開くと機器が、機器を開くとセンサーが出る。系統なしには、系統のない機器と未所属が入る", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    await user.click(lineToggle("第1ライン"));
+    expect(screen.getByText("r-1")).toBeInTheDocument();
+    expect(screen.getByText("r-2")).toBeInTheDocument();
+    expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+    await user.click(groupToggle("r-1"));
+    expect(screen.getByTitle("ld01 電圧")).toBeInTheDocument();
+
+    await user.click(lineToggle("系統なし"));
+    expect(screen.getByText("r-4")).toBeInTheDocument();
+    expect(screen.getByText("未所属")).toBeInTheDocument();
+  });
+
+  it("3 つの並べ方を切り替えられる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    const layouts = within(screen.getByRole("group", { name: "センサーの並べ方" })).getAllByRole("button");
+    expect(layouts.map((b) => b.textContent)).toEqual(["系統 › 機器", "機器ごと", "一覧"]);
+    await user.click(screen.getByRole("button", { name: "機器ごと" }));
+    expect(screen.queryByText("第1ライン")).not.toBeInTheDocument();
+    expect(screen.getByText("r-1")).toBeInTheDocument();
+  });
+
+  it("系統が 1 つも無ければ、これまでどおり「機器ごと」「一覧」の 2 つだけ（既定は機器ごと）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(devicesSensors);
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("r-2");
+
+    const layouts = within(screen.getByRole("group", { name: "センサーの並べ方" })).getAllByRole("button");
+    expect(layouts.map((b) => b.textContent)).toEqual(["機器ごと", "一覧"]);
+    expect(layouts[0]).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("系統名に空白や記号があっても、開閉ボタンの aria-controls が、開いた機器の一覧の id と一致する", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("w1", "ld01 電圧", "r-1", "第 1 ライン / A棟")]);
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第 1 ライン / A棟");
+
+    const toggle = lineToggle("第 1 ライン / A棟");
+    await user.click(toggle);
+    const controls = toggle.getAttribute("aria-controls") ?? "";
+    expect(controls).not.toMatch(/\s/);
+    const devices = document.getElementById(controls);
+    expect(devices).not.toBeNull();
+    expect(within(devices as HTMLElement).getByText("r-1")).toBeInTheDocument();
+  });
+
+  it("系統のチェックで、その系統の表示中のセンサーをすべて選べる（一部だけのときは「一部」の状態）", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    const lineCheck = screen.getByRole("checkbox", { name: "第1ラインの表示中のセンサーをすべて選ぶ" });
+    await user.click(lineCheck);
+    expect(screen.getByText(/^3 個を選択中/)).toBeInTheDocument();
+
+    await user.click(lineToggle("第1ライン"));
+    await user.click(groupToggle("r-2"));
+    await user.click(screen.getByRole("checkbox", { name: "ld02 電圧を選ぶ" }));
+    expect(screen.getByText(/^2 個を選択中/)).toBeInTheDocument();
+    expect((lineCheck as HTMLInputElement).indeterminate).toBe(true);
+  });
+
+  it("系統の見出しの点は、中のいちばん重いアラームの色になる", async () => {
+    vi.mocked(api.fetchAlarms).mockImplementation(async (status?: string) => ({
+      alarms:
+        status === "active"
+          ? [
+              {
+                id: "al1",
+                sensorId: "s4",
+                triggeredAt: "2024-01-01T00:00:00.000Z",
+                resolvedAt: null,
+                acknowledgedAt: null,
+                acknowledgedBy: null,
+                value: 9,
+                status: "active" as const,
+                thresholdBreached: "max" as const,
+                severity: "warning" as const,
+              },
+            ]
+          : [],
+      total: status === "active" ? 1 : 0,
+    }));
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    await waitFor(() => expect(screen.getByTitle("軽故障のアラームがあります")).toBeInTheDocument());
+    expect(screen.getAllByTitle("未対応のアラームはありません")).toHaveLength(2); // 第1ライン・系統なし
+  });
+
+  it("系統名で検索すると、当たった系統・機器がすべて開いて出る（開閉はできない）", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "第2ライン");
+
+    expect(screen.getByTitle("ld03 電圧")).toBeInTheDocument();
+    expect(screen.queryByText("第1ライン")).not.toBeInTheDocument();
+    expect(lineToggle("第2ライン")).toBeDisabled();
+    expect(document.querySelector("mark")?.textContent).toBe("第2ライン");
+  });
+
+  it("名前の語の絞り込みとは AND。語で絞っている間は、当たった系統・機器を自動で開く", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    await user.click(screen.getByRole("button", { name: /^電流\d/ }));
+    expect(screen.getByTitle("ld01 電流")).toBeInTheDocument();
+    expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+    expect(screen.queryByText("第2ライン")).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "ld09");
+    expect(screen.getByText("該当するセンサーがありません")).toBeInTheDocument();
+  });
+
+  it("「すべて開く」は系統だけを開く（機器の行までは描かない）", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    await user.click(screen.getByRole("button", { name: "すべて開く" }));
+    expect(screen.getByText("r-1")).toBeInTheDocument();
+    expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "すべて閉じる" }));
+    expect(screen.queryByText("r-1")).not.toBeInTheDocument();
+  });
+
+  it("1,050 センサー・350 機器・7 系統でも、閉じている間は見出しだけを描き、開いた系統の機器の見出しだけが増える", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 350 }, (_, index) =>
+      ["電圧", "電流", "電位"].map((kind) =>
+        makeSensor(`m${index}-${kind}`, `ld${index} ${kind}`, `r-load-${index}`, `第${Math.floor(index / 50) + 1}ライン`),
+      ),
+    ).flat();
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+    await screen.findByText("第1ライン");
+
+    expect(screen.getAllByRole("button", { name: /機器 \/ \d+ 個）$/ })).toHaveLength(7);
+    expect(screen.queryAllByRole("checkbox", { name: /を選ぶ$/ }).filter((c) => c.getAttribute("aria-label")?.startsWith("ld"))).toHaveLength(0);
+
+    await user.click(lineToggle("第1ライン"));
+    expect(screen.getAllByRole("button", { name: /^r-load-\d+（3 個）$/ })).toHaveLength(50);
+    expect(screen.queryByTitle("ld0 電圧")).not.toBeInTheDocument(); // 機器を開くまで、行は描かない
+  });
+});
+
+describe("センサー棚: 窓を広げたときの読みやすさ", () => {
+  it("棚の幅（container query）で切り替えるクラスが付いている（広げると名前が 1 行になり、値が右に並ぶ。index.css）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("a", "とても長いセンサーの名前 電圧")]);
+    renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+
+    const name = await screen.findByTitle("とても長いセンサーの名前 電圧");
+    expect(name).toHaveClass("shelf-row-name", "line-clamp-2"); // 狭いときは従来どおり 2 行まで
+    expect(name.parentElement).toHaveClass("shelf-row-main");
+    expect(name.nextElementSibling).toHaveClass("shelf-row-meta");
+    expect(name.closest(".shelf-scroll")).not.toBeNull();
   });
 });

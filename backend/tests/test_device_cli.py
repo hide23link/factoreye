@@ -82,3 +82,35 @@ def test_cli_refuses_in_saas_mode(
     monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
     assert device_cli.main(["list"]) == 1
     assert "自前ホスト" in capsys.readouterr().err
+
+
+async def test_create_with_line_and_set_line_change_and_clear_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert await device_cli.run_command(_cli("create", "cli-l", "--line", " 第1ライン ")) == 0
+    async with AsyncSession(engine) as session:
+        device = await device_keys.get_device_by_name(session, "cli-l")
+        assert device is not None and device.line == "第1ライン"  # 前後の空白は除く
+
+    assert await device_cli.run_command(_cli("set-line", "cli-l", "第2ライン")) == 0
+    assert await device_cli.run_command(_cli("list")) == 0
+    assert "系統 第2ライン" in capsys.readouterr().out
+
+    # 系統を省くと外す（空の文字でも同じ）
+    assert await device_cli.run_command(_cli("set-line", "cli-l")) == 0
+    async with AsyncSession(engine) as session:
+        device = await device_keys.get_device_by_name(session, "cli-l")
+        assert device is not None and device.line is None
+    assert await device_cli.run_command(_cli("set-line", "cli-l", "第3ライン")) == 0
+    assert await device_cli.run_command(_cli("set-line", "cli-l", "  ")) == 0
+    async with AsyncSession(engine) as session:
+        device = await device_keys.get_device_by_name(session, "cli-l")
+        assert device is not None and device.line is None
+
+
+async def test_line_too_long_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+    assert await device_cli.run_command(_cli("create", "cli-long", "--line", "あ" * 41)) == 1
+    assert "40 文字まで" in capsys.readouterr().err
+    assert await device_cli.run_command(_cli("create", "cli-ok", "--line", "あ" * 40)) == 0
+    assert await device_cli.run_command(_cli("set-line", "cli-ok", "い" * 41)) == 1
+    assert await device_cli.run_command(_cli("set-line", "cli-nope", "x")) == 1  # 機器がない

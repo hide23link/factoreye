@@ -235,3 +235,33 @@ def test_readings_pk_migration_downgrade_restores_id_and_rows(
         ).fetchone()
     assert [r[1] for r in rows] == [1.0, 2.0]
     assert new_id is not None and new_id[0] > rows[-1][0]
+
+
+# ── 機器の系統（i9d0e1f2a3b4）: NULL 可の列を足すだけ ─────────────
+
+_BEFORE_DEVICE_LINE = "h8c9d0e1f2a3"
+
+
+def test_device_line_migration_adds_a_nullable_column_and_keeps_existing_devices(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    _alembic(async_url, "downgrade", _BEFORE_DEVICE_LINE)
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO ingest_devices (id, name, key_hash, created_at) "
+            "VALUES (gen_random_uuid(), 'old-device', repeat('a', 64), now())"
+        )
+
+    _alembic(async_url, "upgrade", "head")
+
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        column = conn.execute(
+            "SELECT is_nullable, character_maximum_length, column_default "
+            "FROM information_schema.columns "
+            "WHERE table_name = 'ingest_devices' AND column_name = 'line'"
+        ).fetchone()
+        # NULL 可・既定なし・40 文字。既存の機器は表を書き直さずに残り、系統は NULL（系統なし）
+        assert column == ("YES", 40, None)
+        old = conn.execute("SELECT line FROM ingest_devices WHERE name = 'old-device'").fetchone()
+        assert old == (None,)

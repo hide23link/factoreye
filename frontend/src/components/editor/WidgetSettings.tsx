@@ -51,7 +51,7 @@ const changeConfig = (actions: Actions, widget: Widget, change: Partial<WidgetCo
 
 export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboard: DashboardDetail }) {
   const actions = useWidgetActions(dashboard);
-  const { handleProps, resetButton } = useMovableWindow("panel", "設定パネル");
+  const { handleProps, resetButton, resizeHandles } = useMovableWindow("panel", "設定パネル");
 
   return (
     <>
@@ -98,6 +98,7 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
           </div>
         </Section>
       </div>
+      {resizeHandles}
     </>
   );
 }
