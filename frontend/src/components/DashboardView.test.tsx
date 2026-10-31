@@ -324,7 +324,9 @@ describe("DashboardView", () => {
       await user.click(screen.getByRole("button", { name: "すべて" }));
       await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "稼働");
       expect(screen.queryByText("乾燥炉 温度")).not.toBeInTheDocument();
-      expect(screen.getByText("ライン1 稼働")).toBeInTheDocument();
+      // 検索に当たった文字は強調（<mark>）で分かれるので、強調込みの表示テキスト（textContent）で探す
+      expect(screen.getByText((_, element) => element?.getAttribute("title") === "ライン1 稼働" && element.textContent === "ライン1 稼働")).toBeInTheDocument();
+      expect(document.querySelector("mark")?.textContent).toBe("稼働");
     });
 
     it("ウィジェット棚のクリックで、種類を追加できる", async () => {

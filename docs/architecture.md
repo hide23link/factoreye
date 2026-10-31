@@ -80,7 +80,7 @@ flowchart LR
 |---|---|---|---|
 | GET | `/health` | 稼働確認。DB 接続状態を返す（`ok` / `degraded`） | なし |
 | POST | `/api/ingest/readings` | センサー値の取り込み（単発・バッチ） | APIキー（self-hosted。`INGEST_AUTH=off` でなし） |
-| GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成 | なし |
+| GET / POST | `/api/sensors` | センサー一覧（ETag 付き。`If-None-Match` が一致すれば 304）・作成。応答に所属する機器の `deviceId`・`deviceName`（所属なし・SaaS は null）を含む | なし |
 | GET / PUT / DELETE | `/api/sensors/{id}` | 詳細・更新・削除（物理削除） | なし |
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`） | なし |
 | GET | `/api/sensors/{id}/readings/downsampled` | グラフ用の間引き。`from` / `to` の範囲を `buckets` 区間（既定 500・上限 1000）に分け、区間ごとの最小・平均・最大・件数を返す | なし |

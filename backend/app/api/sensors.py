@@ -20,7 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import AwareDatetime
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, null, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -29,7 +29,7 @@ from app import ingest_cache
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
 from app.api.updates import apply_update
-from app.db.models import Reading, Sensor
+from app.db.models import IngestDevice, Reading, Sensor
 from app.db.session import get_session
 from app.schemas import (
     DownsampledBucket,
@@ -83,6 +83,33 @@ _SENSOR_LIST_COLUMNS = (
 )
 
 
+def _list_query(workspace_id: UUID | None) -> Any:
+    """一覧の SELECT。self-hosted は所属する機器（id・名前）も付ける。SaaS は機器を出さない。
+
+    機器ごとのキーは self-hosted だけの機能で、SaaS の応答に機器の情報を混ぜない（防御）。
+    機器に所属しないセンサーも出すため、self-hosted は外部結合にする。
+    """
+    if workspace_id is not None:
+        return (
+            select(  # type: ignore[call-overload]
+                *_SENSOR_LIST_COLUMNS,
+                null().label("device_id"),
+                null().label("device_name"),
+            )
+            .select_from(Sensor)
+            .where(Sensor.workspace_id == workspace_id)
+        )
+    return (
+        select(  # type: ignore[call-overload]
+            *_SENSOR_LIST_COLUMNS,
+            Sensor.device_id,
+            IngestDevice.name.label("device_name"),  # type: ignore[attr-defined]
+        )
+        .select_from(Sensor)
+        .outerjoin(IngestDevice, col(Sensor.device_id) == col(IngestDevice.id))
+    )
+
+
 async def _sensors_etag(session: AsyncSession, workspace_id: UUID | None) -> str:
     """センサー一覧の版（件数と最終更新時刻から作る）。中身を読まずに、変わったかを判定するため。
 
@@ -116,9 +143,7 @@ async def list_sensors(
     key = (workspace_id, etag)
     body = _sensor_list_cache.get(key)
     if body is None:
-        query = select(*_SENSOR_LIST_COLUMNS)  # type: ignore[call-overload]
-        if workspace_id is not None:
-            query = query.where(Sensor.workspace_id == workspace_id)
+        query = _list_query(workspace_id)
         result = await session.exec(query)
         sensors = [SensorRead.model_validate(row) for row in result.all()]
         body = json_array_body(sensors)
@@ -183,13 +208,28 @@ def _name_in_scope(workspace_id: UUID | None, name: str) -> Any:
     return and_(scope, col(Sensor.name) == name)
 
 
+async def _to_read(
+    session: AsyncSession, sensor: Sensor, workspace_id: UUID | None
+) -> SensorRead:
+    """詳細・更新の応答。機器の名前も入れて、一覧と同じ形にする（SaaS は機器なし）。"""
+    read = SensorRead.model_validate(sensor)
+    if workspace_id is not None:
+        read.device_id = None
+    elif sensor.device_id is not None:
+        device = await session.get(IngestDevice, sensor.device_id)
+        read.device_name = device.name if device else None
+    return read
+
+
 @router.get("/{sensor_id}", response_model=SensorRead)
 async def get_sensor(
     sensor_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-) -> Sensor:
-    return await _get_active_sensor(session, sensor_id, workspace_id)
+) -> SensorRead:
+    return await _to_read(
+        session, await _get_active_sensor(session, sensor_id, workspace_id), workspace_id
+    )
 
 
 @router.put("/{sensor_id}", response_model=SensorRead)
@@ -198,7 +238,7 @@ async def update_sensor(
     payload: SensorUpdate,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-) -> Sensor:
+) -> SensorRead:
     """センサーの更新。送られた項目だけを変える（exclude_unset）。名前の変更は、重複を確かめる。"""
     sensor = await _get_active_sensor(session, sensor_id, workspace_id)
 
@@ -225,7 +265,7 @@ async def update_sensor(
         ) from error
     await session.refresh(sensor)
     ingest_cache.clear()  # 無効にした・所属を変えたセンサーを、取り込みがすぐ反映できるように
-    return sensor
+    return await _to_read(session, sensor, workspace_id)
 
 
 @router.delete("/{sensor_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -79,6 +79,8 @@ async def attach_sensors(
             missing.append(ingest_key)
             continue
         sensor.device_id = device.id
+        # 一覧の版（ETag）は updated_at から作る。進めないと、画面が機器の表示を更新しない
+        sensor.updated_at = datetime.now(UTC)
         session.add(sensor)
     await session.commit()
     ingest_cache.clear()
