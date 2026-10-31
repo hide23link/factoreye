@@ -220,7 +220,9 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     ...renderThresholdLines(lines),
     drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
   ];
-  const nameOf = (sensorId: string) => sensors?.find((s) => s.id === sensorId)?.name ?? sensorId;
+  // 凡例に出す名前: 利用者が付けた名前（空欄なら、センサーの名前）
+  const nameOf = (sensorId: string) =>
+    widget.config.seriesNames?.[sensorId]?.trim() || sensors?.find((s) => s.id === sensorId)?.name || sensorId;
   // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
   // 線は connectNulls で自分の点だけを繋ぐ。5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
   const series = sensorIds.map((sensorId, i) => {
