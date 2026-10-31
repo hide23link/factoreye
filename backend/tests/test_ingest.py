@@ -1316,21 +1316,21 @@ async def test_numeric_timestamp_must_be_seconds(
     assert resp.status_code == 400
 
 
-async def test_saas_mode_ignores_device_time_for_samples_and_sensors(
+async def test_saas_mode_uses_device_time_for_samples_and_sensors(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SaaS（multi_tenant）では、INGEST_DEVICE_TIME=on でも機器の時刻を使わない。
-    samples・sensors の形でも、受信時刻で保存し、未登録は自動登録しない（404）。"""
+    """SaaS（multi_tenant）でも、INGEST_DEVICE_TIME=on なら機器の時刻を使う。
+    範囲内（30 日より前まで）の時刻は、そのまま保存する。未登録は自動登録しない（404）。"""
     sensor_id = await _create_sensor(client, "saas-s1")
     monkeypatch.setattr(settings, "ingest_device_time", True)
     monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
     monkeypatch.setattr(settings, "ingest_auto_create", True)
-    old = (datetime.now(UTC) - timedelta(days=5)).replace(microsecond=0).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=5)).replace(microsecond=0)
     resp = await client.post(
         "/api/ingest/readings",
         json={
             "samples": [
-                {"timestamp": old, "values": {"saas-s1": 1, "saas-nope": 2}},
+                {"timestamp": old.isoformat(), "values": {"saas-s1": 1, "saas-nope": 2}},
             ]
         },
     )
@@ -1339,7 +1339,22 @@ async def test_saas_mode_ignores_device_time_for_samples_and_sensors(
     assert body["accepted"] == 1
     assert [(r["ingestKey"], r["status"]) for r in body["rejected"]] == [("saas-nope", 404)]
     (stored,) = await _stored_times(sensor_id)
-    assert stored > datetime.now(UTC) - timedelta(minutes=1)  # 5 日前ではなく、受信時刻
+    assert stored == old  # 機器の時刻（5 日前）で保存する
+
+
+async def test_saas_mode_rejects_device_time_out_of_range(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SaaS でも時刻の範囲（30 日より前）は 400。他の利用者の時計の狂いを、ここで止める。"""
+    await _create_sensor(client, "saas-range")
+    monkeypatch.setattr(settings, "ingest_device_time", True)
+    monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
+    too_old = (datetime.now(UTC) - timedelta(days=60)).replace(microsecond=0).isoformat()
+    resp = await client.post(
+        "/api/ingest/readings",
+        json={"samples": [{"timestamp": too_old, "values": {"saas-range": 1}}]},
+    )
+    assert resp.status_code == 400
 
 
 # ---- QA 再レビューの指摘（H-D・H-C・H-B）の回帰テスト ----

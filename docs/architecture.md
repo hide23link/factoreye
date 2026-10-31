@@ -164,7 +164,7 @@ flowchart LR
 
 ### 時刻
 - `recorded_at` は既定で **サーバーが受信した時刻**を採用する。デバイス側の時刻は信頼しない（ずれや改ざんを避けるため）
-- **測定時刻の指定（self-hosted だけ、`INGEST_DEVICE_TIME=on`、既定 off）**: 各値に `timestamp`（時差つきの ISO 8601 `"2026-10-30T12:00:00.123Z"`、または UNIX 秒）を付けると、その時刻で保存する。付けない値は受信時刻のまま（1 つの送信に混在してよい）。off のときと SaaS では `timestamp` を無視する（従来どおり）
+- **測定時刻の指定（`INGEST_DEVICE_TIME=on`、既定 off。self-hosted と SaaS）**: 各値に `timestamp`（時差つきの ISO 8601 `"2026-10-30T12:00:00.123Z"`、または UNIX 秒）を付けると、その時刻で保存する。付けない値は受信時刻のまま（1 つの送信に混在してよい）。off のときは `timestamp` を無視する（従来どおり）。範囲外（未来 10 秒超・30 日より前）や時差なしは 400
   - 時差なし・未来（10 秒超）・30 日より前の `timestamp` を含む送信は、全体を 400 にする（機器に時計のずれを知らせる）。通信が切れて溜めた値を、後から送り直してよい
   - 同じ (センサー, 時刻) を送り直しても二重にならない（後から来た値で上書きする。送り直しの値が同じなら変わらない）。アラームの評価は、その時刻で行う（古い値を溜めて送ると、順序が前後することがある）
   - 機器の時計（NTP など）が合っていることが前提
@@ -397,7 +397,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では必ず変更する |
 | `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー（self-hosted）。本番では必ず変更する（`INGEST_AUTH=off` のときは使わない） |
 | `INGEST_CACHE_SECONDS` | `5` | 取り込みの照合（機器のキー・センサーの検索）を覚えておく秒数（0〜300。0 で無効。§5） |
-| `INGEST_DEVICE_TIME` | `false` | 機器が付けた `timestamp` を測定値の時刻にする（self-hosted だけ。§5）。SaaS では無視する |
+| `INGEST_DEVICE_TIME` | `false` | 機器が付けた `timestamp` を測定値の時刻にする（self-hosted と SaaS。§5）。範囲は未来 10 秒・過去 30 日まで |
 | `INGEST_AUTO_CREATE` | `false` | 未登録の `ingestKey` のセンサーを、自動で作る（self-hosted だけ。§5）。SaaS では無視する |
 | `INGEST_AUTO_CREATE_MAX_SENSORS` | `100` | 自動で作ってよい、センサー全体の数の上限（1〜10000） |
 | `INGEST_AUTH` | `key` | 取り込みの認証（self-hosted）。`off` でキーなしで受け付ける（機器に API キーを入れない運用向け。`off` のときは `INGEST_API_KEY` の本番の検査をしない。SaaS では使わない） |
