@@ -176,6 +176,8 @@ export interface WidgetConfig {
   refreshSeconds?: number;
   // グラフ用（センサー2つ以上）: 縦軸を実際の値にするか、センサーごとに 0〜100% にそろえるか。未指定は実際の値
   axisMode?: "shared" | "normalized";
+  // グラフ用（センサー2つ以上・実際の値）: センサーごとの縦軸の左右（センサーID → 左か右）。未指定は単位で決める
+  axisSides?: Record<string, "left" | "right">;
   // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
   stack?: "none" | "normal" | "percent";
   // しきい値の表示（線・色の帯・両方・なし）。未指定なら showThresholds に従う（true は「線」）

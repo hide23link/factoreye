@@ -250,6 +250,43 @@ export function graphDataOptions(config: WidgetConfig, sensorCount: number): Gra
   };
 }
 
+export type AxisSide = "left" | "right";
+
+/** 縦軸の左右の割り当て。sides = センサーID → 左か右、leftUnit・rightUnit = その軸に載る単位（混ざるときは " / " でつなぐ）、dual = 右の軸を使うか */
+export interface GraphAxisSides {
+  sides: Record<string, AxisSide>;
+  leftUnit: string;
+  rightUnit: string;
+  dual: boolean;
+}
+
+/**
+ * センサーを、縦軸の左右に割り当てる。
+ * 既定: 同じ単位のセンサーは同じ軸にまとめる。最初の単位を左、2 番目の単位を右にする。3 種類目以降の単位は左。
+ * 設定（config.axisSides）で個別に選んだ左右は、既定より優先する（不正な値は無視する）。
+ */
+export function graphAxisSides(
+  config: WidgetConfig,
+  sensorIds: string[],
+  unitOf: (sensorId: string) => string | undefined,
+): GraphAxisSides {
+  const units = [...new Set(sensorIds.map((id) => unitOf(id) ?? ""))];
+  const defaultSide = (id: string): AxisSide => (units.indexOf(unitOf(id) ?? "") === 1 ? "right" : "left");
+  const sides: Record<string, AxisSide> = {};
+  for (const id of sensorIds) {
+    const chosen = config.axisSides?.[id];
+    sides[id] = chosen === "left" || chosen === "right" ? chosen : defaultSide(id);
+  }
+  const unitsOn = (side: AxisSide) =>
+    [...new Set(sensorIds.filter((id) => sides[id] === side).map((id) => unitOf(id) ?? ""))].filter((u) => u !== "");
+  return {
+    sides,
+    leftUnit: unitsOn("left").join(" / "),
+    rightUnit: unitsOn("right").join(" / "),
+    dual: sensorIds.some((id) => sides[id] === "right"),
+  };
+}
+
 /** 縦軸の決め方。values = 実際の値（手動の範囲・しきい値込みの自動）、percent = 0〜100% にそろえた、percentStack = 100% 積み上げ（recharts が 0〜1 に換算する） */
 export interface GraphYAxisPlan {
   domain: [AxisBound, AxisBound];
