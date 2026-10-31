@@ -5,9 +5,11 @@
  * 【誰が使うか】SettingsPanel。
  * 【引数（props）】widget = 選んだウィジェット、dashboard = 属するダッシュボード（保存の操作に使う）。
  */
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
+import { updateSensor } from "../../lib/api";
 import { clampPlacement } from "../../lib/widget-layout";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
@@ -259,6 +261,14 @@ function GraphSettings({ widget, actions }: SectionProps) {
   const { data: sensors } = useSensors();
   const unitOf = (id: string) => sensors?.find((s) => s.id === id)?.unit;
   const nameOfSensor = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  const queryClient = useQueryClient();
+  // センサーの名前を変える（空欄は変えない）。変えたあとは、センサーの一覧を取り直す
+  const renameSensor = async (id: string, value: string) => {
+    const name = value.trim();
+    if (!name || name === nameOfSensor(id)) return;
+    await updateSensor(id, { name });
+    await queryClient.invalidateQueries({ queryKey: ["sensors"] });
+  };
   // 縦軸の左右（実際の値のとき。設定が無ければ単位で決まる既定を表示する）
   const axis = graphAxisSides(config, ids, unitOf);
   // 縦軸を手動で決められるのは、実際の値で描くとき（0〜100% や 100% 積み上げでは、軸が決まっている）
@@ -357,6 +367,20 @@ function GraphSettings({ widget, actions }: SectionProps) {
           onChange={(refreshSeconds) => void changeConfig(actions, widget, { refreshSeconds })}
         />
       </Section>
+      {ids.length > 0 && (
+        <Section title="センサーの名前" note="ここで変えると、センサーそのものの名前が変わります（ほかの画面にも出ます）">
+          {ids.map((id) => (
+            <AxisUnitField
+              key={id}
+              label={nameOfSensor(id)}
+              value={sensors?.find((s) => s.id === id)?.name ?? ""}
+              placeholder={nameOfSensor(id)}
+              wide
+              onCommit={(value) => void renameSensor(id, value)}
+            />
+          ))}
+        </Section>
+      )}
       {ids.length > 0 && (
         <Section title="凡例の名前" note="空欄はセンサーの名前。凡例と、マウスを乗せたときの表示に出ます">
           {ids.map((id) => (

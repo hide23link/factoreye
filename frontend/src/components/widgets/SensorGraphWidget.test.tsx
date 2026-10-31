@@ -142,7 +142,7 @@ describe("SensorGraphWidget", () => {
       <SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], graphType: "area" } })} />,
     );
 
-    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+    expect(screen.queryByText("複数センサー比較")).toBeNull();
     const requested = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((c) => c[0]);
     expect(requested).toEqual(expect.arrayContaining(["s1", "s2"]));
   });
@@ -189,7 +189,7 @@ describe("SensorGraphWidget", () => {
       <SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], legendPosition, showGrid: false, showTooltip: false } })} />,
     );
 
-    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+    expect(screen.queryByText("複数センサー比較")).toBeNull();
   });
   it("区間の値を最大にすると、最大の値で描く設定でも壊れない（単一センサー）", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
@@ -213,6 +213,6 @@ describe("SensorGraphWidget", () => {
       buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
     });
     renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], ...extra } })} />);
-    expect(await screen.findByText("複数センサー比較")).toBeInTheDocument();
+    expect(screen.queryByText("複数センサー比較")).toBeNull();
   });
 });

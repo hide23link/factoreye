@@ -279,9 +279,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
 
   return (
     <div className="flex h-full flex-col">
-      <p className="mb-1 text-sm font-medium text-gray-700">
-        {widget.type === "MultiSensorComparison" || sensorIds.length > 1 ? "複数センサー比較" : nameOf(sensorIds[0])}
-      </p>
+      {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
+      {sensorIds.length === 1 && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
       <div ref={chartRef} className="min-h-0 flex-1 select-none">
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
