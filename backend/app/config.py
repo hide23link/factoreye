@@ -154,11 +154,12 @@ class Settings(BaseSettings):
 
     @property
     def ingest_device_time_active(self) -> bool:
-        """測定時刻を機器のものにするか。self-hosted で INGEST_DEVICE_TIME=on のときだけ True。
+        """測定時刻を機器のものにするか。INGEST_DEVICE_TIME=on のときだけ True。
 
-        SaaS では、他の利用者の機器の時計を信用できないので、使えない（常に False）。
+        self-hosted と SaaS で同じ API を使えるように、SaaS でも同じ規則にする。
+        時刻の範囲（未来 10 秒・過去 30 日まで）が、他の利用者の時計の狂いを抑える。
         """
-        return self.ingest_device_time and self.auth_mode != AuthMode.MULTI_TENANT
+        return self.ingest_device_time
 
     @property
     def ingest_requires_key(self) -> bool:

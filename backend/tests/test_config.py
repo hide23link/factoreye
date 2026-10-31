@@ -162,8 +162,8 @@ def test_device_time_is_off_by_default() -> None:
     assert not s.ingest_device_time and not s.ingest_device_time_active
 
 
-def test_device_time_is_active_only_for_self_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_device_time_is_active_in_saas_too(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INGEST_DEVICE_TIME", "true")
     assert Settings(_env_file=None).ingest_device_time_active
     monkeypatch.setenv("AUTH_MODE", "multi_tenant")
-    assert not Settings(_env_file=None).ingest_device_time_active  # SaaS では使えない
+    assert Settings(_env_file=None).ingest_device_time_active  # SaaS でも、同じ API・同じ規則

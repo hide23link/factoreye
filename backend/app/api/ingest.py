@@ -7,7 +7,7 @@
     本文（JSON）:
         {"ingestKey": "line1-temp", "value": 23.5}                      ← 1件
         {"ingestKey": "line1-temp", "readings": [{"value": 23.5}, ...]} ← まとめて複数件
-    INGEST_DEVICE_TIME=on（self-hosted だけ）なら、各値に "timestamp"（時差つきの ISO 8601 か
+    INGEST_DEVICE_TIME=on（self-hosted と SaaS）なら、各値に "timestamp"（時差つきの ISO 8601 か
     UNIX 秒）を付けて、測った時刻（秒単位に切り捨て）で保存できる（付けなければ受信時刻）。
     範囲外・時差なし・ミリ秒の数値は 400。
         {"sensors": [{"ingestKey": "a", "readings": [...]}, ...]}      ← センサーごとにまとめる
@@ -551,7 +551,7 @@ async def _buffer_readings(
 
     時刻は、既定では機器の時計ではなく、サーバーが受け取った時刻を使う
     （機器の timestamp は信頼しない。docs/architecture.md §3 データモデル参照）。
-    ただし INGEST_DEVICE_TIME=on の self-hosted では、timestamp を付けた値は、その時刻で保存する
+    ただし INGEST_DEVICE_TIME=on（self-hosted と SaaS）では、timestamp を付けた値は、その時刻で保存する
     （付けない値は、受信時刻のまま。一部だけ付けた送信も受け付ける）。
     測定値の主キーは (sensor_id, recorded_at) で、同じ時刻の値は 1 件だけ（app/db/models.py）。
     このため、受信時刻を割り当てる値は、センサーごとに「前に割り当てた時刻」を覚え、

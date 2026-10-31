@@ -100,7 +100,7 @@ sequenceDiagram
    - 認証: self-hosted は `X-API-Key`（共有シークレット）または機器ごとのキー `X-Device-Key`、SaaS は本文の `ingestKey`（センサーごとの鍵）。機器のキーを付けると、その機器に所属するセンサーにだけ送れる（`device_keys.py`）。
    - 本文は 4 つの形: 1 センサー（`ingestKey` ＋ `value` / `readings`）、`sensors`（センサーごと）、`samples`（時刻ごと、複数センサー）。上限は本文 8MB、`sensors`・`samples` は合計 70,000 件。
    - `ingestKey` からセンサーを特定する。無ければ 404、無効化されていれば 403。複数センサーの形では、センサーごとの問題を `rejected` に出して、残りを受け付ける。照合（機器のキー・センサー）は 5 秒だけ覚える（`ingest_cache.py`、`INGEST_CACHE_SECONDS`）。
-   - 時刻は既定で**サーバーが受け取った時刻**（機器の時計は信頼しない）。`INGEST_DEVICE_TIME=on`（self-hosted だけ）では、機器が付けた `timestamp` を秒単位で使う。
+   - 時刻は既定で**サーバーが受け取った時刻**（機器の時計は信頼しない）。`INGEST_DEVICE_TIME=on`（self-hosted と SaaS）では、機器が付けた `timestamp` を秒単位で使う。
    - バッファに入れて、すぐ `202` を返す。DB は待たない。
 2. **バッファ**（`ingest_buffer.py` の `IngestBuffer`）
    - メモリ上のリスト。複数のリクエストが同時に入れても壊れないよう `lock` で守る。
