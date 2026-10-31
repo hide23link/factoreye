@@ -2,6 +2,7 @@
  * 編集モードの左のセンサー棚。検索と種類の絞り込み。ステータスの点・現在値・小さな推移線つき。
  * 画面にドラッグするか、行の「＋」ボタンで追加できる（ドラッグできない人・操作のための「＋」）。
  * センサーが機器に所属していれば、「機器ごと」に分けて表示できる（多数のセンサーを探しやすくする）。
+ * 「名前の語」（電圧・電流など。利用者が足せる）で、名前に語を含むセンサーだけに絞れる。
  * チェックで複数を選び、棚の下の「N 個を追加」で一度に追加できる（選んだ全員を、それぞれ新しいウィジェットにする）。
  * ウィジェットの種類は、別の窓（WidgetPalette）に分けてある。
  *
@@ -14,6 +15,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { InfoButton } from "./controls";
 import { ShelfGroup } from "./ShelfGroup";
 import { SensorRow } from "./ShelfSensorRow";
+import { ShelfWordFilter } from "./ShelfWordFilter";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
@@ -21,12 +23,15 @@ import { useWidgetActions } from "../../hooks/useWidgetActions";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
 import {
   checkStateOf,
+  countByWord,
   groupByDevice,
   hasDevices,
   matchesQuery,
+  matchesWord,
   worstLevel,
   type AlertLevel,
 } from "../../lib/sensor-groups";
+import { addWord, defaultWordFilter, loadWordFilter, removeWord, saveWordFilter, type WordFilterState } from "../../lib/sensor-words";
 import { useEditorStore } from "../../store/useEditorStore";
 import type { DashboardDetail, Sensor, WidgetType } from "../../types";
 
@@ -118,6 +123,7 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | SensorKind>("all");
   const [alertOnly, setAlertOnly] = useState(false);
+  const [wordFilter, setWordFilter] = useState<WordFilterState>(loadWordFilter);
   const [layoutChoice, setLayoutChoice] = useState<ShelfLayout | null>(null);
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
@@ -140,10 +146,13 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
         (s) =>
           (filter === "all" || guessSensorKind(s) === filter) &&
           (!alertOnly || alertLevels.has(s.id)) &&
+          matchesWord(s, wordFilter.selected) &&
           matchesQuery(s, needle),
       ),
-    [all, filter, alertOnly, alertLevels, needle],
+    [all, filter, alertOnly, alertLevels, wordFilter.selected, needle],
   );
+  // 語ごとの件数は、ほかの絞り込みに関係なく、全センサーで数える
+  const wordCounts = useMemo(() => countByWord(all, wordFilter.words), [all, wordFilter.words]);
   const groups = useMemo(() => (layout === "device" ? groupByDevice(visible) : []), [layout, visible]);
   const levelByGroup = useMemo(
     () => new Map(groups.map((g) => [g.id, worstLevel(g.sensors, alertLevels)])),
@@ -153,8 +162,8 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
     () => new Map(groups.map((g) => [g.id, checkStateOf(g.sensors, selectedIds)])),
     [groups, selectedIds],
   );
-  // 検索中・要注意の絞り込み中は、当たったグループをすべて開いて見せる（開閉はできない）
-  const showAllGroups = needle !== "" || alertOnly;
+  // 検索中・要注意・語の絞り込み中は、当たったグループをすべて開いて見せる（開閉はできない）
+  const showAllGroups = needle !== "" || alertOnly || wordFilter.selected !== null;
 
   const selectedSensors = useMemo(() => all.filter((s) => selectedIds.has(s.id)), [all, selectedIds]);
   const visibleIds = useMemo(() => new Set(visible.map((s) => s.id)), [visible]);
@@ -244,6 +253,18 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
     latest.current = { actions, requestAddMany };
   });
 
+  // 語の状態を変えたら、すぐ保存する
+  const changeWordFilter = (next: WordFilterState) => {
+    setWordFilter(next);
+    saveWordFilter(next);
+  };
+  const addWordFromInput = (input: string): string | null => {
+    const result = addWord(wordFilter.words, input);
+    if (!result.ok) return result.message;
+    changeWordFilter({ ...wordFilter, words: result.words });
+    return null;
+  };
+
   const toggleAllOpen = () => {
     if (openGroups.size > 0) {
       setOpenGroups(new Set());
@@ -324,6 +345,15 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
             要注意のみ
           </button>
         </div>
+        <ShelfWordFilter
+          words={wordFilter.words}
+          selected={wordFilter.selected}
+          counts={wordCounts}
+          onSelect={(word) => changeWordFilter({ ...wordFilter, selected: word })}
+          onAdd={addWordFromInput}
+          onRemove={(word) => changeWordFilter(removeWord(wordFilter, word))}
+          onReset={() => changeWordFilter(defaultWordFilter())}
+        />
         {all.length > 0 && (
           <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
             <span>

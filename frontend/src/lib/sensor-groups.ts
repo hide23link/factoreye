@@ -75,3 +75,16 @@ export function checkStateOf(sensors: Sensor[], selectedIds: ReadonlySet<string>
   if (count === 0) return "none";
   return count === sensors.length ? "all" : "some";
 }
+
+/**
+ * センサーの名前に、語を含むか（大文字小文字を区別しない。検索と同じ）。word が null なら、すべて合う。
+ * 「電圧」「電流」のように、名前の付け方で分ける絞り込みに使う（機器の項目ではなく名前だけを見る）。
+ */
+export function matchesWord(sensor: Sensor, word: string | null): boolean {
+  return word === null || sensor.name.toLowerCase().includes(word.toLowerCase());
+}
+
+/** 語ごとの、名前に含むセンサーの数（渡したセンサー全体で数える。チップの件数に使う） */
+export function countByWord(sensors: Sensor[], words: readonly string[]): Map<string, number> {
+  return new Map(words.map((word) => [word, sensors.filter((s) => matchesWord(s, word)).length]));
+}

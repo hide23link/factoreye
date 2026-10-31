@@ -73,6 +73,7 @@ const devicesSensors = [
 ];
 
 beforeEach(() => {
+  window.localStorage.clear();
   useEditorStore.getState().reset();
   vi.mocked(api.fetchSensors).mockResolvedValue(devicesSensors);
   vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
@@ -319,5 +320,136 @@ describe("センサー棚: チェックして一度に追加", () => {
     await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "乾燥");
 
     expect(screen.getByText("2 個を選択中（うち 2 個は表示外）")).toBeInTheDocument();
+  });
+
+  describe("名前の語の絞り込み", () => {
+    const chip = (word: string) => screen.getByRole("button", { name: new RegExp(`^${word}\\d`) });
+
+    it("既定の語（電圧・電流・電位）のチップに、全センサー中の件数が付く", async () => {
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      expect(chip("電圧")).toHaveTextContent("電圧2");
+      expect(chip("電流")).toHaveTextContent("電流1");
+      expect(chip("電位")).toHaveTextContent("電位0");
+    });
+
+    it("語を選ぶと、名前に含むセンサーだけになり（機器ごと・一覧のどちらでも）、もう一度押すと解除される", async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(chip("電圧"));
+      expect(chip("電圧")).toHaveAttribute("aria-pressed", "true");
+      // 機器ごと: 当たったグループは自動で開く（未所属は当たらないので出ない）
+      expect(screen.getByTitle("ld01 電圧")).toBeInTheDocument();
+      expect(screen.getByTitle("ld02 電圧")).toBeInTheDocument();
+      expect(screen.queryByTitle("ld01 電流")).not.toBeInTheDocument();
+      expect(screen.queryByText("未所属")).not.toBeInTheDocument();
+      expect(groupToggle("r-1")).toBeDisabled();
+
+      await user.click(screen.getByRole("button", { name: "一覧" }));
+      expect(screen.getAllByTitle(/電圧$/)).toHaveLength(2);
+      expect(screen.queryByTitle("乾燥炉 温度")).not.toBeInTheDocument();
+
+      await user.click(chip("電圧"));
+      expect(chip("電圧")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTitle("乾燥炉 温度")).toBeInTheDocument();
+    });
+
+    it("「すべて」で解除でき、ほかの絞り込み（検索・種類・要注意）とは AND になる", async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(chip("電圧"));
+      await user.type(screen.getByRole("searchbox", { name: "センサーを検索" }), "ld02");
+      expect(screen.getByTitle("ld02 電圧")).toBeInTheDocument();
+      expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "稼働" })); // 種類。この例のセンサーに稼働はない
+      expect(screen.getByText("該当するセンサーがありません")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "すべて" }));
+
+      // 語を「すべて」に戻しても、検索（ld02）は効いたまま
+      await user.click(screen.getByRole("button", { name: "名前の語: すべて" }));
+      expect(chip("電圧")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTitle("ld02 電圧")).toBeInTheDocument();
+      expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+    });
+
+    it("語で絞っても、チェックした選択は保たれる", async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(screen.getByRole("checkbox", { name: "r-1の表示中のセンサーをすべて選ぶ" }));
+      await user.click(chip("電圧"));
+
+      expect(screen.getByText("2 個を選択中（うち 1 個は表示外）")).toBeInTheDocument();
+    });
+
+    it("語を追加すると、チップと件数が出て、選択でき、再読み込みしても残る", async () => {
+      const user = userEvent.setup();
+      const { unmount } = renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(screen.getByRole("button", { name: "＋語を追加" }));
+      await user.type(screen.getByLabelText("追加する語"), "温度");
+      await user.click(screen.getByRole("button", { name: "語を追加" }));
+      expect(chip("温度")).toHaveTextContent("温度1");
+      await user.click(chip("温度"));
+      expect(screen.getByTitle("乾燥炉 温度")).toBeInTheDocument();
+
+      unmount();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByTitle("乾燥炉 温度");
+      expect(chip("温度")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.queryByTitle("ld01 電圧")).not.toBeInTheDocument();
+    });
+
+    it("空・重複・長すぎる語は追加できず、理由を出す", async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+      await user.click(screen.getByRole("button", { name: "＋語を追加" }));
+      const submit = () => user.click(screen.getByRole("button", { name: "語を追加" }));
+
+      await submit();
+      expect(screen.getByRole("alert")).toHaveTextContent("語を入力してください");
+
+      await user.type(screen.getByLabelText("追加する語"), "電圧");
+      await submit();
+      expect(screen.getByRole("alert")).toHaveTextContent("同じ語がすでにあります");
+
+      await user.clear(screen.getByLabelText("追加する語"));
+      await user.type(screen.getByLabelText("追加する語"), "あ".repeat(21));
+      await submit();
+      expect(screen.getByRole("alert")).toHaveTextContent("20 文字まで");
+    });
+
+    it("✕ で語を消せ（既定の語も）、「既定に戻す」で戻る。選択中の語を消すと絞り込みも外れる", async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      await user.click(chip("電圧"));
+      await user.click(screen.getByRole("button", { name: "語「電圧」を削除" }));
+      expect(screen.queryByRole("button", { name: /^電圧\d/ })).not.toBeInTheDocument();
+      expect(screen.getByText("未所属")).toBeInTheDocument(); // 絞り込みが外れた（当たらなかった未所属も出る）
+
+      await user.click(screen.getByRole("button", { name: "既定に戻す" }));
+      expect(chip("電圧")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "既定に戻す" })).not.toBeInTheDocument();
+    });
+
+    it("保存した値が壊れていても、既定の語で動く", async () => {
+      window.localStorage.setItem("factoreye.sensorShelfWords", "{oops");
+      renderWithQueryClient(<EditorShelf dashboard={dashboard} />);
+      await screen.findByText("r-1");
+
+      expect(chip("電圧")).toBeInTheDocument();
+      expect(chip("電位")).toBeInTheDocument();
+    });
   });
 });

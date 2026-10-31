@@ -4,9 +4,11 @@ import type { Sensor } from "../types";
 import {
   NO_DEVICE_GROUP_ID,
   checkStateOf,
+  countByWord,
   groupByDevice,
   hasDevices,
   matchesQuery,
+  matchesWord,
   worstLevel,
 } from "./sensor-groups";
 
@@ -82,5 +84,31 @@ describe("worstLevel と checkStateOf", () => {
     expect(checkStateOf(list, new Set())).toBe("none");
     expect(checkStateOf(list, new Set(["1"]))).toBe("some");
     expect(checkStateOf(list, new Set(["1", "2", "3"]))).toBe("all");
+  });
+});
+
+describe("matchesWord と countByWord", () => {
+  const list = [sensor("1", "ld01 電圧", "r-1"), sensor("2", "ld01 電流", "r-1"), sensor("3", "Temp A"), sensor("4", "ld02 電圧")];
+
+  it("名前に語を含むものに合う（大文字小文字は区別しない）。null なら全部合う", () => {
+    expect(matchesWord(list[0], "電圧")).toBe(true);
+    expect(matchesWord(list[1], "電圧")).toBe(false);
+    expect(matchesWord(list[2], "temp")).toBe(true);
+    expect(matchesWord(list[1], null)).toBe(true);
+  });
+
+  it("機器名やキーには当たらない（センサー名だけを見る）", () => {
+    expect(matchesWord(list[0], "r-1")).toBe(false);
+    expect(matchesWord(list[0], "key-1")).toBe(false);
+  });
+
+  it("語ごとの件数を、渡したセンサー全体で数える", () => {
+    const counts = countByWord(list, ["電圧", "電流", "電位", "temp"]);
+    expect([...counts]).toEqual([
+      ["電圧", 2],
+      ["電流", 1],
+      ["電位", 0],
+      ["temp", 1],
+    ]);
   });
 });
