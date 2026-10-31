@@ -28,6 +28,8 @@ services:
       # CORS 許可オリジン。Cloudflare Tunnel のドメインを設定する
       - FRONTEND_URL=https://${DOMAIN:?DOMAIN を .env に設定してください}
       - AUTH_MODE=multi_tenant
+      # 機器が付けた測定時刻（timestamp）を使うか。既定 false。本番では .env で on にする（2026-10-31）
+      - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
       # 管理画面の「書き戻し」が呼ぶ、復旧ツール（tools/recovery。同じネットワーク factoreye-cloud に入る）。
       # パスワードは .env に設定する（復旧ツールの RECOVERY_PASSWORD と同じ値）。空なら書き戻しは使えない
       - FAILBACK_RECOVERY_URL=${FAILBACK_RECOVERY_URL:-http://recovery:8090}
