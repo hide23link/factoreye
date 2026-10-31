@@ -9,7 +9,7 @@
  * 【誰が使うか】DashboardView.tsx が、ウィジェットの数だけ並べる。
  * 【引数（props）】widget = このウィジェット、dashboard = 属するダッシュボード（どちらも DashboardView が渡す）。
  */
-import { Suspense } from "react";
+import { Suspense, useRef, useState } from "react";
 
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { lazyNamed } from "../lib/lazyWithRetry";
@@ -64,6 +64,11 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   const label = widgetLabel(widget.type);
   // 利用者が付けたタイトル（空なら出さない）。枠の上に 1 行で出し、中身はその下に収める
   const title = widget.config.title?.trim() ?? "";
+  // 編集モードでタイトルを書き換えるときの入力中の文字（null は書き換えていないとき）
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  const titleCancelled = useRef(false);
+  // タイトルの行を、枠の中身の上に置くか（タイトルがあるとき。編集中の入力の場所は、タイトルがないときは重ねて出す）
+  const showsTitleLine = title !== "";
 
   return (
     <div
@@ -89,15 +94,58 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       className={`relative h-full overflow-hidden rounded-lg border bg-white p-3 shadow-sm ${
         editing ? "widget-drag-handle cursor-grab touch-none active:cursor-grabbing" : ""
       } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"} ${
-        title ? "flex flex-col" : ""
+        showsTitleLine ? "flex flex-col" : ""
       }`}
     >
-      {title && (
-        <p className="mb-1 shrink-0 truncate text-sm font-semibold text-gray-800" title={title}>
-          {title}
+      {titleDraft !== null ? (
+        <input
+          autoFocus
+          aria-label="タイトル"
+          value={titleDraft}
+          maxLength={40}
+          placeholder="タイトルを入力"
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={() => {
+            const next = titleCancelled.current ? title : (titleDraft ?? "").trim();
+            titleCancelled.current = false;
+            setTitleDraft(null);
+            if (next !== title) void actions.patchConfig(widget, { title: next || undefined });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              titleCancelled.current = true;
+              e.currentTarget.blur();
+            }
+          }}
+          className={`widget-no-drag rounded border border-blue-400 bg-white px-1 text-sm font-semibold text-gray-800 ${
+            title ? "mb-1 shrink-0" : "absolute left-1 top-1 z-10"
+          }`}
+        />
+      ) : editing ? (
+        // 編集モードでは、タイトルの文字をクリックするだけで書き換えられる（タイトルがないときは、入力の場所を出す）
+        <p
+          role="button"
+          tabIndex={0}
+          title="クリックしてタイトルを変える"
+          onClick={(e) => {
+            e.stopPropagation();
+            setTitleDraft(title);
+          }}
+          className={`widget-no-drag cursor-text truncate rounded px-1 text-sm font-semibold text-gray-800 hover:bg-blue-50 ${
+            title ? "mb-1 shrink-0" : "absolute left-1 top-1 z-10 max-w-[60%] bg-white/90"
+          }`}
+        >
+          {title || <span className="font-normal text-gray-400">タイトルを入力</span>}
         </p>
+      ) : (
+        title && (
+          <p className="mb-1 shrink-0 truncate text-sm font-semibold text-gray-800" title={title}>
+            {title}
+          </p>
+        )
       )}
-      <div className={`${title ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
+      <div className={`${showsTitleLine ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
           <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
             <WidgetBody widget={widget} />
