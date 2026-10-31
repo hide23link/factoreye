@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clampWindowPosition, isWindowPositionInside, loadWindowPosition, saveWindowPosition } from "./window-position";
+import {
+  clampWindowPosition,
+  clampWindowSize,
+  isWindowPositionInside,
+  loadWindowPosition,
+  loadWindowSize,
+  saveWindowPosition,
+  saveWindowSize,
+} from "./window-position";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -71,5 +79,66 @@ describe("設定パネル（幅 316px）", () => {
     saveWindowPosition("panel", { x: 100, y: 100 });
     expect(loadWindowPosition("panel", 1280, 800)).toEqual({ x: 100, y: 100 });
     expect(loadWindowPosition("shelf", 1280, 800)).toBeNull();
+  });
+});
+
+describe("clampWindowSize（最小〜画面内に収まる最大）", () => {
+  const pos = { x: 100, y: 50 };
+
+  it("範囲内ならそのまま", () => {
+    expect(clampWindowSize("shelf", { width: 400, height: 500 }, pos, 1280, 800)).toEqual({ width: 400, height: 500 });
+  });
+
+  it("最小（棚は幅 272・パネルは幅 316、高さは 160）より小さくしない", () => {
+    expect(clampWindowSize("shelf", { width: 10, height: 10 }, pos, 1280, 800)).toEqual({ width: 272, height: 160 });
+    expect(clampWindowSize("panel", { width: 10, height: 10 }, pos, 1280, 800)).toEqual({ width: 316, height: 160 });
+  });
+
+  it("最大は、位置から画面の右・下の縁（間隔 8px）まで", () => {
+    expect(clampWindowSize("shelf", { width: 9999, height: 9999 }, pos, 1280, 800)).toEqual({
+      width: 1280 - 100 - 8,
+      height: 800 - 50 - 8,
+    });
+  });
+
+  it("画面が最小より狭くても、最小を優先する（それ以上は小さくしない）", () => {
+    expect(clampWindowSize("shelf", { width: 500, height: 500 }, { x: 0, y: 0 }, 200, 100)).toEqual({ width: 272, height: 160 });
+  });
+
+  it("小数は丸める", () => {
+    expect(clampWindowSize("shelf", { width: 300.6, height: 200.4 }, pos, 1280, 800)).toEqual({ width: 301, height: 200 });
+  });
+});
+
+describe("大きさの保存と読み込み", () => {
+  it("保存した大きさを読める。null で消せる", () => {
+    saveWindowSize("shelf", { width: 400, height: 500 });
+    expect(loadWindowSize("shelf")).toEqual({ width: 400, height: 500 });
+    expect(loadWindowSize("panel")).toBeNull(); // 窓ごとに別
+    saveWindowSize("shelf", null);
+    expect(loadWindowSize("shelf")).toBeNull();
+  });
+
+  it.each([
+    ["JSON ではない", "{oops"],
+    ["数値ではない", JSON.stringify({ width: "400", height: 500 })],
+    ["有限ではない", '{"width": 1e999, "height": 500}'],
+    ["最小より小さい幅", JSON.stringify({ width: 100, height: 500 })],
+    ["最小より小さい高さ", JSON.stringify({ width: 400, height: 50 })],
+    ["オブジェクトではない", "123"],
+  ])("壊れた値（%s）は読み込まない（既定の大きさ）", (_name, raw) => {
+    window.localStorage.setItem("factoreye.sensorShelfSize", raw);
+    expect(loadWindowSize("shelf")).toBeNull();
+  });
+
+  it("localStorage が使えない環境でも、例外を出さない", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    expect(loadWindowSize("shelf")).toBeNull();
+    expect(() => saveWindowSize("shelf", { width: 400, height: 500 })).not.toThrow();
   });
 });

@@ -17,6 +17,20 @@ docker compose exec backend python -m app.device_cli create <機器名>
 
 機器名は一意です。同じ名前があると、`create` は終了コード 1 で止まります。
 
+### 系統（任意）
+
+機器に「系統」（ライン・設備の区分。例: `第1ライン`、40 文字まで）を付けると、編集画面のセンサー棚が「系統 › 機器 › センサー」に分けて見せます。センサーが多い現場で探しやすくするための項目で、付けなくても使えます（系統のない機器は「系統なし」にまとまります）。
+
+```bash
+# 作るときに付ける
+docker compose exec backend python -m app.device_cli create <機器名> --line 第1ライン
+# 既存の機器に付ける・変える（系統を省く、または空にすると外す）
+docker compose exec backend python -m app.device_cli set-line <機器名> 第2ライン
+docker compose exec backend python -m app.device_cli set-line <機器名>
+```
+
+`list` の表示にも系統が出ます。SaaS 版には系統はありません（応答の `deviceLine` は常に null）。
+
 ## 2. センサーを機器に所属させる
 
 ```bash

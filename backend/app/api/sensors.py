@@ -84,9 +84,9 @@ _SENSOR_LIST_COLUMNS = (
 
 
 def _list_query(workspace_id: UUID | None) -> Any:
-    """一覧の SELECT。self-hosted は所属する機器（id・名前）も付ける。SaaS は機器を出さない。
+    """一覧の SELECT。self-hosted は所属する機器（id・名前・系統）も付ける。SaaS は機器を出さない。
 
-    機器ごとのキーは self-hosted だけの機能で、SaaS の応答に機器の情報を混ぜない（防御）。
+    機器ごとのキーは self-hosted だけの機能。SaaS の応答に機器の情報を混ぜない（防御）。
     機器に所属しないセンサーも出すため、self-hosted は外部結合にする。
     """
     if workspace_id is not None:
@@ -95,6 +95,7 @@ def _list_query(workspace_id: UUID | None) -> Any:
                 *_SENSOR_LIST_COLUMNS,
                 null().label("device_id"),
                 null().label("device_name"),
+                null().label("device_line"),
             )
             .select_from(Sensor)
             .where(Sensor.workspace_id == workspace_id)
@@ -104,6 +105,7 @@ def _list_query(workspace_id: UUID | None) -> Any:
             *_SENSOR_LIST_COLUMNS,
             Sensor.device_id,
             IngestDevice.name.label("device_name"),  # type: ignore[attr-defined]
+            IngestDevice.line.label("device_line"),  # type: ignore[union-attr]
         )
         .select_from(Sensor)
         .outerjoin(IngestDevice, col(Sensor.device_id) == col(IngestDevice.id))
@@ -218,6 +220,7 @@ async def _to_read(
     elif sensor.device_id is not None:
         device = await session.get(IngestDevice, sensor.device_id)
         read.device_name = device.name if device else None
+        read.device_line = device.line if device else None
     return read
 
 

@@ -2,6 +2,7 @@
  * 編集モードの左のセンサー棚。検索と種類の絞り込み。ステータスの点・現在値・小さな推移線つき。
  * 画面にドラッグするか、行の「＋」ボタンで追加できる（ドラッグできない人・操作のための「＋」）。
  * センサーが機器に所属していれば、「機器ごと」に分けて表示できる（多数のセンサーを探しやすくする）。
+ * 機器に系統（ライン）が付いていれば、「系統 › 機器」にも分けられる。
  * 「名前の語」（電圧・電流など。利用者が足せる）で、名前に語を含むセンサーだけに絞れる。
  * チェックで複数を選び、棚の下の「N 個を追加」で一度に追加できる（選んだ全員を、それぞれ新しいウィジェットにする）。
  * ウィジェットの種類は、別の窓（WidgetPalette）に分けてある。
@@ -14,18 +15,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { InfoButton } from "./controls";
 import { ShelfGroup } from "./ShelfGroup";
+import { ShelfLineGroup } from "./ShelfLineGroup";
 import { SensorRow } from "./ShelfSensorRow";
 import { ShelfWordFilter } from "./ShelfWordFilter";
 
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
-import { useWidgetActions } from "../../hooks/useWidgetActions";
+import { GRAPH_SENSOR_LIMIT, useWidgetActions, type AddSensorsResult } from "../../hooks/useWidgetActions";
 import { SENSOR_KIND_LABEL, guessSensorKind, type SensorKind } from "../../lib/sensor-kind";
 import {
   checkStateOf,
   countByWord,
   groupByDevice,
+  groupByLine,
   hasDevices,
+  hasLines,
   matchesQuery,
   matchesWord,
   worstLevel,
@@ -37,12 +41,12 @@ import type { DashboardDetail, Sensor, WidgetType } from "../../types";
 
 /**
  * センサー棚（センサーだけ。ウィジェットの種類は WidgetPalette に分けた）。
- * 見出しをつかんで、画面内の好きな位置へ動かせる（矢印キーでも動かせる）。位置は保存され、「位置をもとに戻す」で既定の場所に戻る。
+ * 見出しをつかんで、画面内の好きな位置へ動かせる（矢印キーでも動かせる）。位置は保存され、「もとの位置・大きさ」で既定の場所に戻る。右辺・下辺・右下をつかんで大きさも変えられる（広げると、名前が折り返さず 1 行に収まる）。
  * 狭い画面（640px 未満）は、従来どおり下寄せの固定で、動かせない。動かす仕組みは設定パネルと共通（useMovableWindow）。
  */
 export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   const setShelfOpen = useEditorStore((s) => s.setShelfOpen);
-  const { handleProps, resetButton } = useMovableWindow("shelf", "センサー棚");
+  const { handleProps, resetButton, resizeHandles } = useMovableWindow("shelf", "センサー棚");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -69,6 +73,7 @@ export function EditorShelf({ dashboard }: { dashboard: DashboardDetail }) {
         </div>
       </div>
       <SensorShelf dashboard={dashboard} />
+      {resizeHandles}
     </div>
   );
 }
@@ -80,15 +85,18 @@ const KIND_FILTERS: ReadonlyArray<{ value: "all" | SensorKind; label: string }> 
   { value: "state", label: SENSOR_KIND_LABEL.state },
 ];
 
-/** 棚の並べ方: 機器ごと / 一覧（従来）。機器に所属するセンサーがなければ、一覧だけ */
-type ShelfLayout = "device" | "list";
+/** 棚の並べ方: 系統 › 機器 / 機器ごと / 一覧（従来）。機器に所属するセンサーがなければ一覧だけ、系統がなければ「系統 › 機器」は出さない */
+type ShelfLayout = "line" | "device" | "list";
 
-const LAYOUTS: ReadonlyArray<{ value: ShelfLayout; label: string }> = [
-  { value: "device", label: "機器ごと" },
-  { value: "list", label: "一覧" },
-];
+const LAYOUT_LABEL: Record<ShelfLayout, string> = { line: "系統 › 機器", device: "機器ごと", list: "一覧" };
 
-// この数を超える一括追加は、確認を出す（ウィジェットが一度に大量にできるため）
+/** 選べる並べ方（先頭が、選んでいないときの既定） */
+function availableLayouts(linesExist: boolean, devicesExist: boolean): ShelfLayout[] {
+  if (linesExist) return ["line", "device", "list"];
+  return devicesExist ? ["device", "list"] : ["list"];
+}
+
+// グラフにまとめない（それぞれ別のウィジェットになる）センサーが、この数を超える一括追加は、確認を出す
 const BULK_ADD_CONFIRM_COUNT = 30;
 // 「すべて開く」で描く行がこの数を超えるときは、確認を出す（行ごとに値を取りにいくため重くなる）
 const OPEN_ALL_CONFIRM_ROWS = 300;
@@ -109,12 +117,25 @@ function useAlertLevels(): ReadonlyMap<string, AlertLevel> {
   }, [active, acknowledged]);
 }
 
-/** 確認の小窓に出す内容（実行を押したら run を呼ぶ） */
+/** 確認の小窓に出す内容（実行を押したら run、もう 1 つの選択肢を押したら secondary.run を呼ぶ） */
 interface PendingConfirm {
   title: string;
   message: string;
   confirmLabel: string;
   run: () => void;
+  secondary?: { label: string; run: () => void };
+}
+
+/** 一括追加の結果を、1 つの通知の文にまとめる（グラフにまとめた数・ほかの数・失敗の数） */
+function describeAddResult(total: number, result: AddSensorsResult): string {
+  const failure = result.failed.length > 0 ? `（${result.failed.length} 個は失敗）` : "";
+  if (result.failed.length === total) return `${total} 個すべての追加に失敗しました`;
+  const singles = result.added.length - result.graphed.length;
+  if (result.graphCount === 0) {
+    return failure ? `${total} 個中 ${result.added.length} 個を追加しました${failure}` : `${result.added.length} 個のセンサーを追加しました`;
+  }
+  const graphPart = `グラフ ${result.graphCount} つに ${result.graphed.length} 個`;
+  return `${graphPart}${singles > 0 ? `、ほかに ${singles} 個` : ""}を追加しました${failure}`;
 }
 
 function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
@@ -136,8 +157,10 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
 
   const all = useMemo(() => sensors ?? [], [sensors]);
   const devicesExist = useMemo(() => hasDevices(all), [all]);
-  // 選ばなければ、機器があるときは「機器ごと」、なければ従来の一覧
-  const layout: ShelfLayout = devicesExist ? (layoutChoice ?? "device") : "list";
+  const linesExist = useMemo(() => hasLines(all), [all]);
+  const layouts = availableLayouts(linesExist, devicesExist);
+  // 選んだ並べ方が（センサーの変化で）使えなくなったら、既定に戻す
+  const layout: ShelfLayout = layoutChoice && layouts.includes(layoutChoice) ? layoutChoice : layouts[0];
 
   const needle = query.trim().toLowerCase();
   const visible = useMemo(
@@ -154,13 +177,16 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
   // 語ごとの件数は、ほかの絞り込みに関係なく、全センサーで数える
   const wordCounts = useMemo(() => countByWord(all, wordFilter.words), [all, wordFilter.words]);
   const groups = useMemo(() => (layout === "device" ? groupByDevice(visible) : []), [layout, visible]);
+  const lineGroups = useMemo(() => (layout === "line" ? groupByLine(visible) : []), [layout, visible]);
+  // 一番上の階層のグループ（「機器ごと」は機器、「系統 › 機器」は系統）。見出しの点とチェックの状態をまとめて求める
+  const topGroups = layout === "line" ? lineGroups : groups;
   const levelByGroup = useMemo(
-    () => new Map(groups.map((g) => [g.id, worstLevel(g.sensors, alertLevels)])),
-    [groups, alertLevels],
+    () => new Map(topGroups.map((g) => [g.id, worstLevel(g.sensors, alertLevels)])),
+    [topGroups, alertLevels],
   );
   const checkByGroup = useMemo(
-    () => new Map(groups.map((g) => [g.id, checkStateOf(g.sensors, selectedIds)])),
-    [groups, selectedIds],
+    () => new Map(topGroups.map((g) => [g.id, checkStateOf(g.sensors, selectedIds)])),
+    [topGroups, selectedIds],
   );
   // 検索中・要注意・語の絞り込み中は、当たったグループをすべて開いて見せる（開閉はできない）
   const showAllGroups = needle !== "" || alertOnly || wordFilter.selected !== null;
@@ -210,23 +236,19 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
 
   /**
    * 一括追加の本体。成功と失敗を数えて 1 回だけ知らせ、失敗したセンサーは選択に残す（やり直せるように）。
-   * 追加中は二重に実行しない。
+   * 追加中は二重に実行しない。graphLimit = 1 つのグラフに載せる上限（省略すると、まとめて 1 つ）。
    */
-  const runAddMany = async (targets: Sensor[]) => {
+  const runAddMany = async (targets: Sensor[], graphLimit?: number) => {
     if (addingRef.current) return;
     addingRef.current = true;
     setAdding(true);
     try {
-      const { added, failed } = await actions.addSensors(targets);
-      const message =
-        failed.length === 0
-          ? `${added.length} 個のセンサーを追加しました`
-          : `${targets.length} 個中 ${added.length} 個を追加しました（${failed.length} 個は失敗）`;
-      useEditorStore.getState().showToast(message);
+      const result = await actions.addSensors(targets, { graphLimit });
+      useEditorStore.getState().showToast(describeAddResult(targets.length, result));
       setSelectedIds((selected) => {
         const next = new Set(selected);
-        for (const sensor of added) next.delete(sensor.id);
-        for (const sensor of failed) next.add(sensor.id);
+        for (const sensor of result.added) next.delete(sensor.id);
+        for (const sensor of result.failed) next.add(sensor.id);
         return next;
       });
     } catch {
@@ -236,18 +258,35 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
       setAdding(false);
     }
   };
+  // 計測値は 1 つのグラフにまとまり、それ以外は 1 つずつウィジェットになる。多すぎるときは、先に確認する
   const requestAddMany = (targets: Sensor[]) => {
     if (targets.length === 0 || addingRef.current) return;
-    if (targets.length <= BULK_ADD_CONFIRM_COUNT) {
-      void runAddMany(targets);
+    const graphCount = targets.filter((s) => guessSensorKind(s) === "measure").length;
+    const singleCount = targets.length - graphCount;
+    const singleNote = singleCount > BULK_ADD_CONFIRM_COUNT ? `ほかの ${singleCount} 個は、それぞれ別のウィジェットになります。` : "";
+    if (graphCount > GRAPH_SENSOR_LIMIT) {
+      setConfirm({
+        title: "センサーをまとめて追加",
+        message: `${graphCount} 個を 1 つのグラフに入れます。多いと見にくくなります。${singleNote}`,
+        confirmLabel: "1 つのグラフに入れる",
+        run: () => void runAddMany(targets),
+        secondary: {
+          label: `${GRAPH_SENSOR_LIMIT} 本ずつ分ける`,
+          run: () => void runAddMany(targets, GRAPH_SENSOR_LIMIT),
+        },
+      });
       return;
     }
-    setConfirm({
-      title: "センサーをまとめて追加",
-      message: `${targets.length} 個のセンサーを、それぞれ新しいウィジェットとして追加します。よろしいですか？`,
-      confirmLabel: "追加",
-      run: () => void runAddMany(targets),
-    });
+    if (singleCount > BULK_ADD_CONFIRM_COUNT) {
+      setConfirm({
+        title: "センサーをまとめて追加",
+        message: `${singleCount} 個のセンサーを、それぞれ新しいウィジェットとして追加します。よろしいですか？`,
+        confirmLabel: "追加",
+        run: () => void runAddMany(targets),
+      });
+      return;
+    }
+    void runAddMany(targets);
   };
   useEffect(() => {
     latest.current = { actions, requestAddMany };
@@ -270,8 +309,9 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
       setOpenGroups(new Set());
       return;
     }
-    const openAll = () => setOpenGroups(new Set(groups.map((g) => g.id)));
-    if (visible.length <= OPEN_ALL_CONFIRM_ROWS) {
+    const openAll = () => setOpenGroups(new Set(topGroups.map((g) => g.id)));
+    // 開くのは一番上の階層だけ。行まで描くのは「機器ごと」のときなので、そのときだけ行数を確かめる
+    if (layout === "line" || visible.length <= OPEN_ALL_CONFIRM_ROWS) {
       openAll();
       return;
     }
@@ -285,7 +325,7 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
 
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5">
+      <div className="shelf-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5">
         <div className="flex items-center gap-1.5">
           <input
             type="search"
@@ -306,15 +346,15 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
         )}
         {devicesExist && (
           <div role="group" aria-label="センサーの並べ方" className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-md border border-gray-300">
-            {LAYOUTS.map((item) => (
+            {layouts.map((value) => (
               <button
-                key={item.value}
+                key={value}
                 type="button"
-                aria-pressed={layout === item.value}
-                onClick={() => setLayoutChoice(item.value)}
-                className={`px-1 py-1 text-xs ${layout === item.value ? "bg-blue-600 text-white" : "bg-white text-gray-700"}`}
+                aria-pressed={layout === value}
+                onClick={() => setLayoutChoice(value)}
+                className={`px-1 py-1 text-xs ${layout === value ? "bg-blue-600 text-white" : "bg-white text-gray-700"}`}
               >
-                {item.label}
+                {LAYOUT_LABEL[value]}
               </button>
             ))}
           </div>
@@ -357,13 +397,14 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
         {all.length > 0 && (
           <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
             <span>
-              {visible.length} 個{layout === "device" ? ` / ${groups.length} 機器` : ""}
+              {visible.length} 個
+              {layout === "line" ? ` / ${lineGroups.length} 系統` : layout === "device" ? ` / ${groups.length} 機器` : ""}
             </span>
             <span className="flex items-center gap-2">
               <button type="button" onClick={() => toggleSelection(visible)} disabled={visible.length === 0} className="text-blue-600 disabled:text-gray-400">
                 {allVisibleSelected ? "表示中の選択を外す" : "表示中をすべて選択"}
               </button>
-              {layout === "device" && !showAllGroups && (
+              {layout !== "list" && !showAllGroups && (
                 <button type="button" onClick={toggleAllOpen} className="text-blue-600">
                   {openGroups.size > 0 ? "すべて閉じる" : "すべて開く"}
                 </button>
@@ -372,7 +413,32 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
           </div>
         )}
         <ul className="flex flex-col gap-1.5">
-          {layout === "device"
+          {layout === "line"
+            ? lineGroups.map((line) => {
+                const open = showAllGroups || openGroups.has(line.id);
+                return (
+                  <ShelfLineGroup
+                    key={line.id}
+                    line={line}
+                    needle={needle}
+                    open={open}
+                    locked={showAllGroups}
+                    busy={adding}
+                    level={levelByGroup.get(line.id) ?? "none"}
+                    checkState={checkByGroup.get(line.id) ?? "none"}
+                    openGroups={open ? openGroups : null}
+                    selectedIds={open ? selectedIds : null}
+                    alertLevels={open ? alertLevels : null}
+                    onToggleOpen={toggleOpen}
+                    onToggleCheck={toggleSelection}
+                    onAddAll={addAll}
+                    onToggleSelect={toggleOne}
+                    onAdd={addOne}
+                    onAddAs={addOneAs}
+                  />
+                );
+              })
+            : layout === "device"
             ? groups.map((group) => {
                 const open = showAllGroups || openGroups.has(group.id);
                 return (
@@ -441,6 +507,17 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
           title={confirm.title}
           message={confirm.message}
           confirmLabel={confirm.confirmLabel}
+          confirmTone="primary"
+          secondary={
+            confirm.secondary && {
+              label: confirm.secondary.label,
+              onClick: () => {
+                const run = confirm.secondary?.run;
+                setConfirm(null);
+                run?.();
+              },
+            }
+          }
           onConfirm={() => {
             const { run } = confirm;
             setConfirm(null);

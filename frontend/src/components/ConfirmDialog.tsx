@@ -7,7 +7,9 @@
  *
  * 【誰が使うか】SensorSettingsPanel.tsx（センサーの削除）、SettingsPanel.tsx（ダッシュボードの削除）、WebhookSettingsPanel.tsx（購読の削除）。
  * 【引数（props）】呼ぶ側が渡す。title=見出し、message=本文、confirmLabel=実行ボタンの文字（既定「削除」）、
- * onConfirm=実行を押したときの処理、onCancel=やめたときの処理、pending=実行中か。
+ * onConfirm=実行を押したときの処理、onCancel=やめたときの処理、pending=実行中か、
+ * confirmTone=実行ボタンの色（既定 danger=赤。削除以外の確認は primary=青）、
+ * secondary=もう 1 つの選択肢のボタン（例: 「分けて追加」。省略すると出ない）。
  */
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -19,6 +21,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   pending = false,
+  confirmTone = "danger",
+  secondary,
 }: {
   title: string;
   message: string;
@@ -27,6 +31,8 @@ export function ConfirmDialog({
   onCancel: () => void;
   /** 実行中。true の間は、確認ボタンを押せない（二重実行を防ぐ） */
   pending?: boolean;
+  confirmTone?: "danger" | "primary";
+  secondary?: { label: string; onClick: () => void };
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -84,11 +90,23 @@ export function ConfirmDialog({
           >
             キャンセル
           </button>
+          {secondary && (
+            <button
+              type="button"
+              onClick={secondary.onClick}
+              disabled={pending}
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {secondary.label}
+            </button>
+          )}
           <button
             type="button"
             onClick={onConfirm}
             disabled={pending}
-            className="rounded bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+            className={`rounded px-3 py-1.5 text-sm text-white disabled:opacity-50 ${
+              confirmTone === "primary" ? "bg-blue-600 hover:bg-blue-700" : "bg-red-600 hover:bg-red-700"
+            }`}
           >
             {confirmLabel}
           </button>

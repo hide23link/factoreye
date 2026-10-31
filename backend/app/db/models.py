@@ -78,6 +78,8 @@ class IngestDevice(SQLModel, table=True):
     key_hash: str = Field(max_length=64, unique=True)
     created_at: datetime = Field(default_factory=_utcnow)
     revoked_at: datetime | None = None
+    # 系統（ライン・設備の区分。例: 第1ライン）。センサー棚が「系統 › 機器」に分けるために使う。任意
+    line: str | None = Field(default=None, max_length=40)
 
 
 class Sensor(SQLModel, table=True):

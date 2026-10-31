@@ -33,6 +33,8 @@ URL=http://192.0.2.10:8001/api/ingest/readings
 
 # 1. 準備: 100 か所分のセンサー（ld01-v/-i/-e …）と機器（r-load-01 …）を作り、キーを KEYS_DIR に保存する
 ./setup_devices.sh 100 "$KEYS_DIR"
+#    センサー棚の「系統 › 機器」を試すなら、LINES で機器を系統に分ける（例: 7 系統。既定は付けない）
+#    LINES=7 ./setup_devices.sh 350 "$KEYS_DIR"
 
 # 2. 実行: 例は、100 か所が 60 個を 1 分ごとに送る、1 時間（秒数は DURATION）
 ./run.sh 100 batch 3600 "$URL"        # 1 秒ごとなら: ./run.sh 100 second 3600 "$URL"

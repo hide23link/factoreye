@@ -106,3 +106,40 @@ async def test_attaching_a_sensor_to_a_device_changes_the_etag(client: httpx.Asy
     response = await client.get("/api/sensors", headers={"If-None-Match": etag_before})
     assert response.status_code == 200
     assert response.json()[0]["deviceName"] == "r-shelf-02"
+
+
+async def test_list_and_detail_include_the_line_of_the_device(client: httpx.AsyncClient) -> None:
+    sensor_id = await _create(client, "line-in")
+    free_id = await _create(client, "line-out")
+    async with AsyncSession(engine) as session:
+        await device_keys.create_device(session, "r-line-01", "第1ライン")
+        device = await device_keys.get_device_by_name(session, "r-line-01")
+        assert device is not None
+        assert await device_keys.attach_sensors(session, device, ["line-in"]) == []
+
+    by_id = {item["id"]: item for item in (await client.get("/api/sensors")).json()}
+    assert by_id[sensor_id]["deviceLine"] == "第1ライン"
+    # 機器に所属しないセンサー・系統のない機器のセンサーは null（従来の応答に項目が増えるだけ）
+    assert by_id[free_id]["deviceLine"] is None
+    assert (await client.get(f"/api/sensors/{sensor_id}")).json()["deviceLine"] == "第1ライン"
+    updated = await client.put(f"/api/sensors/{sensor_id}", json={"unit": "A"})
+    assert updated.json()["deviceLine"] == "第1ライン"
+
+
+async def test_setting_the_line_changes_the_etag_of_the_devices_sensors(
+    client: httpx.AsyncClient,
+) -> None:
+    await _create(client, "line-etag")
+    async with AsyncSession(engine) as session:
+        await device_keys.create_device(session, "r-line-02")
+        device = await device_keys.get_device_by_name(session, "r-line-02")
+        assert device is not None
+        await device_keys.attach_sensors(session, device, ["line-etag"])
+        etag_before = (await client.get("/api/sensors")).headers["etag"]
+
+        await device_keys.set_device_line(session, device, "第2ライン")
+
+    # 系統を変えたのに版が同じだと、画面が古い一覧（系統なし）のまま 304 を受け取ってしまう
+    response = await client.get("/api/sensors", headers={"If-None-Match": etag_before})
+    assert response.status_code == 200
+    assert response.json()[0]["deviceLine"] == "第2ライン"

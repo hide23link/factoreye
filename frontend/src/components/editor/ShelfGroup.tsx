@@ -10,19 +10,14 @@
  * selectedIds = 選択中の id（行のチェックに使う。閉じているグループには null を渡して、選択が変わっても描き直さない）、
  * onToggleOpen / onToggleCheck / onAddAll / 行の操作 = 操作（どのグループ・センサーかは引数で渡す。呼ぶ側は同じ関数を渡し続けられる）。
  */
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useId, useRef } from "react";
 
 import { Highlight } from "./Highlight";
 import { SensorRow } from "./ShelfSensorRow";
 
+import { LEVEL_DOT } from "../../lib/alert-dot";
 import type { AlertLevel, CheckState, SensorGroup } from "../../lib/sensor-groups";
 import type { Sensor, WidgetType } from "../../types";
-
-const LEVEL_DOT: Record<AlertLevel, { className: string; label: string }> = {
-  critical: { className: "bg-red-600", label: "重故障のアラームがあります" },
-  warning: { className: "bg-amber-500", label: "軽故障のアラームがあります" },
-  none: { className: "bg-green-600", label: "未対応のアラームはありません" },
-};
 
 interface Props {
   group: SensorGroup;
@@ -64,7 +59,7 @@ export const ShelfGroup = memo(function ShelfGroup({
   }, [checkState]);
 
   const dot = LEVEL_DOT[level];
-  const rowsId = `shelf-group-${group.id}`;
+  const rowsId = useId(); // aria-controls 用の id（機器名などは使わず、React が作る安全な id にする）
   return (
     <li className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1.5">
