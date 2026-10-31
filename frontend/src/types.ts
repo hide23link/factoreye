@@ -180,6 +180,10 @@ export interface WidgetConfig {
   axisSides?: Record<string, "left" | "right">;
   // グラフ用: 縦軸に出す単位の文字（左・右）。未指定・空欄なら、軸に載るセンサーの単位を自動で出す
   axisUnits?: { left?: string; right?: string };
+  // 全ウィジェット共通: 枠の上に出すタイトル。未指定・空欄なら出さない
+  title?: string;
+  // グラフ用: 凡例に出す系列の名前（センサーID → 名前）。未指定はセンサーの名前
+  seriesNames?: Record<string, string>;
   // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
   stack?: "none" | "normal" | "percent";
   // しきい値の表示（線・色の帯・両方・なし）。未指定なら showThresholds に従う（true は「線」）

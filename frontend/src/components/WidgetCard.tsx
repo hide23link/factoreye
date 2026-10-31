@@ -62,6 +62,8 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   const settingsShown = useEditorStore((s) => s.panelOpen && s.selectedWidgetId === widget.id);
   const actions = useWidgetActions(dashboard);
   const label = widgetLabel(widget.type);
+  // 利用者が付けたタイトル（空なら出さない）。枠の上に 1 行で出し、中身はその下に収める
+  const title = widget.config.title?.trim() ?? "";
 
   return (
     <div
@@ -86,9 +88,16 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       // 編集中は、カード全体をつかんで移動できる
       className={`relative h-full overflow-hidden rounded-lg border bg-white p-3 shadow-sm ${
         editing ? "widget-drag-handle cursor-grab touch-none active:cursor-grabbing" : ""
-      } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"}`}
+      } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"} ${
+        title ? "flex flex-col" : ""
+      }`}
     >
-      <div className={`h-full overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
+      {title && (
+        <p className="mb-1 shrink-0 truncate text-sm font-semibold text-gray-800" title={title}>
+          {title}
+        </p>
+      )}
+      <div className={`${title ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
           <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
             <WidgetBody widget={widget} />

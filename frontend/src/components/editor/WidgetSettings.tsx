@@ -8,6 +8,7 @@
 import { useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
+import { clampPlacement } from "../../lib/widget-layout";
 import { useMovableWindow } from "../../hooks/useMovableWindow";
 import { useWidgetActions } from "../../hooks/useWidgetActions";
 import {
@@ -80,6 +81,10 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
         </button>
       </div>
       <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
+        <Section title="タイトル" note="枠の上に出す名前。空欄なら出しません">
+          <AxisUnitField label="タイトル" value={widget.config.title ?? ""} placeholder="タイトルなし" wide onCommit={(value) => void changeConfig(actions, widget, { title: value.trim() || undefined })} />
+        </Section>
+        <PlacementFields widget={widget} actions={actions} />
         <TypeSettings widget={widget} actions={actions} />
         <Section title="操作">
           <div className="flex gap-2">
@@ -197,11 +202,13 @@ function AxisUnitField({
   value,
   placeholder,
   onCommit,
+  wide = false,
 }: {
   label: string;
   value: string;
   placeholder: string;
   onCommit: (value: string) => void;
+  wide?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   return (
@@ -209,7 +216,7 @@ function AxisUnitField({
       {label}
       <input
         aria-label={label}
-        className="w-24 rounded border border-gray-300 px-1 py-0.5 text-sm text-gray-800"
+        className={`${wide ? "w-full" : "w-24"} rounded border border-gray-300 px-1 py-0.5 text-sm text-gray-800`}
         value={draft ?? value}
         placeholder={placeholder}
         onChange={(event) => setDraft(event.target.value)}
@@ -222,6 +229,25 @@ function AxisUnitField({
         }}
       />
     </label>
+  );
+}
+
+/** ウィジェットの位置（列・行）と大きさ（幅・高さ）を数字で指定する。範囲に収めてから保存する */
+function PlacementFields({ widget, actions }: SectionProps) {
+  const current = { column: widget.gridColumn, row: widget.gridRow, width: widget.gridWidth, height: widget.gridHeight };
+  const apply = (change: Partial<typeof current>) => {
+    const next = clampPlacement({ ...current, ...change });
+    void actions.saveLayout([{ i: widget.id, x: next.column - 1, y: next.row - 1, w: next.width, h: next.height }]);
+  };
+  return (
+    <Section title="位置とサイズ" note="列・行は 1 から。幅は 1〜12 マス。編集中は、枠をつかんでも変えられます">
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <NumberField label="列" value={current.column} min={1} max={12} step={1} onCommit={(v) => v !== null && apply({ column: v })} />
+        <NumberField label="行" value={current.row} min={1} step={1} onCommit={(v) => v !== null && apply({ row: v })} />
+        <NumberField label="幅" value={current.width} min={1} max={12} step={1} onCommit={(v) => v !== null && apply({ width: v })} />
+        <NumberField label="高さ" value={current.height} min={1} max={40} step={1} onCommit={(v) => v !== null && apply({ height: v })} />
+      </div>
+    </Section>
   );
 }
 
@@ -331,6 +357,25 @@ function GraphSettings({ widget, actions }: SectionProps) {
           onChange={(refreshSeconds) => void changeConfig(actions, widget, { refreshSeconds })}
         />
       </Section>
+      {ids.length > 0 && (
+        <Section title="凡例の名前" note="空欄はセンサーの名前。凡例と、マウスを乗せたときの表示に出ます">
+          {ids.map((id) => (
+            <AxisUnitField
+              key={id}
+              label={nameOfSensor(id)}
+              value={config.seriesNames?.[id] ?? ""}
+              placeholder={nameOfSensor(id)}
+              wide
+              onCommit={(value) => {
+                const names: Record<string, string> = { ...config.seriesNames };
+                if (value.trim()) names[id] = value.trim();
+                else delete names[id];
+                void changeConfig(actions, widget, { seriesNames: names });
+              }}
+            />
+          ))}
+        </Section>
+      )}
       {ids.length > 1 && (
         <Section title="複数センサーの重ね方" note="単位の違うセンサーを同じ高さで比べるときは「0〜100%」。積み上げは、単位が同じセンサー向けです">
           <div className="text-xs text-gray-500">縦軸</div>
