@@ -43,12 +43,18 @@ services:
       - backend
 
   postgres:
-    image: postgres:15-alpine
+    # postgres:15（Debian）に WAL-G を足したイメージ（infra/cloud/postgres/Dockerfile）。Alpine では WAL-G が動かないため
+    build: ./infra/cloud/postgres
+    image: factoreye-postgres:15
     restart: unless-stopped
     environment:
       - POSTGRES_USER=factoreye
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=factoreye
+    # WAL-G の設定（R2 の鍵を含む。Git 管理外。権限 600）。無くても起動する（archive_mode は init.sh まで off）
+    env_file:
+      - path: ./walg/walg.env
+        required: false
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
