@@ -12,7 +12,9 @@ COPY . .
 # VITE_API_URL=http://<このホストのIP>:8000 を設定してビルドし直す必要がある。
 ARG VITE_API_URL
 ARG VITE_AUTH_MODE
-RUN VITE_API_URL=$VITE_API_URL VITE_AUTH_MODE=$VITE_AUTH_MODE npm run build
+# 復旧ツールの画面の URL（設定画面の「バックアップ」タブのリンク。未設定なら案内を出す）
+ARG VITE_RECOVERY_URL
+RUN VITE_API_URL=$VITE_API_URL VITE_AUTH_MODE=$VITE_AUTH_MODE VITE_RECOVERY_URL=$VITE_RECOVERY_URL npm run build
 
 # 実行段: 静的ファイルをnginxで配信する（Node.jsとnode_modulesは含めない）
 FROM nginx:alpine
