@@ -50,6 +50,8 @@ class Settings:
     walg_error: str | None = None
     # R2 から復元した DB の作業用の場所（使い終わったら消す。本番の DB と同じ大きさの空きが要る）
     r2_work_dir: Path = Path("/var/lib/recovery/r2restore")
+    # Basic 認証をかけるか。RECOVERY_AUTH_DISABLED=1 のときだけ外す（既定はかける）
+    auth_enabled: bool = True
 
 
 def normalize_dsn(dsn: str) -> str:
@@ -86,10 +88,13 @@ def _load_walg_env(path: str | None) -> tuple[dict[str, str] | None, str | None]
 def load_settings(env: dict[str, str] | None = None) -> Settings:
     e = dict(os.environ) if env is None else env
 
+    # 認証を外すのは、RECOVERY_AUTH_DISABLED=1 と明示したときだけ（LAN に公開しない運用の場合に限る）
+    auth_enabled = e.get("RECOVERY_AUTH_DISABLED", "").strip().lower() not in ("1", "true", "yes", "on")
     password = e.get("RECOVERY_PASSWORD", "")
-    if len(password) < MIN_PASSWORD_LENGTH:
+    if auth_enabled and len(password) < MIN_PASSWORD_LENGTH:
         raise ConfigError(
             f"RECOVERY_PASSWORD を {MIN_PASSWORD_LENGTH} 文字以上で設定してください"
+            "（認証を外すなら RECOVERY_AUTH_DISABLED=1）"
         )
     scratch = e.get("SCRATCH_DSN", "")
     if not scratch:
@@ -127,4 +132,5 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         walg_env=walg_env,
         walg_error=walg_error,
         r2_work_dir=Path(e.get("R2_RESTORE_DIR", "/var/lib/recovery/r2restore")),
+        auth_enabled=auth_enabled,
     )

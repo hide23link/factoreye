@@ -34,7 +34,7 @@ export function BackupSettingsPanel() {
           </p>
         )}
         <p className="mt-2 text-xs text-gray-500">
-          開くと、ユーザー名とパスワードを聞かれます（復旧ツールの設定の RECOVERY_USERNAME・RECOVERY_PASSWORD）。
+          復旧ツールは、ラズパイの LAN（同じネットワーク）からだけ開けます。外からは開かないでください。
         </p>
       </section>
 
