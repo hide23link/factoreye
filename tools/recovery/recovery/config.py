@@ -89,12 +89,13 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     e = dict(os.environ) if env is None else env
 
     # 認証を外すのは、RECOVERY_AUTH_DISABLED=1 と明示したときだけ（LAN に公開しない運用の場合に限る）
-    auth_enabled = e.get("RECOVERY_AUTH_DISABLED", "").strip().lower() not in ("1", "true", "yes", "on")
+    disabled = e.get("RECOVERY_AUTH_DISABLED", "").strip().lower()
+    auth_enabled = disabled not in ("1", "true", "yes", "on")
     password = e.get("RECOVERY_PASSWORD", "")
     if auth_enabled and len(password) < MIN_PASSWORD_LENGTH:
         raise ConfigError(
-            f"RECOVERY_PASSWORD を {MIN_PASSWORD_LENGTH} 文字以上で設定してください"
-            "（認証を外すなら RECOVERY_AUTH_DISABLED=1）"
+            f"RECOVERY_PASSWORD を {MIN_PASSWORD_LENGTH} 文字以上で設定してください（認証を外すなら "
+            "RECOVERY_AUTH_DISABLED=1）"
         )
     scratch = e.get("SCRATCH_DSN", "")
     if not scratch:
