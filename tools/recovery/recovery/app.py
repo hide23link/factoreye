@@ -1,6 +1,8 @@
 """復旧ツールの Web 画面と API。
 
 画面にはバックアップの中身（利用者のデータ）が出るため、全体に Basic 認証をかける。
+ただし RECOVERY_AUTH_DISABLED=1 のときは外す
+（LAN だけに公開するラズパイの運用。書き戻しができるので、公開範囲に注意）。
 今の DB へは読み取り専用で接続する（このツールから本番に書き込む機能は、段階 3 で別に設ける）。
 
 【誰が使うか】main.py が読み込む。
@@ -122,7 +124,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
-        dependencies=[Depends(_require_auth(settings))],
+        dependencies=[Depends(_require_auth(settings))] if settings.auth_enabled else [],
     )
 
     merge_lock = asyncio.Lock()

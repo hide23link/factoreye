@@ -38,7 +38,7 @@ notify_on_failure() {
 # WAL-G の置き場が、専用バケット（factoreye-db）か。delete は置き場の下の WAL をすべて対象にするので、共有バケットでは実行しない（試験用のローカルの置き場は許す）
 require_dedicated_prefix() {
   local p; p="$(in_pg sh -c 'printenv WALG_S3_PREFIX || printenv WALG_FILE_PREFIX' 2>/dev/null | tr -d '\r')"
-  case "$p" in s3://factoreye-db|s3://factoreye-db/|/var/lib/walg-repo) ;; *) die "WAL-G の置き場が専用バケットではありません（${p:-未設定}）。delete が他のバックアップを消すので、実行しません。WALG_S3_PREFIX=s3://factoreye-db にしてください" ;; esac
+  case "$p" in s3://factoreye-db|s3://factoreye-db/|s3://factoreye-oss-db|s3://factoreye-oss-db/|/var/lib/walg-repo) ;; *) die "WAL-G の置き場が専用バケットではありません（${p:-未設定}）。delete が他のバックアップを消すので、実行しません。WALG_S3_PREFIX=s3://factoreye-db にしてください" ;; esac
 }
 
 wait_ready() {

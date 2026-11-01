@@ -34,6 +34,22 @@ def test_short_password_rejected() -> None:
         load_settings({**BASE, "RECOVERY_PASSWORD": "short"})
 
 
+def test_auth_is_on_by_default() -> None:
+    assert load_settings(BASE).auth_enabled is True
+
+
+def test_auth_can_be_disabled_explicitly_without_password() -> None:
+    env = {k: v for k, v in BASE.items() if k != "RECOVERY_PASSWORD"}
+    settings = load_settings({**env, "RECOVERY_AUTH_DISABLED": "1"})
+    assert settings.auth_enabled is False
+
+
+def test_password_still_required_when_auth_disabled_is_not_set() -> None:
+    env = {k: v for k, v in BASE.items() if k != "RECOVERY_PASSWORD"}
+    with pytest.raises(ConfigError):
+        load_settings({**env, "RECOVERY_AUTH_DISABLED": "0"})
+
+
 def test_write_requires_mode() -> None:
     env = {**BASE, "TARGET_DATABASE_URL": "postgresql://u@h/db",
            "TARGET_WRITE_DATABASE_URL": "postgresql://u@h/db"}

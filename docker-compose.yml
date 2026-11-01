@@ -36,6 +36,8 @@ services:
         # Viteはビルド時に値を静的ファイルへ焼き込むため、build.argsで渡す必要がある
         # （実行時のenvironment:をいくら変えても効果が無い）。.envでの上書き先はこちら。
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        # 復旧ツール（tools/recovery）の画面の URL。設定画面の「バックアップ」タブのリンクに使う（未設定ならリンクの代わりに案内を出す）
+        VITE_RECOVERY_URL: ${VITE_RECOVERY_URL:-}
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -43,12 +45,18 @@ services:
       - backend
 
   postgres:
-    image: postgres:15-alpine
+    # postgres:15（Debian）に WAL-G を足したイメージ（infra/cloud/postgres/Dockerfile）。Alpine では WAL-G が動かないため
+    build: ./infra/cloud/postgres
+    image: factoreye-postgres:15
     restart: unless-stopped
     environment:
       - POSTGRES_USER=factoreye
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=factoreye
+    # WAL-G の設定（R2 の鍵を含む。Git 管理外。権限 600）。無くても起動する（archive_mode は init.sh まで off）
+    env_file:
+      - path: ./walg/walg.env
+        required: false
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:

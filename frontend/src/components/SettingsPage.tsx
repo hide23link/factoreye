@@ -7,21 +7,30 @@
 import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
+import { BackupSettingsPanel } from "./settings/BackupSettingsPanel";
 import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
 // 設定画面のタブの種類（値は、下の描画の分岐と対応させる）
-type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration";
+type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration" | "backup";
 
-const TABS: { value: SettingsTab; label: string; icon: string; hint: string }[] = [
+// ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS 版（multi_tenant）では「バックアップ」は出さない
+const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
+
+const BASE_TABS: { value: SettingsTab; label: string; icon: string; hint: string }[] = [
   { value: "sensors", label: "センサー", icon: "📡", hint: "測定する機器" },
   { value: "alarms", label: "アラーム", icon: "🚨", hint: "異常の履歴" },
   { value: "notifications", label: "通知", icon: "🔔", hint: "知らせ方" },
   { value: "webhooks", label: "Webhook連携", icon: "🔗", hint: "外部サービス" },
   { value: "migration", label: "データ移行", icon: "🚚", hint: "書き出し・取り込み" },
 ];
+
+// OSS 版だけ、最後に「バックアップ」のタブを足す
+const TABS = IS_MULTI_TENANT
+  ? BASE_TABS
+  : [...BASE_TABS, { value: "backup" as const, label: "バックアップ", icon: "💾", hint: "復旧・書き戻し" }];
 
 /** 設定画面の本体。初期表示はセンサーのタブ。 */
 export function SettingsPage() {
@@ -32,7 +41,7 @@ export function SettingsPage() {
       <h1 className="mb-4 text-2xl font-bold text-gray-900">設定</h1>
 
       {/* アイコンは飾り（aria-hidden）。ボタンの名前は、従来どおりタブの名前だけにする */}
-      <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
+      <div className={`mb-4 grid grid-cols-3 gap-2 ${TABS.length > 5 ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
         {TABS.map((t) => (
           <button
             key={t.value}
@@ -62,6 +71,7 @@ export function SettingsPage() {
         {tab === "notifications" && <NotificationSettingsPanel />}
         {tab === "webhooks" && <WebhookSettingsPanel />}
         {tab === "migration" && <MigrationSettingsPanel />}
+        {tab === "backup" && !IS_MULTI_TENANT && <BackupSettingsPanel />}
       </div>
     </div>
   );
