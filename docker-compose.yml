@@ -24,7 +24,8 @@ services:
       - WEBHOOK_ALLOW_PRIVATE_NETWORKS=${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # 公開先（既定は全インターフェース）。Pi など、外に出さない機器では FE_BIND_HOST=127.0.0.1 にする
+      - "${FE_BIND_HOST:-0.0.0.0}:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,12 +36,13 @@ services:
       args:
         # Viteはビルド時に値を静的ファイルへ焼き込むため、build.argsで渡す必要がある
         # （実行時のenvironment:をいくら変えても効果が無い）。.envでの上書き先はこちら。
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        # 空（VITE_API_URL=）なら同じオリジンの /api を呼ぶ（ホストの nginx で転送する構成）。未設定なら localhost:8000
+        VITE_API_URL: ${VITE_API_URL-http://localhost:8000}
         # 復旧ツール（tools/recovery）の画面の URL。設定画面の「バックアップ」タブのリンクに使う（未設定ならリンクの代わりに案内を出す）
         VITE_RECOVERY_URL: ${VITE_RECOVERY_URL:-}
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "${FE_BIND_HOST:-0.0.0.0}:3001:3001"
     depends_on:
       - backend
 
