@@ -5,6 +5,8 @@
  * - 受信の確認（ハートビート）: 1 時間あたり 60・間隔 1 分（初期値）。1 分に 1 回の値が来ていれば緑
  * - 生産の目標: 1 時間あたりの目標と間隔を決める。例: 120 個/時・5 分 → 1 マス 10 個以上で緑
  * - 勤務時間の外を「対象外」（灰色）にできる。今の途中のマスは、満たすまで「集計中」（灰色）
+ * 表示する期間は、グラフと同じ（ダッシュボードの時間操作。ウィジェット個別の期間があればそれ）。
+ * 期間が長くてマスが多すぎるときは、マスの長さを自動で広げる（最大 720 マス）。
  * 計算は lib/target-strip.ts。データは既存の間引き API（センサーごと）から取る。
  *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "TargetStrip" のときに出す。
@@ -12,7 +14,9 @@
  */
 import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
 import { useNow } from "../../hooks/useNow";
-import { graphSensorIds } from "../../lib/graph-config";
+import { effectiveRange, graphSensorIds } from "../../lib/graph-config";
+import { resolveRange } from "../../lib/timeRange";
+import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import {
   bucketTarget,
   buildCells,
@@ -39,6 +43,7 @@ const DOT_CLASS: Record<StripLevel, string> = { ok: "bg-green-500", warn: "bg-am
 const DOT_LABEL: Record<StripLevel, string> = { ok: "正常", warn: "未達あり", bad: "未達が続いています" };
 
 const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 const formatNumber = formatTargetNumber;
 
 /** センサー 1 行分（帯と丸印）。センサーごとにデータを取るので、行ごとのコンポーネントにしている。 */
@@ -76,7 +81,7 @@ function StripRow({
   const createdAtMs = sensor ? new Date(sensor.createdAt).getTime() : null;
   const cells = buildCells(data.buckets, window, nowMs, settings, widget.config, createdAtMs);
   const summary = summarizeCells(cells);
-  const need = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
+  const need = bucketTarget(settings.hourlyTarget, window.bucketMinutes);
 
   return (
     <div className="grid items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(120px,190px)_minmax(0,1fr)]">
@@ -96,7 +101,7 @@ function StripRow({
       </div>
       <div
         role="img"
-        aria-label={`${name}: 直近${settings.hours}時間で ${summary.okCount} / ${summary.judged} マスが目標（${formatNumber(need)}）以上`}
+        aria-label={`${name}: 表示期間で ${summary.okCount} / ${summary.judged} マスが目標（${formatNumber(need)}）以上`}
         className="flex h-5 min-w-0 gap-px"
       >
         {cells.map((cell) => (
@@ -114,6 +119,8 @@ function StripRow({
 export function TargetStripWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const now = useNow(LIVE_CHART_INTERVAL_MS);
+  // 表示期間は、グラフと同じ（ダッシュボードの時間範囲。ウィジェット個別の期間があればそれ）
+  const dashboardRange = useTimeRangeStore((s) => s.range);
   const settings = stripSettingsFromConfig(widget.config);
   const ids = graphSensorIds(widget);
 
@@ -125,18 +132,21 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">読み込み中...</p>;
   }
 
-  const window = stripWindow(now, settings.bucketMinutes, settings.hours);
-  const need = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
-  // 目盛りは、マスの開始時刻（始め・1/4・半分・3/4）と、右端は今の時刻
+  const range = resolveRange(effectiveRange(widget, dashboardRange), now);
+  const window = stripWindow(range, settings.bucketMinutes);
+  const need = bucketTarget(settings.hourlyTarget, window.bucketMinutes);
+  // 目盛りは、マスの開始時刻（始め・1/4・半分・3/4）と、右端は表示範囲の終わり（今を越えない）。長い期間は日付も付ける
+  const spansDays = range.to - range.from > 24 * 60 * 60 * 1000;
+  const tickFormat = spansDays ? dateTimeFormat : timeFormat;
   const ticks = [
-    ...[0, 0.25, 0.5, 0.75].map((ratio) => timeFormat.format(window.from + Math.round(ratio * window.bucketCount) * window.bucketMs)),
-    timeFormat.format(now),
+    ...[0, 0.25, 0.5, 0.75].map((ratio) => tickFormat.format(window.from + Math.round(ratio * window.bucketCount) * window.bucketMs)),
+    tickFormat.format(Math.min(range.to, now)),
   ];
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 overflow-auto">
       <p className="text-xs text-gray-500">
-        1 マス = {settings.bucketMinutes} 分 ／ 目標 {formatNumber(need)} 以上で緑（1 時間あたり {formatNumber(settings.hourlyTarget)}）
+        1 マス = {window.bucketMinutes} 分{window.bucketMinutes > settings.bucketMinutes ? "（表示期間が長いので自動で広げています）" : ""} ／ 目標 {formatNumber(need)} 以上で緑（1 時間あたり {formatNumber(settings.hourlyTarget)}）
       </p>
       <div className="flex flex-col gap-2">
         {ids.map((id) => (
