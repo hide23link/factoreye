@@ -9,6 +9,7 @@ import { TargetStripWidget } from "./TargetStripWidget";
 vi.mock("../../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchSensorReadingsDownsampled: vi.fn(),
+  fetchSensorReadings: vi.fn(),
 }));
 
 // 現在時刻は 2024-01-01 12:07:30（ローカル）に固定する
@@ -143,6 +144,33 @@ describe("TargetStripWidget", () => {
     renderWithQueryClient(<TargetStripWidget widget={widget({ rangeHours: 1 })} />);
     const strip = await screen.findByRole("img", { name: /atom01-heartbeat: 表示期間/ });
     expect(strip.children).toHaveLength(stripWindow({ from: NOW - 60 * MIN, to: NOW }, 1).bucketCount);
+  });
+
+  it("受信の間隔: 60 秒おきなら緑、1 回抜ければ赤（分の境目でも赤にならない）", async () => {
+    // 表示の始めより前から、60 秒おきに受信。途中で 1 回抜ける（141 秒の間隔）
+    const fetchFrom = W1.from - 5 * MIN;
+    const received: number[] = [];
+    for (let t = fetchFrom + 59000; t < NOW; t += 60000) received.push(t);
+    const cutAt = received[Math.floor(received.length / 2)];
+    const readings = received
+      .filter((t) => !(t > cutAt && t < cutAt + 120000))
+      .map((t) => ({ sensorId: "s1", value: 1, recordedAt: new Date(t).toISOString() }))
+      .reverse(); // API は新しい順
+    vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings, total: readings.length });
+    renderWithQueryClient(
+      <TargetStripWidget widget={widget({ stripJudge: "interval", stripMaxGapSeconds: 90 })} />,
+    );
+
+    const strip = await screen.findByRole("img", { name: /atom01-heartbeat: 表示期間/ });
+    const cells = Array.from(strip.children);
+    expect(cells).toHaveLength(W1.bucketCount);
+    const reds = cells.filter((c) => c.className.includes("bg-red-400"));
+    expect(reds.length).toBeGreaterThanOrEqual(1);
+    expect(reds.length).toBeLessThanOrEqual(3);
+    expect(cells.filter((c) => c.className.includes("bg-green-500")).length).toBe(cells.length - reds.length);
+    expect(screen.getByText(/前回の受信から 90 秒以内に次の受信があれば緑/)).toBeInTheDocument();
+    // 判定は件数の API（間引き）ではなく、受信の時刻で行う
+    expect(api.fetchSensorReadingsDownsampled).not.toHaveBeenCalled();
   });
 
   it("取得に失敗したら再試行を出す", async () => {

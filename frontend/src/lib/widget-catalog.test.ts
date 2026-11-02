@@ -28,10 +28,10 @@ describe("ゲージの登録", () => {
 });
 
 describe("達成ストリップ", () => {
-  it("棚にあり、初期値は受信の確認（1 分・1 時間 60）", () => {
+  it("棚にあり、初期値は受信の確認（受信の間隔・90 秒）", () => {
     const kind = widgetKind("TargetStrip");
     expect(kind?.label).toBe("達成ストリップ");
-    expect(kind?.defaultConfig).toEqual({ stripBucketMinutes: 1, stripHourlyTarget: 60 });
+    expect(kind?.defaultConfig).toEqual({ stripJudge: "interval", stripMaxGapSeconds: 90, stripBucketMinutes: 1 });
     expect(widgetLabel("TargetStrip")).toBe("達成ストリップ");
   });
 });

@@ -236,9 +236,11 @@ export const fetchSensorReadings = (
   sensorId: string,
   from?: string,
   limit = 500, // 既定はグラフ・スパークライン用。最新 1 件だけ要る呼び出しは 1 にする
+  to?: string, // 期間の終わり（ISO）。省略は「今まで」
 ) => {
   const params = new URLSearchParams({ limit: String(limit) });
   if (from) params.set("from", from);
+  if (to) params.set("to", to);
   return request<{ readings: Reading[]; total: number }>(
     `/api/sensors/${sensorId}/readings?${params.toString()}`,
   );

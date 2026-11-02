@@ -204,6 +204,10 @@ export interface WidgetConfig {
   stripBucketMinutes?: number;
   // 1 時間あたりの目標。1 マスの目標 = これ × 間隔 ÷ 60。未指定は 60（受信の確認: 1 分に 1 回）
   stripHourlyTarget?: number;
+  // 判定の方法。"count"（既定）= マスの合計が目標以上か（生産の目標）。"interval" = 受信の間隔が上限以内か（受信の確認）
+  stripJudge?: "count" | "interval";
+  // "interval" のとき、前回の受信からの最大の間隔（秒）。これを超えて受信が無い時間にかかるマスを赤にする。未指定は 90
+  stripMaxGapSeconds?: number;
   // 1 分のマスで、前後のマスと 1 マス分まで融通するか（届く時刻の数秒のずれで赤にしない）。未指定は false（厳密）
   stripTolerant?: boolean;
   // 勤務時間（workStartHour・workEndHour・breakMinutes）の外を対象外にするか。未指定は false

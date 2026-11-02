@@ -26,7 +26,15 @@ const MINUTE_MS = 60 * 1000;
 /** 達成=緑、未達=赤、集計中=今のマスで未達成、対象外=勤務時間外・センサーが無かった期間 */
 export type CellState = "ok" | "short" | "pending" | "off";
 
+/** 受信間隔の判定で、前回の受信からこの秒数を超えて受信が無い時間にかかるマスを赤にする（初期値） */
+export const DEFAULT_MAX_GAP_SECONDS = 90;
+export type StripJudge = "count" | "interval";
+
 export interface StripSettings {
+  /** 判定の方法。count = マスの合計が目標以上（生産の目標）、interval = 受信の間隔が上限以内（受信の確認） */
+  judge: StripJudge;
+  /** interval のとき、前回の受信からの最大の間隔（秒） */
+  maxGapSeconds: number;
   /** 設定した 1 マスの長さ（最短）。表示期間が長いときは、stripWindow が広げる */
   bucketMinutes: number;
   hourlyTarget: number;
@@ -45,6 +53,11 @@ export function stripSettingsFromConfig(config: WidgetConfig): StripSettings {
     hourlyTarget: target !== undefined && Number.isFinite(target) && target > 0 ? target : DEFAULT_STRIP_HOURLY_TARGET,
     workOnly: config.stripWorkOnly ?? false,
     tolerant: config.stripTolerant ?? false,
+    judge: config.stripJudge === "interval" ? "interval" : "count",
+    maxGapSeconds:
+      config.stripMaxGapSeconds !== undefined && Number.isFinite(config.stripMaxGapSeconds) && config.stripMaxGapSeconds >= 10
+        ? Math.min(config.stripMaxGapSeconds, 3600)
+        : DEFAULT_MAX_GAP_SECONDS,
   };
 }
 
@@ -208,4 +221,68 @@ export function summarizeCells(cells: readonly StripCell[]): StripSummary {
     trailingShort,
     level: trailingShort >= 3 ? "bad" : trailingShort >= 1 ? "warn" : "ok",
   };
+}
+
+/**
+ * 受信間隔の判定に必要な、読み込み範囲。前回の受信を捕まえるため、表示の始めより少し前から読む。
+ * from は、始めより max(5 分, 最大間隔の 2 倍) 前。
+ */
+export function intervalFetchRange(window: StripWindow, maxGapSeconds: number): { from: number; to: number } {
+  return { from: window.from - Math.max(5 * MINUTE_MS, maxGapSeconds * 2000), to: window.to };
+}
+
+/**
+ * 受信の間隔で、マスの状態を作る（受信の確認用）。「前回の受信から maxGap 秒を超えて受信が無い時間」を
+ * 受信が途切れた時間とし、その時間に少しでもかかるマスを「未達」（赤）、かからないマスを「達成」（緑）にする。
+ * 受信が分の境目（xx:59 と xx:00）にそろって来ても、間隔が 60 秒前後なら、赤にならない。
+ *
+ * - receivedMs: 読み込んだ受信の時刻（ミリ秒、古い順）。fetchFromMs より前は含まない
+ * - fetchFromMs: 読み込みの始め。ここより前の受信は分からない
+ * - truncatedFromMs: 件数の上限で古い側が欠けたとき、読めた最も古い受信の時刻。それより前のマスは「対象外」
+ * - 最後のマス（今を含む）も、受信が途切れている時間にかかれば赤（まだ集計中ではなく、今の状態）
+ * - センサーを作る前・勤務時間の外（workOnly のとき、マスが全部外）は「対象外」
+ * sum は、そのマスで受信した回数。
+ */
+export function buildIntervalCells(
+  receivedMs: readonly number[],
+  window: StripWindow,
+  nowMs: number,
+  settings: StripSettings,
+  config: WidgetConfig,
+  createdAtMs: number | null,
+  fetchFromMs: number,
+  truncatedFromMs: number | null,
+): StripCell[] {
+  const maxGapMs = settings.maxGapSeconds * 1000;
+  const times = [...receivedMs].sort((a, b) => a - b);
+  // 受信が途切れている時間 [from, to)。読み込みの始めは「そこで受信があった」ものとして扱う
+  const dead: Array<[number, number]> = [];
+  let previous = truncatedFromMs ?? fetchFromMs;
+  for (const t of times) {
+    if (t - previous > maxGapMs) dead.push([previous + maxGapMs, t]);
+    previous = t;
+  }
+  if (nowMs - previous > maxGapMs) dead.push([previous + maxGapMs, nowMs]);
+
+  const schedule = scheduleFromConfig(config);
+  const cells: StripCell[] = [];
+  for (let i = 0; i < window.bucketCount; i++) {
+    const startMs = window.from + i * window.bucketMs;
+    const endMs = startMs + window.bucketMs;
+    const count = times.filter((t) => t >= startMs && t < endMs).length;
+    const beforeSensor = createdAtMs !== null && startMs < createdAtMs;
+    const beforeKnown = truncatedFromMs !== null && endMs <= truncatedFromMs;
+    let outsideWork = false;
+    if (settings.workOnly) {
+      const startMinute = minuteOfDay(startMs);
+      outsideWork = workMinutesBetween(startMinute, startMinute + window.bucketMinutes, schedule) === 0;
+    }
+    if (beforeSensor || beforeKnown || outsideWork) {
+      cells.push({ startMs, sum: count, state: "off" });
+      continue;
+    }
+    const interrupted = dead.some(([from, to]) => Math.min(endMs, to) - Math.max(startMs, from) > 0);
+    cells.push({ startMs, sum: count, state: interrupted ? "short" : "ok" });
+  }
+  return cells;
 }
