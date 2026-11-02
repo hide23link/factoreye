@@ -134,7 +134,9 @@ export type WidgetType =
   // 半円のメーター（正常・軽故障・重故障の色の帯と針）
   | "Gauge"
   // 生産管理（1日の目標に対する進み具合）。稼働ステータス（ProductionStatus）とは別の種類
-  | "ProductionPlan";
+  | "ProductionPlan"
+  // 達成ストリップ（一定の間隔ごとに、目標を満たしたかを緑・赤の帯で見せる。受信の確認と、生産の目標に使う）
+  | "TargetStrip";
 
 /** ウィジェットの表示設定（色・Y 軸の範囲など）。 */
 export interface WidgetConfig {
@@ -196,6 +198,15 @@ export interface WidgetConfig {
   showHourly?: boolean;
   showForecast?: boolean;
   showUptime?: boolean;
+  // TargetStrip（達成ストリップ）用。センサーは sensorIds に複数入れる
+  // 1 マスの長さ（分）。1・5・10 のいずれか。未指定は 1
+  stripBucketMinutes?: number;
+  // 1 時間あたりの目標。1 マスの目標 = これ × 間隔 ÷ 60。未指定は 60（受信の確認: 1 分に 1 回）
+  stripHourlyTarget?: number;
+  // 表示する期間（時間）。2・6・12 のいずれか。未指定は 2
+  stripHours?: number;
+  // 勤務時間（workStartHour・workEndHour・breakMinutes）の外を対象外にするか。未指定は false
+  stripWorkOnly?: boolean;
 }
 
 /** ダッシュボードに置くウィジェット1つ分（種類・位置・サイズ・設定）。 */

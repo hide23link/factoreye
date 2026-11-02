@@ -21,6 +21,16 @@ export type Assignment =
 
 export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): Assignment {
   switch (widget.type) {
+    case "TargetStrip": {
+      // 複数のセンサーを並べる（グラフと同じ。すでにあれば何もしない。「入れ替え」はそのセンサーだけにする）
+      const ids = graphSensorIds(widget);
+      if (mode === "add" && ids.includes(sensor.id)) {
+        return { ok: false, message: `「${sensor.name}」はすでにこのストリップにあります` };
+      }
+      const next = mode === "add" ? [...ids, sensor.id] : [sensor.id];
+      const patch = graphSensorPatch(widget, next, []);
+      return { ok: true, ...patch, message: mode === "add" ? `「${sensor.name}」をストリップに追加しました` : `ストリップを「${sensor.name}」に入れ替えました` };
+    }
     case "SensorGraph":
     case "MultiSensorComparison": {
       const ids = graphSensorIds(widget);

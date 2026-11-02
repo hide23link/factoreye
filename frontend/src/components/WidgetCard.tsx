@@ -29,6 +29,7 @@ const MultiSensorComparisonWidget = lazyNamed(
 const StatValueWidget = lazyNamed(() => import("./widgets/StatValueWidget"), "StatValueWidget");
 const GaugeWidget = lazyNamed(() => import("./widgets/GaugeWidget"), "GaugeWidget");
 const ProductionPlanWidget = lazyNamed(() => import("./widgets/ProductionPlanWidget"), "ProductionPlanWidget");
+const TargetStripWidget = lazyNamed(() => import("./widgets/TargetStripWidget"), "TargetStripWidget");
 
 /** ウィジェットの種類（type）に応じて、中身の部品を切り替える。未知の種類は注意文を出す。 */
 function WidgetBody({ widget }: { widget: Widget }) {
@@ -47,6 +48,8 @@ function WidgetBody({ widget }: { widget: Widget }) {
       return <GaugeWidget widget={widget} />;
     case "ProductionPlan":
       return <ProductionPlanWidget widget={widget} />;
+    case "TargetStrip":
+      return <TargetStripWidget widget={widget} />;
     default:
       return <p className="text-sm text-gray-400">未対応のウィジェットタイプ: {widget.type}</p>;
   }
