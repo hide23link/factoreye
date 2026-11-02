@@ -90,8 +90,9 @@ export interface StripCell {
  * - createdAtMs: センサーを作った時刻。それより前のマスと、作った時刻をまたぐマスは「対象外」（まだ無かった期間を、未達にしない）
  * - 勤務時間の外（workOnly のとき）は「対象外」。勤務時間に一部だけかかるマス（昼休みの終わりなど）は、
  *   その稼働時間の割合に目標を減らして判定する
- * - 1 分のマスだけ、前のマスの余りを 1 マス分まで繰り越す。値が来る間隔のわずかな揺れで、
- *   「ある分は 2 回、次の分は 0 回」となっても赤にしないため（本当に途切れたときは 2 マス続けて足りないので赤になる）
+ * - 1 分のマスだけ、前後のマスと 1 マス分まで融通する。値が来る間隔のわずかな揺れで、
+ *   「2 回の次が 0 回」や「0 回の次が 2 回」となっても赤にしないため。本当に途切れたときは、
+ *   2 マス続けて足りないので赤になる（累計の過不足が -1 マス分を下回る）
  */
 export function buildCells(
   buckets: readonly DownsampledBucketLike[],
@@ -108,8 +109,9 @@ export function buildCells(
   }
   const fullNeed = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
   const schedule = scheduleFromConfig(config);
-  const carryAllowed = settings.bucketMinutes === 1;
-  let carry = 0; // 前のマスの余り（1 分のマスだけ使う）
+  const flexible = settings.bucketMinutes === 1;
+  let carry = 0; // 前のマスの余り（1 マス分まで。1 分のマスだけ使う）
+  let previousDeficit = 0; // 直前のマスが赤のとき、足りなかった分
   const cells: StripCell[] = [];
   for (let i = 0; i < window.bucketCount; i++) {
     const startMs = window.from + i * window.bucketMs;
@@ -125,21 +127,24 @@ export function buildCells(
     if (beforeSensor || workFraction === 0) {
       cells.push({ startMs, sum, state: "off" });
       carry = 0;
+      previousDeficit = 0;
       continue;
     }
     const need = fullNeed * workFraction;
-    const enough = sum + carry >= need - 1e-9;
-    let state: CellState;
-    if (endMs > nowMs) {
-      // 今の途中のマス。満たしていれば緑、まだなら集計中（赤にはしない）
-      state = enough ? "ok" : "pending";
-    } else {
-      state = enough ? "ok" : "short";
+    const available = sum + carry;
+    const enough = available >= need - 1e-9;
+    let surplus = Math.max(available - need, 0);
+    // 遅れて届いた分で、直前の赤が埋まるとき（0 回の次が 2 回）は、直前のマスを緑に直す。埋めた分は、このマスの余りから引く
+    const previous = cells[cells.length - 1];
+    if (flexible && enough && previous?.state === "short" && previousDeficit > 0 && surplus >= previousDeficit - 1e-9) {
+      previous.state = "ok";
+      surplus -= previousDeficit;
     }
-    cells.push({ startMs, sum, state });
-    if (state !== "pending") {
-      // 余りは 1 マス分まで。足りなかったマスは 0 に戻す（借りを次に持ち越さない）
-      carry = carryAllowed ? Math.min(Math.max(sum + carry - need, 0), need) : 0;
+    const complete = endMs <= nowMs;
+    cells.push({ startMs, sum, state: enough ? "ok" : complete ? "short" : "pending" });
+    if (complete) {
+      carry = flexible && enough ? Math.min(surplus, need) : 0;
+      previousDeficit = enough ? 0 : need - available;
     }
   }
   return cells;

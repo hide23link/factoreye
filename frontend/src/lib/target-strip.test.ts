@@ -88,6 +88,24 @@ describe("buildCells（受信の確認: 1 分・値 1）", () => {
     expect(cells[102].state).toBe("short");
   });
 
+  it("遅れて届いた分も融通する（0 回の次が 2 回なら、前のマスを緑にする）", () => {
+    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    expect(cells[100].state).toBe("ok");
+    expect(cells[101].state).toBe("ok");
+  });
+
+  it("0 回・2 回・0 回なら、最後は赤（2 回で救えるのは 1 マスだけ）", () => {
+    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    expect(cells[100].state).toBe("ok");
+    expect(cells[102].state).toBe("short");
+  });
+
+  it("2 マス続けて空けば、どちらも赤のまま", () => {
+    const cells = buildCells([bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    expect(cells[100].state).toBe("short");
+    expect(cells[101].state).toBe("short");
+  });
+
   it("余りは 1 マス分まで。3 回来ても、2 マス続けて空けば赤", () => {
     const cells = buildCells([bucketAt(window, 100, 3, 3)], window, NOW, settings, {}, null);
     expect(cells[101].state).toBe("ok");
