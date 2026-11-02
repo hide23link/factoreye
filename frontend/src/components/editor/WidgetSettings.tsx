@@ -772,6 +772,18 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           個以上。満たせば緑、満たさなければ赤です。
         </p>
       </Section>
+      {settings.bucketMinutes === 1 && (
+        <Section title="判定のゆるさ" note="受信の確認は、厳密のまま（1 分に 1 回、時間どおり届いたかを見る）がおすすめです">
+          <Toggle
+            label="前後の分と融通する（1 分のマスだけ）"
+            checked={settings.tolerant}
+            onChange={(v) => void changeConfig(actions, widget, { stripTolerant: v })}
+          />
+          <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+            入れると、「ある分に 2 回、次の分に 0 回」（または逆）は、赤にしません。分の境目で届く時刻が数秒ずれただけの赤を減らせますが、1 分遅れて届いたことも見えなくなります。2 分続けて届かないときは、どちらでも赤です。
+          </p>
+        </Section>
+      )}
       <Section title="勤務時間" note="生産の目標のとき。勤務時間の外（夜間・昼休み）を、赤にせず対象外にします">
         <Toggle
           label="勤務時間だけ判定する"

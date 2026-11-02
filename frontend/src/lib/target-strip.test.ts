@@ -23,7 +23,7 @@ function bucketAt(window: { from: number; bucketMs: number }, index: number, sum
 
 describe("stripSettingsFromConfig", () => {
   it("未設定は受信の確認（1 分・1 時間 60・2 時間）", () => {
-    expect(stripSettingsFromConfig({})).toEqual({ bucketMinutes: 1, hourlyTarget: 60, workOnly: false });
+    expect(stripSettingsFromConfig({})).toEqual({ bucketMinutes: 1, hourlyTarget: 60, workOnly: false, tolerant: false });
   });
   it("範囲外の間隔・期間は初期値に寄せる", () => {
     const s = stripSettingsFromConfig({ stripBucketMinutes: 7, stripHourlyTarget: -3 });
@@ -70,6 +70,7 @@ describe("bucketTarget / stripWindow", () => {
 
 describe("buildCells（受信の確認: 1 分・値 1）", () => {
   const settings = stripSettingsFromConfig({});
+  const tolerant = stripSettingsFromConfig({ stripTolerant: true });
   const window = stripWindow(rangeOf(2), 1);
   const last = window.bucketCount - 1;
 
@@ -96,35 +97,43 @@ describe("buildCells（受信の確認: 1 分・値 1）", () => {
     expect(cells[105].state).toBe("short");
   });
 
+  it("既定は厳密: 2 回の次が 0 回も、0 回の次が 2 回も、0 回のマスは赤", () => {
+    const afterTwo = buildCells([bucketAt(window, 100, 2, 2)], window, NOW, settings, {}, null);
+    expect(afterTwo[100].state).toBe("ok");
+    expect(afterTwo[101].state).toBe("short");
+    const beforeTwo = buildCells([bucketAt(window, 101, 2, 2)], window, NOW, settings, {}, null);
+    expect(beforeTwo[100].state).toBe("short");
+  });
+
   it("1 分のマスは、前のマスの余りを 1 マス分まで繰り越す（受信の揺れで赤にしない）", () => {
     // マス 100 に 2 回、101 に 0 回 → 101 は余りで緑。102 も 0 回 → 余りが無いので赤
     const buckets = [bucketAt(window, 100, 2, 2), bucketAt(window, 99, 1)];
-    const cells = buildCells(buckets, window, NOW, settings, {}, null);
+    const cells = buildCells(buckets, window, NOW, tolerant, {}, null);
     expect(cells[100].state).toBe("ok");
     expect(cells[101].state).toBe("ok");
     expect(cells[102].state).toBe("short");
   });
 
   it("遅れて届いた分も融通する（0 回の次が 2 回なら、前のマスを緑にする）", () => {
-    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, tolerant, {}, null);
     expect(cells[100].state).toBe("ok");
     expect(cells[101].state).toBe("ok");
   });
 
   it("0 回・2 回・0 回なら、最後は赤（2 回で救えるのは 1 マスだけ）", () => {
-    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    const cells = buildCells([bucketAt(window, 101, 2, 2), bucketAt(window, 99, 1)], window, NOW, tolerant, {}, null);
     expect(cells[100].state).toBe("ok");
     expect(cells[102].state).toBe("short");
   });
 
   it("2 マス続けて空けば、どちらも赤のまま", () => {
-    const cells = buildCells([bucketAt(window, 99, 1)], window, NOW, settings, {}, null);
+    const cells = buildCells([bucketAt(window, 99, 1)], window, NOW, tolerant, {}, null);
     expect(cells[100].state).toBe("short");
     expect(cells[101].state).toBe("short");
   });
 
   it("余りは 1 マス分まで。3 回来ても、2 マス続けて空けば赤", () => {
-    const cells = buildCells([bucketAt(window, 100, 3, 3)], window, NOW, settings, {}, null);
+    const cells = buildCells([bucketAt(window, 100, 3, 3)], window, NOW, tolerant, {}, null);
     expect(cells[101].state).toBe("ok");
     expect(cells[102].state).toBe("short");
   });

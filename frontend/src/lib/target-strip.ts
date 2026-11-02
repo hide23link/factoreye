@@ -31,6 +31,8 @@ export interface StripSettings {
   bucketMinutes: number;
   hourlyTarget: number;
   workOnly: boolean;
+  /** 1 分のマスで、前後のマスと 1 マス分まで融通するか。初期値は false（厳密: 毎分 目標以上が要る） */
+  tolerant: boolean;
 }
 
 /** 保存された設定から、達成ストリップの設定を作る。未設定や範囲外の値は初期値に寄せる */
@@ -42,6 +44,7 @@ export function stripSettingsFromConfig(config: WidgetConfig): StripSettings {
     // 目標 0 は「常に達成」になり、未達を隠してしまうので認めない（正の数だけ）
     hourlyTarget: target !== undefined && Number.isFinite(target) && target > 0 ? target : DEFAULT_STRIP_HOURLY_TARGET,
     workOnly: config.stripWorkOnly ?? false,
+    tolerant: config.stripTolerant ?? false,
   };
 }
 
@@ -106,7 +109,7 @@ export interface StripCell {
  * - createdAtMs: センサーを作った時刻。それより前のマスと、作った時刻をまたぐマスは「対象外」（まだ無かった期間を、未達にしない）
  * - 勤務時間の外（workOnly のとき）は「対象外」。勤務時間に一部だけかかるマス（昼休みの終わりなど）は、
  *   その稼働時間の割合に目標を減らして判定する
- * - 1 分のマスだけ、前後のマスと 1 マス分まで融通する。値が来る間隔のわずかな揺れで、
+ * - 設定「前後のマスと融通する」（stripTolerant、初期値は厳密）を入れた 1 分のマスだけ、前後のマスと 1 マス分まで融通する。値が来る間隔のわずかな揺れで、
  *   「2 回の次が 0 回」や「0 回の次が 2 回」となっても赤にしないため。本当に途切れたときは、
  *   2 マス続けて足りないので赤になる（累計の過不足が -1 マス分を下回る）
  */
@@ -125,7 +128,7 @@ export function buildCells(
   }
   const fullNeed = bucketTarget(settings.hourlyTarget, window.bucketMinutes);
   const schedule = scheduleFromConfig(config);
-  const flexible = window.bucketMinutes === 1;
+  const flexible = settings.tolerant && window.bucketMinutes === 1;
   let carry = 0; // 前のマスの余り（1 マス分まで。1 分のマスだけ使う）
   let previousDeficit = 0; // 直前のマスが赤のとき、足りなかった分
   const cells: StripCell[] = [];
