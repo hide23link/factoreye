@@ -90,6 +90,32 @@ async def test_revoke_blocks_key_and_blocks_attach(client: httpx.AsyncClient) ->
     assert blocked.status_code == 409
 
 
+async def test_attach_does_not_steal_sensor_from_another_device(client: httpx.AsyncClient) -> None:
+    await _sensor(client, "own-temp")
+    first = (await client.post("/api/devices", json={"name": "first"})).json()
+    second = (await client.post("/api/devices", json={"name": "second"})).json()
+    ok = await client.post(f"/api/devices/{first['id']}/sensors", json={"ingestKeys": ["own-temp"]})
+    assert ok.status_code == 200
+
+    stolen = await client.post(
+        f"/api/devices/{second['id']}/sensors", json={"ingestKeys": ["own-temp"]}
+    )
+    assert stolen.status_code == 409
+    assert "own-temp" in stolen.json()["detail"]
+    # 元の機器のキーで、引き続き送れる
+    sent = await client.post(
+        "/api/ingest/readings",
+        headers={"X-Device-Key": first["key"]},
+        json={"ingestKey": "own-temp", "value": 1},
+    )
+    assert sent.status_code == 202
+    # 同じ機器への再実行は、そのまま成功する
+    again = await client.post(
+        f"/api/devices/{first['id']}/sensors", json={"ingestKeys": ["own-temp"]}
+    )
+    assert again.status_code == 200
+
+
 async def test_unknown_device_is_404(client: httpx.AsyncClient) -> None:
     missing = "00000000-0000-0000-0000-000000000000"
     assert (await client.post(f"/api/devices/{missing}/revoke")).status_code == 404

@@ -5,7 +5,8 @@
 
 - GET  /api/devices                     機器の一覧（所属センサー・最後の受信つき。キーは返さない）
 - POST /api/devices                     機器を作る。キーは、この応答で 1 回だけ返す
-- POST /api/devices/{id}/sensors        センサーを機器に所属させる（本文: ingestKeys）
+- POST /api/devices/{id}/sensors        センサーを機器に所属させる（本文: ingestKeys）。
+                                       別の機器に所属中のセンサーは 409（付け替えはコマンドで）
 - POST /api/devices/{id}/revoke         機器のキーを失効させる
 
 他の書き込みAPIと同じく、この API 自体に認証はない（ネットワーク境界で守る前提。OSS の方針）。
@@ -177,6 +178,21 @@ async def attach_sensors(
     device = await _get_or_404(session, device_id)
     if device.revoked_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="device is revoked")
+    # 別の機器に所属中のセンサーは付け替えない（付け替えると、その機器のキーで送れなくなる）。
+    # 付け替えたいときは、コマンド（device_cli attach）で行う
+    owned = await session.exec(
+        select(Sensor.ingest_key).where(
+            col(Sensor.ingest_key).in_(body.ingest_keys),
+            col(Sensor.device_id).is_not(None),
+            Sensor.device_id != device.id,
+        )
+    )
+    taken = sorted(owned.all())
+    if taken:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"already attached to another device: {', '.join(taken)}",
+        )
     missing = await device_keys.attach_sensors(session, device, body.ingest_keys)
     return AttachResult(missing=missing)
 

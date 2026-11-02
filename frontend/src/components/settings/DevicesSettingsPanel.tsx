@@ -133,6 +133,8 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
   const [error, setError] = useState<string | null>(null);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const active = device.revokedAt === null;
+  // 選んだセンサーが、再取得で一覧から消えていたら、先頭に戻す（古い選択を送らない）
+  const picked = unattached.includes(pick) ? pick : (unattached[0] ?? "");
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["devices"] });
@@ -140,11 +142,12 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
   };
 
   const attach = useMutation({
-    mutationFn: () => attachDeviceSensors(device.id, [pick || unattached[0]]),
-    onSuccess: () => {
+    mutationFn: () => attachDeviceSensors(device.id, [picked]),
+    onSuccess: (result) => {
       setPick("");
-      setError(null);
       refresh();
+      // 見つからなかったセンサーがあれば、成功とは見せない
+      setError(result.missing.length > 0 ? `見つからないセンサーがありました: ${result.missing.join("、")}` : null);
     },
     onError: (err) => setError(describeDeviceError(err, "センサーの所属付け")),
   });
@@ -153,6 +156,7 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
     mutationFn: () => revokeDevice(device.id),
     onSuccess: () => {
       setConfirmingRevoke(false);
+      setError(null);
       refresh();
     },
     onError: (err) => {
@@ -203,7 +207,7 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
             <div className="flex flex-wrap items-center gap-2">
               <select
                 aria-label="未所属のセンサー"
-                value={pick || unattached[0]}
+                value={picked}
                 onChange={(e) => setPick(e.target.value)}
                 className="min-w-0 rounded border border-gray-300 px-2 py-1 text-sm"
               >
@@ -265,8 +269,14 @@ export function DevicesSettingsPanel() {
   const [adding, setAdding] = useState(false);
   const [created, setCreated] = useState<DeviceCreated | null>(null);
 
-  if (devicesQuery.isError) {
-    return <ErrorNotice message="機器の一覧を取得できませんでした。" onRetry={() => void devicesQuery.refetch()} />;
+  // 取得に失敗しても、すでに一覧があるあいだは画面を保つ（作成直後のキーの小窓を消さない）
+  if (devicesQuery.isError && !devicesQuery.data) {
+    return (
+      <>
+        <ErrorNotice message="機器の一覧を取得できませんでした。" onRetry={() => void devicesQuery.refetch()} />
+        {created && <KeyDialog created={created} onClose={() => setCreated(null)} />}
+      </>
+    );
   }
   const devices = devicesQuery.data ?? [];
   const selected = devices.find((d) => d.id === selectedId) ?? devices[0] ?? null;

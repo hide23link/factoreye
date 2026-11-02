@@ -98,6 +98,34 @@ describe("DevicesSettingsPanel", () => {
     await waitFor(() => expect(api.attachDeviceSensors).toHaveBeenCalledWith(device.id, ["ld01-v"]));
   });
 
+  it("見つからないセンサーがあれば、成功とは見せずに知らせる", async () => {
+    const user = userEvent.setup();
+    mockLists([device], [looseSensor]);
+    vi.mocked(api.attachDeviceSensors).mockResolvedValue({ missing: ["ld01-v"] });
+    renderWithQueryClient(<DevicesSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "所属させる" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("見つからないセンサー");
+  });
+
+  it("キーの小窓は、作成直後の一覧の再取得が失敗しても消えない", async () => {
+    const user = userEvent.setup();
+    const created: DeviceCreated = { ...device, key: "secret-key-value-1234567890" };
+    // 1 回目（最初の表示）は空、作成後の再取得（invalidate）は失敗する
+    vi.mocked(api.fetchDevices).mockResolvedValueOnce([]).mockRejectedValue(new Error("network"));
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.createDevice).mockResolvedValue(created);
+    renderWithQueryClient(<DevicesSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "機器を追加" }));
+    await user.type(screen.getByLabelText("機器名"), "atom01");
+    await user.click(screen.getByRole("button", { name: "追加してキーを発行" }));
+
+    expect(await screen.findByTestId("device-key")).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(api.fetchDevices).mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getByTestId("device-key")).toBeInTheDocument();
+  });
+
   it("失効は確認してから実行する", async () => {
     const user = userEvent.setup();
     mockLists([device]);
