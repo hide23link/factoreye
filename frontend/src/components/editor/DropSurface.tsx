@@ -71,7 +71,11 @@ export function DropSurface({
         ? e.shiftKey
           ? "このグラフと入れ替え"
           : "このグラフに追加（Shift で入れ替え）"
-        : "このウィジェットに切り替え";
+        : widget.type === "TargetStrip"
+          ? e.shiftKey
+            ? "このストリップと入れ替え"
+            : "このストリップに追加（Shift で入れ替え）"
+          : "このウィジェットに切り替え";
       return {
         kind: "widget",
         widget,

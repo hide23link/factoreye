@@ -26,8 +26,9 @@ describe("stripSettingsFromConfig", () => {
     const s = stripSettingsFromConfig({ stripBucketMinutes: 7, stripHours: 5, stripHourlyTarget: -3 });
     expect(s).toMatchObject({ bucketMinutes: 1, hours: 2, hourlyTarget: 60 });
   });
-  it("目標 0 は有効（目標なし = 常に達成）", () => {
-    expect(stripSettingsFromConfig({ stripHourlyTarget: 0 }).hourlyTarget).toBe(0);
+  it("目標 0 以下は認めない（常に達成になって未達を隠すため）。初期値に寄せる", () => {
+    expect(stripSettingsFromConfig({ stripHourlyTarget: 0 }).hourlyTarget).toBe(60);
+    expect(stripSettingsFromConfig({ stripHourlyTarget: -5 }).hourlyTarget).toBe(60);
   });
 });
 
@@ -70,11 +71,27 @@ describe("buildCells（受信の確認: 1 分・値 1）", () => {
     expect(cells[119].state).toBe("ok");
   });
 
-  it("センサーを作る前のマスは対象外（未達にしない）", () => {
-    const created = window.from + 100 * MIN;
+  it("センサーを作る前のマスと、作った時刻をまたぐマスは対象外（未達にしない）", () => {
+    const created = window.from + 100 * MIN + 30000; // マス 100 の途中
     const cells = buildCells([], window, NOW, settings, {}, created);
     expect(cells[50].state).toBe("off");
+    expect(cells[100].state).toBe("off");
     expect(cells[105].state).toBe("short");
+  });
+
+  it("1 分のマスは、前のマスの余りを 1 マス分まで繰り越す（受信の揺れで赤にしない）", () => {
+    // マス 100 に 2 回、101 に 0 回 → 101 は余りで緑。102 も 0 回 → 余りが無いので赤
+    const buckets = [bucketAt(window, 100, 2, 2), bucketAt(window, 99, 1)];
+    const cells = buildCells(buckets, window, NOW, settings, {}, null);
+    expect(cells[100].state).toBe("ok");
+    expect(cells[101].state).toBe("ok");
+    expect(cells[102].state).toBe("short");
+  });
+
+  it("余りは 1 マス分まで。3 回来ても、2 マス続けて空けば赤", () => {
+    const cells = buildCells([bucketAt(window, 100, 3, 3)], window, NOW, settings, {}, null);
+    expect(cells[101].state).toBe("ok");
+    expect(cells[102].state).toBe("short");
   });
 });
 
@@ -88,6 +105,27 @@ describe("buildCells（生産の目標: 5 分・1 時間 120 → 1 マス 10 個
     expect(cells[22].state).toBe("ok"); // 10 = 目標ちょうど
     expect(cells[21].state).toBe("short"); // 9 < 10
     expect(cells[20].state).toBe("ok"); // 12
+  });
+
+  it("5 分以上のマスは繰り越さない（厳密に判定）", () => {
+    // マス 22 に 25 個（目標 10 の 2.5 倍）、マス 23 は 0 個 → 23 は赤（今のマスなので集計中）
+    const cells = buildCells([bucketAt(window, 21, 25, 5)], window, NOW, settings, {}, null);
+    expect(cells[21].state).toBe("ok");
+    expect(cells[22].state).toBe("short");
+  });
+
+  it("勤務時間に一部だけかかるマスは、稼働時間の割合に目標を減らして判定する", () => {
+    // 昼休みを 45 分（12:00〜12:45）にして、10 分マス 12:40〜12:50 は稼働 5 分 → 目標 5 個
+    const lunch = stripSettingsFromConfig({ stripBucketMinutes: 10, stripHourlyTarget: 60, stripWorkOnly: true });
+    const lunchNow = new Date(2026, 10, 2, 14, 0, 0).getTime();
+    const w = stripWindow(lunchNow, 10, 6);
+    const cellAt = (h: number, m: number) => (new Date(2026, 10, 2, h, m).getTime() - w.from) / w.bucketMs;
+    const config = { workStartHour: 8, workEndHour: 17, breakMinutes: 45 };
+    const idx = cellAt(12, 40);
+    const buckets = [{ start: new Date(w.from + idx * w.bucketMs).toISOString(), avg: 5, count: 1 }];
+    const cells = buildCells(buckets, w, lunchNow, lunch, config, null);
+    expect(cells[idx].state).toBe("ok"); // 5 個 ≥ 5（半分の目標）
+    expect(cells[cellAt(12, 10)].state).toBe("off"); // 昼休み中
   });
 
   it("勤務時間だけ判定: 時間外は対象外", () => {

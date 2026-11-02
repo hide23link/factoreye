@@ -39,9 +39,15 @@ export function stripSettingsFromConfig(config: WidgetConfig): StripSettings {
   return {
     bucketMinutes: (STRIP_BUCKET_OPTIONS as readonly number[]).includes(bucket ?? -1) ? (bucket as number) : DEFAULT_STRIP_BUCKET_MINUTES,
     hours: (STRIP_HOURS_OPTIONS as readonly number[]).includes(hours ?? -1) ? (hours as number) : DEFAULT_STRIP_HOURS,
-    hourlyTarget: target !== undefined && Number.isFinite(target) && target >= 0 ? target : DEFAULT_STRIP_HOURLY_TARGET,
+    // 目標 0 は「常に達成」になり、未達を隠してしまうので認めない（正の数だけ）
+    hourlyTarget: target !== undefined && Number.isFinite(target) && target > 0 ? target : DEFAULT_STRIP_HOURLY_TARGET,
     workOnly: config.stripWorkOnly ?? false,
   };
+}
+
+/** 数の表示（小数 1 桁まで、3 桁区切り）。ウィジェットと設定パネルで同じ形にする */
+export function formatTargetNumber(value: number): string {
+  return (Math.round(value * 10) / 10).toLocaleString("ja-JP");
 }
 
 /** 1 マスの目標（合計がこれ以上なら達成） */
@@ -81,8 +87,11 @@ export interface StripCell {
 
 /**
  * マスごとの合計と状態を作る。
- * - createdAtMs: センサーを作った時刻。それより前のマスは「対象外」（まだ無かった期間を、未達にしない）
- * - 勤務時間の外（workOnly のとき）は「対象外」
+ * - createdAtMs: センサーを作った時刻。それより前のマスと、作った時刻をまたぐマスは「対象外」（まだ無かった期間を、未達にしない）
+ * - 勤務時間の外（workOnly のとき）は「対象外」。勤務時間に一部だけかかるマス（昼休みの終わりなど）は、
+ *   その稼働時間の割合に目標を減らして判定する
+ * - 1 分のマスだけ、前のマスの余りを 1 マス分まで繰り越す。値が来る間隔のわずかな揺れで、
+ *   「ある分は 2 回、次の分は 0 回」となっても赤にしないため（本当に途切れたときは 2 マス続けて足りないので赤になる）
  */
 export function buildCells(
   buckets: readonly DownsampledBucketLike[],
@@ -97,26 +106,41 @@ export function buildCells(
     const index = Math.round((new Date(bucket.start).getTime() - window.from) / window.bucketMs);
     sums.set(index, (sums.get(index) ?? 0) + bucket.avg * bucket.count);
   }
-  const need = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
+  const fullNeed = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
   const schedule = scheduleFromConfig(config);
+  const carryAllowed = settings.bucketMinutes === 1;
+  let carry = 0; // 前のマスの余り（1 分のマスだけ使う）
   const cells: StripCell[] = [];
   for (let i = 0; i < window.bucketCount; i++) {
     const startMs = window.from + i * window.bucketMs;
     const endMs = startMs + window.bucketMs;
     const sum = sums.get(i) ?? 0;
+    // 作った時刻をまたぐマス、または前のマスは対象外
+    const beforeSensor = createdAtMs !== null && startMs < createdAtMs;
+    let workFraction = 1;
+    if (settings.workOnly) {
+      const startMinute = minuteOfDay(startMs);
+      workFraction = workMinutesBetween(startMinute, startMinute + settings.bucketMinutes, schedule) / settings.bucketMinutes;
+    }
+    if (beforeSensor || workFraction === 0) {
+      cells.push({ startMs, sum, state: "off" });
+      carry = 0;
+      continue;
+    }
+    const need = fullNeed * workFraction;
+    const enough = sum + carry >= need - 1e-9;
     let state: CellState;
-    const beforeSensor = createdAtMs !== null && endMs <= createdAtMs;
-    const outsideWork =
-      settings.workOnly && workMinutesBetween(minuteOfDay(startMs), minuteOfDay(startMs) + settings.bucketMinutes, schedule) === 0;
-    if (beforeSensor || outsideWork) {
-      state = "off";
-    } else if (endMs > nowMs) {
+    if (endMs > nowMs) {
       // 今の途中のマス。満たしていれば緑、まだなら集計中（赤にはしない）
-      state = sum >= need - 1e-9 ? "ok" : "pending";
+      state = enough ? "ok" : "pending";
     } else {
-      state = sum >= need - 1e-9 ? "ok" : "short";
+      state = enough ? "ok" : "short";
     }
     cells.push({ startMs, sum, state });
+    if (state !== "pending") {
+      // 余りは 1 マス分まで。足りなかったマスは 0 に戻す（借りを次に持ち越さない）
+      carry = carryAllowed ? Math.min(Math.max(sum + carry - need, 0), need) : 0;
+    }
   }
   return cells;
 }

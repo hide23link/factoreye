@@ -5,7 +5,7 @@
  * - ほかの種類（1つ）: ドロップは「入れ替え」
  * ドラッグ以外でも選べるよう、「＋ センサーを追加」（SensorPicker）を必ず用意する（キーボード操作のため）。
  *
- * 【誰が使うか】GraphSettings、StatValueSettings、ProductionStatusSettings、ProductionPlanSettings。
+ * 【誰が使うか】GraphSettings、StatValueSettings、ProductionStatusSettings、ProductionPlanSettings、TargetStripSettings。
  */
 import { useRef, useState } from "react";
 

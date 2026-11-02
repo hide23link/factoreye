@@ -16,6 +16,7 @@ import { graphSensorIds } from "../../lib/graph-config";
 import {
   bucketTarget,
   buildCells,
+  formatTargetNumber,
   stripSettingsFromConfig,
   stripWindow,
   summarizeCells,
@@ -38,7 +39,7 @@ const DOT_CLASS: Record<StripLevel, string> = { ok: "bg-green-500", warn: "bg-am
 const DOT_LABEL: Record<StripLevel, string> = { ok: "正常", warn: "未達あり", bad: "未達が続いています" };
 
 const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
-const formatNumber = (value: number) => (Math.round(value * 10) / 10).toLocaleString("ja-JP");
+const formatNumber = formatTargetNumber;
 
 /** センサー 1 行分（帯と丸印）。センサーごとにデータを取るので、行ごとのコンポーネントにしている。 */
 function StripRow({
@@ -119,12 +120,18 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
   if (ids.length === 0) {
     return <p className="text-sm text-gray-400">センサーが設定されていません（編集モードで設定できます）</p>;
   }
+  // センサーの一覧（名前・作成時刻）が来る前に描くと、作る前の期間が未達に見え、名前が ID のままになる
+  if (!sensors) {
+    return <p className="text-sm text-gray-400">読み込み中...</p>;
+  }
 
   const window = stripWindow(now, settings.bucketMinutes, settings.hours);
   const need = bucketTarget(settings.hourlyTarget, settings.bucketMinutes);
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) =>
-    timeFormat.format(window.from + Math.min(ratio * (window.to - window.from), window.to - window.from - window.bucketMs)),
-  );
+  // 目盛りは、マスの開始時刻（始め・1/4・半分・3/4）と、右端は今の時刻
+  const ticks = [
+    ...[0, 0.25, 0.5, 0.75].map((ratio) => timeFormat.format(window.from + Math.round(ratio * window.bucketCount) * window.bucketMs)),
+    timeFormat.format(now),
+  ];
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 overflow-auto">
@@ -136,7 +143,7 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
           <StripRow
             key={id}
             widget={widget}
-            sensor={sensors?.find((s) => s.id === id)}
+            sensor={sensors.find((s) => s.id === id)}
             sensorId={id}
             window={window}
             settings={settings}

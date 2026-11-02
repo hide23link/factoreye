@@ -41,6 +41,7 @@ import {
   STRIP_BUCKET_OPTIONS,
   STRIP_HOURS_OPTIONS,
   bucketTarget,
+  formatTargetNumber,
   stripSettingsFromConfig,
 } from "../../lib/target-strip";
 import { useEditorStore } from "../../store/useEditorStore";
@@ -758,14 +759,17 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
         <NumberField
           label="1 時間あたりの目標"
           value={settings.hourlyTarget}
-          min={0}
+          min={1}
           step={10}
           unit="個"
-          onCommit={(v) => void changeConfig(actions, widget, { stripHourlyTarget: v ?? undefined })}
+          // 空にしたときは、今の値を保つ（黙って初期値の 60 に戻さない）。0 以下も認めない
+          onCommit={(v) => {
+            if (v !== null && v > 0) void changeConfig(actions, widget, { stripHourlyTarget: v });
+          }}
         />
         <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
           1 マス（{settings.bucketMinutes} 分）の目標は{" "}
-          <b className="text-gray-900">{formatStripNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
+          <b className="text-gray-900">{formatTargetNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
           個以上。満たせば緑、満たさなければ赤です。
         </p>
       </Section>
@@ -819,4 +823,3 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
   );
 }
 
-const formatStripNumber = (value: number) => (Math.round(value * 10) / 10).toLocaleString("ja-JP");

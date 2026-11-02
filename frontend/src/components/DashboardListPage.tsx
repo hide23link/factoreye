@@ -20,7 +20,7 @@ const THUMB_COLUMNS = 12;
 
 /** 種類ごとのプレビューの色（生産管理は緑、アラームは赤、そのほかは青） */
 function thumbTone(type: Widget["type"]): string {
-  if (type === "ProductionPlan") return "border-green-600 bg-green-100";
+  if (type === "ProductionPlan" || type === "TargetStrip") return "border-green-600 bg-green-100";
   if (type === "AlarmAlert") return "border-red-600 bg-red-100";
   return "border-blue-600 bg-blue-100";
 }
