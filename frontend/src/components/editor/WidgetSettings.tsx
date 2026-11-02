@@ -39,7 +39,6 @@ import {
 } from "../../lib/production-plan";
 import {
   STRIP_BUCKET_OPTIONS,
-  STRIP_HOURS_OPTIONS,
   bucketTarget,
   formatTargetNumber,
   stripSettingsFromConfig,
@@ -747,7 +746,7 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           onRemove={removeAt}
         />
       </Section>
-      <Section title="1 マスの長さ" note="この間隔ごとに、合計が目標を満たしたかを判定します">
+      <Section title="1 マスの長さ" note="この間隔ごとに、合計が目標を満たしたかを判定します。表示期間は、グラフと同じ（画面上部の時間操作）で、長いときは自動で広げます">
         <Segmented
           label="1 マスの長さ"
           value={settings.bucketMinutes}
@@ -772,14 +771,6 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           <b className="text-gray-900">{formatTargetNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
           個以上。満たせば緑、満たさなければ赤です。
         </p>
-      </Section>
-      <Section title="表示する期間">
-        <Segmented
-          label="表示する期間"
-          value={settings.hours}
-          options={STRIP_HOURS_OPTIONS.map((value) => ({ value, label: `${value}時間` }))}
-          onChange={(stripHours) => void changeConfig(actions, widget, { stripHours })}
-        />
       </Section>
       <Section title="勤務時間" note="生産の目標のとき。勤務時間の外（夜間・昼休み）を、赤にせず対象外にします">
         <Toggle

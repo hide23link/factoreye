@@ -199,12 +199,11 @@ export interface WidgetConfig {
   showForecast?: boolean;
   showUptime?: boolean;
   // TargetStrip（達成ストリップ）用。センサーは sensorIds に複数入れる
-  // 1 マスの長さ（分）。1・5・10 のいずれか。未指定は 1
+  // 1 マスの長さ（分、最短）。1・5・10 のいずれか。未指定は 1。表示期間は、グラフと同じ（ダッシュボードの時間範囲）
+  // 表示期間が長くてマスが多すぎるときは、自動で広げる
   stripBucketMinutes?: number;
   // 1 時間あたりの目標。1 マスの目標 = これ × 間隔 ÷ 60。未指定は 60（受信の確認: 1 分に 1 回）
   stripHourlyTarget?: number;
-  // 表示する期間（時間）。2・6・12 のいずれか。未指定は 2
-  stripHours?: number;
   // 勤務時間（workStartHour・workEndHour・breakMinutes）の外を対象外にするか。未指定は false
   stripWorkOnly?: boolean;
 }
