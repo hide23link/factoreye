@@ -99,6 +99,31 @@ export const useSensorReadings = (
     refetchInterval: POLL_INTERVAL_MS,
   });
 
+/**
+ * 期間内の測定値の時刻だけを使う取得（達成ストリップの「受信間隔」判定用。値は使わない）。
+ * 新しい順に limit 件まで。上限に達したときは、古い側が欠けている（呼び出し側が判定する）。
+ * queryKey は秒単位に丸める（時刻が少しずつ進んでも、同じ範囲の取得を重ねないため）。
+ */
+export const useReadingTimes = (
+  sensorId: string | null,
+  range: { from: number; to: number },
+  limit: number,
+  intervalMs: number = LIVE_CHART_INTERVAL_MS,
+) =>
+  useQuery({
+    queryKey: ["reading-times", sensorId, Math.round(range.from / 1000), Math.round(range.to / 1000), limit],
+    queryFn: () =>
+      fetchSensorReadings(
+        sensorId as string,
+        new Date(range.from).toISOString(),
+        limit,
+        new Date(range.to).toISOString(),
+      ),
+    enabled: sensorId !== null,
+    refetchInterval: intervalMs,
+    placeholderData: keepPreviousData,
+  });
+
 // from/to は呼び出し側（ウィジェット）が計算して渡す（例: 「直近1時間」「本日0時から」）。
 // pollごとに境界がわずかにズレてもキャッシュが無駄に増えないよう、分単位に丸めたISO文字列を
 // queryKeyにそのまま使う想定

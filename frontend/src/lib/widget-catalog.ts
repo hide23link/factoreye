@@ -84,8 +84,8 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     width: 8,
     height: 6,
     suitedSensor: null,
-    // 初期値は受信の確認（ハートビート: 1 分に 1 回）。生産の目標にするときは、間隔と 1 時間あたりの目標を変える
-    defaultConfig: { stripBucketMinutes: 1, stripHourlyTarget: 60 },
+    // 初期値は受信の確認（ハートビート: 60 秒に 1 回、前回の受信から 90 秒以内なら緑）。生産の目標にするときは、判定を「件数」にして、1 時間あたりの目標を決める
+    defaultConfig: { stripJudge: "interval", stripMaxGapSeconds: 90, stripBucketMinutes: 1 },
   },
 ];
 

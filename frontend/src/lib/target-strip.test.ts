@@ -4,6 +4,8 @@ import {
   MAX_STRIP_CELLS,
   bucketTarget,
   buildCells,
+  buildIntervalCells,
+  intervalFetchRange,
   stripSettingsFromConfig,
   stripWindow,
   summarizeCells,
@@ -22,8 +24,15 @@ function bucketAt(window: { from: number; bucketMs: number }, index: number, sum
 }
 
 describe("stripSettingsFromConfig", () => {
-  it("未設定は受信の確認（1 分・1 時間 60・2 時間）", () => {
-    expect(stripSettingsFromConfig({})).toEqual({ bucketMinutes: 1, hourlyTarget: 60, workOnly: false, tolerant: false });
+  it("未設定は、件数の判定（1 分・1 時間 60）", () => {
+    expect(stripSettingsFromConfig({})).toEqual({
+      bucketMinutes: 1,
+      hourlyTarget: 60,
+      workOnly: false,
+      tolerant: false,
+      judge: "count",
+      maxGapSeconds: 90,
+    });
   });
   it("範囲外の間隔・期間は初期値に寄せる", () => {
     const s = stripSettingsFromConfig({ stripBucketMinutes: 7, stripHourlyTarget: -3 });
@@ -196,5 +205,81 @@ describe("summarizeCells", () => {
     expect(summarizeCells([cell("ok"), cell("short"), cell("pending")]).level).toBe("warn");
     expect(summarizeCells([cell("ok"), cell("short"), cell("short"), cell("pending")]).level).toBe("warn");
     expect(summarizeCells([cell("ok"), cell("short"), cell("off"), cell("short"), cell("short"), cell("pending")]).level).toBe("bad");
+  });
+});
+
+describe("buildIntervalCells（受信の間隔）", () => {
+  const settings = stripSettingsFromConfig({ stripJudge: "interval", stripMaxGapSeconds: 90 });
+  const window = stripWindow(rangeOf(1), 1);
+  const fetchFrom = intervalFetchRange(window, 90).from;
+  const SEC = 1000;
+  // 60 秒おきの受信を、from〜to の間に並べる（offset 秒ずらせる）
+  const every60 = (from: number, to: number, offsetSec = 0) => {
+    const out: number[] = [];
+    for (let t = from + offsetSec * SEC; t < to; t += 60 * SEC) out.push(t);
+    return out;
+  };
+  const build = (times: number[], createdAt: number | null = null, truncatedFrom: number | null = null) =>
+    buildIntervalCells(times, window, NOW, settings, {}, createdAt, fetchFrom, truncatedFrom);
+
+  it("60 秒おきなら全部緑（分の境目をまたいでも、赤にならない）", () => {
+    // 分の境目 xx:59.2 と xx:00.2 が交互に来る（実機の atom04 と同じ形）。間隔は 59〜61 秒
+    const base = Math.floor(fetchFrom / MIN) * MIN - 1000; // xx:59
+    const times: number[] = [];
+    for (let t = base, i = 0; t < NOW; i++) { times.push(t + (i === 3 ? 1100 : 0)); t += 60 * SEC + (i === 3 ? 100 : 0); }
+    const cells = build(times);
+    expect(cells.every((c) => c.state === "ok")).toBe(true);
+  });
+
+  it("1 回抜けて 141 秒あくと、その間の途切れた時間にかかるマスだけ赤", () => {
+    const all = every60(fetchFrom, NOW, 10);
+    const gapStart = all[20]; // この受信の次が 141 秒後
+    const times = [...all.slice(0, 21), gapStart + 141 * SEC, ...every60(gapStart + 141 * SEC + 60 * SEC, NOW)];
+    const cells = build(times);
+    const reds = cells.filter((c) => c.state === "short");
+    // 途切れた時間 = [gapStart + 90 秒, gapStart + 141 秒)。51 秒なので、1〜2 マス
+    expect(reds.length).toBeGreaterThanOrEqual(1);
+    expect(reds.length).toBeLessThanOrEqual(2);
+    for (const red of reds) {
+      expect(red.startMs).toBeGreaterThanOrEqual(Math.floor((gapStart + 90 * SEC) / MIN) * MIN);
+      expect(red.startMs).toBeLessThan(gapStart + 141 * SEC);
+    }
+    expect(cells.filter((c) => c.state === "ok").length).toBe(cells.length - reds.length);
+  });
+
+  it("65〜77 秒の遅れでは赤にならない（実機で見えた小さな遅れ）", () => {
+    const base = every60(fetchFrom, NOW, 5);
+    const times = [...base.slice(0, 10), base[9] + 77 * SEC, ...base.slice(11).map((t) => t + 17 * SEC)];
+    expect(build(times).every((c) => c.state === "ok")).toBe(true);
+  });
+
+  it("今の受信が途切れていれば、今のマスも赤（集計中にはしない）", () => {
+    const times = every60(fetchFrom, NOW - 5 * MIN);
+    const cells = build(times);
+    expect(cells[cells.length - 1].state).toBe("short");
+    expect(cells[cells.length - 3].state).toBe("short"); // 受信が止まって 90 秒を過ぎた時間にかかる
+    expect(cells[cells.length - 10].state).toBe("ok"); // 止まる前
+    expect(cells[0].state).toBe("ok");
+  });
+
+  it("受信がまったく無ければ、センサーを作ったあとのマスは赤、作る前は対象外", () => {
+    const created = window.from + 30 * MIN + 5000;
+    const cells = build([], created);
+    expect(cells[10].state).toBe("off");
+    expect(cells[30].state).toBe("off"); // 作った時刻をまたぐマス
+    expect(cells[40].state).toBe("short");
+  });
+
+  it("件数の上限で古い側が欠けたときは、読めた最も古い受信より前を対象外にする", () => {
+    const times = every60(window.from + 20 * MIN, NOW);
+    const cells = build(times, null, times[0]);
+    expect(cells[5].state).toBe("off");
+    expect(cells[25].state).toBe("ok");
+  });
+
+  it("受信の数をマスごとに数える", () => {
+    const times = every60(fetchFrom, NOW, 10);
+    const cells = build(times);
+    expect(cells.slice(1, -1).every((c) => c.sum === 1)).toBe(true);
   });
 });

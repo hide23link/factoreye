@@ -746,7 +746,18 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           onRemove={removeAt}
         />
       </Section>
-      <Section title="1 マスの長さ" note="この間隔ごとに、合計が目標を満たしたかを判定します。表示期間は、グラフと同じ（画面上部の時間操作）で、長いときは自動で広げます">
+      <Section title="判定の方法" note="受信の確認は「受信の間隔」、生産の目標は「件数」">
+        <Segmented
+          label="判定の方法"
+          value={settings.judge}
+          options={[
+            { value: "interval", label: "受信の間隔" },
+            { value: "count", label: "件数" },
+          ]}
+          onChange={(stripJudge) => void changeConfig(actions, widget, { stripJudge })}
+        />
+      </Section>
+      <Section title="1 マスの長さ" note="帯の 1 マスの長さです。表示期間は、グラフと同じ（画面上部の時間操作）で、長いときは自動で広げます">
         <Segmented
           label="1 マスの長さ"
           value={settings.bucketMinutes}
@@ -754,35 +765,57 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           onChange={(stripBucketMinutes) => void changeConfig(actions, widget, { stripBucketMinutes })}
         />
       </Section>
-      <Section title="1 時間あたりの目標" note="受信の確認は 60（1 分に 1 回）。生産は 1 時間に作る数">
-        <NumberField
-          label="1 時間あたりの目標"
-          value={settings.hourlyTarget}
-          min={1}
-          step={10}
-          unit="個"
-          // 空にしたときは、今の値を保つ（黙って初期値の 60 に戻さない）。0 以下も認めない
-          onCommit={(v) => {
-            if (v !== null && v > 0) void changeConfig(actions, widget, { stripHourlyTarget: v });
-          }}
-        />
-        <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
-          1 マス（{settings.bucketMinutes} 分）の目標は{" "}
-          <b className="text-gray-900">{formatTargetNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
-          個以上。満たせば緑、満たさなければ赤です。
-        </p>
-      </Section>
-      {settings.bucketMinutes === 1 && (
-        <Section title="判定のゆるさ" note="受信の確認は、厳密のまま（1 分に 1 回、時間どおり届いたかを見る）がおすすめです">
-          <Toggle
-            label="前後の分と融通する（1 分のマスだけ）"
-            checked={settings.tolerant}
-            onChange={(v) => void changeConfig(actions, widget, { stripTolerant: v })}
+      {settings.judge === "interval" ? (
+        <Section title="最大の間隔" note="前回の受信から、この秒数を超えて次の受信が無い時間にかかるマスを、赤にします">
+          <NumberField
+            label="最大の間隔"
+            value={settings.maxGapSeconds}
+            min={10}
+            max={3600}
+            step={10}
+            unit="秒"
+            // 空や範囲外のときは、今の値を保つ
+            onCommit={(v) => {
+              if (v !== null && v >= 10 && v <= 3600) void changeConfig(actions, widget, { stripMaxGapSeconds: v });
+            }}
           />
           <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
-            入れると、「ある分に 2 回、次の分に 0 回」（または逆）は、赤にしません。分の境目で届く時刻が数秒ずれただけの赤を減らせますが、1 分遅れて届いたことも見えなくなります。2 分続けて届かないときは、どちらでも赤です。
+            60 秒ごとに届く受信は、90 秒（初期値）なら、数秒のずれでは赤になりません。1 回抜けると（約 120 秒の間隔）、赤になります。
           </p>
         </Section>
+      ) : (
+        <>
+          <Section title="1 時間あたりの目標" note="生産は 1 時間に作る数">
+            <NumberField
+              label="1 時間あたりの目標"
+              value={settings.hourlyTarget}
+              min={1}
+              step={10}
+              unit="個"
+              // 空にしたときは、今の値を保つ（黙って初期値の 60 に戻さない）。0 以下も認めない
+              onCommit={(v) => {
+                if (v !== null && v > 0) void changeConfig(actions, widget, { stripHourlyTarget: v });
+              }}
+            />
+            <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+              1 マス（{settings.bucketMinutes} 分）の目標は{" "}
+              <b className="text-gray-900">{formatTargetNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
+              個以上。満たせば緑、満たさなければ赤です。
+            </p>
+          </Section>
+          {settings.bucketMinutes === 1 && (
+            <Section title="判定のゆるさ" note="件数を 1 分ごとに見るときのスイッチです">
+              <Toggle
+                label="前後の分と融通する（1 分のマスだけ）"
+                checked={settings.tolerant}
+                onChange={(v) => void changeConfig(actions, widget, { stripTolerant: v })}
+              />
+              <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+                入れると、「ある分に 2 回、次の分に 0 回」（または逆）は、赤にしません。2 分続けて足りないときは、どちらでも赤です。
+              </p>
+            </Section>
+          )}
+        </>
       )}
       <Section title="勤務時間" note="生産の目標のとき。勤務時間の外（夜間・昼休み）を、赤にせず対象外にします">
         <Toggle
