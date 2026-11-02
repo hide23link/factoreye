@@ -37,6 +37,12 @@ import {
   scheduleFromConfig,
   totalWorkMinutes,
 } from "../../lib/production-plan";
+import {
+  STRIP_BUCKET_OPTIONS,
+  STRIP_HOURS_OPTIONS,
+  bucketTarget,
+  stripSettingsFromConfig,
+} from "../../lib/target-strip";
 import { useEditorStore } from "../../store/useEditorStore";
 import { widgetLabel } from "../../lib/widget-catalog";
 import type { DashboardDetail, Sensor, Widget, WidgetConfig } from "../../types";
@@ -126,6 +132,8 @@ function TypeSettings({ widget, actions }: SectionProps) {
       return <ProductionStatusSettings widget={widget} actions={actions} />;
     case "ProductionPlan":
       return <ProductionPlanSettings widget={widget} actions={actions} />;
+    case "TargetStrip":
+      return <TargetStripSettings widget={widget} actions={actions} />;
     case "AlarmAlert":
       return (
         <Section title="表示するアラーム">
@@ -702,3 +710,113 @@ function ProductionPlanSettings({ widget, actions }: SectionProps) {
     </>
   );
 }
+
+/** 達成ストリップの設定。センサー（複数）、1 マスの長さ、1 時間あたりの目標、期間、勤務時間だけ判定するか。 */
+function TargetStripSettings({ widget, actions }: SectionProps) {
+  const config = widget.config;
+  const settings = stripSettingsFromConfig(config);
+  const schedule = scheduleFromConfig(config);
+  const ids = graphSensorIds(widget);
+
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+    });
+  // 開始を終了以降にしたときは、終了を開始の 1 時間後に直す（生産管理と同じ）
+  const changeStart = (hour: number) =>
+    actions.patchFromLatest(widget, (latest) => ({
+      config: {
+        ...latest.config,
+        workStartHour: hour,
+        workEndHour: Math.max(scheduleFromConfig(latest.config).endHour, hour + 1),
+      },
+    }));
+
+  return (
+    <>
+      <Section title="センサー（複数OK）" note="受信の確認なら、機器ごとの heartbeat のセンサー。生産の目標なら、生産数のセンサー">
+        <SensorField
+          sensorIds={ids}
+          multiple
+          suited="count"
+          onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
+          onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
+          onRemove={removeAt}
+        />
+      </Section>
+      <Section title="1 マスの長さ" note="この間隔ごとに、合計が目標を満たしたかを判定します">
+        <Segmented
+          label="1 マスの長さ"
+          value={settings.bucketMinutes}
+          options={STRIP_BUCKET_OPTIONS.map((value) => ({ value, label: `${value}分` }))}
+          onChange={(stripBucketMinutes) => void changeConfig(actions, widget, { stripBucketMinutes })}
+        />
+      </Section>
+      <Section title="1 時間あたりの目標" note="受信の確認は 60（1 分に 1 回）。生産は 1 時間に作る数">
+        <NumberField
+          label="1 時間あたりの目標"
+          value={settings.hourlyTarget}
+          min={0}
+          step={10}
+          unit="個"
+          onCommit={(v) => void changeConfig(actions, widget, { stripHourlyTarget: v ?? undefined })}
+        />
+        <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+          1 マス（{settings.bucketMinutes} 分）の目標は{" "}
+          <b className="text-gray-900">{formatStripNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
+          個以上。満たせば緑、満たさなければ赤です。
+        </p>
+      </Section>
+      <Section title="表示する期間">
+        <Segmented
+          label="表示する期間"
+          value={settings.hours}
+          options={STRIP_HOURS_OPTIONS.map((value) => ({ value, label: `${value}時間` }))}
+          onChange={(stripHours) => void changeConfig(actions, widget, { stripHours })}
+        />
+      </Section>
+      <Section title="勤務時間" note="生産の目標のとき。勤務時間の外（夜間・昼休み）を、赤にせず対象外にします">
+        <Toggle
+          label="勤務時間だけ判定する"
+          checked={settings.workOnly}
+          onChange={(v) => void changeConfig(actions, widget, { stripWorkOnly: v })}
+        />
+        {settings.workOnly && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                開始
+                <NumberField label="勤務開始（時）" value={schedule.startHour} min={0} max={23} onCommit={(v) => void changeStart(v ?? 8)} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                終了
+                <NumberField
+                  label="勤務終了（時）"
+                  value={schedule.endHour}
+                  min={schedule.startHour + 1}
+                  max={24}
+                  onCommit={(v) => void changeConfig(actions, widget, { workEndHour: v ?? 17 })}
+                />
+              </label>
+            </div>
+            <div className="text-xs text-gray-500">昼休み（12:00〜）</div>
+            <Segmented
+              label="昼休み"
+              value={schedule.breakMinutes}
+              options={[
+                { value: 0, label: "なし" },
+                { value: 45, label: "45分" },
+                { value: 60, label: "60分" },
+              ]}
+              onChange={(breakMinutes) => void changeConfig(actions, widget, { breakMinutes })}
+            />
+          </>
+        )}
+      </Section>
+    </>
+  );
+}
+
+const formatStripNumber = (value: number) => (Math.round(value * 10) / 10).toLocaleString("ja-JP");

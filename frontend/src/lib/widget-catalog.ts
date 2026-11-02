@@ -77,6 +77,16 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     // 目標は未設定で置く（仮の数字が、実際の目標に見えないように）。設定するまでは、設定を促す表示になる
     defaultConfig: {},
   },
+  {
+    type: "TargetStrip",
+    label: "達成ストリップ",
+    description: "一定の間隔ごとに、目標を満たしたかを緑・赤の帯で見る。受信の確認や、生産の目標に",
+    width: 8,
+    height: 6,
+    suitedSensor: null,
+    // 初期値は受信の確認（ハートビート: 1 分に 1 回）。生産の目標にするときは、間隔と 1 時間あたりの目標を変える
+    defaultConfig: { stripBucketMinutes: 1, stripHourlyTarget: 60, stripHours: 2 },
+  },
 ];
 
 /** 旧「複数センサー比較」は棚に無いが、既存のウィジェットとして表示・編集できる */

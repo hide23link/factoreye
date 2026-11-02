@@ -61,3 +61,23 @@ describe("assignSensor", () => {
     expect(acceptsSensor(widget("SensorGraph"))).toBe(true);
   });
 });
+
+describe("assignSensor（達成ストリップ）", () => {
+  it("追加すると sensorIds に足される。すでにあれば何もしない", () => {
+    const first = assignSensor(widget("TargetStrip"), sensor("a", "atom01-heartbeat", ""), "add");
+    expect(first).toMatchObject({ ok: true, sensorId: "a", config: { sensorIds: ["a"] } });
+
+    const withA = widget("TargetStrip", "a", { sensorIds: ["a"] });
+    const second = assignSensor(withA, sensor("b", "atom02-heartbeat", ""), "add");
+    expect(second).toMatchObject({ ok: true, config: { sensorIds: ["a", "b"] } });
+
+    const dup = assignSensor(withA, sensor("a", "atom01-heartbeat", ""), "add");
+    expect(dup.ok).toBe(false);
+  });
+
+  it("入れ替えは、そのセンサーだけにする", () => {
+    const w = widget("TargetStrip", "a", { sensorIds: ["a", "b"] });
+    const result = assignSensor(w, sensor("c", "atom03-heartbeat", ""), "replace");
+    expect(result).toMatchObject({ ok: true, sensorId: "c", config: { sensorIds: ["c"] } });
+  });
+});

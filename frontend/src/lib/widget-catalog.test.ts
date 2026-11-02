@@ -26,3 +26,12 @@ describe("ゲージの登録", () => {
     expect(widgetLabel("Gauge")).toBe("ゲージ");
   });
 });
+
+describe("達成ストリップ", () => {
+  it("棚にあり、初期値は受信の確認（1 分・1 時間 60・2 時間）", () => {
+    const kind = widgetKind("TargetStrip");
+    expect(kind?.label).toBe("達成ストリップ");
+    expect(kind?.defaultConfig).toEqual({ stripBucketMinutes: 1, stripHourlyTarget: 60, stripHours: 2 });
+    expect(widgetLabel("TargetStrip")).toBe("達成ストリップ");
+  });
+});
