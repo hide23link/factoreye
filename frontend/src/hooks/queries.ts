@@ -15,6 +15,7 @@ import {
   fetchAlarms,
   fetchDashboard,
   fetchDashboards,
+  fetchDevices,
   fetchMigrationStatus,
   fetchNotificationSettings,
   fetchSensorReadings,
@@ -37,6 +38,10 @@ export const LIVE_CHART_INTERVAL_MS = 30000;
 /** センサーの一覧（5 秒ごとに取り直す）。 */
 export const useSensors = () =>
   useQuery({ queryKey: ["sensors"], queryFn: fetchSensors, refetchInterval: POLL_INTERVAL_MS });
+
+/** 機器の一覧（OSS 版）。最後の受信を新しく保つため、30 秒ごとに取り直す。 */
+export const useDevices = () =>
+  useQuery({ queryKey: ["devices"], queryFn: fetchDevices, refetchInterval: 30000 });
 
 /** ダッシュボードの一覧。 */
 export const useDashboards = () =>

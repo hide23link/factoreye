@@ -14,6 +14,8 @@ import type {
   AuthTokens,
   Dashboard,
   DashboardDetail,
+  Device,
+  DeviceCreated,
   MeResponse,
   MigrationImportResult,
   MigrationStatus,
@@ -383,6 +385,24 @@ export const updateWebhookSubscription = (
 
 export const deleteWebhookSubscription = (id: string) =>
   request<void>(`/api/settings/webhooks/${id}`, { method: "DELETE" });
+
+// ── Devices（OSS 版の機器ごとのキー。設定画面「機器」から使う）──────
+
+export const fetchDevices = () => request<Device[]>("/api/devices");
+
+/** 機器を作る。応答の key は、このときだけ読める（あとから表示する API は無い）。 */
+export const createDevice = (data: { name: string; line?: string }) =>
+  request<DeviceCreated>("/api/devices", { method: "POST", body: JSON.stringify(data) });
+
+/** センサーを機器に所属させる。見つからなかった Ingest Key を missing で返す。 */
+export const attachDeviceSensors = (id: string, ingestKeys: string[]) =>
+  request<{ missing: string[] }>(`/api/devices/${id}/sensors`, {
+    method: "POST",
+    body: JSON.stringify({ ingestKeys }),
+  });
+
+export const revokeDevice = (id: string) =>
+  request<Device>(`/api/devices/${id}/revoke`, { method: "POST" });
 
 // ── Migration（SaaS → OSS。設定画面「データ移行」から使う）──────
 

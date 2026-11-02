@@ -1,5 +1,5 @@
 /**
- * 設定画面。タブで、センサー・アラーム・通知・Webhook・データ移行の各パネルを切り替える。
+ * 設定画面。タブで、センサー・アラーム・通知・Webhook・データ移行（OSS 版は機器・バックアップも）の各パネルを切り替える。
  * 選んでいるタブだけを描画する（ほかのパネルは作らない＝不要な通信をしない）。
  *
  * 【誰が使うか】App.tsx が、メニューで「設定」を選んだときに出す。引数（props）はない。
@@ -8,13 +8,14 @@ import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
 import { BackupSettingsPanel } from "./settings/BackupSettingsPanel";
+import { DevicesSettingsPanel } from "./settings/DevicesSettingsPanel";
 import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
 // 設定画面のタブの種類（値は、下の描画の分岐と対応させる）
-type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration" | "backup";
+type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration" | "backup" | "devices";
 
 // ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS 版（multi_tenant）では「バックアップ」は出さない
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
@@ -27,10 +28,14 @@ const BASE_TABS: { value: SettingsTab; label: string; icon: string; hint: string
   { value: "migration", label: "データ移行", icon: "🚚", hint: "書き出し・取り込み" },
 ];
 
-// OSS 版だけ、最後に「バックアップ」のタブを足す
+// OSS 版だけ、最後に「機器」「バックアップ」のタブを足す
 const TABS = IS_MULTI_TENANT
   ? BASE_TABS
-  : [...BASE_TABS, { value: "backup" as const, label: "バックアップ", icon: "💾", hint: "復旧・書き戻し" }];
+  : [
+      ...BASE_TABS,
+      { value: "devices" as const, label: "機器", icon: "🔑", hint: "送信キー" },
+      { value: "backup" as const, label: "バックアップ", icon: "💾", hint: "復旧・書き戻し" },
+    ];
 
 /** 設定画面の本体。初期表示はセンサーのタブ。 */
 export function SettingsPage() {
@@ -41,7 +46,7 @@ export function SettingsPage() {
       <h1 className="mb-4 text-2xl font-bold text-gray-900">設定</h1>
 
       {/* アイコンは飾り（aria-hidden）。ボタンの名前は、従来どおりタブの名前だけにする */}
-      <div className={`mb-4 grid grid-cols-3 gap-2 ${TABS.length > 5 ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
+      <div className={`mb-4 grid grid-cols-3 gap-2 ${TABS.length > 6 ? "sm:grid-cols-7" : TABS.length > 5 ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
         {TABS.map((t) => (
           <button
             key={t.value}
@@ -71,6 +76,7 @@ export function SettingsPage() {
         {tab === "notifications" && <NotificationSettingsPanel />}
         {tab === "webhooks" && <WebhookSettingsPanel />}
         {tab === "migration" && <MigrationSettingsPanel />}
+        {tab === "devices" && !IS_MULTI_TENANT && <DevicesSettingsPanel />}
         {tab === "backup" && !IS_MULTI_TENANT && <BackupSettingsPanel />}
       </div>
     </div>

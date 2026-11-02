@@ -18,3 +18,14 @@ describe("formatChartTime", () => {
     expect(result).toMatch(/\d{2}:\d{2}/);
   });
 });
+
+describe("formatLastReceived", () => {
+  it("UTC の時刻を日本時間（JST）で出す", async () => {
+    const { formatLastReceived } = await import("./time");
+    expect(formatLastReceived("2026-11-02T01:23:00Z")).toContain("10:23");
+  });
+  it("まだ受信がなければ『まだ受信なし』", async () => {
+    const { formatLastReceived } = await import("./time");
+    expect(formatLastReceived(null)).toBe("まだ受信なし");
+  });
+});

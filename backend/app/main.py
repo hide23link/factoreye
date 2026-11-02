@@ -38,6 +38,7 @@ from app.api import (
     alarms,  # アラームの一覧を見る・確認済みにする
     auth,  # 登録・ログイン・ログアウト。SaaS 版だけ
     dashboards,  # ダッシュボード（画面）の作成・取得・変更・削除
+    devices,  # 機器（機器ごとのキー）の管理。OSS 版だけ
     ingest,  # 機器からの測定値を受け取る（データの入口）
     migration,  # SaaS から OSS（自分のサーバー）へ、データを引っ越す
     readings,  # 測定値の一覧を見る
@@ -173,6 +174,7 @@ app.include_router(dashboards.router)  # /api/dashboards: ダッシュボード
 app.include_router(widgets.router)  # /api/widgets: ダッシュボードの部品
 app.include_router(alert_settings.router)  # /api/settings/notifications: Discord 通知の設定
 app.include_router(migration.router)  # /api/settings/migration: SaaS から OSS への引っ越し
+app.include_router(devices.router)  # /api/devices: 機器の管理（OSS 版）
 app.include_router(webhooks.router)  # /api/settings/webhooks: Webhook の通知先
 
 # Phase 0.5: AUTH_MODE=multi_tenant（SaaS）のときだけ、ログイン・ユーザー・管理者の API を公開する。
