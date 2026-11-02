@@ -95,3 +95,11 @@ export function describeWebhookError(err: unknown, action: string): string {
   }
   return describeActionError(err, action);
 }
+
+/** 機器の追加・所属付け・失効の失敗。409 は名前の重複（追加）か失効済み（所属付け）、422 は入力の不備 */
+export function describeDeviceError(err: unknown, action: string): string {
+  const status = errorStatus(err);
+  if (status === 409) return `${action}に失敗しました。その名前の機器がすでにあるか、失効済みの機器です。`;
+  if (status === 422) return `${action}に失敗しました。機器名（100 文字まで）と系統（40 文字まで）を確認してください。`;
+  return describeActionError(err, action);
+}

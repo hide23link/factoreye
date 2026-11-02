@@ -19,3 +19,15 @@ export function formatChartTime(ms: number, timeRangeHours: number): string {
       })
     : new Date(ms).toLocaleTimeString("ja-JP");
 }
+
+/** 最後の受信を、日本時間の「月/日 時:分」にする。受信がまだなら「まだ受信なし」。 */
+export function formatLastReceived(iso: string | null): string {
+  if (!iso) return "まだ受信なし";
+  return new Date(iso).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

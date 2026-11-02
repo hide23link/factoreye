@@ -227,3 +227,21 @@ export interface Dashboard {
 export interface DashboardDetail extends Dashboard {
   widgets: Widget[];
 }
+
+/** 取り込みの機器（OSS 版の機器ごとのキー）。キーそのものは持たない（作成時の応答でだけ返る）。 */
+export interface Device {
+  id: string;
+  name: string;
+  line: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+  /** 所属するセンサーの最新の測定値の時刻。まだ受信がなければ null */
+  lastReceivedAt: string | null;
+  /** 所属するセンサーの Ingest Key */
+  sensors: string[];
+}
+
+/** 機器を作った直後の応答。key は、このときだけ読める。 */
+export interface DeviceCreated extends Device {
+  key: string;
+}
