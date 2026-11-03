@@ -155,6 +155,7 @@ main() {
   fetch_file docker-compose.yml 644
   fetch_file .env.template 644
   fetch_file factoreye.sh 755
+  fetch_file smoke-test.sh 755
 
   if [ "$is_update" = true ]; then
     say "既存の設定（.env）とデータを残して更新します"

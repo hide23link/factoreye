@@ -1,5 +1,7 @@
 # ビルド段: TypeScript検査とViteビルドを行う（devDependenciesはこの段にだけ残る）
-FROM node:20-slim AS builder
+# ビルド段は、ビルドする PC の CPU（$BUILDPLATFORM）で動かす。出来上がるのは静的ファイル（CPU に依存しない）なので、
+# arm64（ラズパイ）向けのイメージを作るときも、遅いエミュレーション（QEMU）で npm を動かさずに済む
+FROM --platform=$BUILDPLATFORM node:20-slim AS builder
 
 WORKDIR /app
 
