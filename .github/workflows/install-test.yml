@@ -38,9 +38,14 @@ jobs:
 
       - name: Config file permissions and shape
         run: |
-          sudo test "$(sudo stat -c %a "$INSTALL_DIR/config/.env")" = "600"
-          sudo grep -q "^ADMIN_PASSWORD_HASH='\$2b\$" "$INSTALL_DIR/config/.env"
-          ! sudo grep -q "__GENERATE__" <(sudo grep -v '^#' "$INSTALL_DIR/config/.env")
+          env_file="$INSTALL_DIR/config/.env"
+          test "$(sudo stat -c %a "$env_file")" = "600"
+          # 管理パスワードのハッシュは $ を含むので、単一引用符で囲んで保存されている（-F: 文字どおりに探す）
+          sudo grep -qF "ADMIN_PASSWORD_HASH='\$2b\$" "$env_file"
+          # コメント以外に、乱数で埋め忘れた場所がないこと
+          if sudo grep -v '^#' "$env_file" | grep -q '__GENERATE__'; then
+            echo "::error::.env に未置換の項目がある"; exit 1
+          fi
 
       - name: Smoke test (view, auth, save and restart)
         run: bash install/smoke-test.sh "http://127.0.0.1:$PORT" "$ADMIN_PASSWORD"
