@@ -79,7 +79,9 @@ jobs:
             FACTOREYE_VERSION=test FACTOREYE_IMAGE_PREFIX=local FACTOREYE_SKIP_PULL=1 \
             bash install/install.sh
           test "$before" = "$(sudo sha256sum "$INSTALL_DIR/config/.env")"
-          sudo ls "$INSTALL_DIR"/backups/*.sql.gz "$INSTALL_DIR"/backups/*.env
+          # backups/ は root だけが入れる。一覧も root のシェルで展開する
+          sudo sh -c "ls -l $INSTALL_DIR/backups/*.sql.gz $INSTALL_DIR/backups/*.env"
+          test "$(sudo sh -c "stat -c %a $INSTALL_DIR/backups/*.env" | sort -u)" = "600"
           bash install/smoke-test.sh "http://127.0.0.1:$PORT"
 
       - name: Logs on failure
