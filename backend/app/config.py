@@ -6,6 +6,7 @@
 【誰が使うか】他のファイルが `from app.config import settings` と書いて、`settings.database_url`
 のように読む。設定を変えるには、環境変数（docker-compose.yml の environment や .env）を変える。
 """
+import os
 from enum import StrEnum
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -49,9 +50,16 @@ class IngestAuth(StrEnum):
 class Settings(BaseSettings):
     """設定の一覧。型が違う値（例: 数値の項目に文字列）は、起動時にエラーになる。"""
 
-    # extra="ignore": 配布版は、docker compose 用の項目（POSTGRES_PASSWORD など）も同じ .env に書くため、
-    # このアプリが使わない項目があっても、起動時にエラーにしない
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # extra="ignore": 配布版は、docker compose 用の項目（POSTGRES_PASSWORD など）も
+    # 同じ .env に書くため、このアプリが使わない項目があっても、起動時にエラーにしない
+    # 設定ファイルの場所。配布版は FACTOREYE_ENV_FILE で /app/config/.env を指す（ディレクトリごと
+    # マウントする。ファイル 1 つのマウントだと、ホストで新しいファイルに置き換える編集をしたとき、
+    # コンテナが古い実体を見続けてしまうため）。指定がなければ、作業ディレクトリの .env
+    model_config = SettingsConfigDict(
+        env_file=os.environ.get("FACTOREYE_ENV_FILE", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # 実行環境。"production" 以外（既定は development）では、
     # API の仕様書（/docs）と SQL のログを出す
@@ -66,6 +74,11 @@ class Settings(BaseSettings):
     jwt_secret: str = DEFAULT_SECRET
     # 画面のアドレス。CORS で、この1つだけを許可する（ほかのサイトからの API 呼び出しを防ぐ）
     frontend_url: str = "http://localhost:3001"
+
+    # 配布版（install/）の管理パスワードの bcrypt ハッシュ。設定画面から .env を変えるときに使う。
+    # 空なら、画面からは変更できない（.env を直接編集する）。
+    # .env には、$ を含むので単一引用符で囲んで書く
+    admin_password_hash: str = ""
 
     # 認証モード（AuthMode を参照）。既定は self-hosted（認証なし）
     auth_mode: AuthMode = AuthMode.DISABLED
