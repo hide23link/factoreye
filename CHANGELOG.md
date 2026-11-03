@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **本番の自動デプロイを、サーバーが GitHub を見に行く方式（pull 型）に切り替えた**: 本番サーバーの自己ホスト型ランナーと `deploy-cloud.yml` をやめた。公開リポジトリでは、外部の人の PR の中身が、ランナー経由で本番サーバー上で実行される恐れがあるため。`infra/cloud/deploy-pull.sh`（systemd のタイマーが 1 分ごとに実行）が、`main` が変わっていて、`backend/`・`frontend/`・`infra/cloud/`・`docker-compose.cloud.yml` のどれかが変わっていれば、`docker compose -f docker-compose.cloud.yml up -d --build` で作り直す（fast-forward だけ、失敗したら次の回に再試行、同時実行なし）。外から入る口（SSH・ランナー）は要らない。手順は `infra/README.md`「本番の自動デプロイ」
 - **LAN 向けの取り込み窓口の本文待ち（`client_body_timeout`）を 10 秒 → 30 秒に延ばした**: 2026-11-03 の OSS 版の点検で、機器 3 台（atom02/03/04）だけが 408（本文待ちの超過）と 499（機器が先に切断）を出していた（1 秒データの欠測はなし。再送で埋まるが、ハートビートの受信が最大 約 5 分遅れて詰まっていた）。電波強度とは無関係。機器側の送信の待ち時間は 25 秒に延ばす（ecopower PR #75）。`infra/lan-ingest/nginx.conf` の変更だけ。反映は窓口のコンテナの再起動が必要（単一ファイルのマウントのため `nginx -s reload` では反映されない）
 
 ### Added

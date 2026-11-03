@@ -45,7 +45,7 @@ factoreye-db/
    rm -f /etc/cron.d/factoreye-pgbackrest
    ```
 2. DR コンソール（`https://<本番のドメイン>/admin/dr`）の「自動切り替え」が**無効**なことを確認する。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
-3. 自動デプロイの前提を確認する: 本番の Docker Compose が **2.24 以上**（`docker compose version`。`env_file` の `required: false` の書き方に必要）。デプロイを実行する runner のユーザーが、`/opt/factoreye/walg/walg.env`（権限 600、所有者 root）を読めること（root でなければ、権限エラーで `compose up` が失敗する。その場合は runner が読めるグループにして 640 にする）。
+3. 自動デプロイの前提を確認する: 本番の Docker Compose が **2.24 以上**（`docker compose version`。`env_file` の `required: false` の書き方に必要）。自動デプロイを実行するユーザー（`factoreye`）が、`/opt/factoreye/walg/walg.env`（権限 600、所有者 root）を読めること（root でなければ、権限エラーで `compose up` が失敗する。その場合は、そのユーザーが読めるグループにして 640 にする）。
 4. **`main` にマージして、自動デプロイを済ませる**（PostgreSQL が、WAL-G 入りの新しいイメージで作り直される。数秒、DB が再起動する）。確認: `docker compose -f docker-compose.cloud.yml exec -T postgres wal-g --version`
 
 ### 1. 鍵を置く
@@ -57,8 +57,8 @@ ssh factoreye 'umask 077; mkdir -p /opt/factoreye/walg; cat > /opt/factoreye/wal
 LXC で:
 ```bash
 cd /opt/factoreye && git pull origin main && sudo infra/walg/make-conf.sh
-# 自動デプロイの runner（ユーザー factoreye）が、walg.env を読めるようにする（読めないと compose up が permission denied で失敗する。実際に起きた）
-sudo chmod 755 /opt/factoreye/walg                  # umask 077 で作ったディレクトリは、runner が入れない
+# 自動デプロイ（ユーザー factoreye）が、walg.env を読めるようにする（読めないと compose up が permission denied で失敗する。実際に起きた）
+sudo chmod 755 /opt/factoreye/walg                  # umask 077 で作ったディレクトリは、自動デプロイのユーザーが入れない
 sudo chgrp factoreye /opt/factoreye/walg/walg.env && sudo chmod 640 /opt/factoreye/walg/walg.env   # r2.env は 600 のまま（root だけ）
 ```
 

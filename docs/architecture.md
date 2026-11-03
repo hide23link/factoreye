@@ -392,6 +392,10 @@ DB に接続できない場合は `status` が `degraded` になる。
 - 復元した PostgreSQL は、バックアップの設定を使わず最小の自前の設定で起動する。鍵は環境に渡さず権限 600 のファイルから読む。`walg.env` が読めなくても復旧ツールは起動し、R2 の機能だけ無効になる（理由を画面に出す）
 - 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は [`tools/recovery/README.md`](../tools/recovery/README.md)
 
+### 11.1.1 本番（クラウド版）の自動デプロイ
+
+`main` が変わると、本番サーバーが自分で更新する。systemd のタイマー（`factoreye-deploy.timer`、1 分ごと）が `infra/cloud/deploy-pull.sh` を実行し、GitHub の `main` が前回デプロイした版から変わっていて、`backend/`・`frontend/`・`infra/cloud/`・`docker-compose.cloud.yml` が変わっていれば `docker compose -f docker-compose.cloud.yml up -d --build`。サーバーから外へ見に行くだけで、外から入る口（SSH・ランナー）は無い。fast-forward だけで更新し、失敗したら記録せず次の回に再試行する。ログは `journalctl -u factoreye-deploy`。手順と理由は `infra/README.md`「本番の自動デプロイ」、[decisions.md](decisions.md)（2026-11-03）。
+
 ### 11.2 配布版（OSS）のインストールと設定ファイル（`install/`）
 
 「1 コマンドで入る」ための一式。ソースのビルドは要らず、GHCR に公開したイメージ（`ghcr.io/hide23link/factoreye-backend` / `factoreye-frontend`、amd64 と arm64）を使う。ルートの `docker-compose.yml`（ソースからビルド。Raspberry Pi の運用・E2E が使う）とは別物で、そちらは変えていない。

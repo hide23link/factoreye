@@ -13,7 +13,6 @@ defaults:
 
 jobs:
   test:
-    # セルフホストランナー登録後は `runs-on: self-hosted` に切替（docs/architecture.md §11 運用）
     runs-on: ubuntu-latest
     services:
       postgres:
