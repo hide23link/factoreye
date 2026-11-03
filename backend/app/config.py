@@ -49,7 +49,9 @@ class IngestAuth(StrEnum):
 class Settings(BaseSettings):
     """設定の一覧。型が違う値（例: 数値の項目に文字列）は、起動時にエラーになる。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": 配布版は、docker compose 用の項目（POSTGRES_PASSWORD など）も同じ .env に書くため、
+    # このアプリが使わない項目があっても、起動時にエラーにしない
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 実行環境。"production" 以外（既定は development）では、
     # API の仕様書（/docs）と SQL のログを出す
