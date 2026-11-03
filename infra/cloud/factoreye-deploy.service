@@ -1,0 +1,14 @@
+# 本番の自動デプロイ（1 回分）。タイマー（factoreye-deploy.timer）が呼ぶ。手順は infra/README.md の「本番の自動デプロイ」
+[Unit]
+Description=FactorEye 本番の自動デプロイ（GitHub の main が変わっていれば更新する）
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# /opt/factoreye を持っていて、docker を使える利用者
+User=factoreye
+WorkingDirectory=/opt/factoreye
+ExecStart=/opt/factoreye/infra/cloud/deploy-pull.sh
+# イメージのビルドに時間がかかることがある
+TimeoutStartSec=1800
