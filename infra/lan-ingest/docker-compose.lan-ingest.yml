@@ -1,6 +1,6 @@
 # LAN 向けの取り込み専用の窓口（nginx）を足す。使い方は README.md。
 #
-#   LAN_INGEST_BIND=192.168.0.62 docker compose -f docker-compose.yml -f infra/lan-ingest/docker-compose.lan-ingest.yml up -d
+#   LAN_INGEST_BIND=192.168.0.10 docker compose -f docker-compose.yml -f infra/lan-ingest/docker-compose.lan-ingest.yml up -d
 #
 # LAN_INGEST_BIND: 窓口を開く、このホストの LAN の IP。0.0.0.0 にしない（Tailscale など、ほかの口にも開くため）。
 #                  未設定なら 127.0.0.1（このホストの中だけ。LAN の機器からは届かない）。止める・ログを見るときは未設定でよい

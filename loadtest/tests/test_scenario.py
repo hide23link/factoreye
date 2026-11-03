@@ -22,10 +22,32 @@ def test_jitter_must_not_exceed_interval() -> None:
 
 
 def test_production_host_is_rejected_unless_explicitly_allowed() -> None:
-    prod = "https://factoreye.hide23.link"
+    prod = "https://factoreye.example.com"
     with pytest.raises(ValueError, match="本番ホスト"):
         Scenario(target_url=prod).validate()
     Scenario(target_url=prod, allow_production=True).validate()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://192.168.0.10:8001",
+        "http://10.1.2.3",
+        "http://backend:8000",  # Docker のサービス名
+        "http://raspberrypi.local",
+        "http://oss.invalid",
+    ],
+)
+def test_local_hosts_are_not_production(url: str) -> None:
+    Scenario(target_url=url).validate()
+
+
+@pytest.mark.parametrize("url", ["https://factory.example.com", "http://8.8.8.8", "https://iot.co.jp"])
+def test_public_hosts_are_treated_as_production(url: str) -> None:
+    with pytest.raises(ValueError, match="本番ホスト"):
+        Scenario(target_url=url).validate()
 
 
 def test_unknown_keys_are_rejected() -> None:

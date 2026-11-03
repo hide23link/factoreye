@@ -129,7 +129,7 @@ def test_production_target_cannot_be_started() -> None:
     async def scenario_run() -> None:
         runner = Runner(transport=httpx.MockTransport(FakeServer().handler))
         with pytest.raises(ValueError):
-            await runner.start(Scenario(target_url="https://factoreye.hide23.link"))
+            await runner.start(Scenario(target_url="https://factoreye.example.com"))
 
     _run(scenario_run())
 
