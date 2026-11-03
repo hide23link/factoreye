@@ -9,7 +9,6 @@ on:
 
 jobs:
   e2e:
-    # セルフホストランナー登録後は `runs-on: self-hosted` に切替（docs/architecture.md §11 運用）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

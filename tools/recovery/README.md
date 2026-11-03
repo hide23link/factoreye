@@ -126,7 +126,7 @@ docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d --build
 - `BACKUP_DIR` の既定は `../../backups`（`/opt/factoreye/backups`）
 - 今の DB は、読み取り専用のロールで接続する（下の「読み取り専用のロール」）。`TARGET_DATABASE_URL=postgresql://factoreye_readonly:<パスワード>@postgres:5432/factoreye`
 - 画面は `127.0.0.1:8090` だけで待ち受けます。Mac からは `ssh -L 8090:localhost:8090 factoreye` を開いてから `http://localhost:8090` を開きます。Tailscale から直接開く場合は `.env` に `RECOVERY_BIND=<LXC の Tailscale の IP>` を設定します
-- FactorEye 本体のデプロイ（`deploy-cloud`）とは別に動きます。本体を作り直しても止まりません
+- FactorEye 本体の自動デプロイ（`infra/cloud/deploy-pull.sh`）とは別に動きます。本体を作り直しても止まりません
 
 ### OSS 版（自分のサーバーで FactorEye を動かしている場合）
 

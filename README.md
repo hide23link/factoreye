@@ -194,7 +194,8 @@ GitHub Actions（`.github/workflows/`）:
 | `arduino-client-compile.yml` | Arduino クライアントのコンパイル確認 |
 | `raspberry-pi-client-test.yml` | Raspberry Pi クライアントのテスト |
 | `recovery-tool-test.yml` | 復旧ツールのテスト |
-| `deploy-cloud.yml` | クラウド版のデプロイ |
+| `publish-images.yml` | タグ（`v*`）で、配布用イメージを GHCR に公開（amd64 + arm64） |
+| `install-test.yml` | まっさらな Ubuntu で `install.sh` を実行し、起動・設定の保存と再起動・更新まで確認 |
 
 ---
 
