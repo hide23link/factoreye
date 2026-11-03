@@ -106,7 +106,8 @@ create_env() {
   db_password="$(random_hex 16)"
   ADMIN_PASSWORD="$(random_hex 2)-$(random_hex 2)-$(random_hex 2)"
   local hash
-  hash="$(hash_password "$ADMIN_PASSWORD")" || die "管理パスワードのハッシュを作れません"
+  hash="$(hash_password "$ADMIN_PASSWORD")" \
+    || die "管理パスワードのハッシュを作れません（イメージ ${IMAGE_PREFIX}/factoreye-backend:${IMAGE_VERSION} を取得できない可能性があります。インターネットへの接続と、イメージが公開されているかを確認してください）"
 
   content="$(cat "$INSTALL_DIR/.env.template")"
   # 先に DATABASE_URL の行（パスワードを含む）を置き換えてから、残りの __GENERATE__ を順に置き換える
