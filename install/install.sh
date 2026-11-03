@@ -123,6 +123,9 @@ create_env() {
   if printf '%s\n' "$content" | grep -v '^#' | grep -q '__GENERATE__'; then die ".env の生成に失敗しました（未置換の項目があります）"; fi
 
   (umask 077 && printf '%s\n' "$content" > "$INSTALL_DIR/config/.env")
+  # umask だけに頼らない。置き場所に既定の ACL があると、umask があっても誰でも読めるファイルになる
+  # （GitHub のランナーで確認）。鍵と DB パスワードが入るので、持ち主（root）だけにする
+  chmod 600 "$INSTALL_DIR/config/.env"
 }
 
 # 毎日 3 時にバックアップを取る（cron.d がある環境だけ）
@@ -151,6 +154,8 @@ main() {
   ensure_docker
 
   mkdir -p "$INSTALL_DIR/backups" "$INSTALL_DIR/config"
+  # 設定（鍵）とバックアップ（全データ）は、root だけが入れるようにする
+  chmod 700 "$INSTALL_DIR/backups" "$INSTALL_DIR/config"
   cd "$INSTALL_DIR"
   local is_update=false
   [ -f config/.env ] && is_update=true
