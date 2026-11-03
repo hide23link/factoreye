@@ -24,7 +24,7 @@ set -euo pipefail
 
 INSTALL_DIR="${FACTOREYE_DIR:-/opt/factoreye}"
 PORT="${FACTOREYE_PORT:-3001}"
-VERSION="${FACTOREYE_VERSION:-latest}"
+IMAGE_VERSION="${FACTOREYE_VERSION:-latest}"
 BASE_URL="${FACTOREYE_BASE_URL:-https://raw.githubusercontent.com/hide23link/factoreye/main/install}"
 SRC_DIR="${FACTOREYE_SRC_DIR:-}"
 HEALTH_WAIT_SECONDS=120
@@ -43,11 +43,14 @@ check_root() {
 
 check_os() {
   [ -r /etc/os-release ] || die "対応していない OS です（/etc/os-release がありません）"
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID:-}" in
+  # /etc/os-release は VERSION・NAME などの変数を定義する。このスクリプトの変数を上書きしないよう、
+  # サブシェルの中で読み、必要な値だけを取り出す
+  local os_id os_name
+  os_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+  os_name="$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-不明な OS}")"
+  case "$os_id" in
     ubuntu|debian|raspbian) ;;
-    *) say "注意: ${PRETTY_NAME:-不明な OS} は動作確認の対象外です。Docker が入っていれば続けます" ;;
+    *) say "注意: ${os_name} は動作確認の対象外です。Docker が入っていれば続けます" ;;
   esac
   case "$(uname -m)" in
     x86_64|amd64|aarch64|arm64) ;;
@@ -91,7 +94,7 @@ detect_ip() {
 # （パスワードは環境変数で渡す。コマンドラインに出すと ps で他人に見えるため）
 hash_password() {
   docker run --rm -e FACTOREYE_PW="$1" --entrypoint python \
-    "${IMAGE_PREFIX}/factoreye-backend:$VERSION" \
+    "${IMAGE_PREFIX}/factoreye-backend:$IMAGE_VERSION" \
     -c 'import bcrypt, os; print(bcrypt.hashpw(os.environ["FACTOREYE_PW"].encode(), bcrypt.gensalt()).decode())'
 }
 
@@ -115,7 +118,7 @@ create_env() {
   content="${content/ADMIN_PASSWORD_HASH=/ADMIN_PASSWORD_HASH=\'${hash}\'}"
   content="${content/FRONTEND_URL=http:\/\/localhost:3001/FRONTEND_URL=http://${ip}:${PORT}}"
   content="${content/FACTOREYE_PORT=3001/FACTOREYE_PORT=${PORT}}"
-  content="${content/FACTOREYE_VERSION=latest/FACTOREYE_VERSION=${VERSION}}"
+  content="${content/FACTOREYE_VERSION=latest/FACTOREYE_VERSION=${IMAGE_VERSION}}"
   # コメント行は除いて、置き換え漏れがないか調べる
   if printf '%s\n' "$content" | grep -v '^#' | grep -q '__GENERATE__'; then die ".env の生成に失敗しました（未置換の項目があります）"; fi
 
