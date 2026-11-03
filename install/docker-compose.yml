@@ -1,19 +1,27 @@
 # FactorEye 配布版（OSS / self-hosted）の Docker Compose。ビルドは不要で、公開済みのイメージを取得して動かす。
 #
-# 使い方: install.sh が /opt/factoreye にこのファイルと .env を置いて起動する。手動なら、
-#   cp .env.template .env && （.env の __GENERATE__ を書き換える）&& docker compose up -d
+# 使い方: install.sh が /opt/factoreye にこのファイルと config/.env を置いて起動する。手動なら、
+#   mkdir config && cp .env.template config/.env
+#   （config/.env の __GENERATE__ を書き換える）
+#   docker compose --env-file config/.env up -d
 #
-# 設定は同じ階層の .env の 1 ファイルに集約している（テキストで編集してよい。画面の設定タブからも変えられる）。
-# 注意: backend には `environment:` を渡さない。環境変数は .env より優先されるため、
-#       画面から .env を書き換えても反映されなくなる。backend は /app/.env を直接読む。
+# 設定は config/.env の 1 ファイルに集約している（テキストで編集してよい。画面の設定タブからも変えられる）。
+# compose の変数（ポート・DB パスワード・版）も、同じファイルから読む（--env-file config/.env）。
+# 注意: backend には設定の値を `environment:` で渡さない。環境変数は .env より優先されるため、
+#       画面から .env を書き換えても反映されなくなる。backend は /app/config/.env を直接読む。
 
 services:
   backend:
     image: ${FACTOREYE_IMAGE_PREFIX:-ghcr.io/hide23link}/factoreye-backend:${FACTOREYE_VERSION:-latest}
     restart: unless-stopped
     volumes:
-      # 画面の設定タブが、この .env を書き換えて、backend 自身を再起動する
-      - ./.env:/app/.env
+      # 画面の設定タブが、この中の .env を書き換えて、backend 自身を再起動する。
+      # （ディレクトリごとマウントする理由は backend/app/env_file.py の冒頭を参照）
+      # .env.bak は、画面で保存する直前の内容。`./factoreye.sh restore-env` で戻せる
+      - ./config:/app/config
+    environment:
+      # 設定ファイルの場所だけを渡す（設定の値は渡さない）
+      - FACTOREYE_ENV_FILE=/app/config/.env
     depends_on:
       postgres:
         condition: service_healthy

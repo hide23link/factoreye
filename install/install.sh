@@ -7,7 +7,7 @@
 # やること:
 #   1. Docker が無ければ導入する（公式の get.docker.com）
 #   2. /opt/factoreye に compose ファイルと管理スクリプト（factoreye.sh）を置く
-#   3. 設定ファイル .env を作る（鍵・パスワードは乱数。すでにあれば、そのまま残す）
+#   3. 設定ファイル config/.env を作る（鍵・パスワードは乱数。すでにあれば、そのまま残す）
 #   4. 公開済みのイメージを取得して起動し、画面の URL と初期の管理パスワードを表示する
 # もう一度実行すると、データと .env を残したまま更新する（更新前に DB のバックアップを取る）。
 #
@@ -119,7 +119,7 @@ create_env() {
   # コメント行は除いて、置き換え漏れがないか調べる
   if printf '%s\n' "$content" | grep -v '^#' | grep -q '__GENERATE__'; then die ".env の生成に失敗しました（未置換の項目があります）"; fi
 
-  (umask 077 && printf '%s\n' "$content" > "$INSTALL_DIR/.env")
+  (umask 077 && printf '%s\n' "$content" > "$INSTALL_DIR/config/.env")
 }
 
 # 毎日 3 時にバックアップを取る（cron.d がある環境だけ）
@@ -147,10 +147,10 @@ main() {
   check_os
   ensure_docker
 
-  mkdir -p "$INSTALL_DIR/backups"
+  mkdir -p "$INSTALL_DIR/backups" "$INSTALL_DIR/config"
   cd "$INSTALL_DIR"
   local is_update=false
-  [ -f .env ] && is_update=true
+  [ -f config/.env ] && is_update=true
 
   fetch_file docker-compose.yml 644
   fetch_file .env.template 644
@@ -162,17 +162,19 @@ main() {
     ./factoreye.sh backup || say "注意: 更新前のバックアップを取れませんでした（DB が停止中の可能性）。続けます"
   fi
 
-  if [ "${FACTOREYE_SKIP_PULL:-}" != "1" ]; then
-    say "イメージを取得します..."
-    docker compose pull
-  fi
-
+  # 管理パスワードのハッシュ作りで backend のイメージを使うため、新規のときは、取得より先に .env を作る
+  # （イメージが手元に無ければ、docker run が自動で取得する）
   ADMIN_PASSWORD=""
   if [ "$is_update" = false ]; then
     create_env "$(detect_ip)"
   fi
 
-  docker compose up -d
+  if [ "${FACTOREYE_SKIP_PULL:-}" != "1" ]; then
+    say "イメージを取得します..."
+    docker compose --env-file config/.env pull
+  fi
+
+  docker compose --env-file config/.env up -d
   install_backup_cron
 
   say "起動を待っています（最大 ${HEALTH_WAIT_SECONDS} 秒）..."
@@ -190,7 +192,7 @@ main() {
   else
     say "   既存の設定を引き継ぎました。管理パスワードを変えるには: cd $INSTALL_DIR && ./factoreye.sh set-password"
   fi
-  say "   設定ファイル: $INSTALL_DIR/.env"
+  say "   設定ファイル: $INSTALL_DIR/config/.env"
   say "   管理コマンド: cd $INSTALL_DIR && ./factoreye.sh   （update / backup / status / logs / set-password）"
   say "=========================================="
 }
