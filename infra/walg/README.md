@@ -44,7 +44,7 @@ factoreye-db/
    docker compose -f docker-compose.cloud.yml restart postgres
    rm -f /etc/cron.d/factoreye-pgbackrest
    ```
-2. DR コンソール（`https://factoreye.hide23.link/admin/dr`）の「自動切り替え」が**無効**なことを確認する。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
+2. DR コンソール（`https://<本番のドメイン>/admin/dr`）の「自動切り替え」が**無効**なことを確認する。停止中は、コンソールが「障害」と記録し、Discord に通知が出る。想定内。
 3. 自動デプロイの前提を確認する: 本番の Docker Compose が **2.24 以上**（`docker compose version`。`env_file` の `required: false` の書き方に必要）。デプロイを実行する runner のユーザーが、`/opt/factoreye/walg/walg.env`（権限 600、所有者 root）を読めること（root でなければ、権限エラーで `compose up` が失敗する。その場合は runner が読めるグループにして 640 にする）。
 4. **`main` にマージして、自動デプロイを済ませる**（PostgreSQL が、WAL-G 入りの新しいイメージで作り直される。数秒、DB が再起動する）。確認: `docker compose -f docker-compose.cloud.yml exec -T postgres wal-g --version`
 

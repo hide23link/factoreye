@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   build: {
     rollupOptions: {
@@ -24,6 +24,11 @@ export default defineConfig({
   preview: {
     port: 3001,
     host: true,
-    allowedHosts: ["factoreye.hide23.link"],
+    // 外から、ホスト名つきで開くときの許可（カンマ区切り。例: VITE_ALLOWED_HOSTS=factoreye.example.com）。
+    // 既定は空で、localhost だけ。配布版は nginx で配信するので、この preview は開発用
+    allowedHosts: loadEnv(mode, ".", "VITE_")
+      .VITE_ALLOWED_HOSTS?.split(",")
+      .map((host) => host.trim())
+      .filter(Boolean) ?? [],
   },
-});
+}));

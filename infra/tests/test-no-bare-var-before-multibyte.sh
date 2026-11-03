@@ -6,6 +6,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-bad=$(perl -ne 'next if /^\s*#/; print "$ARGV:$.:$_" if /\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7F])/; close ARGV if eof' infra/*.sh infra/walg/*.sh infra/tests/*.sh 2>/dev/null || true)
+bad=$(perl -ne 'next if /^\s*#/; print "$ARGV:$.:$_" if /\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7F])/; close ARGV if eof' infra/*.sh infra/cloud/*.sh infra/walg/*.sh infra/tests/*.sh install/*.sh 2>/dev/null || true)
 if [ -n "$bad" ]; then echo "NG: 変数名の直後に、全角などの文字があります（\${VAR} と書いてください）:" >&2; echo "$bad" >&2; exit 1; fi
 echo "OK: 変数名の直後に全角などの文字がある箇所はありません"

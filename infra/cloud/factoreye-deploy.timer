@@ -1,0 +1,11 @@
+# 前回の実行が終わってから 60 秒ごとに、factoreye-deploy.service を動かす
+[Unit]
+Description=FactorEye 本番の自動デプロイを 1 分ごとに確認する
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

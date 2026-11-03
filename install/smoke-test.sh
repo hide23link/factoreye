@@ -44,7 +44,7 @@ auth="$(printf '%s' "$settings" | sed -n 's/.*"ingestAuth":"\([a-z]*\)".*/\1/p')
 if [ "$auth" = "key" ]; then
   code="$(status_of -X POST "$BASE_URL/api/ingest/readings" -H 'Content-Type: application/json' \
     -d '{"ingestKey":"smoke-test","value":1}')"
-  [ "$code" = "401" ] && pass "キーなしの取り込みは 401" || fail "キーなしの取り込みが 401 でない（$code）"
+  [ "$code" = "401" ] && pass "キーなしの取り込みは 401" || fail "キーなしの取り込みが 401 でない（${code}）"
 else
   pass "取り込みの認証は off のため、キーなしの確認は飛ばした"
 fi
@@ -55,7 +55,7 @@ if [ -z "$PASSWORD" ]; then
 else
   wrong="$(status_of -X POST "$BASE_URL/api/settings/runtime/unlock" -H 'Content-Type: application/json' \
     -d '{"password":"wrong-password-for-smoke-test"}')"
-  [ "$wrong" = "401" ] && pass "違うパスワードは 401" || fail "違うパスワードが 401 でない（$wrong）"
+  [ "$wrong" = "401" ] && pass "違うパスワードは 401" || fail "違うパスワードが 401 でない（${wrong}）"
 
   body="$(curl -s -X POST "$BASE_URL/api/settings/runtime/unlock" -H 'Content-Type: application/json' \
     -d "{\"password\":\"$PASSWORD\"}")"

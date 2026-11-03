@@ -4,11 +4,13 @@
 
 【誰が使うか】runner.py、vuser.py、web.py が読み込む。
 """
+import ipaddress
 from dataclasses import asdict, dataclass, fields, replace
 from urllib.parse import urlparse
 
-# 本番ホスト。ここへの実行は --allow-production を付けない限り拒否する
-PRODUCTION_HOSTS = frozenset({"factoreye.hide23.link"})
+# 手元・社内・試験用とみなす名前の末尾。これ以外の公開ホストは、本番かもしれないとして、
+# --allow-production を付けない限り拒否する（本番のドメイン名をコードに書かずに、誤爆を防ぐため）
+LOCAL_HOST_SUFFIXES = (".localhost", ".local", ".lan", ".internal", ".invalid", ".test", ".example")
 
 PROFILES = ("sine", "random", "spiky")
 
@@ -24,9 +26,21 @@ LIMITS: dict[str, tuple[float, float]] = {
 }
 
 
+def is_local_host(host: str) -> bool:
+    """手元・社内・試験用のホストか。localhost、ループバックと私的なアドレス（192.168.x.x など）、
+    ドットのない名前（Docker のサービス名）、LOCAL_HOST_SUFFIXES で終わる名前。"""
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return "." not in host or host == "localhost" or host.endswith(LOCAL_HOST_SUFFIXES)
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
 def is_production_target(target_url: str) -> bool:
-    host = urlparse(target_url).hostname or ""
-    return host in PRODUCTION_HOSTS
+    """本番かもしれない（手元・社内・試験用と分かるホストではない）送り先か。"""
+    return not is_local_host((urlparse(target_url).hostname or "").lower())
 
 
 @dataclass(frozen=True)

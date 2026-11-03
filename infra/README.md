@@ -33,6 +33,29 @@
 
    （何も指定しなければ、リポジトリ直下の`backups/`に7日分保持する）
 
+## 本番の自動デプロイ（クラウド版。サーバーが GitHub を見に行く方式）
+
+`main` が変わると、本番のサーバーが 1 分以内に自分で更新する。**サーバーから外へ見に行くだけ**で、外から入る口（SSH・ランナー）は要らない。公開リポジトリに、自己ホスト型ランナーを本番に置くと、外部の人の PR の中身が本番で実行される恐れがあるため、この方式にした（SSH の経路は、2026-10-06 に閉じたまま）。
+
+- `infra/cloud/deploy-pull.sh`: `git fetch` → 前回デプロイした版（`.deployed`）から変わっていて、`backend/`・`frontend/`・`infra/cloud/`・`docker-compose.cloud.yml` のどれかが変わっていれば、`docker compose -f docker-compose.cloud.yml up -d --build`。文書だけの変更は、コードの更新だけ。失敗したら記録せず、次の回にもう一度試す。本番のコードが手元で書き換えられていたら、上書きせずに止まる（exit 1）
+- `infra/cloud/factoreye-deploy.service` / `.timer`: systemd が、前回の終了から 60 秒ごとに実行する。ログは `journalctl -u factoreye-deploy`
+- 試験: `infra/tests/test-deploy-pull.sh`（Docker も GitHub も不要）
+
+### 導入（本番のサーバーで、root か sudo。1 回だけ）
+
+```bash
+cd /opt/factoreye && git pull origin main          # deploy-pull.sh と unit ファイルが入る
+sudo cp infra/cloud/factoreye-deploy.service infra/cloud/factoreye-deploy.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now factoreye-deploy.timer
+systemctl list-timers factoreye-deploy.timer        # 次の実行の予定が出る
+sudo -u factoreye /opt/factoreye/infra/cloud/deploy-pull.sh   # 手で 1 回。初回は「記録しました」と出るだけ
+```
+
+- `/opt/factoreye` の持ち主（`factoreye`）が、`docker` を使えて、`git pull` できること（HTTPS の公開リポジトリか、読み取りの鍵）
+- 確認: `main` に小さな変更（backend のコメントなど）をマージして、1〜2 分後に `journalctl -u factoreye-deploy -n 20` に「デプロイが終わりました」が出ること
+- 止めるとき: `sudo systemctl disable --now factoreye-deploy.timer`（手動のデプロイは、これまでどおり `docker compose -f docker-compose.cloud.yml up -d --build`）
+
 ## 動作確認
 
 ```bash

@@ -76,7 +76,7 @@ fetch_file() {
   if [ -n "$SRC_DIR" ]; then
     cp "$SRC_DIR/$name" "$INSTALL_DIR/$name"
   else
-    curl -fsSL "$BASE_URL/$name" -o "$INSTALL_DIR/$name.tmp" || die "$name を取得できません（$BASE_URL/$name）"
+    curl -fsSL "$BASE_URL/$name" -o "$INSTALL_DIR/$name.tmp" || die "${name} を取得できません（${BASE_URL}/${name}）"
     mv "$INSTALL_DIR/$name.tmp" "$INSTALL_DIR/$name"
   fi
   chmod "$mode" "$INSTALL_DIR/$name"

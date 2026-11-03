@@ -1,8 +1,8 @@
 #!/bin/bash
 # LAN 向けの取り込みの窓口（nginx）が、決めたとおりに通して・断っているかを確かめる。
 # LAN の別のマシン（機器と同じ立場）から実行する。使い方:
-#   ./infra/lan-ingest/verify.sh http://192.168.0.62:8001            # 通す・断るの確認
-#   ./infra/lan-ingest/verify.sh http://192.168.0.62:8001 --rate-test  # さらに、レート制限が偽装で避けられないかを確認（約 1 分、制限を使い切る）
+#   ./infra/lan-ingest/verify.sh http://192.168.0.10:8001            # 通す・断るの確認
+#   ./infra/lan-ingest/verify.sh http://192.168.0.10:8001 --rate-test  # さらに、レート制限が偽装で避けられないかを確認（約 1 分、制限を使い切る）
 # 注意: --rate-test のあと 1 分以内に、もう一度実行すると、取り込みの確認が 429 になって NG になる。
 #       取り込みの制限を解除している間（管理画面の解除、INGEST_RATE_LIMIT=off）は、--rate-test は NG になる。
 #
