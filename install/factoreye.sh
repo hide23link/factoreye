@@ -46,6 +46,8 @@ cmd_backup() {
   mv "$file.partial" "$file"
   # 設定ファイル（鍵・DB パスワード）も一緒に残す。失うと、DB のバックアップだけでは元に戻せない
   (umask 077 && cp "$ENV_FILE" "${file%.sql.gz}.env")
+  # umask だけに頼らず、権限を明示する（置き場所の既定の ACL で広がることがあるため）
+  chmod 600 "$file" "${file%.sql.gz}.env"
   find backups \( -name 'factoreye-*.sql.gz' -o -name 'factoreye-*.env' \) -mtime "+$BACKUP_RETENTION_DAYS" -delete
   echo "バックアップしました: ${file}（設定ファイルは ${file%.sql.gz}.env）"
 }
