@@ -18,6 +18,7 @@ import {
   fetchDevices,
   fetchMigrationStatus,
   fetchNotificationSettings,
+  fetchRuntimeSettings,
   fetchSensorReadings,
   fetchSensorReadingsAggregate,
   fetchSensorReadingsDownsampled,
@@ -69,6 +70,10 @@ export const useAlarms = (status?: string, limit?: number) =>
 /** 通知設定。 */
 export const useNotificationSettings = () =>
   useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });
+
+/** 配布版の「API・取り込み」設定。.env を直接編集したことに気づけるよう、15 秒ごとに取り直す。 */
+export const useRuntimeSettings = () =>
+  useQuery({ queryKey: ["runtime-settings"], queryFn: fetchRuntimeSettings, refetchInterval: 15000 });
 
 /** Webhook の購読の一覧。 */
 export const useWebhookSubscriptions = () =>

@@ -29,6 +29,14 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "Webhook連携" })).toBeInTheDocument();
   });
 
+  it("OSS 版には「API・取り込み」タブがある", () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+
+    renderWithQueryClient(<SettingsPage />);
+
+    expect(screen.getByRole("button", { name: "API・取り込み" })).toBeInTheDocument();
+  });
+
   it("アラームタブに切り替えられる", async () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([]);

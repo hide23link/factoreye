@@ -21,6 +21,7 @@ import type {
   MigrationStatus,
   NotificationSettings,
   Reading,
+  RuntimeSettings,
   ReadingAggregate,
   Sensor,
   WebhookEventType,
@@ -363,6 +364,63 @@ export const updateNotificationSettings = (data: Partial<NotificationSettings>) 
     method: "PUT",
     body: JSON.stringify(data),
   });
+
+// ── Runtime Settings（配布版: 設定ファイル .env の表示・変更）──────
+// backend/app/api/runtime_settings.py と対応。変更系は、解錠で受け取った許可証（token）を X-Settings-Token で送る
+
+export const fetchRuntimeSettings = () => request<RuntimeSettings>("/api/settings/runtime");
+
+/** 管理パスワードで解錠して、30 分有効の許可証を受け取る。 */
+export const unlockRuntimeSettings = (password: string) =>
+  request<{ token: string; expiresInSeconds: number }>("/api/settings/runtime/unlock", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+
+/** .env の項目を書き換える。values のキーは .env の項目名（例: INGEST_AUTH）。保存後、バックエンドが再起動する。 */
+export const saveRuntimeSettings = (values: Record<string, string>, token: string) =>
+  request<{ restarting: boolean }>("/api/settings/runtime", {
+    method: "PUT",
+    headers: { "X-Settings-Token": token },
+    body: JSON.stringify({ values }),
+  });
+
+export const changeRuntimePassword = (password: string, token: string) =>
+  request<{ restarting: boolean }>("/api/settings/runtime/password", {
+    method: "PUT",
+    headers: { "X-Settings-Token": token },
+    body: JSON.stringify({ password }),
+  });
+
+/** .env を直接編集したあとの反映（パスワード不要）。検査に通れば、バックエンドが再起動する。 */
+export const reflectRuntimeSettings = () =>
+  request<{ restarting: boolean }>("/api/settings/runtime/reflect", { method: "POST" });
+
+/** 再起動の確認に使う間隔（ミリ秒）と、あきらめるまでの時間。 */
+const RESTART_POLL_MS = 1000;
+const RESTART_GIVE_UP_MS = 60_000;
+// 停止を一度も見られなくても、この時間が過ぎたら「再起動は済んだ」とみなす（停止が短くて見逃した場合）
+const RESTART_MIN_WAIT_MS = 5000;
+
+/**
+ * バックエンドの再起動が終わるのを待つ。true: 戻った / false: 時間内に戻らなかった。
+ * 保存の応答の直後は、まだ旧プロセスが動いている（約 1 秒後に終了する）ので、
+ * 「いったん応答が止まったあと戻る」か、一定時間が過ぎてから応答する、のどちらかで戻ったと判断する。
+ */
+export async function waitForBackendRestart(): Promise<boolean> {
+  const startedAt = Date.now();
+  let sawDown = false;
+  while (Date.now() - startedAt < RESTART_GIVE_UP_MS) {
+    await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_MS));
+    try {
+      await fetchHealth();
+      if (sawDown || Date.now() - startedAt >= RESTART_MIN_WAIT_MS) return true;
+    } catch {
+      sawDown = true;
+    }
+  }
+  return false;
+}
 
 // ── Webhook Subscriptions（Phase 1: ノーコード連携）─────────────
 // Webhook の購読（イベントを、外部サービスの URL へ送る設定）

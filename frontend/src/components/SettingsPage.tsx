@@ -11,11 +11,12 @@ import { BackupSettingsPanel } from "./settings/BackupSettingsPanel";
 import { DevicesSettingsPanel } from "./settings/DevicesSettingsPanel";
 import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
+import { RuntimeSettingsPanel } from "./settings/RuntimeSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
 // 設定画面のタブの種類（値は、下の描画の分岐と対応させる）
-type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration" | "backup" | "devices";
+type SettingsTab = "sensors" | "alarms" | "notifications" | "webhooks" | "migration" | "backup" | "devices" | "runtime";
 
 // ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS 版（multi_tenant）では「バックアップ」は出さない
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
@@ -35,6 +36,7 @@ const TABS = IS_MULTI_TENANT
       ...BASE_TABS,
       { value: "devices" as const, label: "機器", icon: "🔑", hint: "送信キー" },
       { value: "backup" as const, label: "バックアップ", icon: "💾", hint: "復旧・書き戻し" },
+      { value: "runtime" as const, label: "API・取り込み", icon: "⚙️", hint: "取り込みの設定" },
     ];
 
 /** 設定画面の本体。初期表示はセンサーのタブ。 */
@@ -46,7 +48,7 @@ export function SettingsPage() {
       <h1 className="mb-4 text-2xl font-bold text-gray-900">設定</h1>
 
       {/* アイコンは飾り（aria-hidden）。ボタンの名前は、従来どおりタブの名前だけにする */}
-      <div className={`mb-4 grid grid-cols-3 gap-2 ${TABS.length > 6 ? "sm:grid-cols-7" : TABS.length > 5 ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
+      <div className={`mb-4 grid grid-cols-3 gap-2 ${TABS.length > 7 ? "sm:grid-cols-8" : TABS.length > 6 ? "sm:grid-cols-7" : TABS.length > 5 ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
         {TABS.map((t) => (
           <button
             key={t.value}
@@ -78,6 +80,7 @@ export function SettingsPage() {
         {tab === "migration" && <MigrationSettingsPanel />}
         {tab === "devices" && !IS_MULTI_TENANT && <DevicesSettingsPanel />}
         {tab === "backup" && !IS_MULTI_TENANT && <BackupSettingsPanel />}
+        {tab === "runtime" && !IS_MULTI_TENANT && <RuntimeSettingsPanel />}
       </div>
     </div>
   );

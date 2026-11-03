@@ -80,6 +80,24 @@ export function describeSensorError(err: unknown, action: string): string {
   return describeActionError(err, action);
 }
 
+/**
+ * API が返した失敗の理由（本文の detail）を、文字列の一覧にする。取り出せなければ空の一覧。
+ * 設定ファイルの検査の誤り（例: ["INGEST_AUTH: ..."]）を、画面に並べて出すために使う。
+ */
+export function errorDetails(err: unknown): string[] {
+  if (!(err instanceof Error)) return [];
+  const start = err.message.indexOf("{");
+  if (start < 0) return [];
+  try {
+    const body = JSON.parse(err.message.slice(start)) as { detail?: unknown };
+    if (typeof body.detail === "string") return [body.detail];
+    if (Array.isArray(body.detail)) return body.detail.filter((item): item is string => typeof item === "string");
+  } catch {
+    // 本文が JSON でなければ、理由は取り出せない
+  }
+  return [];
+}
+
 /** 通知設定（Discord）の保存の失敗。422 は、送信先の URL の形が合っていない */
 export function describeNotificationError(err: unknown): string {
   if (errorStatus(err) === 422) {
