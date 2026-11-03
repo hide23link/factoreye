@@ -13,6 +13,60 @@
 
 ## クイックスタート
 
+### Ubuntu / Raspberry Pi（1 コマンド）
+
+Ubuntu・Debian・Raspberry Pi OS（64bit）で、次の 1 行を実行します。Docker が無ければ自動で入れます。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hide23link/factoreye/main/install/install.sh | sudo bash
+```
+
+1. **実行する**（数分。ビルドはせず、公開済みのイメージを取得します）
+2. **表示された URL をブラウザで開く**（例: `http://192.168.0.20:3001`）。最後に表示される**管理パスワード**は、一度しか出ないので控えてください
+3. **画面右上の「セットアップガイド」**に沿って、センサーを登録し、ダッシュボードを作る（約 5 分）
+
+もう一度実行すると、データと設定を残したまま更新します（更新前に自動でバックアップを取ります）。
+
+| やりたいこと | 方法 |
+|---|---|
+| 設定を変える | 画面の **設定 → API・取り込み**（管理パスワードが必要）。または `/opt/factoreye/config/.env` をテキストで編集し、同じ画面の「ファイルの内容を反映」を押す |
+| 管理コマンド | `cd /opt/factoreye && ./factoreye.sh`（`status` / `logs` / `update` / `backup` / `set-password` / `restore-env`） |
+| 動作確認 | `cd /opt/factoreye && ./smoke-test.sh http://<IP>:3001 '<管理パスワード>'`（画面・API・認証・設定の保存と再起動を確かめる。パスワードを省くと見るだけ） |
+| 削除 | `cd /opt/factoreye && docker compose --env-file config/.env down -v && cd / && sudo rm -rf /opt/factoreye /etc/cron.d/factoreye`（データも消えます） |
+
+**設定ファイル**は `/opt/factoreye/config/.env` の 1 つです。取り込みのキー、認証、自動登録、レート制限などをここに集約しています。秘密の値（`JWT_SECRET`・DB パスワード）は画面に出さず、このファイルでだけ変えます。ひな形は [`install/.env.template`](install/.env.template) です。
+
+> **注意**: 配布版は http です。インターネットから使う場合は、リバースプロキシ（Caddy・Cloudflare Tunnel など）で https にしてください。取り込み先を `INGEST_AUTH=off` にするときは、口を LAN に限定してください。
+
+### Mac / Windows（Docker Desktop）
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) を入れて起動してから、ターミナル（Windows は PowerShell か WSL）で実行します。
+
+```bash
+mkdir factoreye
+cd factoreye
+curl -fsSLO https://raw.githubusercontent.com/hide23link/factoreye/main/install/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/hide23link/factoreye/main/install/.env.template
+mkdir config
+cp .env.template config/.env
+```
+
+Windows の PowerShell では、`curl` を `curl.exe` に読み替えてください（`curl` は別のコマンドの別名です）。
+
+`config/.env` を開き、`__GENERATE__` の 4 か所を長いランダムな文字列に置き換えます（`DATABASE_URL` のパスワードと `POSTGRES_PASSWORD` は同じ値）。ランダムな文字列は、Mac は `openssl rand -hex 24`、PowerShell は `-join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })` で作れます。そのあと起動します。
+
+```bash
+docker compose --env-file config/.env up -d
+```
+
+画面は http://localhost:3001 です。管理パスワード（`ADMIN_PASSWORD_HASH`）は空のままなので、設定は `config/.env` を直接編集して、画面の「ファイルの内容を反映」で取り込みます。
+
+> Docker が難しい場合は、Python だけで動くオフライン版 **FactorEye-S** もあります（[ecopower リポジトリ](https://github.com/hide23link/ecopower) の `factoreyeS/`）。
+
+---
+
+### 開発者向け: ソースからビルドして起動する
+
 ```bash
 docker compose up -d --build
 ```

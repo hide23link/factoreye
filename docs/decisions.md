@@ -372,6 +372,21 @@ SaaS → OSS の移行は、書き出しファイルを介して行う。OSS →
 
 イメージの大きさは、すべて実測（Mac arm64）。
 
+### 2026-11-03 — OSS 版は「1 コマンドで入る」配布物（`install/`）にする。ルートの compose は変えない
+- **判断**: `curl … | sudo bash` の `install/install.sh` が、Docker の導入・乱数の鍵つき `config/.env` の生成・公開済みイメージの取得・起動までを行う。イメージは GHCR（amd64 + arm64）にタグで公開する。配布用の compose は `install/` に独立させ、ルートの `docker-compose.yml`（ソースからビルド）は変えない
+- **理由**: 公開にあたり、`git clone` と `docker compose up --build`、`VITE_API_URL` に IP を書いて再ビルドする手順、既定の鍵のままでも起動できること、が導入の壁だった。ルートの compose は Raspberry Pi の運用・E2E・`infra/` のスクリプトが使っており、書き換えると既存の運用が黙って別物になる
+- **影響**: 画面と API の入口を 1 ポートにした（frontend の nginx が `/api` を転送し、`VITE_API_URL` は空 = 同じオリジン）。レート制限は `CF-Connecting-IP`（接続元）を使うため、nginx が接続元を付け直す。frontend の Dockerfile のビルド段は `$BUILDPLATFORM` で動かし、arm64 向けでも npm を QEMU で動かさない
+
+### 2026-11-03 — 設定は `config/.env` の 1 ファイル。画面から変えられ、直接編集もできる
+- **判断**: 取り込みの鍵・認証・自動登録・レート制限などの設定を、`config/.env` の 1 ファイルに集約する。画面（設定 → API・取り込み）は、管理パスワードで解錠して変更し、保存すると `.env` を書き換えて backend が自分を再起動する。直接編集したときは、パスワードなしの「ファイルの内容を反映」で取り込む（起動後に書き換わっているときだけ受け付け、検査に通らなければ再起動しない）。Discord・Webhook の送信先・機器キー・センサーは、画面で増減するものなので DB のまま
+- **理由**: 設定の置き場が 2 つあると、どちらが正か分からなくなる。画面からも直接も変えられることが要件。再起動で反映するのは、起動時に 1 回読む既存の設定の仕組みを変えないため
+- **影響**: backend は設定を環境変数でなく `.env` から直接読む（環境変数は `.env` より優先されるため）。`JWT_SECRET`・DB パスワード・`DATABASE_URL` は画面から変えられない。管理パスワードのハッシュ（`$` を含む）は単一引用符で囲む。画面で保存する前の内容は `config/.env.bak` に残し、`./factoreye.sh restore-env` で戻せる
+
+### 2026-11-03 — `.env` はディレクトリごとマウントする（ファイル 1 つのマウントは使わない）
+- **判断**: `./config`（`.env` と `.env.bak`）を backend にマウントする。compose の変数も `--env-file config/.env` で同じファイルから読む
+- **理由**: ファイル 1 つのバインドマウントは、ホストで `sed -i`・vim のように新しいファイルに置き換えて保存すると、コンテナが古い実体を見続けた（反映ボタンが「変更なし」と返し、500 も出た。実機相当の確認で発見）
+- **影響**: 設定の場所は `/opt/factoreye/config/.env`。`factoreye.sh backup` は DB と一緒に設定ファイルも保存する（失うと DB だけでは戻せない）
+
 ### 2026-10-06 — frontend は nginx で静的ファイルを配信する
 - **判断**: 実行段は `nginx:alpine`。ビルド済みの `dist/` だけを置く。SPA のフォールバックと assets の長期キャッシュは `frontend/nginx.conf` で設定する
 - **理由**: `vite preview` は開発用のサーバーで、devDependencies（約 200 MB）と Node.js を本番イメージに残していた。428 MB → 63 MB になった

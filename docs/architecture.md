@@ -392,6 +392,34 @@ DB に接続できない場合は `status` が `degraded` になる。
 - 復元した PostgreSQL は、バックアップの設定を使わず最小の自前の設定で起動する。鍵は環境に渡さず権限 600 のファイルから読む。`walg.env` が読めなくても復旧ツールは起動し、R2 の機能だけ無効になる（理由を画面に出す）
 - 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は [`tools/recovery/README.md`](../tools/recovery/README.md)
 
+### 11.2 配布版（OSS）のインストールと設定ファイル（`install/`）
+
+「1 コマンドで入る」ための一式。ソースのビルドは要らず、GHCR に公開したイメージ（`ghcr.io/hide23link/factoreye-backend` / `factoreye-frontend`、amd64 と arm64）を使う。ルートの `docker-compose.yml`（ソースからビルド。Raspberry Pi の運用・E2E が使う）とは別物で、そちらは変えていない。
+
+| ファイル | 内容 |
+|---|---|
+| `install/install.sh` | `curl … \| sudo bash`。Docker の導入、`/opt/factoreye` への配置、`config/.env` の生成（鍵・DB パスワードは乱数、IP は自動検出、管理パスワードは乱数を 1 回だけ表示）、起動、`/health` の確認、毎日 3 時のバックアップ（cron）。再実行は設定とデータを残して更新（更新前にバックアップ） |
+| `install/docker-compose.yml` | backend / frontend / `postgres:15`。公開ポートは frontend の 3001 だけ（`/api` と `/health` は frontend の nginx が backend へ転送する。DB は公開しない） |
+| `install/.env.template` | 設定ファイルのひな形（コメント付き） |
+| `install/factoreye.sh` | `status` / `logs` / `restart` / `update` / `backup`（DB と設定ファイル）/ `set-password` / `restore-env` |
+| `install/smoke-test.sh` | 動作確認（`install.sh` が `/opt/factoreye` にも置く）（画面・API・認証・設定の保存と再起動）。CI と実機の両方で使う |
+
+**設定は `config/.env` の 1 ファイル**に集約する。backend は設定を環境変数ではなく、このファイルから直接読む（`FACTOREYE_ENV_FILE=/app/config/.env`。環境変数は `.env` より優先されるため、compose の `environment:` には設定の値を書かない）。compose の変数（ポート・DB パスワード・版）も `--env-file config/.env` で同じファイルから読む。`config/` は**ディレクトリごと**マウントする（ファイル 1 つのマウントは、ホストの `sed -i`・vim のような置き換え保存で、コンテナが古い実体を見続け、反映が効かなくなる）。
+
+**画面の「設定 → API・取り込み」**（self-hosted だけ。`backend/app/api/runtime_settings.py`、`app/env_file.py`）:
+
+| API | 認証 | 内容 |
+|---|---|---|
+| `GET /api/settings/runtime` | なし | 今の設定（鍵・`JWT_SECRET`・DB パスワードは返さない）と、`.env` が起動後に書き換わったか（`fileChanged`） |
+| `POST /api/settings/runtime/unlock` | 管理パスワード | 30 分有効の許可証（JWT）を返す。5 回連続で失敗すると 60 秒止める |
+| `PUT /api/settings/runtime` | 許可証（`X-Settings-Token`） | 変えた項目だけを `.env` に書く。画面から変えられる項目は `INGEST_*`・`WEBHOOK_ALLOW_PRIVATE_NETWORKS`・`FRONTEND_URL` に限る。値は引用符なしで安全な形に限る（compose が `$`・`#` を解釈するため） |
+| `PUT /api/settings/runtime/password` | 許可証 | 管理パスワード（`ADMIN_PASSWORD_HASH`。bcrypt。`$` を含むので単一引用符で囲んで保存）を変える |
+| `POST /api/settings/runtime/reflect` | なし | `.env` を直接編集したあとの反映。起動後に書き換わっているときだけ受け付け（409）、検査に通らなければ再起動しない（422） |
+
+保存・反映は、**再起動後と同じ手順（`Settings`）で先に検査**し、通らない内容は書かない。書くときは直前の内容を `config/.env.bak` に残し、同じファイルの中身を書き換える。応答のあと 1 秒で自分に SIGTERM を送り（バッファの最後の保存を済ませて終わる）、Docker の `restart: unless-stopped` が新しい `.env` で起動し直す（約 4 秒）。画面は `/health` が止まって戻るのを待ち、全データを取り直す。管理パスワードが未設定（`ADMIN_PASSWORD_HASH` が空）だと、画面からは変更できない（`.env` の直接編集と反映ボタンは使える）。
+
+CI は `publish-images.yml`（タグ `v*` で GHCR へ公開）と `install-test.yml`（まっさらな Ubuntu で `install.sh` → スモークテスト → 置き換え型の直接編集と反映 → 再実行。arm64 はビルドだけ）。
+
 ### 設定（環境変数）
 | 変数 | 既定 | 内容 |
 |---|---|---|
@@ -406,6 +434,8 @@ DB に接続できない場合は `status` が `degraded` になる。
 | `ENVIRONMENT` | `development` | `production` で `/docs` を無効化。このとき `INGEST_API_KEY`（`AUTH_MODE=multi_tenant` なら `JWT_SECRET`）が既定値のままだと起動しない（`INGEST_AUTH=off` なら `INGEST_API_KEY` は検査しない。大文字小文字は区別しない） |
 | `FRONTEND_URL` | `http://localhost:3001` | CORS の許可オリジン（`*` は使わない） |
 | `AUTH_MODE` | `disabled` | `multi_tenant` で SaaS モード |
+| `ADMIN_PASSWORD_HASH` | 空 | 配布版の管理パスワードの bcrypt ハッシュ（§11.2）。空なら画面から設定を変更できない |
+| `FACTOREYE_ENV_FILE` | `.env` | 設定ファイルの場所（配布版は `/app/config/.env`。§11.2） |
 | `INGEST_RATE_LIMIT` | `100/minute` | 取り込みの制限。`off` で解除（管理画面からの期限付き解除は §10） |
 | `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Webhook の社内ネットワーク送信を許可（§7） |
 | `JWT_ACCESS_EXPIRE_MINUTES` | `15` | アクセストークンの有効期限（分）（§10） |

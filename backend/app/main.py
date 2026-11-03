@@ -42,6 +42,7 @@ from app.api import (
     ingest,  # 機器からの測定値を受け取る（データの入口）
     migration,  # SaaS から OSS（自分のサーバー）へ、データを引っ越す
     readings,  # 測定値の一覧を見る
+    runtime_settings,  # 設定ファイル（.env）を画面から見て・変える。OSS 版だけ
     sensors,  # センサーの登録・変更・削除と、そのセンサーの測定値の取得
     webhooks,  # Webhook（外部サービスへの通知先）の登録・変更・削除
     widgets,  # ダッシュボードの部品（グラフや数値の表示）の変更・削除
@@ -184,6 +185,8 @@ if settings.auth_mode == AuthMode.MULTI_TENANT:
     # 管理者API（管理者はテキストファイルで管理。app/admin_accounts.py 参照）
     app.include_router(admin.router)
     app.include_router(admin_failback.router)  # /api/admin/failback/*: 控えからの書き戻し
+else:
+    app.include_router(runtime_settings.router)  # /api/settings/runtime: .env の表示・変更
 
 
 @app.get("/health")

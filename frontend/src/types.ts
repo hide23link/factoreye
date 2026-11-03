@@ -111,6 +111,24 @@ export interface NotificationSettings {
   criticalRepeatIntervalMinutes: number;
 }
 
+/** 配布版（OSS）の「API・取り込み」設定（設定ファイル .env の内容）。秘密の値（鍵）は含まれない。 */
+export interface RuntimeSettings {
+  // 取り込みキーが設定済みか（値そのものは返ってこない）
+  ingestApiKeyConfigured: boolean;
+  ingestAuth: "key" | "off";
+  ingestAutoCreate: boolean;
+  ingestAutoCreateMaxSensors: number;
+  ingestDeviceTime: boolean;
+  ingestRateLimit: string;
+  ingestCacheSeconds: number;
+  webhookAllowPrivateNetworks: boolean;
+  frontendUrl: string;
+  // 管理パスワードが設定済みか。未設定だと画面からは変更できない
+  passwordConfigured: boolean;
+  // 起動したあとに .env が書き換えられている（表示は反映前の値）
+  fileChanged: boolean;
+}
+
 // Zapier/Make/n8n等のノーコード自動化サービスへ繋ぐための汎用Webhook（Phase 1）
 // Webhook で送るイベントの種類（測定値の受信・アラーム発生）
 export type WebhookEventType = "reading.received" | "alarm.triggered";
