@@ -39,9 +39,12 @@ jobs:
       - name: Config file permissions and shape
         run: |
           env_file="$INSTALL_DIR/config/.env"
-          test "$(sudo stat -c %a "$env_file")" = "600"
+          # 失敗したときの手がかり（値は出さず、項目名・権限・ハッシュの先頭だけ）
+          sudo ls -la "$INSTALL_DIR/config"
+          sudo sed -E 's/=.{0,6}.*/=…/' "$env_file" | grep -v '^#' | grep -v '^$' || true
+          test "$(sudo stat -c %a "$env_file")" = "600" || { echo "::error::権限が 600 でない"; exit 1; }
           # 管理パスワードのハッシュは $ を含むので、単一引用符で囲んで保存されている（-F: 文字どおりに探す）
-          sudo grep -qF "ADMIN_PASSWORD_HASH='\$2b\$" "$env_file"
+          sudo grep -qF "ADMIN_PASSWORD_HASH='\$2b\$" "$env_file" || { echo "::error::ハッシュが単一引用符で保存されていない"; exit 1; }
           # コメント以外に、乱数で埋め忘れた場所がないこと
           if sudo grep -v '^#' "$env_file" | grep -q '__GENERATE__'; then
             echo "::error::.env に未置換の項目がある"; exit 1
