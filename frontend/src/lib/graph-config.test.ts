@@ -9,6 +9,7 @@ import {
   graphAxisSides,
   graphColor,
   graphSensorIds,
+  graphSensorMovePatch,
   graphSensorPatch,
   nextGraphColor,
   bandEnds,
@@ -343,5 +344,25 @@ describe("graphAxisSides の単位の入力（axisUnits）", () => {
     const r = graphAxisSides({ axisUnits: { left: "kW" } }, ["a"], unitOf);
     expect(r.dual).toBe(false);
     expect(r.leftUnit).toBe("kW");
+  });
+});
+
+describe("graphSensorMovePatch", () => {
+  const widget = graph("a", { sensorIds: ["a", "b", "c"], colors: ["#111111", "#222222", "#333333"] });
+  it("後ろへ動かすと、色もセンサーと一緒に動く", () => {
+    const patch = graphSensorMovePatch(widget, 0, 1);
+    expect(patch?.config.sensorIds).toEqual(["b", "a", "c"]);
+    expect(patch?.config.colors).toEqual(["#222222", "#111111", "#333333"]);
+    expect(patch?.sensorId).toBe("b");
+  });
+  it("前へ動かせる", () => {
+    const patch = graphSensorMovePatch(widget, 2, -1);
+    expect(patch?.config.sensorIds).toEqual(["a", "c", "b"]);
+    expect(patch?.config.colors).toEqual(["#111111", "#333333", "#222222"]);
+  });
+  it("端と範囲外は動かさない（null）", () => {
+    expect(graphSensorMovePatch(widget, 0, -1)).toBeNull();
+    expect(graphSensorMovePatch(widget, 2, 1)).toBeNull();
+    expect(graphSensorMovePatch(widget, 5, -1)).toBeNull();
   });
 });

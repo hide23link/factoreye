@@ -59,6 +59,27 @@ export function graphSensorPatch(
   };
 }
 
+/**
+ * センサーを 1 つ前（delta=-1）または後ろ（delta=+1）へ動かしたときの設定の変更分。
+ * 色はセンサーに付いて動く。動かせない（端・範囲外）ときは null。
+ */
+export function graphSensorMovePatch(
+  widget: Pick<Widget, "type" | "config" | "sensorId">,
+  index: number,
+  delta: -1 | 1,
+): { sensorId: string | null; config: WidgetConfig } | null {
+  const ids = graphSensorIds(widget);
+  const target = index + delta;
+  if (index < 0 || index >= ids.length || target < 0 || target >= ids.length) return null;
+  const order = ids.map((_, i) => i);
+  [order[index], order[target]] = [order[target], order[index]];
+  return graphSensorPatch(
+    widget,
+    order.map((i) => ids[i]),
+    order,
+  );
+}
+
 /** このウィジェットが使う表示範囲。ウィジェット固有の期間があればそれ、無ければダッシュボード全体 */
 export function effectiveRange(widget: Pick<Widget, "config">, dashboardRange: TimeRange): TimeRange {
   const hours = widget.config.rangeHours;

@@ -20,6 +20,7 @@ import {
   graphColor,
   graphDataOptions,
   graphSensorIds,
+  graphSensorMovePatch,
   graphSensorPatch,
   defaultLineShape,
   graphStyle,
@@ -318,6 +319,8 @@ function GraphSettings({ widget, actions }: SectionProps) {
       const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
       return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
     });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
   const recolor = (index: number) =>
     void actions.patchFromLatest(widget, (latest) => {
       const colors = graphSensorIds(latest).map((_, i) => graphColor(latest, i));
@@ -339,6 +342,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
           onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
           onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
           onRemove={removeAt}
+          onMove={moveAt}
         />
       </Section>
       <Section title="グラフの形">
@@ -724,6 +728,8 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
       const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
       return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
     });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
   // 開始を終了以降にしたときは、終了を開始の 1 時間後に直す（生産管理と同じ）
   const changeStart = (hour: number) =>
     actions.patchFromLatest(widget, (latest) => ({
@@ -744,6 +750,7 @@ function TargetStripSettings({ widget, actions }: SectionProps) {
           onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
           onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
           onRemove={removeAt}
+          onMove={moveAt}
         />
       </Section>
       <Section title="判定の方法" note="受信の確認は「受信の間隔」、生産の目標は「件数」">
