@@ -310,7 +310,14 @@ function GraphSettings({ widget, actions }: SectionProps) {
   // 縦軸は、値があれば手動。値を入れる前でも入力欄を出し続けるため、「手動にした」操作だけ覚えておく
   // （ウィジェットを切り替えたときは、SettingsPanel の key で作り直されるので、前のウィジェットの状態は引き継がない）
   const [pickedManual, setPickedManual] = useState(false);
-  const manualAxis = pickedManual || config.yAxisMin !== undefined || config.yAxisMax !== undefined;
+  const manualAxis =
+    pickedManual ||
+    config.yAxisMin !== undefined ||
+    config.yAxisMax !== undefined ||
+    config.yAxisRightMin !== undefined ||
+    config.yAxisRightMax !== undefined;
+  // 左右 2 軸で描くときは、左と右の上下限を別々に入力する
+  const twoAxes = axis.dual && options.axisMode === "shared" && options.stack === "none";
 
   // どちらも最新のウィジェットから作る（連続で押したときに、古い表示のまま上書きしないため）
   const removeAt = (index: number) =>
@@ -327,7 +334,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
       colors[index] = nextGraphColor(colors[index]);
       return { config: { ...latest.config, colors } };
     });
-  const axisChange = (key: "yAxisMin" | "yAxisMax", value: number | null) =>
+  const axisChange = (key: "yAxisMin" | "yAxisMax" | "yAxisRightMin" | "yAxisRightMax", value: number | null) =>
     changeConfig(actions, widget, { [key]: value ?? undefined });
 
   return (
@@ -372,20 +379,38 @@ function GraphSettings({ widget, actions }: SectionProps) {
             checked={!manualAxis}
             onChange={(auto) => {
               setPickedManual(!auto);
-              if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined });
+              if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined, yAxisRightMin: undefined, yAxisRightMax: undefined });
             }}
           />
           {manualAxis && (
-            <div className="grid grid-cols-2 gap-2">
-              <label className="flex flex-col gap-1 text-xs text-gray-500">
-                最小
-                <NumberField label="縦軸の最小" value={config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMin", v)} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-gray-500">
-                最大
-                <NumberField label="縦軸の最大" value={config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMax", v)} />
-              </label>
-            </div>
+            <>
+              {twoAxes && <div className="text-xs text-gray-500">左の軸</div>}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  最小
+                  <NumberField label={twoAxes ? "左の縦軸の最小" : "縦軸の最小"} value={config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMin", v)} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  最大
+                  <NumberField label={twoAxes ? "左の縦軸の最大" : "縦軸の最大"} value={config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMax", v)} />
+                </label>
+              </div>
+              {twoAxes && (
+                <>
+                  <div className="text-xs text-gray-500">右の軸</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      最小
+                      <NumberField label="右の縦軸の最小" value={config.yAxisRightMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisRightMin", v)} />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      最大
+                      <NumberField label="右の縦軸の最大" value={config.yAxisRightMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisRightMax", v)} />
+                    </label>
+                  </div>
+                </>
+              )}
+            </>
           )}
         </Section>
       )}

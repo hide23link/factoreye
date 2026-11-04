@@ -3,8 +3,8 @@
  *
  * - 範囲はダッシュボードに 1 つ。SensorGraph と MultiSensorComparison は、この範囲に従う
  * - 範囲は URL（?range=1h / ?from=…&to=…）に反映する。リンクで同じ表示を開ける
- * - 範囲はダッシュボードの設定（サーバー側）には保存しないが、最後に見ていた範囲は
- *   この端末の localStorage に残す。次に開いたとき、URL に指定が無ければそれを使う
+ * - 範囲はダッシュボードの設定（サーバー側）には保存しないが、最後に見ていた「直近」の範囲は
+ *   この端末の localStorage に残す（固定の期間は残さない）。次に開いたとき、URL に指定が無ければそれを使う
  *   （毎回「直近 1 時間」に戻ると不便、という利用者の要望のため）
  *
  * 【誰が使うか】DashboardView、TimeRangeControls、グラフ系の2つのウィジェット。
@@ -38,7 +38,8 @@ function readStoredRange(): TimeRange | null {
     const raw = localStorage.getItem(TIME_RANGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return isValidTimeRange(parsed) ? parsed : null;
+    // 以前の版が保存した固定の期間は使わない（開くと過去の日時のままになるため）
+    return isValidTimeRange(parsed) && parsed.mode === "relative" ? parsed : null;
   } catch {
     return null;
   }
@@ -85,7 +86,9 @@ export const useTimeRangeStore = create<TimeRangeState>()((set) => ({
   setRange: (range) => {
     set({ range });
     writeUrl(range);
-    writeStoredRange(range);
+    // 保存するのは「直近」の範囲だけ。固定の期間（開始〜終了の日時）を残すと、次に開いたとき
+    // 過去の日時のままデータが無く、グラフが空になる
+    if (range.mode === "relative") writeStoredRange(range);
   },
 }));
 

@@ -31,6 +31,20 @@ describe("useTimeRangeStore の永続化", () => {
     });
   });
 
+  it("固定の期間は localStorage に保存しない（次に開いたとき過去の日時のままになるため）", () => {
+    useTimeRangeStore.getState().setRange({ mode: "absolute", from: 1_000, to: 2_000 });
+
+    expect(localStorage.getItem(TIME_RANGE_KEY)).toBeNull();
+  });
+
+  it("以前の版が保存した固定の期間は使わず、既定（直近 1 時間）で開く", () => {
+    localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "absolute", from: 1_000, to: 2_000 }));
+
+    initTimeRangeFromUrl();
+
+    expect(useTimeRangeStore.getState().range).toEqual(DEFAULT_RANGE);
+  });
+
   it("URL に範囲が無ければ、localStorage の最後の範囲を使う", () => {
     localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 24 * 60 * 60 * 1000 }));
 

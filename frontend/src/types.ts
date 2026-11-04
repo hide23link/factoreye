@@ -163,6 +163,9 @@ export interface WidgetConfig {
   // 未指定(undefined)ならRechartsの自動スケール（"auto"）
   yAxisMin?: number;
   yAxisMax?: number;
+  // グラフ用（左右の 2 軸のとき）: 右の縦軸の最小・最大。未指定は自動（左は yAxisMin・yAxisMax）
+  yAxisRightMin?: number;
+  yAxisRightMax?: number;
   // 直近何時間分を表示するか（自由入力、例: 0.5 = 30分、168 = 7日）。
   // StatValueWidgetではスパークライン表示用の窓としても使う
   timeRangeHours?: number;

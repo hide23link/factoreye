@@ -179,7 +179,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
             key="y-right"
             yAxisId="right"
             orientation="right"
-            domain={["auto", "auto"]}
+            domain={[widget.config.yAxisRightMin ?? "auto", widget.config.yAxisRightMax ?? "auto"]}
             width={52}
             tick={{ fontSize: 10 }}
             tickFormatter={formatYTick}
