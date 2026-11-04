@@ -27,9 +27,11 @@ interface Props {
   onAdd: (sensor: Sensor) => void;
   onReplace: (sensor: Sensor) => void;
   onRemove: (index: number) => void;
+  /** 渡すと、複数センサーのとき並びを 1 つ前・後ろへ動かす ◀ ▶ が出る */
+  onMove?: (index: number, delta: -1 | 1) => void;
 }
 
-export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, onAdd, onReplace, onRemove }: Props) {
+export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, onAdd, onReplace, onRemove, onMove }: Props) {
   const { data: sensors } = useSensors();
   const dragging = useEditorStore((s) => s.dragging);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -91,6 +93,28 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
               <span className="max-w-[9rem] truncate" title={nameOf(id)}>
                 {nameOf(id)}
               </span>
+              {multiple && onMove && sensorIds.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    aria-label={`${nameOf(id)}を前へ`}
+                    disabled={index === 0}
+                    onClick={() => onMove(index, -1)}
+                    className="h-5 w-5 rounded-full text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >
+                    ◀
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${nameOf(id)}を後ろへ`}
+                    disabled={index === sensorIds.length - 1}
+                    onClick={() => onMove(index, 1)}
+                    className="h-5 w-5 rounded-full text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >
+                    ▶
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 aria-label={`${nameOf(id)}を外す`}

@@ -222,6 +222,18 @@ describe("WidgetSettings: グラフ", () => {
     expect(lastConfig()).toMatchObject({ sensorIds: ["s2"], colors: ["#222222"] });
   });
 
+  it("▶でセンサーを後ろへ動かすと、色もセンサーと一緒に動く。端のボタンは押せない", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={graph} dashboard={dashboardOf(graph)} />);
+
+    expect(await screen.findByRole("button", { name: "温度を前へ" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "温度を後ろへ" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalledWith("w1", expect.objectContaining({ sensorId: "s2" })));
+    expect(lastConfig()).toMatchObject({ sensorIds: ["s2", "s1"] });
+    expect(lastConfig().colors?.[0]).toBe("#222222");
+  });
+
   it("センサーが2つのとき、しきい値の表示は選べず、案内が出る", () => {
     renderWithQueryClient(<WidgetSettings widget={graph} dashboard={dashboardOf(graph)} />);
     expect(screen.queryByRole("radiogroup", { name: "しきい値の表示" })).not.toBeInTheDocument();
