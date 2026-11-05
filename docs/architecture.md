@@ -46,16 +46,21 @@ flowchart LR
 
 ## 3. データモデル
 
-| テーブル | 役割 |
-|---|---|
-| `sensors` | センサー。名前、`ingest_key`（全体で一意）、単位、しきい値 4 項目、不感帯、有効/無効、所属する機器（`device_id`） |
-| `readings` | 測定値。主キーは `(sensor_id, recorded_at)`。同じセンサー・同じ時刻の値は、後から来た値で上書きする |
-| `alarms` | アラーム。状態（active / acknowledged / resolved）、重要度（warning / critical）、方向（min / max）、確認者 |
-| `dashboards` / `widgets` | ダッシュボードとウィジェット（12 列グリッド）。ダッシュボードの削除は論理削除 |
-| `notification_settings` | Discord Webhook URL（重故障・軽故障）、重故障の再通知 |
-| `webhook_subscriptions` | Webhook の購読（イベント種別、送信先、有効/無効） |
-| `ingest_devices` | 機器ごとのキー（self-hosted のみ）。キーは SHA-256 のハッシュだけを保存する |
-| `users` / `workspaces` / `refresh_tokens` | 認証（SaaS のみ） |
+- `sensors`: センサー
+  - 名前、`ingest_key`（全体で一意）、単位
+  - しきい値 4 項目、不感帯、有効/無効
+  - 所属する機器（`device_id`）
+- `readings`: 測定値
+  - 主キーは `(sensor_id, recorded_at)`
+  - 同じセンサー・同じ時刻は、後から来た値で上書き
+- `alarms`: アラーム
+  - 状態: active / acknowledged / resolved
+  - 重要度: warning / critical、方向: min / max、確認者
+- `dashboards` / `widgets`: 12 列グリッドの配置。ダッシュボードの削除は論理削除
+- `notification_settings`: Discord Webhook URL（重故障・軽故障）、重故障の再通知
+- `webhook_subscriptions`: イベント種別、送信先、有効/無効
+- `ingest_devices`: 機器ごとのキー（self-hosted のみ）。SHA-256 のハッシュだけを保存
+- `users` / `workspaces` / `refresh_tokens`: 認証（SaaS のみ）
 
 テナント列（`workspace_id`）は SaaS で使います（self-hosted は `NULL`）。
 
@@ -89,7 +94,8 @@ flowchart LR
 | GET | `/api/me` | 自分の情報（SaaS） |
 | `/api/admin/*` | 管理者 API（SaaS、§10） | 管理者トークン |
 
-センサー一覧は `ETag` を返し、`If-None-Match` が一致すれば 304。センサーの作成・更新・削除では、必ず件数か `updated_at` を変えること（版の判定に使う）。
+- センサー一覧は `ETag` を返す（`If-None-Match` が一致すれば 304）
+- 版は件数と `updated_at` から作る。作成・更新・削除では、どちらかを必ず変える
 
 ---
 
@@ -108,7 +114,7 @@ flowchart LR
 |---|---|---|
 | `readings` | 1 センサーの複数値（各要素に `value`、任意で `timestamp`） | 1,000 件 |
 | `sensors` | 複数センサーを 1 回で送る | 2,000 センサー・値 70,000 件 |
-| `samples` | 時刻ごとに値をまとめる（`{ts, values: {ingestKey: 値}}`）。1 秒サンプリング向け | 時刻 1,000・値 70,000 件 |
+| `samples` | 時刻ごとに値をまとめる（1 秒サンプリング向け） | 時刻 1,000・値 70,000 件 |
 
 - `ingestKey` / `sensors` / `samples` は、どれか 1 つだけ
 - センサー単位の問題（未登録・無効・値なし）は、応答の `rejected` に出し、残りは受け付ける
@@ -147,12 +153,15 @@ flowchart LR
 ### バッファ
 - 受信値はメモリに溜め、**1 秒ごとに一括 INSERT** し、同じ処理でアラーム評価・通知・Webhook を行う
 - DB 書き込みに失敗したら、次の周期で再試行する。最大 10 万件で、超えたら古い値から捨てる
-- 通常の停止では残りを書いて終了する。クラッシュ時は、未書き込みの値（通常は最大 1 秒分）が失われ得る
+- 通常の停止: 残りを書いてから終了
+- クラッシュ時: 未書き込みの値（通常は最大 1 秒分）が失われ得る
 
 ### キャッシュとレート制限
-- 機器キー・センサーの照合は `INGEST_CACHE_SECONDS`（既定 5 秒）覚える。別プロセスからの変更は、最大この秒数遅れる
+- 機器キー・センサーの照合は `INGEST_CACHE_SECONDS`（既定 5 秒）覚える
+- 別プロセスからの変更は、最大この秒数遅れる
 - IP ごとに **100 回/分**（`INGEST_RATE_LIMIT`。`off` で解除）
-- IP は `CF-Connecting-IP` を優先して読む。プロキシの内側に置くときは、プロキシでこのヘッダーを上書きする
+- IP は `CF-Connecting-IP` を優先して読む
+- プロキシの内側では、プロキシでこのヘッダーを上書きする
 
 ---
 
@@ -189,7 +198,7 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 | イベント | タイミング | 主な項目 |
 |---|---|---|
 | `reading.received` | センサー値の受信ごと | `sensorId`, `value`, `recordedAt` |
-| `alarm.triggered` | アラーム発生ごと | `sensorId`, `sensorName`, `value`, `severity`, `thresholdBreached`, `triggeredAt`, `isRepeat` |
+| `alarm.triggered` | アラーム発生ごと | `sensorId`, `sensorName`, `value`, `severity`, `thresholdBreached`, `triggeredAt` ほか |
 
 - **SSRF 対策**: 送信先は `https` で、名前解決した全アドレスが公開 IP のものだけ
   - 登録時と送信直前に検証し、リダイレクトは追わない
@@ -239,7 +248,7 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 | 失敗の種類 | 動作 |
 |---|---|
 | 通信エラー・タイムアウト・5xx・408・429 | 再送する（429 の `Retry-After` は上限 5 分まで尊重） |
-| 401・403・404（設定の誤り） | 警告ログを出し、値を保持して再送し続ける（1 センサー最大 10 件、超えたら古い値から捨てる）。他センサーの送信は遅らせない |
+| 401・403・404（設定の誤り） | 警告ログを出し、値を保持して再送し続ける（1 センサー最大 10 件） |
 | 400・422 など、再送しても直らない 4xx | その送信分を捨てる（警告ログ） |
 
 NaN・Infinity・数値でない値は、送る前に捨てる。
@@ -255,18 +264,23 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
   - センサーは 1 ワークスペース 10 個まで（11 個目は 402）
   - 測定値は 14 日超を毎日 03:00（UTC）に削除（self-hosted は無期限）
 - **管理者画面（`/admin`）**: 運用者向け
-  - アカウントは DB ではなくファイル（`admin/admins.txt`、`ID:bcryptハッシュ`）で管理し、`python -m app.admin_cli` で操作する
+  - アカウントは DB ではなくファイル（`admin/admins.txt`）で管理
+  - 形式は `ID:bcryptハッシュ`。操作は `python -m app.admin_cli`
   - できること: 件数・DB 使用量の確認、ユーザー管理、取り込みのレート制限の期限付き解除
   - このファイルは DB バックアップに含まれないので、別に保管する
 
 ### 10.1 データ移行
-SaaS の 1 ワークスペース、または self-hosted の全データを、別の self-hosted へ移す（設定 → データ移行）。
+- 対象: SaaS の 1 ワークスペース、または self-hosted の全データ
+- 移行先: 別の self-hosted（設定 → データ移行）
 
 - **書き出し**: gzip の JSON Lines。読み取りのみ
 - **取り込み**（self-hosted のみ）
   - 1 トランザクション。失敗したら何も残さない。`dry_run` で件数だけ確認できる
   - `alembic_version` が一致しないと取り込まない
-- **移るもの**: センサー（取り込みキー込み）、測定値、アラーム、ダッシュボード、ウィジェット、Webhook 購読、機器（キーのハッシュ）。通知設定は `with_notifications` 指定時のみ
+- **移るもの**
+  - センサー（取り込みキー込み）、測定値、アラーム
+  - ダッシュボード、ウィジェット、Webhook 購読、機器（キーのハッシュ）
+  - 通知設定は `with_notifications` 指定時のみ
 - **移らないもの**: ユーザー、リフレッシュトークン、ワークスペース
 
 ---
@@ -274,13 +288,16 @@ SaaS の 1 ワークスペース、または self-hosted の全データを、�
 ## 11. 運用
 
 - **ヘルスチェック**: `GET /health`。DB に接続できないと `status` が `degraded`
-- **バックアップ**: `infra/backup.sh`（`pg_dump`、毎日 3 時の cron、保持 7 日）。復元は `infra/restore.sh`。配布版は cron が自動で実行する
+- **バックアップ**: `infra/backup.sh`（`pg_dump`）
+  - 毎日 3 時の cron、保持 7 日。復元は `infra/restore.sh`
+  - 配布版は cron が自動で実行する
 - **配布版**: GHCR のイメージ（amd64 / arm64）を使う。手順は [`install/README.md`](../install/README.md)
 
 **配布版の設定ファイル**
 - 設定は `config/.env` の 1 ファイル。backend はこれを読む（`FACTOREYE_ENV_FILE`）
-- `config/` は、ファイル単体ではなくディレクトリごとマウントする（置き換え保存で反映されなくなるため）
-- 画面の「設定 → API・取り込み」から変更できる（管理パスワードが必要）。対象は `INGEST_*`・`WEBHOOK_ALLOW_PRIVATE_NETWORKS`・`FRONTEND_URL`
+- `config/` は、ディレクトリごとマウントする（ファイル単体だと、置き換え保存で反映されない）
+- 画面の「設定 → API・取り込み」から変更できる（管理パスワードが必要）
+  - 対象: `INGEST_*`・`WEBHOOK_ALLOW_PRIVATE_NETWORKS`・`FRONTEND_URL`
 - 保存時は、先に再起動後と同じ検査を行い、通れば backend が約 4 秒で再起動する
 
 ### 設定（環境変数）
@@ -320,14 +337,19 @@ SaaS の 1 ワークスペース、または self-hosted の全データを、�
 | Frontend | Vitest・typecheck・ESLint |
 | E2E | Playwright（セットアップ、アラームの発生と確認、データ移行） |
 
-**backend のテストは、接続先のすべてのテーブルを作り直して削除します。** `DATABASE_URL` は、必ずテスト専用の DB（例: `factoreye_test`）に向けてください。手順は [`development.md`](development.md)。
+- **backend のテストは、接続先のテーブルをすべて作り直して削除する**
+- `DATABASE_URL` は、必ずテスト専用の DB（例: `factoreye_test`）にする
+- 手順は [`development.md`](development.md)
 
 ---
 
 ## 13. 既知の制限
 
-- 取り込みの制限は IP 単位。ゲートウェイ 1 台に多数のセンサーを束ねる構成では、制限に当たりやすい
+- 取り込みの制限は IP 単位
+  - ゲートウェイ 1 台に多数のセンサーを束ねると、制限に当たりやすい
 - Webhook は再試行せず、送信待ちが上限を超えると捨てる。DNS rebinding は防ぎきれていない
 - self-hosted は測定値の保持期間が無期限（削除ポリシーなし）
 - 管理画面は、ユーザー一覧のページングと、管理者の画面からの追加・削除が未対応
-- データ移行: 同じデータを同じ DB に取り込み直すと失敗する（ID が重なるため）。取り込みファイルのサイズに上限はない
+- データ移行
+  - 同じデータを同じ DB に取り込み直すと失敗する（ID が重なる）
+  - 取り込みファイルのサイズに上限はない
