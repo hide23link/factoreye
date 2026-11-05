@@ -1,6 +1,8 @@
 # 開発環境
 
-### Backend
+ソースからまとめて起動する: `docker compose up -d --build`（画面 http://localhost:3001、API http://localhost:8000）。本番で使う前に `INGEST_API_KEY` を必ず変更してください。
+
+## Backend
 
 ```bash
 cd backend
@@ -11,7 +13,7 @@ alembic upgrade head   # テーブルを作る（アプリは起動時に作ら�
 uvicorn app.main:app --reload
 ```
 
-チェック（CI と同じ内容。テスト・型検査・Lint の依存は `requirements-dev.txt`）:
+チェック（CI と同じ内容）:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -29,7 +31,7 @@ pip-audit
 > DATABASE_URL=postgresql+asyncpg://factoreye:password@localhost:5432/factoreye_test pytest
 > ```
 
-### Frontend
+## Frontend
 
 ```bash
 cd frontend
@@ -43,7 +45,7 @@ npm run typecheck   # 型チェック
 npm run lint        # lint
 ```
 
-### E2E
+## E2E
 
 スタックを起動した状態で Playwright を実行します。
 
@@ -51,7 +53,3 @@ npm run lint        # lint
 docker compose up -d --build
 cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
 ```
-
-### CI
-
-GitHub Actions（`.github/workflows/`）が、backend・frontend・E2E・各クライアント・導入スクリプトのテストを実行します。
