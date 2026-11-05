@@ -9,6 +9,10 @@
 
 仕様は [`docs/architecture.md`](docs/architecture.md) を参照してください。
 
+![ダッシュボード](docs/images/dashboard.png)
+
+*ダッシュボード: 最新値・生産数・グラフ・アラームを、自由に並べて表示します（画面はデモデータです）*
+
 ---
 
 ## クイックスタート
@@ -24,6 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/hide23link/factoreye/main/install/i
 1. **実行する**（数分。ビルドはせず、公開済みのイメージを取得します）
 2. **表示された URL をブラウザで開く**（例: `http://192.168.0.20:3001`）。最後に表示される**管理パスワード**は、一度しか出ないので控えてください
 3. **画面右上の「セットアップガイド」**に沿って、センサーを登録し、ダッシュボードを作る（約 5 分）
+
+   ![セットアップガイド](docs/images/setup-guide.png)
 
 もう一度実行すると、データと設定を残したまま更新します（更新前に自動でバックアップを取ります）。
 
@@ -80,6 +86,18 @@ LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` �
 機器ごとにキーを発行して、そのキーで送る方法（自前ホスト）は [`docs/device-keys.md`](docs/device-keys.md) を参照してください。
 
 機器に API キーを入れたくない運用では、`INGEST_AUTH=off` でキーなしの取り込みにできます。センサーの ingestKey を知っていれば誰でも値を書けるので、取り込みの口を LAN などに限定してください。環境変数の一覧は [`docs/architecture.md`](docs/architecture.md) §11 を参照してください。
+
+---
+
+## 画面
+
+| ダッシュボード一覧 | 設定（センサー） |
+|---|---|
+| ![ダッシュボード一覧](docs/images/dashboard-list.png) | ![センサーの設定](docs/images/settings-sensors.png) |
+
+設定の「API・取り込み」では、センサーから値を受け取る設定（キーの要否・自動登録など）を管理します。
+
+![API・取り込みの設定](docs/images/settings-ingest.png)
 
 ---
 
