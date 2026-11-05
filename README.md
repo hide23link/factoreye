@@ -7,7 +7,7 @@
 - self-hosted が基本（Docker Compose で自社の PC などに展開し、データは社内に残る）
 - MIT License
 
-仕様は [`docs/architecture.md`](docs/architecture.md)、設計判断は [`docs/decisions.md`](docs/decisions.md)、変更履歴は [`CHANGELOG.md`](CHANGELOG.md) を参照してください。
+仕様は [`docs/architecture.md`](docs/architecture.md) を参照してください。
 
 ---
 
@@ -61,7 +61,6 @@ docker compose --env-file config/.env up -d
 
 画面は http://localhost:3001 です。管理パスワード（`ADMIN_PASSWORD_HASH`）は空のままなので、設定は `config/.env` を直接編集して、画面の「ファイルの内容を反映」で取り込みます。
 
-> Docker が難しい場合は、Python だけで動くオフライン版 **FactorEye-S** もあります（[ecopower リポジトリ](https://github.com/hide23link/ecopower) の `factoreyeS/`）。
 
 ---
 
@@ -93,24 +92,24 @@ LAN 上の別の端末から使う場合は、リポジトリ直下に `.env` �
 - **ダッシュボード**: 12 列グリッドでの自由な配置。グラフ・比較グラフ・最新値・アラーム一覧・生産数の各ウィジェット。グラフの時間範囲は、プリセット・任意の期間・前後への移動・拡大縮小・ドラッグで操作できる
 - **データ移行**: 設定画面の「データ移行」から、ワークスペース（SaaS）または全データ（self-hosted）を書き出し、self-hosted へ取り込む
 - **SaaS モード**: `AUTH_MODE=multi_tenant`（メール + パスワード、ワークスペース単位の分離、Free Tier、管理者画面 `/admin`）。詳細は [`docs/architecture.md`](docs/architecture.md) §10
-- **公式クライアント**: Arduino / M5Stack（`clients/arduino-m5stack/`）、Raspberry Pi（`clients/raspberry-pi/`）
+- **センサー側のクライアント**: M5 ATOM などの ESP32（ライブラリ `clients/arduino-m5stack/`、設定をスマホの画面だけで済ませるスケッチ [`clients/FactorEyeNode/`](clients/FactorEyeNode/)）、Raspberry Pi（`clients/raspberry-pi/`）
 - **テスト用エミュレータ**: `tools/factory-emulator/`（手動操作画面つき）
-- **復旧ツール**: `tools/recovery/`。バックアップを今の DB と見比べて閲覧・CSV 書き出し・書き戻しをする Web 画面（本体とは独立）
 
 ---
 
 ## ディレクトリ構成
 
 ```
-admin/      管理者ファイルの例（SaaS 版。実体は admins.txt で、リポジトリには含めない）
 backend/    REST API・取り込み（Python / FastAPI / SQLModel / PostgreSQL）
 frontend/   ダッシュボード UI（React / TypeScript / Vite）
-e2e/        E2E テスト（Playwright。起動済みのスタックに対して実行）
-clients/    センサー向け公式クライアント（Arduino / M5Stack、Raspberry Pi）
-tools/      開発補助（テスト用の工場エミュレータ）と、バックアップの復旧ツール（recovery）
+clients/    センサー側のクライアント（ESP32 の Arduino ライブラリ、M5 ATOM 用スケッチ FactorEyeNode、Raspberry Pi）
+install/    1 コマンド導入のスクリプトと配布用の docker-compose
+tools/      テスト用の工場エミュレータ、バックアップの復旧ツール
+e2e/        E2E テスト（Playwright）
 loadtest/   負荷テスト用のエミュレータ
-infra/      運用スクリプト（DB のバックアップ・復元、クラウド版のサーバー設定）
-docs/       仕様書と設計判断の記録
+infra/      運用スクリプト（バックアップ・復元、クラウド版のサーバー設定）
+admin/      SaaS 版の管理者ファイルの例
+docs/       仕様書（architecture.md）、機器キーの使い方（device-keys.md）
 ```
 
 ---
@@ -162,40 +161,16 @@ npm run lint        # lint
 
 ### E2E
 
-docker compose でスタックを起動した状態で実行します。手順は [`e2e/README.md`](e2e/README.md) を参照してください。
+スタックを起動した状態で Playwright を実行します。
 
 ```bash
 docker compose up -d --build
 cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
 ```
 
----
+### CI
 
-## バックアップ
-
-`infra/backup.sh` は PostgreSQL を `pg_dump` で取得します。cron で毎日 3 時に実行し、既定で 7 日分を保持します。手順は [`infra/README.md`](infra/README.md) を参照してください。バックアップの中身の確認・比較・書き戻しは、復旧ツール（[`tools/recovery/README.md`](tools/recovery/README.md)）で行えます。
-
-```bash
-./infra/backup.sh            # 手動実行
-./infra/restore.sh <file>    # 空の DB へ復元
-```
-
----
-
-## CI
-
-GitHub Actions（`.github/workflows/`）:
-
-| ワークフロー | 内容 |
-|---|---|
-| `backend-test.yml` | pytest・mypy・ruff・pip-audit |
-| `frontend-build.yml` | lint・typecheck・test・build・npm audit |
-| `e2e-test.yml` | スタックを起動して Playwright で E2E |
-| `arduino-client-compile.yml` | Arduino クライアントのコンパイル確認 |
-| `raspberry-pi-client-test.yml` | Raspberry Pi クライアントのテスト |
-| `recovery-tool-test.yml` | 復旧ツールのテスト |
-| `publish-images.yml` | タグ（`v*`）で、配布用イメージを GHCR に公開（amd64 + arm64） |
-| `install-test.yml` | まっさらな Ubuntu で `install.sh` を実行し、起動・設定の保存と再起動・更新まで確認 |
+GitHub Actions（`.github/workflows/`）が、backend・frontend・E2E・各クライアント・導入スクリプトのテストを実行します。
 
 ---
 

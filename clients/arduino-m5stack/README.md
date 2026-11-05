@@ -22,6 +22,8 @@ void loop() {
 }
 ```
 
+**温度・湿度・気圧やパルスを、設定画面（スマホ）だけで送りたいときは、そのまま使えるスケッチ [`../FactorEyeNode/`](../FactorEyeNode/) を使ってください。**
+
 ## インストール
 
 1. このフォルダ（`clients/arduino-m5stack/`）ごと、Arduino IDEのライブラリフォルダ

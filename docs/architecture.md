@@ -1,7 +1,7 @@
 # FactorEye 仕様書
 
 FactorEye の仕様（現行実装）をまとめたものです。各項目はコードと照合しています。
-変更の経緯と判断理由は [`decisions.md`](decisions.md)、リリースごとの変更は [`CHANGELOG.md`](../CHANGELOG.md) を参照してください。
+
 
 ---
 
@@ -48,7 +48,7 @@ flowchart LR
 
 **復旧ツール**: `tools/recovery/`。バックアップの確認・比較・書き出し・書き戻しを行う、本体とは別のプログラム（§11.1）。
 
-**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432（postgres は `127.0.0.1` だけに公開し、LAN には出さない）。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（frontend は nginx で静的配信。判断とサイズは [decisions.md](decisions.md)）。
+**デプロイ**: `docker-compose.yml`（backend / frontend / postgres）。ポートは backend 8000、frontend 3001、postgres 5432（postgres は `127.0.0.1` だけに公開し、LAN には出さない）。イメージは多段ビルドで、実行段には本体と実行時依存だけを入れる（frontend は nginx で静的配信）。
 
 ---
 
@@ -365,7 +365,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 
 ### バックアップ
 - `infra/backup.sh` が PostgreSQL を `pg_dump` で取得する。cron で毎日 3 時に実行する想定。保持は既定で 7 日（`BACKUP_RETENTION_DAYS`）。復元は `infra/restore.sh`
-- 設定ファイル（`.env`・管理者ファイルなど）の暗号化保存、本番の外の控え（`infra/offsite-pull.sh`・`infra/offsite-s3.sh`）、バックアップのファイルの権限と書き込み中の扱い（sha256・権限 640・`.partial-*`）は [`infra/README.md`](../infra/README.md) に書く
+- 設定ファイル（`.env`・管理者ファイルなど）の暗号化保存、本番の外の控え（`infra/offsite-pull.sh`・`infra/offsite-s3.sh`）、バックアップのファイルの権限と書き込み中の扱い（sha256・権限 640・`.partial-*`）は `infra/` のスクリプトの冒頭に書く
 - 中身の確認・比較・書き出し・書き戻しは、復旧ツール（§11.1）
 
 ### 11.1 復旧ツール（`tools/recovery/`）
@@ -376,7 +376,7 @@ DB に接続できない場合は `status` が `degraded` になる。
 - バックアップは、乗っ取られた本番で書き換えられている前提で展開する（`.sha256` も一緒に作り直せるため）。管理者ではないロールで流し込み、psql のメタコマンドを止める
 - OSS 版 ⇄ SaaS 版は、所属を付け替えて書き戻せる。今の DB の版は `TARGET_MODE`（`saas` / `oss`）で指定する（書き戻しを使うなら必須）。SaaS → OSS のワークスペース単位の移し替えは、§10.1 のデータ移行でもできる（通知設定の上書きの指定など、移行に特化した機能はそちら）
 - 控え（AWS）が稼いだ増加分（縮小ダンプ。R2 の `handoff-inc/`）は、本番に復帰したあと、管理画面（`/admin`）の「書き戻し」で本番に足す（下の「引き継ぎからの書き戻し」）
-- 書き戻しの規則・展開の安全策・設定の一覧・起動手順は [`tools/recovery/README.md`](../tools/recovery/README.md) を正とする
+- 書き戻しの規則・展開の安全策・設定の一覧・起動手順は `tools/recovery/` を正とする
 
 ### 引き継ぎからの書き戻し（管理画面）
 - 流れ: 一覧 → 試算（追加される件数。何も書かない）→ 確認の小窓 → 実行（直前に本番の控え `before-merge-*` を取り、1 つのトランザクション）→ 結果。実行は、試算の件数と実行の直前の件数が一致したときだけ
@@ -390,11 +390,11 @@ DB に接続できない場合は `status` が `degraded` になる。
 - 本番（Proxmox の LXC）が消えた・データが不完全なときに、R2 の `factoreye-db`（ベース ＋ WAL）から、本番に無い行だけを足す。API: `GET/POST/DELETE /api/admin/failback/r2`（状態・開始・破棄）、`POST /api/admin/failback/r2/{preview,apply}`（`handoff` を渡すと R2 → 引き継ぎの順に、1 つのトランザクションで足す）
 - 復旧ツールが、`wal-g backup-fetch LATEST` → `recovery.signal` ＋ `restore_command` → 一時的な PostgreSQL 15（unix ソケットだけ）で WAL を再生 → 昇格後の DB を merge の入力にする。時間のかかる復元は復旧ツールの裏のジョブで、画面は状態（取得中 / 再生中 / 準備完了 / 失敗）を見る。使う WAL-G のコマンドは読み取りだけ（`backup-list`・`backup-fetch`・`wal-fetch`）
 - 復元した PostgreSQL は、バックアップの設定を使わず最小の自前の設定で起動する。鍵は環境に渡さず権限 600 のファイルから読む。`walg.env` が読めなくても復旧ツールは起動し、R2 の機能だけ無効になる（理由を画面に出す）
-- 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は [`tools/recovery/README.md`](../tools/recovery/README.md)
+- 本番の DB が空（スキーマだけ）でも動く。スキーマの版（Alembic）が違えば、書き込まずに拒否して版を 2 つ表示する。手順は `tools/recovery/`
 
 ### 11.1.1 本番（クラウド版）の自動デプロイ
 
-`main` が変わると、本番サーバーが自分で更新する。systemd のタイマー（`factoreye-deploy.timer`、1 分ごと）が `infra/cloud/deploy-pull.sh` を実行し、GitHub の `main` が前回デプロイした版から変わっていて、`backend/`・`frontend/`・`infra/cloud/`・`docker-compose.cloud.yml` が変わっていれば `docker compose -f docker-compose.cloud.yml up -d --build`。サーバーから外へ見に行くだけで、外から入る口（SSH・ランナー）は無い。fast-forward だけで更新し、失敗したら記録せず次の回に再試行する。ログは `journalctl -u factoreye-deploy`。手順と理由は `infra/README.md`「本番の自動デプロイ」、[decisions.md](decisions.md)（2026-11-03）。
+`main` が変わると、本番サーバーが自分で更新する。systemd のタイマー（`factoreye-deploy.timer`、1 分ごと）が `infra/cloud/deploy-pull.sh` を実行し、GitHub の `main` が前回デプロイした版から変わっていて、`backend/`・`frontend/`・`infra/cloud/`・`docker-compose.cloud.yml` が変わっていれば `docker compose -f docker-compose.cloud.yml up -d --build`。サーバーから外へ見に行くだけで、外から入る口（SSH・ランナー）は無い。fast-forward だけで更新し、失敗したら記録せず次の回に再試行する。ログは `journalctl -u factoreye-deploy`。手順は `infra/cloud/` のスクリプトを参照。
 
 ### 11.2 配布版（OSS）のインストールと設定ファイル（`install/`）
 

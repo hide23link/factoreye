@@ -3,9 +3,9 @@ name: arduino-client-compile
 on:
   push:
     branches: [main]
-    paths: ["clients/arduino-m5stack/**", ".github/workflows/arduino-client-compile.yml"]
+    paths: ["clients/arduino-m5stack/**", "clients/FactorEyeNode/**", ".github/workflows/arduino-client-compile.yml"]
   pull_request:
-    paths: ["clients/arduino-m5stack/**", ".github/workflows/arduino-client-compile.yml"]
+    paths: ["clients/arduino-m5stack/**", "clients/FactorEyeNode/**", ".github/workflows/arduino-client-compile.yml"]
 
 jobs:
   compile:
@@ -29,3 +29,16 @@ jobs:
             --library clients/arduino-m5stack \
             --warnings all \
             clients/arduino-m5stack/examples/SendReading
+
+      - name: Install libraries for FactorEyeNode
+        run: arduino-cli lib install "M5Unit-ENV" "M5Unified"
+
+      - name: Compile FactorEyeNode for M5Stack Atom
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:m5stack_atom \
+            --library clients/arduino-m5stack \
+            clients/FactorEyeNode
+
+      - name: Host tests for FactorEyeNode
+        run: clients/FactorEyeNode/test/host/run.sh
