@@ -6,45 +6,32 @@ body:
     id: description
     attributes:
       label: 何が起きたか
-      description: 期待した動作と、実際に起きた動作を書いてください。
+      description: 期待した動作と、実際の動作
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: 再現手順
-      description: 最小構成での再現手順（コマンド・リクエスト例など）
       placeholder: |
         1. ...
         2. ...
-        3. ...
     validations:
       required: true
   - type: input
     id: version
     attributes:
       label: バージョン / コミット
-      description: 使用している FactorEye のバージョンまたはコミットハッシュ
-    validations:
-      required: true
-  - type: dropdown
-    id: mode
-    attributes:
-      label: 実行モード
-      options:
-        - self-hosted（AUTH_MODE=disabled）
-        - SaaS（AUTH_MODE=multi_tenant）
-        - 不明
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
       label: 環境
-      placeholder: OS / Docker のバージョン / ブラウザ など
+      placeholder: OS / Docker / ブラウザ / self-hosted か SaaS か
   - type: textarea
     id: logs
     attributes:
       label: ログ・エラーメッセージ
-      description: 関係するログやスタックトレースがあれば貼ってください（機密情報は必ず除去してください）。
+      description: 機密情報は除いてください。
       render: shell
