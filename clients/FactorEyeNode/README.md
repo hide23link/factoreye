@@ -41,7 +41,6 @@ WiFi の名前・送り先・センサーの種類は、**スマホの設定画�
 
    <img src="../../docs/images/node-setup-wifi.png" width="260" alt="WiFi を選ぶ画面">
 
-
    | 項目 | 入れるもの |
    |---|---|
    | WiFi | 近くの SSID を選び、パスワードを入れる |
