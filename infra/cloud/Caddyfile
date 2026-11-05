@@ -1,0 +1,31 @@
+# FactorEye Cloud — Caddy リバースプロキシ設定
+# TLS は Cloudflare Tunnel が処理するため、ここでは :80 で HTTP のみ受け付ける
+
+:80 {
+    # セキュリティヘッダー（HSTS と nosniff は Cloudflare 側で付く。ここでは残りを足す）
+    # CSP は、SPA の読み込みを壊すおそれがあるため、まだ入れない（別途、画面で確かめてから）
+    header {
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+    }
+
+    # REST API + Ingest（FastAPI）
+    # 本文の上限は 8MB（backend の MAX_BODY_BYTES と同じ。超えると 413）。Content-Length が無い送信も止める
+    handle /api/* {
+        request_body {
+            max_size 8MB
+        }
+        reverse_proxy backend:8000
+    }
+
+    # ヘルスチェック
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # React フロントエンド（それ以外の全パス）
+    handle {
+        reverse_proxy frontend:3001
+    }
+}
