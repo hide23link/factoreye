@@ -1,6 +1,6 @@
 # 本番（クラウド版）の PostgreSQL。公式の postgres:15（Debian）に、DR のバックアップ用の WAL-G を足したもの。
-# WAL を追記で R2 に送り、ベースバックアップ（毎日の差分）を取る。設計は ecopower の docs/aws-dr-wal-design.md。
-# このイメージを入れただけでは、何も送らない（archive_mode は off のまま）。有効にする手順は infra/walg/README.md。
+# WAL を追記で R2 に送り、ベースバックアップ（毎日の差分）を取る。
+# このイメージを入れただけでは、何も送らない（archive_mode は off のまま）。
 #
 # Debian にしている理由: WAL-G の配布物は glibc 向けで、Alpine（musl）では動かない。
 #   OS（libc）が変わると、文字の並び順（照合順序）が変わり、既存のデータのインデックスと合わなくなる。
