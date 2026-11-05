@@ -1,0 +1,10 @@
+# テスト・型検査・Lint・依存監査（CI と開発用）
+-r requirements.txt
+httpx>=0.27.0
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+mypy>=1.11.0
+ruff>=0.6.9
+pip-audit>=2.7.3
+boto3-stubs[s3]>=1.35.0
+asyncpg-stubs>=0.30.0
