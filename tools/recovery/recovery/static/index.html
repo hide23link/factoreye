@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FactorEye 復旧ツール</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --panel: #fff; --text: #1d2330; --muted: #677085; --line: #dde1e8; --soft: #eef1f6;
+    --accent: #2563eb; --accent-soft: #e8efff; --ok: #15803d; --ok-soft: #e7f6ec;
+    --warn: #b45309; --warn-soft: #fdf3e3; --bad: #b91c1c; --bad-soft: #fdecec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #98a1b3; --line: #2c323d; --soft: #232834;
+      --accent: #60a5fa; --accent-soft: #1d2a44; --ok: #4ade80; --ok-soft: #16301f;
+      --warn: #fbbf24; --warn-soft: #362a12; --bad: #f87171; --bad-soft: #3a1c1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px 20px; }
+  .head-row { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; justify-content: space-between; max-width: 1100px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 18px; }
+  .status { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); align-items: center; }
+  .status b { color: var(--text); font-weight: 600; }
+  nav { max-width: 1100px; margin: 12px auto 0; display: flex; gap: 4px; }
+  nav button { border: none; background: none; padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); font-weight: 600; }
+  nav button.active { background: var(--bg); color: var(--text); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  .step.disabled { opacity: .5; }
+  .step-head { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; }
+  .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; flex: none; }
+  .step.done .step-num { background: var(--ok); }
+  .step h2 { margin: 0; font-size: 16px; }
+  .lead { color: var(--muted); margin: 0 0 12px 40px; font-size: 13px; }
+  .body { margin-left: 40px; }
+  @media (max-width: 640px) { .body, .lead { margin-left: 0; } }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: var(--soft); }
+  tr.selected td { background: var(--accent-soft); }
+  tr.muted-row td { color: var(--muted); }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.big { padding: 12px 22px; font-size: 16px; }
+  button.link { border: none; background: none; color: var(--accent); padding: 0; }
+  button:disabled { opacity: .45; cursor: default; }
+  select, input { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  input[type=checkbox], input[type=radio] { width: 18px; height: 18px; vertical-align: middle; accent-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .b-ok { color: var(--ok); background: var(--ok-soft); } .b-warn { color: var(--warn); background: var(--warn-soft); }
+  .b-bad { color: var(--bad); background: var(--bad-soft); } .b-info { color: var(--accent); background: var(--accent-soft); }
+  .b-plain { color: var(--muted); background: var(--soft); }
+  .box { border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+  .box.ok { background: var(--ok-soft); } .box.warn { background: var(--warn-soft); } .box.bad { background: var(--bad-soft); } .box.info { background: var(--soft); }
+  .box p { margin: 4px 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .sentence { font-size: 16px; margin: 6px 0 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .chip { background: var(--soft); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+  .chip b { font-size: 18px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 14px; margin: 8px 0; }
+  .hidden { display: none !important; }
+  dialog { border: none; border-radius: 14px; padding: 0; max-width: 520px; width: calc(100% - 32px); background: var(--panel); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg { padding: 20px 22px; }
+  .dlg h3 { margin: 0 0 10px; }
+  .dlg ol { padding-left: 20px; margin: 8px 0 16px; }
+  .dlg .row { justify-content: flex-end; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="head-row">
+    <h1>FactorEye 復旧ツール</h1>
+    <div class="status" id="status">今の DB を確認しています…</div>
+  </div>
+  <nav>
+    <button class="active" data-tab="restore">書き戻す</button>
+    <button data-tab="browse">データを見る・書き出す</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ── 書き戻す ── -->
+  <div id="tab-restore">
+    <section class="step" id="s1">
+      <div class="step-head"><span class="step-num">1</span><h2>バックアップを選ぶ</h2></div>
+      <p class="lead">戻したい時点のバックアップをクリックします。選ぶと、壊れていないかを確かめてから準備します（本番の DB には触りません）。</p>
+      <div class="body">
+        <div class="scroll"><table id="backup-table"></table></div>
+        <div id="s1-msg"></div>
+      </div>
+    </section>
+
+    <section class="step disabled" id="s2">
+      <div class="step-head"><span class="step-num">2</span><h2>戻すものを選ぶ</h2></div>
+      <p class="lead">バックアップと今の DB を比べた結果です。戻したいものにチェックを入れます（今の DB で消えているもの・測定値が足りないものは、最初から選ばれています）。</p>
+      <div class="body" id="s2-body"><p class="muted small">先に手順 1 でバックアップを選んでください。</p></div>
+    </section>
+
+    <section class="step disabled" id="s3">
+      <div class="step-head"><span class="step-num">3</span><h2>内容を確認する</h2></div>
+      <p class="lead">選んだ内容で書き戻すと、今の DB に何が追加されるかを、実際には書き込まずに確かめた結果です。</p>
+      <div class="body" id="s3-body"><p class="muted small">手順 2 で戻すものを選ぶと、ここに表示されます。</p></div>
+    </section>
+
+    <section class="step disabled" id="s4">
+      <div class="step-head"><span class="step-num">4</span><h2>書き戻す</h2></div>
+      <p class="lead">今の DB に無いデータだけを追加します。今あるデータは変更・削除しません。実行の直前に、今の DB の控えを自動で取ります。</p>
+      <div class="body" id="s4-body">
+        <button class="primary big" id="apply-btn" disabled>書き戻す</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── データを見る・書き出す ── -->
+  <div id="tab-browse" class="hidden">
+    <section class="step">
+      <div class="row" style="margin-bottom:12px">
+        <label>見るデータ <select id="v-source"></select></label>
+        <label>種類 <select id="v-table"></select></label>
+        <label>ワークスペース <select id="v-ws"></select></label>
+      </div>
+      <details id="v-period"><summary>期間で絞る（測定値・アラーム）</summary>
+        <div class="row"><input id="v-from" type="datetime-local"> 〜 <input id="v-to" type="datetime-local"></div>
+      </details>
+      <div class="row" style="margin:12px 0">
+        <button class="primary" id="v-show">表示する</button>
+        <a id="v-csv" href="#"><button type="button">CSV で書き出す（Excel で開けます）</button></a>
+        <span class="muted small" id="v-status"></span>
+      </div>
+      <div class="scroll"><table id="v-rows"></table></div>
+      <div class="row" style="margin-top:10px"><button id="v-prev">← 前へ</button><button id="v-next">次へ →</button></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="dlg"><div class="dlg" id="dlg-body"></div></dialog>
+
+<script>
+"use strict";
+const PAGE = 100;
+const LABELS = {
+  users: "ユーザー", workspaces: "ワークスペース", ingest_devices: "機器（取り込みのキー）", sensors: "センサー", readings: "測定値", alarms: "アラーム",
+  dashboards: "ダッシュボード", widgets: "ウィジェット",
+  webhook_subscriptions: "Webhook", notification_settings: "通知設定", refresh_tokens: "ログインの状態",
+  alembic_version: "スキーマの版",
+};
+const COLUMNS = {
+  id: "ID", name: "名前", email: "メール", password_hash: "パスワード", created_at: "作成日時", updated_at: "更新日時",
+  workspace_id: "ワークスペース", owner_id: "所有者", plan: "プラン", sensor_id: "センサー", value: "値",
+  recorded_at: "測定日時", triggered_at: "発生日時", resolved_at: "解除日時", acknowledged_at: "確認日時",
+  acknowledged_by: "確認者", status: "状態", severity: "重要度", threshold_breached: "超えたしきい値",
+  unit: "単位", ingest_key: "取り込みキー", enabled: "有効", url: "送信先", description: "説明",
+  threshold_min_warning: "下限（軽故障）", threshold_min_critical: "下限（重故障）",
+  threshold_max_warning: "上限（軽故障）", threshold_max_critical: "上限（重故障）", threshold_dead_band: "不感帯",
+  last_notified_at: "最後の通知", deleted_at: "削除日時", dashboard_id: "ダッシュボード", type: "種類",
+};
+const VALUES = {
+  ACTIVE: "発生中", ACKNOWLEDGED: "確認済み", RESOLVED: "解除済み", WARNING: "軽故障", CRITICAL: "重故障",
+  MIN: "下限", MAX: "上限", true: "はい", false: "いいえ",
+};
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const UNITS = { users: "人", workspaces: "件", sensors: "個", readings: "件", alarms: "件" };
+const STATUS = {
+  backup_only: ["b-bad", "今の DB で消えている"],
+  both: ["b-info", "両方にある（足りない分だけ戻せます）"],
+  current_only: ["b-plain", "今の DB だけにある"],
+};
+const state = { info: null, backups: [], selected: null, compare: null, plan: null, planKey: null };
+
+// DB の値は利用者が入れた文字列なので、innerHTML を使わず textContent で入れる
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = v;
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const $ = (id) => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = body.detail;
+    const err = new Error(typeof d === "string" ? d : (d && d.message) || `エラー（HTTP ${res.status}）`);
+    err.status = res.status;
+    err.detail = d;
+    throw err;
+  }
+  return body;
+}
+
+const fmtNum = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString());
+const fmtDate = (s) => (s ? new Date(s).toLocaleString("ja-JP", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const label = (t) => LABELS[t] || t;
+function ago(s) {
+  const min = Math.round((Date.now() - new Date(s).getTime()) / 60000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min} 分前`;
+  if (min < 60 * 24) return `${Math.round(min / 60)} 時間前`;
+  return `${Math.round(min / 60 / 24)} 日前`;
+}
+function kind(name) {
+  if (name.startsWith("before-merge-")) return ["b-warn", "書き戻し前の控え"];
+  if (name.startsWith("backup-before-")) return ["b-warn", "作業前の控え"];
+  if (/^factoreye-\d{8}-0300\d\d\.sql\.gz$/.test(name)) return ["b-plain", "毎日の自動"];
+  return ["b-info", "手動"];
+}
+const spinner = (text) => el("p", { class: "muted" }, el("span", { class: "spinner" }), text);
+const box = (cls, ...children) => el("div", { class: `box ${cls}` }, ...children);
+function setStep(id, mode) {
+  const s = $(id);
+  s.classList.toggle("disabled", mode === "disabled");
+  s.classList.toggle("done", mode === "done");
+}
+function table(headers, rows, numeric = new Set()) {
+  const t = el("table");
+  t.append(el("tr", {}, headers.map((h, i) => el("th", numeric.has(i) ? { class: "num" } : {}, h))));
+  for (const r of rows) t.append(el("tr", {}, r.map((c, i) => el("td", numeric.has(i) ? { class: "num" } : {}, c))));
+  return t;
+}
+
+const modeLabel = () => ({ saas: "（SaaS 版）", oss: "（OSS 版）" }[state.info.target_mode] || "");
+
+// ── ヘッダー: 今の DB の状態 ──
+async function loadStatus() {
+  const bar = $("status");
+  if (!state.info.target_configured) {
+    bar.replaceChildren(el("span", { class: "badge b-plain" }, "今の DB は未設定"), "バックアップの閲覧・書き出しだけができます");
+    return;
+  }
+  try {
+    const [s, ws] = await Promise.all([api("/api/db/current/summary"), api("/api/db/current/workspaces")]);
+    const c = s.table_counts;
+    bar.replaceChildren(
+      el("span", { class: "badge b-ok" }, `今の DB: 接続中${modeLabel()}`),
+      el("span", {}, "ワークスペース ", el("b", {}, fmtNum(ws.filter((w) => w.id).length))),
+      el("span", {}, "センサー ", el("b", {}, fmtNum(c.sensors))),
+      el("span", {}, "測定値 ", el("b", {}, fmtNum(c.readings))),
+      el("span", {}, "最後の測定 ", el("b", {}, s.latest_reading_at ? ago(s.latest_reading_at) : "—")));
+  } catch (e) {
+    bar.replaceChildren(el("span", { class: "badge b-bad" }, "今の DB に接続できません"), el("span", {}, e.message));
+  }
+}
+
+// ── 手順 1: バックアップを選ぶ ──
+async function loadBackups() {
+  state.backups = await api("/api/backups");
+  renderBackups();
+}
+
+function renderBackups() {
+  const t = $("backup-table");
+  t.replaceChildren(el("tr", {}, el("th", {}, ""), el("th", {}, "日時"), el("th", {}, "種類"), el("th", { class: "num" }, "大きさ"), el("th", {}, "")));
+  if (!state.backups.length) {
+    t.append(el("tr", {}, el("td", { colspan: 5, class: "muted" }, "バックアップがありません")));
+    return;
+  }
+  for (const b of state.backups) {
+    const [cls, k] = kind(b.name);
+    const selected = state.selected === b.name;
+    t.append(el("tr", { class: `pick ${selected ? "selected" : ""}`, title: b.name, onclick: () => selectBackup(b.name) },
+      el("td", {}, el("input", { type: "radio", name: "backup", checked: selected })),
+      el("td", {}, el("b", {}, fmtDate(b.modified)), el("span", { class: "muted small" }, `　${ago(b.modified)}`)),
+      el("td", {}, el("span", { class: `badge ${cls}` }, k)),
+      el("td", { class: "num muted" }, fmtSize(b.size)),
+      el("td", {}, b.loaded ? el("span", { class: "badge b-ok" }, "準備済み") : "")));
+  }
+}
+
+async function selectBackup(name, force = false) {
+  state.selected = name;
+  state.compare = state.plan = null;
+  renderBackups();
+  resetLaterSteps();
+  const msg = $("s1-msg");
+  const b = state.backups.find((x) => x.name === name);
+  try {
+    if (!b.loaded || force) {
+      msg.replaceChildren(spinner("壊れていないかを確かめて、中身を準備しています…"));
+      const r = await api(`/api/backups/${encodeURIComponent(name)}/load?force=${force}`, { method: "POST" });
+      b.loaded = true;
+      renderBackups();
+      msg.replaceChildren(verifyNote(r.verify));
+    } else {
+      msg.replaceChildren(box("ok", el("p", {}, "✔ このバックアップは準備済みです")));
+    }
+    setStep("s1", "done");
+    await showCompare();
+  } catch (e) {
+    const v = e.detail && e.detail.verify;
+    if (v && v.gzip_ok && v.checksum === "mismatch" && !force) {
+      msg.replaceChildren(box("bad",
+        el("p", {}, el("b", {}, "このバックアップは、記録された内容と一致しません。")),
+        el("p", { class: "small" }, "途中で壊れたか、書き換えられた可能性があります。別の日時のバックアップを選ぶことをおすすめします。"),
+        el("div", { class: "row" }, el("button", { onclick: () => selectBackup(name, true) }, "内容を承知の上で使う"))));
+    } else {
+      msg.replaceChildren(box("bad", el("p", {}, el("b", {}, "このバックアップは使えません")), el("p", { class: "small" }, e.message)));
+    }
+    setStep("s1", "");
+  }
+}
+
+function verifyNote(v) {
+  if (v.checksum === "ok") return box("ok", el("p", {}, "✔ 壊れていないことを確かめました（記録と一致）"));
+  if (v.checksum === "missing") return box("info", el("p", {}, "✔ 準備できました"), el("p", { class: "small muted" }, "このバックアップには照合用の記録が無いため、ファイルが読めることだけを確かめました。"));
+  return box("warn", el("p", {}, "⚠ 記録と一致しないまま使っています。内容をよく確かめてください。"));
+}
+
+function resetLaterSteps() {
+  setStep("s1", "");
+  for (const id of ["s2", "s3", "s4"]) setStep(id, "disabled");
+  $("s2-body").replaceChildren(el("p", { class: "muted small" }, "先に手順 1 でバックアップを選んでください。"));
+  $("s3-body").replaceChildren(el("p", { class: "muted small" }, "手順 2 で戻すものを選ぶと、ここに表示されます。"));
+  $("apply-btn").disabled = true;
+  $("apply-btn").textContent = "書き戻す";
+}
+
+// ── 手順 2: 戻すものを選ぶ ──
+async function showCompare() {
+  const body = $("s2-body");
+  if (!state.info.target_configured) {
+    body.replaceChildren(box("info", el("p", {}, "今の DB が設定されていないため、比較と書き戻しはできません。"),
+      el("p", { class: "small" }, "「データを見る・書き出す」で、このバックアップの中身を確認・CSV で書き出せます。")));
+    setStep("s2", "");
+    return;
+  }
+  setStep("s2", "");
+  body.replaceChildren(spinner("今の DB と比べています…"));
+  try {
+    [state.compare, state.currentWs] = await Promise.all([
+      api(`/api/backups/${encodeURIComponent(state.selected)}/compare`),
+      api("/api/db/current/workspaces"),
+    ]);
+  } catch (e) {
+    body.replaceChildren(box("bad", el("p", {}, e.message)));
+    return;
+  }
+  const r = state.compare;
+  // OSS 版（self-hosted）のデータは、ワークスペースに属さない（id が空）
+  const isOss = (w) => !w.id;
+  const lostWs = r.workspaces.filter((w) => w.status === "backup_only" && !isOss(w)).length;
+  const lostOss = r.workspaces.some((w) => w.status === "backup_only" && isOss(w));
+  const both = r.workspaces.filter((w) => w.status === "both");
+  const short = both.filter((w) => (w.backup_readings || 0) > (w.current_readings || 0));
+  const parts = [];
+  if (lostOss) parts.push("今の DB で、OSS 版（self-hosted）のセンサーと測定値が消えています。");
+  if (lostWs) parts.push(`今の DB で消えているワークスペースが ${lostWs} 件あります。`);
+  if (short.length) {
+    parts.push(short.length === 1 && isOss(short[0])
+      ? "OSS 版（self-hosted）の測定値が、今の DB のほうが少なくなっています。"
+      : `両方にあるもののうち ${short.length} 件は、測定値が今の DB のほうが少なくなっています。`);
+  }
+  if (!parts.length) parts.push("今の DB に足りないものは見つかりませんでした。");
+
+  const sameVersion = r.backup.alembic_version === r.current.alembic_version;
+  const rows = r.workspaces.map((w) => {
+    const selectable = w.status !== "current_only";
+    // 消えているもの・測定値が足りないものは、最初から選んでおく
+    const lacking = w.status === "backup_only" || (w.status === "both" && (w.backup_readings || 0) > (w.current_readings || 0));
+    const cb = el("input", { type: "checkbox", value: w.id, disabled: !selectable, checked: lacking });
+    cb.addEventListener("change", () => { renderDest(); schedulePlan(); });
+    const diff = (w.current_readings || 0) - (w.backup_readings || 0);
+    return el("tr", { class: selectable ? "" : "muted-row" },
+      el("td", {}, cb),
+      el("td", {}, el("b", {}, isOss(w) ? "OSS 版（self-hosted）のデータ" : w.name), el("div", { class: "small muted" }, w.owner_email || "")),
+      el("td", {}, el("span", { class: `badge ${STATUS[w.status][0]}` }, STATUS[w.status][1])),
+      el("td", { class: "num" }, fmtNum(w.backup_readings)),
+      el("td", { class: "num" }, fmtNum(w.current_readings)),
+      el("td", { class: "num" }, w.backup_readings === null || w.current_readings === null ? "" :
+        el("span", { class: diff < 0 ? "badge b-bad" : "muted" }, diff === 0 ? "同じ" : (diff > 0 ? "+" : "") + fmtNum(diff))),
+      el("td", {}, w.backup_sensors !== null ? el("button", { class: "link", onclick: () => openBrowse(state.selected, w.id || "") }, "中身を見る") : ""));
+  });
+  const t = el("table", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "ワークスペース / OSS 版"), el("th", {}, "状態"),
+    el("th", { class: "num" }, "測定値（バックアップ）"), el("th", { class: "num" }, "測定値（今）"), el("th", { class: "num" }, "差"), el("th", {}, "")), rows);
+
+  body.replaceChildren(
+    el("p", { class: "sentence" }, parts.join(" ")),
+    sameVersion ? "" : box("bad", el("p", {}, el("b", {}, "このバックアップは、今の DB と構成の版が違うため書き戻せません。")),
+      el("p", { class: "small" }, "同じ版のバックアップを選ぶか、「データを見る・書き出す」で CSV として取り出してください。")),
+    r.workspaces.length ? el("div", { class: "scroll", id: "ws-table" }, t) : el("p", { class: "muted" }, "ワークスペースはありません"),
+    el("div", { id: "dest" }),
+    el("details", { id: "period" }, el("summary", {}, "期間を絞る（測定値・アラームだけ。例: 消えた日の分だけ戻す）"),
+      el("div", { class: "row" }, el("input", { type: "datetime-local", id: "p-from", onchange: schedulePlan }), "〜",
+        el("input", { type: "datetime-local", id: "p-to", onchange: schedulePlan }),
+        el("span", { class: "small muted" }, "空欄なら、すべての期間"))));
+  renderDest();
+  if (!sameVersion || !state.info.merge_enabled) {
+    if (!state.info.merge_enabled) {
+      $("s3-body").replaceChildren(box("info", el("p", {}, "書き戻しは無効です（TARGET_WRITE_DATABASE_URL が未設定）。比較と閲覧だけができます。")));
+    }
+    return;
+  }
+  schedulePlan();
+}
+
+// ── 書き戻し先: OSS 版のデータ ⇄ SaaS 版のワークスペースで、所属を変えて入れる ──
+function checkedIds() {
+  return [...document.querySelectorAll("#ws-table input[type=checkbox]:checked")].map((cb) => cb.value);
+}
+
+// 今の DB に合わせて、書き戻し先を選ぶ必要があるか
+function destNeed() {
+  const ids = checkedIds();
+  if (state.info.target_mode === "saas" && ids.includes("")) return "workspace";
+  if (state.info.target_mode === "oss" && ids.some((id) => id)) return "oss";
+  return null;
+}
+
+function renderDest() {
+  const box_ = $("dest");
+  if (!box_) return;
+  const need = destNeed();
+  if (need === "workspace") {
+    const ws = (state.currentWs || []).filter((w) => w.id);
+    if (!ws.length) {
+      box_.replaceChildren(box("warn", el("p", {}, el("b", {}, "OSS 版のデータを入れるワークスペースがありません")),
+        el("p", { class: "small" }, "今の DB（SaaS 版）は、どのワークスペースにも属さないデータを表示できません。先に SaaS 版で利用者登録をしてワークスペースを作り、もう一度この画面を開いてください。")));
+      return;
+    }
+    const prev = $("dest-ws") ? $("dest-ws").value : "";
+    const sel = el("select", { id: "dest-ws", onchange: schedulePlan },
+      el("option", { value: "" }, "選んでください"),
+      ws.map((w) => el("option", { value: w.id }, `${w.name}（${w.owner_email || "所有者なし"}）`)));
+    sel.value = prev;
+    box_.replaceChildren(box("info",
+      el("p", {}, el("b", {}, "書き戻し先: "), "OSS 版のデータは、SaaS 版のどのワークスペースに入れますか？"),
+      el("div", { class: "row" }, sel),
+      el("p", { class: "small muted" }, "選んだデータは、すべてこのワークスペースのものとして入ります（センサー・測定値・アラーム・ダッシュボード・通知設定）。")));
+  } else if (need === "oss") {
+    box_.replaceChildren(box("info",
+      el("p", {}, el("b", {}, "書き戻し先: "), "今の DB は OSS 版です。SaaS 版のワークスペースのデータは、OSS 版のデータとして入れます。"),
+      el("p", { class: "small muted" }, "センサー・測定値・アラーム・ダッシュボード・通知設定を入れます。SaaS 版のユーザーとワークスペースの情報は入れません。")));
+  } else {
+    box_.replaceChildren();
+  }
+}
+
+function selection() {
+  const ids = checkedIds();
+  const b = { workspace_ids: ids.filter((id) => id), include_self_hosted: ids.includes("") };
+  const need = destNeed();
+  if (need === "workspace" && $("dest-ws") && $("dest-ws").value) b.into_workspace_id = $("dest-ws").value;
+  if (need === "oss") b.into_self_hosted = true;
+  const from = $("p-from") && $("p-from").value;
+  const to = $("p-to") && $("p-to").value;
+  // datetime-local は時差を持たないため、ブラウザの時刻として解釈して UTC で送る
+  if (from) b.from = new Date(from).toISOString();
+  if (to) b.to = new Date(to).toISOString();
+  return b;
+}
+
+// ── 手順 3: 内容を確認する（選び直すたびに自動で試行する） ──
+let planTimer = null;
+function schedulePlan() {
+  state.plan = null;
+  $("apply-btn").disabled = true;
+  clearTimeout(planTimer);
+  planTimer = setTimeout(runPlan, 400);
+}
+
+async function runPlan() {
+  const body = $("s3-body");
+  const sel = selection();
+  if (destNeed() === "workspace" && !sel.into_workspace_id) {
+    setStep("s3", "disabled");
+    setStep("s4", "disabled");
+    body.replaceChildren(el("p", { class: "muted small" }, "手順 2 で、OSS 版のデータの書き戻し先のワークスペースを選んでください。"));
+    return;
+  }
+  if (!sel.workspace_ids.length && !sel.include_self_hosted) {
+    setStep("s3", "disabled");
+    setStep("s4", "disabled");
+    body.replaceChildren(el("p", { class: "muted small" }, "手順 2 で戻すものを選ぶと、ここに表示されます。"));
+    return;
+  }
+  setStep("s2", "done");
+  setStep("s3", "");
+  body.replaceChildren(spinner("確かめています…（まだ書き込みません）"));
+  const key = JSON.stringify([state.selected, sel]);
+  try {
+    const r = await api(`/api/backups/${encodeURIComponent(state.selected)}/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...sel, apply: false }) });
+    if (key !== JSON.stringify([state.selected, selection()])) return; // 確認中に選び直された
+    state.plan = r;
+    state.planKey = key;
+    renderPlan(r);
+  } catch (e) {
+    body.replaceChildren(box("bad", el("p", {}, el("b", {}, "この内容では書き戻せません")), el("p", { class: "small" }, e.message)));
+    setStep("s4", "disabled");
+  }
+}
+
+function planTotals(r) {
+  const totals = {};
+  for (const t of r.tables) {
+    totals[t.table] = totals[t.table] || { inserted: 0, existing: 0, closed: 0 };
+    totals[t.table].inserted += t.inserted;
+    totals[t.table].existing += t.existing;
+    totals[t.table].closed += t.closed || 0;
+  }
+  return totals;
+}
+
+function renderPlan(r) {
+  const totals = planTotals(r);
+  const total = Object.values(totals).reduce((n, t) => n + t.inserted, 0);
+  const added = Object.entries(totals).filter(([, t]) => t.inserted > 0);
+  const existing = Object.entries(totals).filter(([, t]) => t.existing > 0);
+  const closed = totals.alarms ? totals.alarms.closed : 0;
+  const body = $("s3-body");
+  if (!total) {
+    body.replaceChildren(box("info", el("p", {}, "追加するものはありません。選んだ内容は、すべて今の DB にあります。")));
+    setStep("s3", "done");
+    setStep("s4", "disabled");
+    return;
+  }
+  body.replaceChildren(
+    el("p", { class: "sentence" }, "書き戻すと、今の DB に次のデータを追加します。"),
+    el("div", { class: "chips" }, added.map(([t, v]) => el("span", { class: "chip" }, el("b", {}, fmtNum(v.inserted)), `${UNITS[t] || "件"}の${label(t)}`))),
+    existing.length ? el("p", { class: "small muted" }, "今の DB に既にあるため追加しないもの: ",
+      existing.map(([t, v]) => `${label(t)} ${fmtNum(v.existing)}`).join("、")) : "",
+    closed ? box("warn", el("p", { class: "small" }, `発生中のアラーム ${closed} 件は、同じセンサーで今も別のアラームが発生中のため、「解除済み」として戻します。`)) : "",
+    el("p", { class: "small muted" }, "今あるデータは変更・削除しません。",
+      totals.users && totals.users.inserted ? "ログインの状態は戻らないため、利用者はログインし直す必要があります。" : ""));
+  setStep("s3", "done");
+  setStep("s4", "");
+  const btn = $("apply-btn");
+  btn.disabled = false;
+  btn.textContent = `今の DB に ${fmtNum(total)} 件を書き戻す`;
+}
+
+function destText() {
+  const sel = selection();
+  if (sel.into_self_hosted) return "OSS 版のデータとして";
+  if (sel.into_workspace_id) {
+    const w = (state.currentWs || []).find((x) => x.id === sel.into_workspace_id);
+    return w ? `ワークスペース「${w.name}」` : "選んだワークスペース";
+  }
+  return "";
+}
+
+// ── 手順 4: 書き戻す ──
+function openDialog(...children) {
+  $("dlg-body").replaceChildren(...children);
+  $("dlg").showModal();
+}
+const closeDialog = () => $("dlg").close();
+
+$("apply-btn").addEventListener("click", () => {
+  const r = state.plan;
+  if (!r || state.planKey !== JSON.stringify([state.selected, selection()])) return;
+  const total = r.tables.reduce((n, t) => n + t.inserted, 0);
+  const b = state.backups.find((x) => x.name === state.selected);
+  openDialog(
+    el("h3", {}, "書き戻しを実行しますか？"),
+    el("p", {}, `${fmtDate(b.modified)} のバックアップから、${fmtNum(total)} 件を今の DB に追加します。`),
+    destText() ? el("p", {}, el("b", {}, "書き戻し先: "), destText()) : "",
+    el("ol", {},
+      el("li", {}, "今の DB の控えを取ります（あとで元に戻せるように）"),
+      el("li", {}, `${fmtNum(total)} 件を追加します。今あるデータは変更しません`),
+      el("li", {}, "途中で問題が起きたら、何も変更せずに止まります")),
+    el("div", { class: "row" },
+      el("button", { onclick: closeDialog }, "やめる"),
+      el("button", { class: "primary", onclick: () => apply(total) }, "書き戻す")));
+});
+
+async function apply(total) {
+  const btn = $("apply-btn");
+  btn.disabled = true;
+  openDialog(el("h3", {}, "書き戻しています…"), spinner("今の DB の控えを取ってから、データを追加しています。画面を閉じずにお待ちください。"));
+  const s4 = $("s4-body");
+  try {
+    const r = await api(`/api/backups/${encodeURIComponent(state.selected)}/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...selection(), apply: true, expected_inserted: total }) });
+    closeDialog();
+    const done = Object.entries(planTotals(r)).filter(([, t]) => t.inserted > 0);
+    s4.replaceChildren(box("ok",
+      el("p", {}, el("b", {}, "✔ 書き戻しが完了しました")),
+      el("div", { class: "chips" }, done.map(([t, v]) => el("span", { class: "chip" }, el("b", {}, fmtNum(v.inserted)), `${UNITS[t] || "件"}の${label(t)}`))),
+      el("p", { class: "small" }, "書き戻す直前の今の DB は、バックアップの一覧に「書き戻し前の控え」として残しました。元に戻したいときは、その控えから DB を丸ごと戻します（infra/restore.sh）。")),
+      el("button", { onclick: () => location.reload() }, "最初の画面に戻る"));
+    setStep("s4", "done");
+    await Promise.all([loadStatus(), loadBackups()]);
+  } catch (e) {
+    closeDialog();
+    s4.replaceChildren(box("bad", el("p", {}, el("b", {}, "書き戻せませんでした（今の DB は変わっていません）")), el("p", { class: "small" }, e.message)), btn);
+    if (e.status === 409) schedulePlan();
+  }
+}
+
+// ── データを見る・書き出す ──
+const view = { offset: 0, names: {} };
+
+// ID の代わりに名前を出すため、センサーとワークスペースの名前を引けるようにする
+async function loadNames(base, ws) {
+  view.names = {};
+  for (const w of ws) if (w.id) view.names[w.id] = w.name;
+  try {
+    const r = await api(`${base}/tables/sensors?limit=500`);
+    const id = r.columns.indexOf("id"), name = r.columns.indexOf("name"), unit = r.columns.indexOf("unit");
+    for (const row of r.rows) view.names[row[id]] = unit >= 0 && row[unit] ? `${row[name]}（${row[unit]}）` : row[name];
+  } catch (e) { /* センサーの表が無い DB では ID のまま表示する */ }
+}
+
+function cell(column, v) {
+  if (v === null || v === undefined) return el("span", { class: "muted" }, "—");
+  if (typeof v === "object") return JSON.stringify(v);
+  if (["sensor_id", "workspace_id"].includes(column) && view.names[v]) return el("span", { title: v }, view.names[v]);
+  if (typeof v === "string" && ISO_RE.test(v)) {
+    return el("span", { title: v }, new Date(v).toLocaleString("ja-JP", { dateStyle: "medium", timeStyle: "medium" }));
+  }
+  if (String(v) in VALUES && typeof v !== "number") return VALUES[String(v)];
+  return v;
+}
+
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $("tab-restore").classList.toggle("hidden", name !== "restore");
+  $("tab-browse").classList.toggle("hidden", name !== "browse");
+}
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  showTab(b.dataset.tab);
+  if (b.dataset.tab === "browse") prepareBrowse();
+}));
+
+function prepareSources(db) {
+  const src = $("v-source");
+  const opts = [];
+  if (state.info.target_configured) opts.push(el("option", { value: "current" }, "今の DB"));
+  for (const b of state.backups) {
+    opts.push(el("option", { value: b.name }, `バックアップ: ${fmtDate(b.modified)}（${kind(b.name)[1]}）${b.loaded ? "" : " ※未準備"}`));
+  }
+  src.replaceChildren(...opts);
+  if (db) src.value = db;
+}
+
+async function prepareBrowse(db, workspaceId) {
+  prepareSources(db || $("v-source").value);
+  await sourceChanged(workspaceId);
+}
+
+async function sourceChanged(workspaceId) {
+  const db = $("v-source").value;
+  if (!db) return;
+  const b = state.backups.find((x) => x.name === db);
+  const status = $("v-status");
+  if (b && !b.loaded) {
+    status.replaceChildren(el("span", { class: "spinner" }), "このバックアップを準備しています…");
+    try {
+      await api(`/api/backups/${encodeURIComponent(db)}/load`, { method: "POST" });
+      b.loaded = true;
+      prepareSources(db);
+    } catch (e) {
+      status.textContent = `準備できませんでした: ${e.message}`;
+      return;
+    }
+  }
+  const base = `/api/db/${encodeURIComponent(db)}`;
+  const [tables, ws] = await Promise.all([api(`${base}/tables`), api(`${base}/workspaces`)]);
+  await loadNames(base, ws);
+  const tSel = $("v-table");
+  const keep = tSel.value;
+  tSel.replaceChildren(...tables.filter((t) => t !== "alembic_version").map((t) => el("option", { value: t }, label(t))));
+  tSel.value = tables.includes(keep) ? keep : (tables.includes("readings") ? "readings" : tables[0]);
+  const wSel = $("v-ws");
+  wSel.replaceChildren(el("option", { value: "" }, "すべて"),
+    ...ws.filter((w) => w.id).map((w) => el("option", { value: w.id }, `${w.name}（${w.owner_email || "所有者なし"}）`)));
+  wSel.value = workspaceId || "";
+  view.offset = 0;
+  await showRows();
+}
+
+function openBrowse(db, workspaceId) {
+  showTab("browse");
+  prepareBrowse(db, workspaceId);
+}
+
+function viewQuery() {
+  const p = new URLSearchParams();
+  if ($("v-ws").value) p.set("workspace_id", $("v-ws").value);
+  if ($("v-from").value) p.set("from", new Date($("v-from").value).toISOString());
+  if ($("v-to").value) p.set("to", new Date($("v-to").value).toISOString());
+  return p;
+}
+
+async function showRows() {
+  const db = $("v-source").value;
+  const t = $("v-table").value;
+  if (!db || !t) return;
+  const base = `/api/db/${encodeURIComponent(db)}`;
+  const p = viewQuery();
+  $("v-csv").href = `${base}/export/${encodeURIComponent(t)}.csv?${p}`;
+  p.set("limit", PAGE);
+  p.set("offset", view.offset);
+  const status = $("v-status");
+  try {
+    const r = await api(`${base}/tables/${encodeURIComponent(t)}?${p}`);
+    const numeric = new Set(r.columns.map((c, i) => (c === "value" ? i : -1)).filter((i) => i >= 0));
+    const next = table(r.columns.map((c) => COLUMNS[c] || c), r.rows.map((row) => row.map((c, i) => cell(r.columns[i], c))), numeric);
+    next.id = "v-rows";
+    $("v-rows").replaceWith(next);
+    status.textContent = r.total
+      ? `${fmtNum(r.total)}${r.total_capped ? " 件以上" : " 件"}のうち ${fmtNum(view.offset + 1)}〜${fmtNum(view.offset + r.rows.length)} 件目`
+      : "該当するデータはありません";
+    $("v-prev").disabled = view.offset === 0;
+    $("v-next").disabled = view.offset + PAGE >= r.total;
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+$("v-source").addEventListener("change", () => sourceChanged());
+$("v-table").addEventListener("change", () => { view.offset = 0; showRows(); });
+$("v-ws").addEventListener("change", () => { view.offset = 0; showRows(); });
+$("v-show").addEventListener("click", () => { view.offset = 0; showRows(); });
+$("v-prev").addEventListener("click", () => { view.offset = Math.max(0, view.offset - PAGE); showRows(); });
+$("v-next").addEventListener("click", () => { view.offset += PAGE; showRows(); });
+
+(async () => {
+  try {
+    state.info = await api("/api/info");
+    await Promise.all([loadStatus(), loadBackups()]);
+  } catch (e) {
+    $("s1-msg").replaceChildren(box("bad", el("p", {}, e.message)));
+  }
+})();
+</script>
+</body>
+</html>
