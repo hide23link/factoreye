@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>負荷テストエミュレータ</title>
+  <style>
+    :root { --fg:#111827; --muted:#6b7280; --line:#e5e7eb; --bg:#f9fafb; --card:#fff; --accent:#2563eb; --bad:#dc2626; --ok:#16a34a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg:#f3f4f6; --muted:#9ca3af; --line:#374151; --bg:#111827; --card:#1f2937; --accent:#60a5fa; --bad:#f87171; --ok:#4ade80; }
+    }
+    :root[data-theme="dark"] { --fg:#f3f4f6; --muted:#9ca3af; --line:#374151; --bg:#111827; --card:#1f2937; --accent:#60a5fa; --bad:#f87171; --ok:#4ade80; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    header { display:flex; align-items:center; gap:12px; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+    h1 { font-size:16px; margin:0; }
+    .pill { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+    .pill.running { color:var(--ok); border-color:var(--ok); }
+    main { display:grid; grid-template-columns: 340px 1fr; gap:16px; padding:16px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+    h2 { font-size:14px; margin:0 0 10px; }
+    label { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
+    input, select { width:100%; box-sizing:border-box; padding:6px 8px; margin-top:3px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    button { padding:7px 12px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; font-size:13px; }
+    button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    button.danger { color:var(--bad); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+    .card .k { font-size:11px; color:var(--muted); }
+    .card .v { font-size:20px; font-weight:600; margin-top:2px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { text-align:right; padding:5px 6px; border-bottom:1px solid var(--line); }
+    th:first-child, td:first-child { text-align:left; }
+    canvas { width:100%; height:140px; display:block; }
+    .msg { font-size:12px; color:var(--muted); min-height:16px; margin-top:8px; white-space:pre-wrap; }
+    .warn { font-size:12px; color:var(--bad); margin-top:6px; }
+    .hint { font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>負荷テストエミュレータ</h1>
+    <span id="state" class="pill">idle</span>
+    <span id="runinfo" class="pill"></span>
+    <span style="flex:1"></span>
+    <span class="pill" id="clock"></span>
+  </header>
+
+  <main>
+    <div>
+      <section>
+        <h2>想定（設定値）</h2>
+        <label>対象URL
+          <input id="target_url" />
+        </label>
+        <label>テストユーザーの接頭辞（英数字10文字以内）
+          <input id="email_prefix" />
+        </label>
+        <label><input id="allow_production" type="checkbox" style="width:auto;margin-right:6px" />本番ホストへの実行を許可する（通常は付けないこと）</label>
+        <label>同時ユーザー数（1〜100）
+          <input id="users" type="number" min="1" max="100" />
+        </label>
+        <label>1ユーザーあたりのセンサー数（1〜10、無料上限）
+          <input id="sensors_per_user" type="number" min="1" max="10" />
+        </label>
+        <label>送信間隔（秒）
+          <input id="send_interval_s" type="number" min="0.1" max="60" step="0.1" />
+        </label>
+        <label>送信のゆらぎ（秒、間隔以下）
+          <input id="jitter_s" type="number" min="0" max="5" step="0.1" />
+        </label>
+        <label>1ユーザーの閲覧・設定変更の並行数（0〜10）
+          <input id="viewers_per_user" type="number" min="0" max="10" />
+        </label>
+        <label>閲覧の間隔（秒）
+          <input id="viewer_interval_s" type="number" min="0.1" max="60" step="0.1" />
+        </label>
+        <label>値の傾向
+          <select id="value_profile">
+            <option value="sine">sine（緩やかな波）</option>
+            <option value="random">random（ランダム）</option>
+            <option value="spiky">spiky（アラームを混ぜる）</option>
+          </select>
+        </label>
+        <label>スパイクの確率（spiky のとき）
+          <input id="spike_probability" type="number" min="0" max="1" step="0.01" />
+        </label>
+        <label>値の平均
+          <input id="value_base" type="number" step="1" />
+        </label>
+        <label>値の振れ幅
+          <input id="value_amplitude" type="number" step="1" />
+        </label>
+        <div class="row">
+          <button id="apply" class="primary">想定を反映</button>
+        </div>
+        <div class="hint">実行中に反映できる項目は即時に効きます。対象URLの変更は再起動になります。</div>
+        <div id="msg" class="msg"></div>
+      </section>
+
+      <section style="margin-top:16px">
+        <h2>実行</h2>
+        <div class="row">
+          <button id="start" class="primary">開始</button>
+          <button id="stop" class="danger">停止</button>
+          <button id="reset">計測をリセット</button>
+        </div>
+      </section>
+
+      <section style="margin-top:16px">
+        <h2>後片付け（負荷テスト用ユーザーの削除）</h2>
+        <label>管理者ID
+          <input id="admin_id" autocomplete="off" />
+        </label>
+        <label>管理者パスワード
+          <input id="admin_password" type="password" autocomplete="off" />
+        </label>
+        <div class="row">
+          <button id="cleanup" class="danger">負荷テストユーザーを削除</button>
+        </div>
+        <div class="hint">メールが「接頭辞-実行ID-番号@example.com」に一致するユーザーだけを削除します。停止後に実行してください。</div>
+      </section>
+    </div>
+
+    <div>
+      <div class="cards">
+        <div class="card"><div class="k">リクエスト（累計）</div><div class="v" id="c_total">0</div></div>
+        <div class="card"><div class="k">リクエスト/秒（直近10秒）</div><div class="v" id="c_rps">0</div></div>
+        <div class="card"><div class="k">エラー率</div><div class="v" id="c_err">0%</div></div>
+        <div class="card"><div class="k">仮想ユーザー（稼働 / 目標）</div><div class="v" id="c_users">0 / 0</div></div>
+        <div class="card"><div class="k">センサー（稼働中）</div><div class="v" id="c_sensors">0</div></div>
+        <div class="card"><div class="k">取り込み p95（ms）</div><div class="v" id="c_p95">—</div></div>
+      </div>
+
+      <section>
+        <h2>リクエスト/秒の推移</h2>
+        <canvas id="chart"></canvas>
+      </section>
+
+      <section style="margin-top:16px">
+        <h2>API別の計測</h2>
+        <table>
+          <thead>
+            <tr><th>API</th><th>件数</th><th>エラー</th><th>p50 ms</th><th>p95 ms</th><th>p99 ms</th></tr>
+          </thead>
+          <tbody id="endpoints"></tbody>
+        </table>
+        <div id="warn" class="warn"></div>
+      </section>
+    </div>
+  </main>
+
+<script>
+const FIELDS = ["target_url","users","sensors_per_user","send_interval_s","jitter_s","viewers_per_user",
+  "viewer_interval_s","value_profile","spike_probability","value_base","value_amplitude","email_prefix"];
+const history = [];
+const HISTORY_MAX = 120;
+let lastState = "idle";
+
+const $ = (id) => document.getElementById(id);
+const msg = (text) => { $("msg").textContent = text; };
+
+function readForm() {
+  const out = {};
+  for (const f of FIELDS) out[f] = $(f).value;
+  out.allow_production = $("allow_production").checked;
+  return out;
+}
+
+function writeForm(s) {
+  for (const f of FIELDS) if (f in s) $(f).value = s[f];
+  $("allow_production").checked = !!s.allow_production;
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `${res.status}`);
+  return data;
+}
+
+async function loadScenario() {
+  const data = await api("GET", "/api/scenario");
+  writeForm(data.scenario);
+  $("email_prefix").value = data.scenario.email_prefix;
+}
+
+$("apply").onclick = async () => {
+  try {
+    const r = await api("PUT", "/api/scenario", readForm());
+    const label = { saved: "保存しました（次回の開始から反映）", live: "実行中に反映しました", restarted: "対象URLが変わったため再起動しました" };
+    msg(label[r.mode] || r.mode);
+    writeForm(r.scenario);
+  } catch (e) { msg("反映に失敗: " + e.message); }
+};
+
+$("start").onclick = async () => {
+  try {
+    await api("PUT", "/api/scenario", readForm());
+    await api("POST", "/api/start", {});
+    msg("開始しました");
+  } catch (e) { msg("開始に失敗: " + e.message); }
+};
+
+$("stop").onclick = async () => {
+  try { await api("POST", "/api/stop"); msg("停止しました"); }
+  catch (e) { msg("停止に失敗: " + e.message); }
+};
+
+$("reset").onclick = async () => {
+  try { await api("POST", "/api/metrics/reset"); history.length = 0; msg("計測をリセットしました"); }
+  catch (e) { msg(e.message); }
+};
+
+$("cleanup").onclick = async () => {
+  if (!confirm("負荷テスト用ユーザーを削除します。よろしいですか？")) return;
+  try {
+    const r = await api("POST", "/api/cleanup", {
+      adminId: $("admin_id").value, password: $("admin_password").value,
+    });
+    $("admin_password").value = "";
+    msg(`削除しました: ${r.deleted} 件`);
+  } catch (e) { msg("削除に失敗: " + e.message); }
+};
+
+function fmt(n) { return n === null || n === undefined ? "—" : Number(n).toLocaleString(); }
+
+function drawChart() {
+  const c = $("chart");
+  const ratio = window.devicePixelRatio || 1;
+  c.width = c.clientWidth * ratio; c.height = c.clientHeight * ratio;
+  const g = c.getContext("2d");
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const w = c.clientWidth, h = c.clientHeight;
+  g.clearRect(0, 0, w, h);
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563eb";
+  const muted = getComputedStyle(document.documentElement).getPropertyValue("--muted").trim() || "#6b7280";
+  const max = Math.max(10, ...history);
+  g.strokeStyle = muted; g.globalAlpha = 0.3; g.beginPath(); g.moveTo(0, h - 1); g.lineTo(w, h - 1); g.stroke(); g.globalAlpha = 1;
+  if (history.length < 2) return;
+  g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+  history.forEach((v, i) => {
+    const x = (i / (HISTORY_MAX - 1)) * w;
+    const y = h - (v / max) * (h - 10) - 4;
+    i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+  });
+  g.stroke();
+  g.fillStyle = muted; g.font = "11px system-ui"; g.fillText(`最大 ${max.toFixed(0)} req/s`, 6, 12);
+}
+
+function render(s) {
+  const st = s.state;
+  $("state").textContent = st;
+  $("state").className = "pill" + (st === "running" ? " running" : "");
+  $("runinfo").textContent = s.runId ? `実行ID ${s.runId}` : "";
+  $("c_total").textContent = fmt(s.metrics.total);
+  $("c_rps").textContent = fmt(s.metrics.rps);
+  $("c_err").textContent = (s.metrics.errorRate * 100).toFixed(2) + "%";
+  $("c_users").textContent = `${s.users.running} / ${s.users.target}` + (s.users.settingUp ? `（準備中 ${s.users.settingUp}）` : "");
+  $("c_sensors").textContent = fmt(s.users.sensors);
+  const ingest = s.metrics.endpoints.ingest;
+  $("c_p95").textContent = ingest && ingest.p95Ms !== null ? ingest.p95Ms : "—";
+
+  const tbody = $("endpoints");
+  tbody.textContent = "";
+  for (const [name, ep] of Object.entries(s.metrics.endpoints)) {
+    const tr = document.createElement("tr");
+    const cells = [name, fmt(ep.count), fmt(ep.errors), ep.p50Ms ?? "—", ep.p95Ms ?? "—", ep.p99Ms ?? "—"];
+    for (const v of cells) { const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); }
+    tbody.appendChild(tr);
+  }
+
+  const warnings = [];
+  if (s.metrics.errorRate > 0.01) warnings.push("エラー率が1%を超えています。429（レート制限）や5xxを確認してください。");
+  if (ingest && ingest.p95Ms > 1000) warnings.push("取り込みの p95 が1秒を超えています。");
+  $("warn").textContent = warnings.join("\n");
+
+  if (st === "running") { history.push(s.metrics.rps); if (history.length > HISTORY_MAX) history.shift(); }
+  drawChart();
+  lastState = st;
+}
+
+async function poll() {
+  try { render(await api("GET", "/api/status")); } catch (e) { msg("状態の取得に失敗: " + e.message); }
+  $("clock").textContent = new Date().toLocaleTimeString("ja-JP");
+}
+
+loadScenario().then(() => { poll(); setInterval(poll, 2000); }).catch((e) => msg("初期化に失敗: " + e.message));
+window.addEventListener("resize", drawChart);
+</script>
+</body>
+</html>
