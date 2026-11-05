@@ -45,6 +45,17 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      # runner の pg_dump / psql は新しい版（17 以降）で、15 系のサーバーが知らない設定
+      # （transaction_timeout）を含むダンプを作る。サーバーと同じ 15 系のクライアントを使う
+      - name: Install PostgreSQL 15 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-15
+          echo "/usr/lib/postgresql/15/bin" >> "$GITHUB_PATH"
+
       # DB のテストは psql でバックアップを流し込む。無ければ飛ばされるため、先に有無を確かめる
       - name: Check psql
         run: psql --version

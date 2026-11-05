@@ -14,7 +14,7 @@ FactorEye への貢献に興味を持っていただきありがとうござい�
    git checkout main && git pull origin main
    git checkout -b feature/your-change   # fix/, docs/, refactor/ も使えます
    ```
-3. **実装する**: [`docs/architecture.md`](docs/architecture.md)（仕様）と [`docs/decisions.md`](docs/decisions.md)（設計判断の経緯）を確認してください。既存の判断と食い違う変更をする場合は、理由を PR に書いてください。
+3. **実装する**: [`docs/architecture.md`](docs/architecture.md)（仕様）を確認してください。既存の判断と食い違う変更をする場合は、理由を PR に書いてください。
 4. **テストを通す**（[README](README.md#開発環境) の手順と同じ）:
    ```bash
    # backend
@@ -39,7 +39,7 @@ FactorEye への貢献に興味を持っていただきありがとうござい�
 - **命名**: backend は `snake_case`（ファイル）/ `PascalCase`（クラス）、frontend は `kebab-case`（ファイル）/ `PascalCase`（コンポーネント）。
 - **コメント**: 「何を」ではなくコードから読み取れない「なぜ」を書く。
 - **理解しやすさ**: コードを修正・追加するときは、読んで意図が分かる形（分かりやすい命名・小さな関数・「なぜ」のコメント）にする。詳細は ecopower リポジトリ `guidelines/03-development-standards.md` の「理解しやすさ」を参照。
-- DB スキーマの変更は Alembic マイグレーションで行い、破壊的変更は [`CHANGELOG.md`](CHANGELOG.md) の「Removed」に明記する。
+- DB スキーマの変更は Alembic マイグレーションで行い、破壊的変更は PR の説明に明記する。
 
 ## 依存関係の追加
 
