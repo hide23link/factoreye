@@ -1,4 +1,4 @@
-"""機器の管理API（/api/devices）のテスト。キーは 1 回だけ返す・所属・失効・SaaS では 404。"""
+"""機器の管理API（/api/devices）のテスト。キー 1 回だけ・目印・所属・失効・削除。SaaS は 404。"""
 
 import httpx
 import pytest
@@ -31,6 +31,16 @@ async def test_create_returns_key_once_and_list_hides_it(client: httpx.AsyncClie
     assert [d["name"] for d in listed.json()] == ["atom01"]
     assert "key" not in listed.json()[0]
     assert body["key"] not in listed.text
+
+
+async def test_key_hint_is_the_first_six_characters_only(client: httpx.AsyncClient) -> None:
+    created = (await client.post("/api/devices", json={"name": "hint01"})).json()
+    assert created["keyHint"] == created["key"][:6]
+
+    listed = (await client.get("/api/devices")).json()
+    assert listed[0]["keyHint"] == created["key"][:6]
+    # 一覧には、キーの残り（7 文字目以降）は出ない
+    assert created["key"][:7] not in str(listed)
 
 
 async def test_duplicate_name_and_bad_input(client: httpx.AsyncClient) -> None:
@@ -134,3 +144,36 @@ async def test_saas_mode_has_no_devices_api(
 ) -> None:
     monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
     assert (await client.get("/api/devices")).status_code == 404
+
+
+async def test_delete_requires_revoke_and_keeps_sensors(client: httpx.AsyncClient) -> None:
+    await _sensor(client, "del-temp")
+    created = (await client.post("/api/devices", json={"name": "del1"})).json()
+    await client.post(f"/api/devices/{created['id']}/sensors", json={"ingestKeys": ["del-temp"]})
+    sent = await client.post(
+        "/api/ingest/readings",
+        headers={"X-Device-Key": created["key"]},
+        json={"ingestKey": "del-temp", "value": 2.5},
+    )
+    assert sent.status_code in (200, 201, 202)
+    await flush_once()
+
+    # 有効な機器は削除できない
+    assert (await client.delete(f"/api/devices/{created['id']}")).status_code == 409
+    assert [d["name"] for d in (await client.get("/api/devices")).json()] == ["del1"]
+
+    await client.post(f"/api/devices/{created['id']}/revoke")
+    assert (await client.delete(f"/api/devices/{created['id']}")).status_code == 204
+    assert (await client.get("/api/devices")).json() == []
+
+    # センサーと測定値は残り、センサーは機器なしに戻る
+    sensors = {s["ingestKey"]: s for s in (await client.get("/api/sensors")).json()}
+    assert sensors["del-temp"]["deviceId"] is None
+    sensor_id = sensors["del-temp"]["id"]
+    readings = await client.get(f"/api/sensors/{sensor_id}/readings")
+    assert readings.status_code == 200
+    assert readings.json()["total"] == 1
+
+    # 2 回目は 404。同じ名前で作り直せる
+    assert (await client.delete(f"/api/devices/{created['id']}")).status_code == 404
+    assert (await client.post("/api/devices", json={"name": "del1"})).status_code == 201

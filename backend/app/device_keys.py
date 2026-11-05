@@ -15,7 +15,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import ingest_cache
-from app.db.models import IngestDevice, Sensor
+from app.db.models import KEY_HINT_LENGTH, IngestDevice, Sensor
 
 
 def hash_device_key(key: str) -> str:
@@ -37,7 +37,14 @@ def normalize_line(line: str | None) -> str | None:
 async def create_device(session: AsyncSession, name: str, line: str | None = None) -> str:
     """機器を作り、キーを返す（この 1 回だけ、キーが画面に出る）。line は任意の系統。"""
     key = secrets.token_urlsafe(32)
-    session.add(IngestDevice(name=name, key_hash=hash_device_key(key), line=normalize_line(line)))
+    session.add(
+        IngestDevice(
+            name=name,
+            key_hash=hash_device_key(key),
+            key_hint=key[:KEY_HINT_LENGTH],
+            line=normalize_line(line),
+        )
+    )
     await session.commit()
     ingest_cache.clear()
     return key
@@ -125,5 +132,28 @@ async def revoke_device(session: AsyncSession, device: IngestDevice) -> None:
     """機器のキーを失効させる（キーは使えなくなる。センサーの所属は残る）。"""
     device.revoked_at = datetime.now(UTC)
     session.add(device)
+    await session.commit()
+    ingest_cache.clear()
+
+
+class DeviceNotRevokedError(Exception):
+    """失効していない機器は、削除できない（先に失効する）。"""
+
+
+async def delete_device(session: AsyncSession, device: IngestDevice) -> None:
+    """失効済みの機器を削除する。所属していたセンサーと測定値は残り、センサーは「機器なし」に戻る。
+
+    センサーの所属は DB の外部キー（ON DELETE SET NULL）で外れる。センサー一覧の版（ETag）は
+    updated_at から作るので、所属していたセンサーの updated_at を進める
+    （進めないと、画面が古い所属のまま 304 を受け取る）。
+    """
+    if device.revoked_at is None:
+        raise DeviceNotRevokedError
+    await session.exec(
+        update(Sensor)
+        .where(col(Sensor.device_id) == device.id)
+        .values(updated_at=datetime.now(UTC))
+    )
+    await session.delete(device)
     await session.commit()
     ingest_cache.clear()
