@@ -7,6 +7,7 @@
 #define ARDUINO_M5STACK_ATOM 1
 #endif
 #include <cstdio>
+#include <cstring>
 
 #include "NodeConfig.h"
 
