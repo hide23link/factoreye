@@ -65,6 +65,10 @@ class AlarmSeverity(StrEnum):
 # ──────────────────────────────────────────────────────────────
 # Sensor
 # ──────────────────────────────────────────────────────────────
+# 機器のキーの目印として保存する、先頭の文字数
+KEY_HINT_LENGTH = 6
+
+
 class IngestDevice(SQLModel, table=True):
     """取り込みの機器（現場の 1 台）。機器ごとのキーで、自分のセンサーだけに送れる（自前ホスト）。
 
@@ -78,6 +82,9 @@ class IngestDevice(SQLModel, table=True):
     key_hash: str = Field(max_length=64, unique=True)
     created_at: datetime = Field(default_factory=_utcnow)
     revoked_at: datetime | None = None
+    # キーの目印（先頭 6 文字）。どの機器のキーかを見分けるためだけに出す。残りは保存しない。
+    # 目印を付ける前に作った機器は None
+    key_hint: str | None = Field(default=None, max_length=KEY_HINT_LENGTH)
     # 系統（ライン・設備の区分。例: 第1ライン）。センサー棚が「系統 › 機器」に分けるために使う。任意
     line: str | None = Field(default=None, max_length=40)
 

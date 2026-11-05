@@ -262,3 +262,22 @@ def test_cli_refuses_to_run_in_saas_mode(
     monkeypatch.setattr(settings, "auth_mode", AuthMode.MULTI_TENANT)
     assert device_cli.main(["list"]) == 1
     assert "自前ホスト" in capsys.readouterr().err
+
+
+async def test_create_device_saves_only_the_first_six_characters_as_hint() -> None:
+    async with AsyncSession(engine) as session:
+        key = await device_keys.create_device(session, "hint-dev")
+        device = await device_keys.get_device_by_name(session, "hint-dev")
+    assert device is not None
+    assert device.key_hint == key[:6]
+    assert key not in (device.key_hash, device.key_hint)
+
+
+async def test_delete_device_refuses_an_active_device() -> None:
+    async with AsyncSession(engine) as session:
+        await device_keys.create_device(session, "keep-dev")
+        device = await device_keys.get_device_by_name(session, "keep-dev")
+        assert device is not None
+        with pytest.raises(device_keys.DeviceNotRevokedError):
+            await device_keys.delete_device(session, device)
+        assert await device_keys.get_device_by_name(session, "keep-dev") is not None

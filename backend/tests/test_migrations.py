@@ -265,3 +265,35 @@ def test_device_line_migration_adds_a_nullable_column_and_keeps_existing_devices
         assert column == ("YES", 40, None)
         old = conn.execute("SELECT line FROM ingest_devices WHERE name = 'old-device'").fetchone()
         assert old == (None,)
+
+
+# ── 機器のキーの目印（j0e1f2a3b4c5）: NULL 可の列を足すだけ ─────────────
+
+_BEFORE_KEY_HINT = "i9d0e1f2a3b4"
+
+
+def test_key_hint_migration_adds_a_nullable_column_and_keeps_existing_devices(
+    migrated_db: tuple[str, str],
+) -> None:
+    async_url, sync_url = migrated_db
+    _alembic(async_url, "downgrade", _BEFORE_KEY_HINT)
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO ingest_devices (id, name, key_hash, created_at) "
+            "VALUES (gen_random_uuid(), 'old-device', repeat('b', 64), now())"
+        )
+
+    _alembic(async_url, "upgrade", "head")
+
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        column = conn.execute(
+            "SELECT is_nullable, character_maximum_length, column_default "
+            "FROM information_schema.columns "
+            "WHERE table_name = 'ingest_devices' AND column_name = 'key_hint'"
+        ).fetchone()
+        # NULL 可・既定なし・6 文字。既存の機器は残り、目印は NULL（目印なし）
+        assert column == ("YES", 6, None)
+        old = conn.execute(
+            "SELECT key_hint FROM ingest_devices WHERE name = 'old-device'"
+        ).fetchone()
+        assert old == (None,)

@@ -63,7 +63,7 @@ flowchart LR
 | `widgets` | ウィジェット | ダッシュボードの配置（12列グリッド）、種別、センサーとの紐付け、設定 |
 | `notification_settings` | 通知設定 | ワークスペースごとに1行（self-hosted は NULL の1行）。重故障・軽故障それぞれの Discord Webhook URL、有効/無効、重故障の再通知 |
 | `webhook_subscriptions` | Webhook 購読 | イベント種別、送信先 URL、有効/無効 |
-| `ingest_devices` | 機器ごとのキー（self-hosted のみ） | 機器の名前（一意）、キーの SHA-256 ハッシュ（キーそのものは保存しない）、作成日時、失効日時、任意の系統（`line`、40 文字まで。センサー棚の「系統 › 機器」用）。センサーの `device_id` の参照先 |
+| `ingest_devices` | 機器ごとのキー（self-hosted のみ） | 機器の名前（一意）、キーの SHA-256 ハッシュ（キーそのものは保存しない）、キーの目印（先頭 6 文字。`key_hint`。見分けるためだけに画面に出す）、作成日時、失効日時、任意の系統（`line`、40 文字まで。センサー棚の「系統 › 機器」用）。センサーの `device_id` の参照先 |
 | `users` / `workspaces` / `refresh_tokens` | 認証（SaaS のみ） | ユーザー、ワークスペース（テナント）、リフレッシュトークン |
 
 - センサーの `workspace_id` などテナント列は SaaS モードで使う（`NULL` が self-hosted）
@@ -134,7 +134,7 @@ flowchart LR
 **機器ごとのキー（self-hosted だけ）**: 機器（現場の 1 台）ごとにキーを発行し、`X-Device-Key` ヘッダーで送る。キーは発行の時に 1 回だけ表示し、DB には SHA-256 のハッシュだけを保存する（`ingest_devices` 表）。センサーは `device_id` で機器に所属させる（`python -m app.device_cli attach <機器名> <ingestKey>...`）。
 - 所属のあるセンサーには、そのセンサーの機器のキーでしか送れない（キーが無いと 401、別の機器のキーは 403。`sensors`・`samples` では `rejected` に出し、残りは受け付ける）
 - 所属のないセンサーには、機器のキーでは送れない（403）。機器のキーが無い送信（従来の形）は、所属のないセンサーにだけ送れる
-- キーは `python -m app.device_cli create <機器名>` で発行し、`revoke <機器名>` で失効させる（失効したキーは 401）
+- キーは `python -m app.device_cli create <機器名>` で発行し、`revoke <機器名>` で失効させる（失効したキーは 401）。失効した機器は `delete <機器名>`（画面では「この機器を削除」）で削除できる（センサーと測定値は残り、センサーの所属は外れる）
 - 機器のキーを付けたときは、共通の `X-API-Key` の検査を省く（機器ごとのキーで認証する）。SaaS 版では無視する（従来どおり）
 - 本文は、読みながら大きさを数える。Content-Length の無い（chunked）送信も、8MB を超えたら 413
 

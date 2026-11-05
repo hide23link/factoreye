@@ -1,10 +1,12 @@
 /**
  * 機器のパネル（設定画面「機器」）。OSS 版（self-hosted）だけで出す。
  *
- * 機器ごとのキー（X-Device-Key）の発行・センサーの所属・失効を、画面でできる
+ * 機器ごとのキー（X-Device-Key）の発行・センサーの所属・失効・削除を、画面でできる
  * （コマンド app/device_cli.py と同じ処理）。
  * - キーは作成した直後に 1 回だけ表示する。DB にはハッシュしか残らないので、あとから見る方法は無い
+ * - あとから見分けられるよう、キーの先頭 6 文字を「目印」として出す（残りは保存していないので出せない）
  * - 失効すると、その機器のキーでの送信は 401 になる（センサーの所属は残る）
+ * - 削除できるのは、失効した機器だけ。所属していたセンサーと測定値は残り、センサーは「機器なし」に戻る
  *
  * 【誰が使うか】SettingsPage.tsx が、OSS 版のときだけ「機器」のタブで出す。引数（props）はない。
  */
@@ -12,12 +14,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useDevices, useSensors } from "../../hooks/queries";
-import { attachDeviceSensors, createDevice, revokeDevice } from "../../lib/api";
+import { attachDeviceSensors, createDevice, deleteDevice, revokeDevice } from "../../lib/api";
 import { describeDeviceError } from "../../lib/errors";
 import { formatLastReceived } from "../../lib/time";
 import type { Device, DeviceCreated } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ErrorNotice } from "../ErrorNotice";
+
+/** キーの目印の表示。先頭 6 文字だけを見せ、残りは伏せる。目印のない（古い）機器は「なし」。 */
+function KeyHint({ hint }: { hint: string | null }) {
+  if (hint === null) return <span className="text-gray-400">目印なし</span>;
+  return (
+    <span data-testid="key-hint" className="font-mono">
+      {hint}••••••••
+    </span>
+  );
+}
 
 /** 作成直後のキーを 1 回だけ見せる小窓。「控えました」にチェックするまで閉じられない。 */
 function KeyDialog({ created, onClose }: { created: DeviceCreated; onClose: () => void }) {
@@ -38,7 +50,8 @@ function KeyDialog({ created, onClose }: { created: DeviceCreated; onClose: () =
       <div role="dialog" aria-modal="true" aria-label="キーを控えてください" className="w-full max-w-md space-y-3 rounded-lg bg-white p-4 shadow-lg">
         <h3 className="text-base font-bold text-gray-900">キーを控えてください</h3>
         <p className="text-sm text-gray-700">
-          機器 <b>{created.name}</b> を作りました。このキーは<b>この 1 回だけ</b>表示します。閉じると、もう見られません。
+          機器 <b>{created.name}</b> を作りました。このキーは<b>この 1 回だけ</b>表示します。閉じると、もう見られません
+          （あとからは、先頭の <KeyHint hint={created.keyHint} /> だけが目印として表示されます）。
         </p>
         <div data-testid="device-key" className="select-all break-all rounded border border-gray-200 bg-gray-50 p-2 font-mono text-sm">
           {created.key}
@@ -126,12 +139,13 @@ function AddDeviceForm({ onCreated, onCancel }: { onCreated: (created: DeviceCre
   );
 }
 
-/** 選んだ機器の詳細（所属センサー・所属させる・失効）。 */
+/** 選んだ機器の詳細（所属センサー・所属させる・失効・削除）。 */
 function DeviceDetail({ device, unattached }: { device: Device; unattached: string[] }) {
   const queryClient = useQueryClient();
   const [pick, setPick] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const active = device.revokedAt === null;
   // 選んだセンサーが、再取得で一覧から消えていたら、先頭に戻す（古い選択を送らない）
   const picked = unattached.includes(pick) ? pick : (unattached[0] ?? "");
@@ -165,6 +179,19 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
     },
   });
 
+  const remove = useMutation({
+    mutationFn: () => deleteDevice(device.id),
+    onSuccess: () => {
+      setConfirmingDelete(false);
+      setError(null);
+      refresh();
+    },
+    onError: (err) => {
+      setConfirmingDelete(false);
+      setError(describeDeviceError(err, "機器の削除"));
+    },
+  });
+
   return (
     <div className="space-y-4">
       <h3 className="font-mono text-base font-bold text-gray-900">{device.name}</h3>
@@ -180,7 +207,10 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
         <dt className="text-gray-500">最後の受信</dt>
         <dd>{formatLastReceived(device.lastReceivedAt)}</dd>
         <dt className="text-gray-500">キー</dt>
-        <dd className="text-xs text-gray-500">表示できません（作成時に 1 回だけ表示済み）</dd>
+        <dd className="text-sm">
+          <KeyHint hint={device.keyHint} />
+          <span className="ml-2 text-xs text-gray-500">先頭 6 文字だけ表示します（全体は作成時の 1 回だけ）</span>
+        </dd>
       </dl>
 
       <section>
@@ -240,10 +270,19 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
             >
               キーを失効
             </button>
-            <span className="text-xs text-gray-500">漏れたとき・機器を外すときに使います</span>
+            <span className="text-xs text-gray-500">漏れたとき・機器を外すときに使います（削除は、失効したあとに行えます）</span>
           </>
         ) : (
-          <span className="text-xs text-gray-500">失効済みです。再開するときは、新しい機器として作り直します。</span>
+          <>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="rounded border border-red-300 px-3 py-1 text-sm text-red-700 hover:bg-red-50"
+            >
+              この機器を削除
+            </button>
+            <span className="text-xs text-gray-500">失効済みです。再開するときは、新しい機器として作り直します。</span>
+          </>
         )}
       </div>
 
@@ -255,6 +294,17 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
           pending={revoke.isPending}
           onConfirm={() => revoke.mutate()}
           onCancel={() => setConfirmingRevoke(false)}
+        />
+      )}
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="機器を削除しますか"
+          message={`機器 ${device.name} を削除します。所属していたセンサー（${device.sensors.length} 件）と測定値は消えません。センサーは「機器なし」に戻り、共通の API キーで送れる状態になります。元に戻せません。`}
+          confirmLabel="削除する"
+          pending={remove.isPending}
+          onConfirm={() => remove.mutate()}
+          onCancel={() => setConfirmingDelete(false)}
         />
       )}
     </div>
@@ -326,7 +376,12 @@ export function DevicesSettingsPanel() {
                   onClick={() => setSelectedId(d.id)}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${d.id === selected?.id ? "bg-gray-100" : "hover:bg-gray-50"}`}
                 >
-                  <span className="min-w-0 flex-1 truncate font-mono font-medium">{d.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono font-medium">{d.name}</span>
+                    <span className="block text-xs text-gray-500">
+                      <KeyHint hint={d.keyHint} />
+                    </span>
+                  </span>
                   <span className="text-xs text-gray-500">{d.sensors.length} センサー</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${d.revokedAt === null ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
                     {d.revokedAt === null ? "有効" : "失効"}
