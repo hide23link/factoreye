@@ -1,0 +1,44 @@
+name: frontend-build
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/frontend-build.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/frontend-build.yml"]
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Dependency audit
+        # tailwindcss@3.x 経由の braces/micromatch (ReDoS) は dev 依存のみ（本番 bundle 非含有）。
+        # v4 アップグレードは破壊的変更のため別 Issue で対応。それまで critical のみをブロックする。
+        run: npm audit --audit-level=critical

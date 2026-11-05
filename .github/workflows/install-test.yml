@@ -1,0 +1,114 @@
+name: install-test
+
+# 配布版（install/）の確認。まっさらな Ubuntu で install.sh を実行し、起動・設定の変更・再起動・更新まで通す。
+# イメージは公開前でも試せるよう、この場でビルドして使う（FACTOREYE_IMAGE_PREFIX=local、イメージの取得は飛ばす）。
+on:
+  push:
+    branches: [main]
+    paths: ["install/**", "backend/**", "frontend/**", ".github/workflows/install-test.yml", ".github/workflows/publish-images.yml"]
+  pull_request:
+    paths: ["install/**", "backend/**", "frontend/**", ".github/workflows/install-test.yml", ".github/workflows/publish-images.yml"]
+  workflow_dispatch:
+
+env:
+  INSTALL_DIR: /opt/factoreye
+  PORT: "3001"
+
+jobs:
+  install-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (same as the published ones)
+        run: |
+          docker build -t local/factoreye-backend:test backend
+          docker build --build-arg VITE_API_URL= -t local/factoreye-frontend:test frontend
+
+      - name: Run install.sh on a clean Ubuntu
+        run: |
+          sudo env FACTOREYE_DIR="$INSTALL_DIR" FACTOREYE_SRC_DIR="$PWD/install" \
+            FACTOREYE_VERSION=test FACTOREYE_IMAGE_PREFIX=local FACTOREYE_SKIP_PULL=1 \
+            bash install/install.sh | tee install.out
+          # 初期の管理パスワード（最後に 1 回だけ表示される）を、次の手順に渡す
+          password="$(grep -E '^ +[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$' install.out | tr -d ' ')"
+          test -n "$password"
+          echo "::add-mask::$password"
+          echo "ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Config file permissions and shape
+        run: |
+          env_file="$INSTALL_DIR/config/.env"
+          # 失敗したときの手がかり（値は出さず、項目名・権限・ハッシュの先頭だけ）
+          sudo ls -la "$INSTALL_DIR/config"
+          sudo sed -E 's/=.{0,6}.*/=…/' "$env_file" | grep -v '^#' | grep -v '^$' || true
+          test "$(sudo stat -c %a "$env_file")" = "600" || { echo "::error::権限が 600 でない"; exit 1; }
+          # 管理パスワードのハッシュは $ を含むので、単一引用符で囲んで保存されている（-F: 文字どおりに探す）
+          sudo grep -qF "ADMIN_PASSWORD_HASH='\$2b\$" "$env_file" || { echo "::error::ハッシュが単一引用符で保存されていない"; exit 1; }
+          # コメント以外に、乱数で埋め忘れた場所がないこと
+          if sudo grep -v '^#' "$env_file" | grep -q '__GENERATE__'; then
+            echo "::error::.env に未置換の項目がある"; exit 1
+          fi
+
+      - name: Smoke test (view, auth, save and restart)
+        run: bash install/smoke-test.sh "http://127.0.0.1:$PORT" "$ADMIN_PASSWORD"
+
+      - name: Direct edit of .env is detected and reflected
+        run: |
+          cd "$INSTALL_DIR"
+          url="http://127.0.0.1:$PORT"
+          # 置き換え型の編集（sed -i）をしても、コンテナが新しい内容を見ること
+          sudo sed -i 's/^INGEST_RATE_LIMIT=.*/INGEST_RATE_LIMIT=77\/minute/' config/.env
+          curl -s "$url/api/settings/runtime" | grep -q '"fileChanged":true'
+          # 誤った値は、反映せず 422
+          sudo sed -i 's/^INGEST_AUTH=.*/INGEST_AUTH=of/' config/.env
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/settings/runtime/reflect")" = "422"
+          sudo sed -i 's/^INGEST_AUTH=.*/INGEST_AUTH=key/' config/.env
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/settings/runtime/reflect")" = "200"
+          for i in $(seq 1 30); do
+            sleep 2
+            curl -fs "$url/health" >/dev/null 2>&1 \
+              && curl -s "$url/api/settings/runtime" | grep -q '"ingestRateLimit":"77/minute"' && exit 0
+          done
+          echo "::error::反映後に新しい値が見えない"; exit 1
+
+      - name: Re-run install.sh keeps config and data
+        run: |
+          before="$(sudo sha256sum "$INSTALL_DIR/config/.env")"
+          sudo env FACTOREYE_DIR="$INSTALL_DIR" FACTOREYE_SRC_DIR="$PWD/install" \
+            FACTOREYE_VERSION=test FACTOREYE_IMAGE_PREFIX=local FACTOREYE_SKIP_PULL=1 \
+            bash install/install.sh
+          test "$before" = "$(sudo sha256sum "$INSTALL_DIR/config/.env")"
+          # backups/ は root だけが入れる。一覧も root のシェルで展開する
+          sudo sh -c "ls -l $INSTALL_DIR/backups/*.sql.gz $INSTALL_DIR/backups/*.env"
+          test "$(sudo sh -c "stat -c %a $INSTALL_DIR/backups/*.env" | sort -u)" = "600"
+          bash install/smoke-test.sh "http://127.0.0.1:$PORT"
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          cd "$INSTALL_DIR" && sudo docker compose --env-file config/.env logs --tail 100 || true
+
+  # ラズパイ（arm64）向けのイメージが作れること。公開はしない（動作確認は実機で行う）
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=backend-arm64
+          cache-to: type=gha,mode=max,scope=backend-arm64
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/arm64
+          build-args: |
+            VITE_API_URL=
+          push: false
+          cache-from: type=gha,scope=frontend-arm64
+          cache-to: type=gha,mode=max,scope=frontend-arm64

@@ -1,0 +1,62 @@
+name: backend-test
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", "loadtest/**", ".github/workflows/backend-test.yml"]
+  pull_request:
+    paths: ["backend/**", "loadtest/**", ".github/workflows/backend-test.yml"]
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: factoreye
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: factoreye
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U factoreye"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+
+      - name: Load test emulator tests
+        # loadtest/ の単体テスト（外部サービス不要）。backend と同じ環境で実行する
+        working-directory: loadtest
+        run: |
+          pip install -r requirements.txt
+          pytest
+
+      - name: Type check
+        run: mypy .
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Dependency audit
+        run: pip-audit
