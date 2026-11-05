@@ -2,7 +2,6 @@
 FactorEye データモデル
 
 仕様: docs/architecture.md §3 データモデル 参照
-(ecopower command-centerリポジトリ: https://github.com/ecopower/ecopower)
 
 Phase 0:  Sensor / Reading / Alarm / Dashboard / Widget
 Phase 0.5: User / Workspace / RefreshToken（AUTH_MODE=multi_tenant 時に使用）
