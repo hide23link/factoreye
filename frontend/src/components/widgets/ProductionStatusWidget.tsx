@@ -1,0 +1,111 @@
+/**
+ * 生産の状況のウィジェット。
+ * - 稼働中か停止中か: 直近の生産数（測定値）が、しきい値（onThreshold）を超えているか
+ * - 直近 1 時間と本日の累計: 測定値の合計（集計 API を使う）
+ * - 目標達成率: 本日の累計 ÷ 本日の目標（dailyTarget）
+ *
+ * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "ProductionStatus" のときに出す。
+ * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
+ */
+import { useSensorReadings, useSensorReadingsAggregate, useSensors } from "../../hooks/queries";
+import { guessSensorKind } from "../../lib/sensor-kind";
+import type { Widget } from "../../types";
+import { ErrorNotice } from "../ErrorNotice";
+import { GearIcon } from "./GearIcon";
+
+// 稼働判定に使うのは最新の 1 件だけなので、1 件だけ取る
+const LATEST_ONLY = 1;
+
+// queryKeyが毎レンダー変わって無駄に再フェッチされないよう、分単位に丸めた境界を使う
+// （「直近1時間」「本日累計」は数十秒のズレが出ても実用上問題にならない）
+function startOfCurrentMinute(offsetMs = 0): string {
+  const d = new Date(Date.now() - offsetMs);
+  d.setSeconds(0, 0);
+  return d.toISOString();
+}
+
+/** 今日の 0 時（ローカル時間）を、UTC の ISO 文字列で返す。「本日累計」の開始時刻に使う。 */
+function startOfTodayLocal(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+/** 生産状況のウィジェット本体。 */
+export function ProductionStatusWidget({ widget }: { widget: Widget }) {
+  const { data: sensors } = useSensors();
+  const { data, isLoading, isError, refetch } = useSensorReadings(
+    widget.sensorId,
+    1,
+    LATEST_ONLY,
+  );
+  const sensor = sensors?.find((s) => s.id === widget.sensorId);
+  // 合計は「個数」のセンサーでだけ意味がある。温度などに置いたときに「本日累計 °C」と出さない
+  const totalUnit = sensor && guessSensorKind(sensor) === "count" ? sensor.unit : "（合計値）";
+
+  const lastHourFrom = startOfCurrentMinute(60 * 60 * 1000);
+  const todayFrom = startOfTodayLocal();
+  const { data: lastHour } = useSensorReadingsAggregate(widget.sensorId, lastHourFrom);
+  const { data: today } = useSensorReadingsAggregate(widget.sensorId, todayFrom);
+
+  if (!widget.sensorId) {
+    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+  }
+  if (!data && isError) {
+    return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
+  }
+  if (isLoading || !data) {
+    return <p className="text-sm text-gray-400">読み込み中...</p>;
+  }
+
+  // 最新の生産数（新しい順の先頭）と、稼働判定のしきい値（既定 0）
+  const latest = data.readings[0];
+  const threshold = widget.config.onThreshold ?? 0;
+  const isRunning = latest !== undefined && latest.value > threshold;
+  const dailyTarget = widget.config.dailyTarget;
+  const achievementRate =
+    dailyTarget && dailyTarget > 0 && today ? (today.sum / dailyTarget) * 100 : null;
+
+  return (
+    <div
+      className={`flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 px-2 ${
+        isRunning ? "border-green-500 bg-green-50" : "border-transparent bg-gray-100"
+      }`}
+    >
+      <GearIcon spinning={isRunning} className={isRunning ? "text-green-600" : "text-gray-400"} />
+      <p className="max-w-full truncate text-sm font-medium text-gray-700" title={sensor?.name}>
+        {sensor?.name ?? "センサー"}
+      </p>
+      <span
+        className={`rounded-full px-4 py-1.5 text-lg font-bold ${
+          isRunning ? "bg-green-700 text-white" : "bg-gray-600 text-white"
+        }`}
+      >
+        <span aria-hidden="true">{isRunning ? "▶ " : "⏸ "}</span>
+        {isRunning ? "稼働中" : "停止中"}
+      </span>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-center text-xs text-gray-500">
+        <div>
+          <p className="text-base font-semibold text-gray-800">
+            {lastHour ? Math.round(lastHour.sum) : "—"}
+          </p>
+          <p>直近1時間 {totalUnit}</p>
+        </div>
+        <div>
+          <p className="text-base font-semibold text-gray-800">
+            {today ? Math.round(today.sum) : "—"}
+          </p>
+          <p>本日累計 {totalUnit}</p>
+        </div>
+      </div>
+
+      {achievementRate !== null && (
+        <p className="text-xs text-gray-400">
+          目標達成率: {achievementRate.toFixed(0)}%（目標 {dailyTarget}
+          {sensor?.unit}）
+        </p>
+      )}
+    </div>
+  );
+}
