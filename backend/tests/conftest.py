@@ -1,0 +1,63 @@
+"""共通テストフィクスチャ: スキーマ作成/クリーンアップ、APIクライアント。
+
+DATABASE_URL は CI の postgres service / docker-compose の postgres を指す
+（backend/.env.example のデフォルト値と同じ認証情報）。
+"""
+from collections.abc import AsyncGenerator
+
+import httpx
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport
+from sqlmodel import SQLModel
+
+from app.db.session import engine
+from app.main import app
+from app.rate_limit import limiter
+
+# テストは既定でレート制限を切る（同じ接続元から大量に呼ぶため）。
+# 制限そのものを検証するテストは、個別に limiter.enabled = True にして戻す
+limiter.enabled = False
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _schema() -> AsyncGenerator[None, None]:
+    async with engine.begin() as conn:
+        # drop_all を先に実行し、前回の異常終了等で残った状態があっても毎回まっさらから始める
+        await conn.run_sync(SQLModel.metadata.drop_all)
+        await conn.run_sync(SQLModel.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_tables() -> AsyncGenerator[None, None]:
+    yield
+    async with engine.begin() as conn:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await conn.execute(table.delete())
+
+
+@pytest.fixture(autouse=True)
+def _clear_ingest_cache() -> None:
+    """取り込みの照合のキャッシュ（app/ingest_cache.py）を、テストごとに空にする。"""
+    from app import ingest_cache
+
+    ingest_cache.clear()
+
+
+@pytest_asyncio.fixture
+async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """送信先 URL の検証（app.webhooks）が実 DNS を引かないよう、既定で公開アドレスに解決させる。
+
+    内部アドレスの拒否を検証するテストは、個別に _addresses_for_host を差し替える。
+    """
+    monkeypatch.setattr("app.webhooks._addresses_for_host", lambda host: ["93.184.216.34"])
