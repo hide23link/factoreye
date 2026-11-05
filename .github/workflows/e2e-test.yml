@@ -1,0 +1,84 @@
+name: e2e-test
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", "frontend/**", "e2e/**", "docker-compose.yml", ".github/workflows/e2e-test.yml"]
+  pull_request:
+    paths: ["backend/**", "frontend/**", "e2e/**", "docker-compose.yml", ".github/workflows/e2e-test.yml"]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start stack
+        run: docker compose up -d --build
+
+      - name: Wait for backend
+        # curlの--retry-connrefusedは「connection reset by peer」(migration中などまだ
+        # listenしていない瞬間によく起きる)を再試行対象にしないため、個別のcurl呼び出しの
+        # 成否を無視して独自ループでポーリングする
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "backend is up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::backend did not become healthy in time"
+          docker compose logs backend
+          exit 1
+
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3001 >/dev/null 2>&1; then
+              echo "frontend is up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::frontend did not become healthy in time"
+          docker compose logs frontend
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: e2e
+        run: npm test
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          # playwright-report/ は HTML レポート、test-results/ は失敗時のトレース（trace.zip）
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
