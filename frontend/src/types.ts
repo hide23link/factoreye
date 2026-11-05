@@ -272,6 +272,8 @@ export interface Device {
   line: string | null;
   createdAt: string;
   revokedAt: string | null;
+  /** キーの目印（先頭 6 文字）。目印を付ける前に作った機器は null。キー全体は持たない */
+  keyHint: string | null;
   /** 所属するセンサーの最新の測定値の時刻。まだ受信がなければ null */
   lastReceivedAt: string | null;
   /** 所属するセンサーの Ingest Key */

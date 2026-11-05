@@ -464,6 +464,10 @@ export const attachDeviceSensors = (id: string, ingestKeys: string[]) =>
 export const revokeDevice = (id: string) =>
   request<Device>(`/api/devices/${id}/revoke`, { method: "POST" });
 
+/** 失効済みの機器を削除する。所属していたセンサーと測定値は残る。有効な機器は 409。 */
+export const deleteDevice = (id: string) =>
+  request<void>(`/api/devices/${id}`, { method: "DELETE" });
+
 // ── Migration（SaaS → OSS。設定画面「データ移行」から使う）──────
 
 export const fetchMigrationStatus = () => request<MigrationStatus>("/api/settings/migration/status");

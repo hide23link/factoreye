@@ -11,6 +11,7 @@ vi.mock("../../lib/api", () => ({
   createDevice: vi.fn(),
   attachDeviceSensors: vi.fn(),
   revokeDevice: vi.fn(),
+  deleteDevice: vi.fn(),
 }));
 
 import * as api from "../../lib/api";
@@ -21,6 +22,7 @@ const device: Device = {
   line: null,
   createdAt: "2026-11-02T00:57:00Z",
   revokedAt: null,
+  keyHint: "aB3xK9",
   lastReceivedAt: "2026-11-02T01:23:00Z", // 日本時間 10:23
   sensors: ["atom01-temp"],
 };
@@ -44,7 +46,14 @@ describe("DevicesSettingsPanel", () => {
     expect(await screen.findByRole("option", { name: /atom01/ })).toBeInTheDocument();
     expect(screen.getByText("atom01-temp")).toBeInTheDocument();
     expect(screen.getByText(/10:23/)).toBeInTheDocument();
-    expect(screen.getByText(/表示できません/)).toBeInTheDocument();
+    // キーは全体を出さず、先頭 6 文字の目印だけを出す
+    expect(screen.getAllByTestId("key-hint")[0]).toHaveTextContent("aB3xK9••••••••");
+  });
+
+  it("目印のない（古い）機器は「目印なし」と出す", async () => {
+    mockLists([{ ...device, keyHint: null }]);
+    renderWithQueryClient(<DevicesSettingsPanel />);
+    expect((await screen.findAllByText("目印なし")).length).toBeGreaterThan(0);
   });
 
   it("機器がなければ案内を出す", async () => {
@@ -136,6 +145,25 @@ describe("DevicesSettingsPanel", () => {
     expect(api.revokeDevice).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "失効する" }));
     await waitFor(() => expect(api.revokeDevice).toHaveBeenCalledWith(device.id));
+  });
+
+  it("削除は、失効した機器にだけ出し、確認してから実行する", async () => {
+    const user = userEvent.setup();
+    mockLists([{ ...device, revokedAt: "2026-11-02T02:00:00Z" }]);
+    vi.mocked(api.deleteDevice).mockResolvedValue(undefined);
+    renderWithQueryClient(<DevicesSettingsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "この機器を削除" }));
+    expect(api.deleteDevice).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "削除する" }));
+    await waitFor(() => expect(api.deleteDevice).toHaveBeenCalledWith(device.id));
+  });
+
+  it("有効な機器には、削除ボタンを出さない", async () => {
+    mockLists([device]);
+    renderWithQueryClient(<DevicesSettingsPanel />);
+    await screen.findByRole("button", { name: "キーを失効" });
+    expect(screen.queryByRole("button", { name: "この機器を削除" })).not.toBeInTheDocument();
   });
 
   it("失効済みの機器には、失効ボタンも所属付けも出さない", async () => {
