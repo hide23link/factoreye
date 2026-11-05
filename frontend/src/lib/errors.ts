@@ -117,6 +117,7 @@ export function describeWebhookError(err: unknown, action: string): string {
 /** 機器の追加・所属付け・失効の失敗。409 は名前の重複（追加）か失効済み（所属付け）、422 は入力の不備 */
 export function describeDeviceError(err: unknown, action: string): string {
   const status = errorStatus(err);
+  if (status === 409 && action === "機器の削除") return `${action}に失敗しました。有効な機器は削除できません。先にキーを失効してください。`;
   if (status === 409) return `${action}に失敗しました。その名前の機器がすでにあるか、失効済みの機器か、別の機器に所属しているセンサーです（付け替えはコマンドで行います）。`;
   if (status === 422) return `${action}に失敗しました。機器名（100 文字まで）と系統（40 文字まで）を確認してください。`;
   return describeActionError(err, action);

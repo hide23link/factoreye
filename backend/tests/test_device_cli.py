@@ -68,6 +68,17 @@ async def test_revoke_makes_the_key_fail(client: httpx.AsyncClient) -> None:
     assert resp.status_code == 401
 
 
+async def test_delete_only_after_revoke(capsys: pytest.CaptureFixture[str]) -> None:
+    await device_cli.run_command(_cli("create", "cli-del"))
+    capsys.readouterr()
+    assert await device_cli.run_command(_cli("delete", "cli-del")) == 1
+    assert "先に revoke" in capsys.readouterr().err
+    assert await device_cli.run_command(_cli("revoke", "cli-del")) == 0
+    assert await device_cli.run_command(_cli("delete", "cli-del")) == 0
+    async with AsyncSession(engine) as session:
+        assert await device_keys.get_device_by_name(session, "cli-del") is None
+
+
 async def test_list_shows_state_and_count(capsys: pytest.CaptureFixture[str]) -> None:
     await device_cli.run_command(_cli("create", "cli-d"))
     await device_cli.run_command(_cli("revoke", "cli-d"))
