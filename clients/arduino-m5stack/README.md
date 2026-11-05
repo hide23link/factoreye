@@ -1,0 +1,98 @@
+# FactorEyeClient（M5Stack / ESP32 用 Arduinoライブラリ）
+
+M5Stack Atom などのESP32系デバイスから、FactorEyeの[センサーIngest API](../../docs/architecture.md)
+(`POST /api/ingest/readings`) へ値を送るための最小クライアントです。
+[Ambient](https://ambidata.io/)のライブラリと同じ感覚で、`begin()` と `send()` の2行で使えます。
+
+```cpp
+#include <FactorEyeClient.h>
+
+FactorEyeClient factoreye;
+
+void setup() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  factoreye.begin("http://192.168.1.50:8000", "your-ingest-api-key");
+}
+
+void loop() {
+  factoreye.send("atom-temp-1", 25.3);
+  delay(10000);
+}
+```
+
+**温度・湿度・気圧やパルスを、設定画面（スマホ）だけで送りたいときは、そのまま使えるスケッチ [`../FactorEyeNode/`](../FactorEyeNode/) を使ってください。**
+
+## インストール
+
+1. このフォルダ（`clients/arduino-m5stack/`）ごと、Arduino IDEのライブラリフォルダ
+   （通常 `~/Documents/Arduino/libraries/FactorEyeClient/`）にコピーまたはシンボリックリンク
+2. Arduino IDEでボードを M5Stack Atom（または任意のESP32ボード）に設定
+3. `File > Examples > FactorEyeClient > SendReading` を開き、WiFi/FactorEyeの接続情報を書き換えて書き込み
+
+必要な追加ライブラリはありません（ESP32 Arduino core 同梱の `WiFi.h` / `HTTPClient.h` のみ使用）。
+
+## 使い方
+
+### 1. センサーを先に登録する
+
+`send()` で使う `ingestKey` は、FactorEye側に事前に登録されているセンサーの `ingestKey` と
+一致している必要があります（未登録のキーで送ると404になります）。FactorEyeの設定画面
+（「設定」→「センサー」）、またはセットアップガイドから登録してください。
+
+### 2. APIキー
+
+`begin()` の第2引数は、backendの `.env` に設定した `INGEST_API_KEY` と同じ値を使います。
+backend を `INGEST_AUTH=off`（キーなしの取り込み）で動かしているときは、空文字（`""`）を渡します。そのときは `X-API-Key` ヘッダーを付けずに送ります。
+self-hosted運用ではインストールごとに1つの共有シークレットです。SaaS版へ送る場合、SaaSは
+`X-API-Key` ヘッダーを見ず、本文の `ingestKey` だけでセンサーを識別します（ここには任意の文字列を渡して構いません）。
+
+### センサーの自動登録（任意）
+
+backend を `INGEST_AUTO_CREATE=on`（self-hosted だけ）で動かしているときは、FactorEye の画面でセンサーを登録しなくても、送り始められます。名前と単位を、`setSensorInfo` で結びつけます:
+
+```cpp
+factoreye.begin("http://192.168.1.50:8000", "");
+factoreye.setSensorInfo("atom-temp-1", "ATOM 温度", "℃");  // 未登録なら、この名前・単位で作られる
+factoreye.send("atom-temp-1", 25.3);
+```
+
+名前と単位は、最初に送信が成功するまでの間だけ、本文に付きます（最大 16 個まで結びつけられます）。自動で作らない backend では、登録済みのセンサーは上書きされず、未登録の ID は、今までどおり 404 です。`ingestKey` は、英数字と `.` `_` `-` だけ・64 文字までにしてください。
+
+### 3. 送信の挙動（オフライン対応）
+
+`send(ingestKey, value)` は以下のように動きます:
+
+- 通常時: 即座に1回POSTし、成否（`true`/`false`）を返す
+- 送信に失敗した場合: 値を内部のリングバッファ（最大100件）に保持し、次回以降の`send()`で
+  まとめて再送を試みる。再送のタイミングは指数バックオフ（1秒→2秒→4秒→8秒→16秒→上限30秒、
+  ±10%のジッター付き）に従う
+- バックオフ待機中に呼ばれた`send()`は通信を試みず、値をバッファに積むだけで即座に返る
+  （`loop()`をブロックしない）
+- バッファが満杯のときは最も古い値から捨てられる
+- 再送するのは、通信エラー・タイムアウト・5xx・408・429だけ。429に`Retry-After`が付いていれば、それより早くは
+  送らない（現行のbackendは付けないため、通常のバックオフになる）
+- 401・403・404（APIキー・取り込みキー・センサー無効の設定の誤り）は、警告を出して値を保持し、再送し続ける。
+  保持は1センサーあたり最大10件（超えたら古い値から捨てる）で、他のセンサーの送信は遅らせない
+- 400・422 など、送り直しても成功しない4xxは、その分を捨てて警告を出す。NaN・無限大や数値でない値は送らずに捨てる
+
+この挙動は `docs/architecture.md` §9 デバイス連携 の
+「送信失敗時の再試行（デバイス側）」の仕様に準拠しています。
+
+`pendingCount()` で現在バッファに溜まっている未送信件数を取得できます（Serial出力等の
+デバッグ用）。
+
+### 制限事項
+
+- `ingestKey` に `"` や `\` などJSONエスケープが必要な文字を含めないでください（手書きJSON
+  生成のため、エスケープ処理は行っていません）。センサー名は通常 `pressure-a1` のような
+  単純な識別子にするため、実運用上は問題になりません。
+- タイムスタンプは送信しません。FactorEyeバックエンドは受信時刻を採用し、デバイス側の
+  時刻は信頼しない設計のためです（`docs/architecture.md` 参照）。
+- 1回の`send()`につき対象にできる`ingestKey`は1つです（複数センサーを送る場合はそれぞれ
+  別の`ingestKey`で`send()`を呼んでください）。
+
+## ライセンス
+
+MIT（`LICENSE`参照）。
