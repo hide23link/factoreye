@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Env / secrets
+.env
+.env.local
+id_ed25519
+id_ed25519.pub
+id_rsa
+id_rsa.pub
+ras.txt
+*.pem
+
+# DBバックアップ（infra/backup.sh出力先。本物のデータなのでコミットしない）
+/backups/
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# 管理者アカウント（ハッシュ入り。Git にコミットしない）
+/admin/admins.txt
+/admin/*.tmp
+
+# 負荷テストの実行ログ（loadtest/README.md の手順で生成される。都度変わる手元のログなのでコミットしない）
+/loadtest/*.log
+
+# 外部保管（S3）の認証情報（infra/offsite-s3.sh）
+/.offsite-s3.env
+tools/recovery/walg/
