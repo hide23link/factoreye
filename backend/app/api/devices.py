@@ -49,6 +49,8 @@ class DeviceRead(CamelModel):
     line: str | None
     created_at: datetime
     revoked_at: datetime | None
+    # キーの目印（先頭 6 文字）。目印を付ける前に作った機器は None。キー全体は返さない
+    key_hint: str | None
     # 所属するセンサーの最新の測定値の時刻（まだ受信がなければ None）
     last_received_at: datetime | None
     sensors: list[str]  # 所属するセンサーの ingestKey
@@ -119,6 +121,7 @@ async def _list_devices(session: AsyncSession, only: UUID | None = None) -> list
                 line=device.line,
                 created_at=device.created_at,
                 revoked_at=device.revoked_at,
+                key_hint=device.key_hint,
                 last_received_at=max(times) if times else None,
                 sensors=[key for key, _ in pairs],
             )
@@ -205,3 +208,17 @@ async def revoke_device(
     if device.revoked_at is None:
         await device_keys.revoke_device(session, device)
     return await _read_device(session, device_id)
+
+
+@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_device(
+    device_id: UUID, session: Annotated[AsyncSession, Depends(get_session)]
+) -> None:
+    """失効済みの機器を削除する。所属していたセンサーと測定値は残る。有効な機器は 409。"""
+    device = await _get_or_404(session, device_id)
+    try:
+        await device_keys.delete_device(session, device)
+    except device_keys.DeviceNotRevokedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="device is not revoked"
+        ) from error

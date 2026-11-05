@@ -9,6 +9,7 @@
     python -m app.device_cli attach <機器名> <ingestKey> [<ingestKey> ...]
         → センサーをその機器に所属させる（この機器のキーでしか送れなくなる）
     python -m app.device_cli revoke <機器名>
+    python -m app.device_cli delete <機器名>   # 失効済みの機器だけ
         → 機器のキーを失効させる
     python -m app.device_cli list
         → 機器の一覧（キーは表示しない）
@@ -57,7 +58,7 @@ async def run_command(args: argparse.Namespace) -> int:
                 state = "失効" if item.revoked_at else "有効"
                 print(
                     f"{item.name}\t{state}\tセンサー {count}\t系統 {item.line or '-'}"
-                    f"\t作成 {_fmt(item.created_at)}"
+                    f"\t目印 {item.key_hint or '-'}\t作成 {_fmt(item.created_at)}"
                 )
             return 0
 
@@ -84,6 +85,17 @@ async def run_command(args: argparse.Namespace) -> int:
             await device_keys.revoke_device(session, device)
             print(f"キーを失効させました: {args.name}")
             return 0
+        if args.command == "delete":
+            try:
+                await device_keys.delete_device(session, device)
+            except device_keys.DeviceNotRevokedError:
+                print(
+                    f"失効していない機器は削除できません。先に revoke してください: {args.name}",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"機器を削除しました（センサーと測定値は残ります）: {args.name}")
+            return 0
     return 2
 
 
@@ -105,6 +117,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     attach_p.add_argument("ingest_keys", nargs="+")
     revoke_p = sub.add_parser("revoke", help="機器のキーを失効させる")
     revoke_p.add_argument("name")
+    delete_p = sub.add_parser("delete", help="失効済みの機器を削除する（センサーと測定値は残る）")
+    delete_p.add_argument("name")
     sub.add_parser("list", help="機器の一覧")
     return parser.parse_args(argv)
 
