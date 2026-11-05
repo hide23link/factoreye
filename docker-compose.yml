@@ -1,0 +1,78 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://factoreye:password@postgres:5432/factoreye
+      - INGEST_API_KEY=${INGEST_API_KEY:-change-this-in-production}
+      # 取り込みの認証。"off" でキーなしで受け付ける（機器に API キーを入れない運用。取り込みの口を LAN などに限定すること）
+      - INGEST_AUTH=${INGEST_AUTH:-key}
+      # 未登録の ingestKey のセンサーを自動で作る（self-hosted だけ。既定は作らない）。作る数の上限は MAX_SENSORS
+      - INGEST_AUTO_CREATE=${INGEST_AUTO_CREATE:-false}
+      - INGEST_AUTO_CREATE_MAX_SENSORS=${INGEST_AUTO_CREATE_MAX_SENSORS:-100}
+      # 機器が付けた測定時刻（timestamp）を使う（self-hosted だけ。既定は受信時刻）
+      - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
+      # 取り込みの照合（機器のキー・センサー）を覚えておく秒数。0 で無効
+      - INGEST_CACHE_SECONDS=${INGEST_CACHE_SECONDS:-5}
+      - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで
+      # FRONTEND_URL=http://<このホストのIP>:3001 を指定する（CORSの許可オリジンに使われる）
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
+      # 取り込みのIP別レート制限。負荷テスト・実機テストでは .env で "off" などに変える
+      - INGEST_RATE_LIMIT=${INGEST_RATE_LIMIT:-100/minute}
+      # Webhookの送信先に社内ネットワーク（http・プライベートIP）を許可する。既定は禁止（SSRF対策）
+      - WEBHOOK_ALLOW_PRIVATE_NETWORKS=${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
+    restart: unless-stopped
+    ports:
+      # 公開先（既定は全インターフェース）。Pi など、外に出さない機器では FE_BIND_HOST=127.0.0.1 にする
+      - "${FE_BIND_HOST:-0.0.0.0}:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Viteはビルド時に値を静的ファイルへ焼き込むため、build.argsで渡す必要がある
+        # （実行時のenvironment:をいくら変えても効果が無い）。.envでの上書き先はこちら。
+        # 空（VITE_API_URL=）なら同じオリジンの /api を呼ぶ（ホストの nginx で転送する構成）。未設定なら localhost:8000
+        VITE_API_URL: ${VITE_API_URL-http://localhost:8000}
+        # 復旧ツール（tools/recovery）の画面の URL。設定画面の「バックアップ」タブのリンクに使う（未設定ならリンクの代わりに案内を出す）
+        VITE_RECOVERY_URL: ${VITE_RECOVERY_URL:-}
+    restart: unless-stopped
+    ports:
+      - "${FE_BIND_HOST:-0.0.0.0}:3001:3001"
+    depends_on:
+      - backend
+
+  postgres:
+    # postgres:15（Debian）に WAL-G を足したイメージ（infra/cloud/postgres/Dockerfile）。Alpine では WAL-G が動かないため
+    build: ./infra/cloud/postgres
+    image: factoreye-postgres:15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=factoreye
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=factoreye
+    # WAL-G の設定（R2 の鍵を含む。Git 管理外。権限 600）。無くても起動する（archive_mode は init.sh まで off）
+    env_file:
+      - path: ./walg/walg.env
+        required: false
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # 同じホストからの接続（テスト・psql）だけ許可する。LAN には公開しない
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factoreye"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+
+networks:
+  default:
+    name: factoreye
