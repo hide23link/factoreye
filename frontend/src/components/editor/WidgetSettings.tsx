@@ -1,0 +1,893 @@
+/**
+ * 選んだウィジェットの設定（右の設定パネルの中身）。
+ * 種類ごとの項目を出し、変更はすぐ画面に反映して保存する（保存ボタンは無い）。
+ *
+ * 【誰が使うか】SettingsPanel。
+ * 【引数（props）】widget = 選んだウィジェット、dashboard = 属するダッシュボード（保存の操作に使う）。
+ */
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { useSensors } from "../../hooks/queries";
+import { updateSensor } from "../../lib/api";
+import { clampPlacement } from "../../lib/widget-layout";
+import { useMovableWindow } from "../../hooks/useMovableWindow";
+import { useWidgetActions } from "../../hooks/useWidgetActions";
+import {
+  MAX_LINE_WIDTH,
+  REFRESH_SECONDS_OPTIONS,
+  graphAxisSides,
+  graphColor,
+  graphDataOptions,
+  graphSensorIds,
+  graphSensorMovePatch,
+  graphSensorPatch,
+  defaultLineShape,
+  graphStyle,
+  nextGraphColor,
+  thresholdMode,
+  type Aggregation,
+  type AxisMode,
+  type LegendPosition,
+  type LineShape,
+  type StackMode,
+  type ThresholdMode,
+} from "../../lib/graph-config";
+import {
+  planPerWorkHour,
+  scheduleFromConfig,
+  totalWorkMinutes,
+} from "../../lib/production-plan";
+import {
+  STRIP_BUCKET_OPTIONS,
+  bucketTarget,
+  formatTargetNumber,
+  stripSettingsFromConfig,
+} from "../../lib/target-strip";
+import { useEditorStore } from "../../store/useEditorStore";
+import { widgetLabel } from "../../lib/widget-catalog";
+import type { DashboardDetail, Sensor, Widget, WidgetConfig } from "../../types";
+import { NumberField, Section, Segmented, Toggle } from "./controls";
+import { SensorField } from "./SensorField";
+import { WidgetIcon } from "./WidgetIcon";
+
+type Actions = ReturnType<typeof useWidgetActions>;
+
+interface SectionProps {
+  widget: Widget;
+  actions: Actions;
+}
+
+/** 設定の一部だけを変える（最新の設定に重ねて保存する。undefined の項目は未指定に戻す） */
+const changeConfig = (actions: Actions, widget: Widget, change: Partial<WidgetConfig>) => actions.patchConfig(widget, change);
+
+export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboard: DashboardDetail }) {
+  const actions = useWidgetActions(dashboard);
+  const { handleProps, resetButton, resizeHandles } = useMovableWindow("panel", "設定パネル");
+
+  return (
+    <>
+      <div
+        {...handleProps}
+        className="flex cursor-grab touch-none select-none items-center gap-2.5 border-b border-gray-200 px-3.5 py-3 active:cursor-grabbing"
+      >
+        <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-blue-600">
+          <WidgetIcon type={widget.type} size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-[15px] font-bold" title="変更はすぐ画面に反映されます">
+            {widgetLabel(widget.type)}の設定
+          </h3>
+                  </div>
+        {resetButton}
+        <button
+          type="button"
+          aria-label="設定パネルを閉じる"
+          onClick={() => useEditorStore.getState().setPanelOpen(false)}
+          className="h-6 w-6 shrink-0 rounded text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
+        <Section title="タイトル" note="枠の上に出す名前。空欄なら出しません">
+          <AxisUnitField label="タイトル" value={widget.config.title ?? ""} placeholder="タイトルなし" wide onCommit={(value) => void changeConfig(actions, widget, { title: value.trim() || undefined })} />
+        </Section>
+        <PlacementFields widget={widget} actions={actions} />
+        <SensorNameFields widget={widget} />
+        <TypeSettings widget={widget} actions={actions} />
+        <Section title="操作">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void actions.duplicate(widget)}
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+            >
+              複製
+            </button>
+            <button
+              type="button"
+              onClick={() => void actions.remove(widget)}
+              className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+            >
+              このウィジェットを削除
+            </button>
+          </div>
+        </Section>
+      </div>
+      {resizeHandles}
+    </>
+  );
+}
+
+function TypeSettings({ widget, actions }: SectionProps) {
+  switch (widget.type) {
+    case "SensorGraph":
+    case "MultiSensorComparison":
+      return <GraphSettings widget={widget} actions={actions} />;
+    case "StatValue":
+      return <StatValueSettings widget={widget} actions={actions} />;
+    case "Gauge":
+      return <GaugeSettings widget={widget} actions={actions} />;
+    case "ProductionStatus":
+      return <ProductionStatusSettings widget={widget} actions={actions} />;
+    case "ProductionPlan":
+      return <ProductionPlanSettings widget={widget} actions={actions} />;
+    case "TargetStrip":
+      return <TargetStripSettings widget={widget} actions={actions} />;
+    case "AlarmAlert":
+      return (
+        <Section title="表示するアラーム">
+          <p className="text-sm text-gray-500">発生中・確認待ちのアラームを一覧で表示します。設定する項目はありません。</p>
+        </Section>
+      );
+    default:
+      return (
+        <Section title="未対応の種類">
+          <p className="text-sm text-gray-500">この種類のウィジェットは、ここでは設定できません。</p>
+        </Section>
+      );
+  }
+}
+
+/** センサー1つ用の欄（数値・稼働ステータス・生産管理） */
+function SingleSensorField({ widget, actions, suited }: SectionProps & { suited: "measure" | "count" | "state" }) {
+  const ids = widget.sensorId ? [widget.sensorId] : [];
+  const set = (sensor: Sensor) => void actions.assign(widget, sensor, "replace");
+  return (
+    <Section title="センサー">
+      <SensorField
+        sensorIds={ids}
+        multiple={false}
+        suited={suited}
+        onAdd={set}
+        onReplace={set}
+        onRemove={() => void actions.patch(widget, { sensorId: null })}
+      />
+    </Section>
+  );
+}
+
+const RANGE_OPTIONS = [
+  { value: 0, label: "全体" },
+  { value: 1, label: "1時間" },
+  { value: 6, label: "6時間" },
+  { value: 24, label: "24時間" },
+] as const;
+
+const LINE_SHAPE_OPTIONS: ReadonlyArray<{ value: LineShape; label: string }> = [
+  { value: "smooth", label: "なめらか" },
+  { value: "linear", label: "直線" },
+  { value: "step", label: "階段" },
+];
+const LEGEND_OPTIONS: ReadonlyArray<{ value: LegendPosition; label: string }> = [
+  { value: "bottom", label: "下" },
+  { value: "right", label: "右" },
+  { value: "off", label: "なし" },
+];
+const AGGREGATION_OPTIONS: ReadonlyArray<{ value: Aggregation; label: string }> = [
+  { value: "avg", label: "平均" },
+  { value: "max", label: "最大" },
+  { value: "min", label: "最小" },
+];
+const REFRESH_LABEL: Record<(typeof REFRESH_SECONDS_OPTIONS)[number], string> = { 10: "10秒", 30: "30秒", 60: "1分", 300: "5分" };
+const REFRESH_OPTIONS = REFRESH_SECONDS_OPTIONS.map((seconds) => ({ value: seconds, label: REFRESH_LABEL[seconds] }));
+const AXIS_MODE_OPTIONS: ReadonlyArray<{ value: AxisMode; label: string }> = [
+  { value: "shared", label: "実際の値" },
+  { value: "normalized", label: "0〜100%" },
+];
+const STACK_OPTIONS: ReadonlyArray<{ value: StackMode; label: string }> = [
+  { value: "none", label: "しない" },
+  { value: "normal", label: "積み上げ" },
+  { value: "percent", label: "100%" },
+];
+const THRESHOLD_OPTIONS: ReadonlyArray<{ value: ThresholdMode; label: string }> = [
+  { value: "off", label: "なし" },
+  { value: "line", label: "線" },
+  { value: "area", label: "帯" },
+  { value: "both", label: "両方" },
+];
+
+/** 縦軸の単位の文字を入力する欄。確定は、フォーカスを外したときと Enter。空欄は自動（センサーの単位）に戻す */
+function AxisUnitField({
+  label,
+  value,
+  placeholder,
+  onCommit,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onCommit: (value: string) => void;
+  wide?: boolean;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-500">
+      {label}
+      <input
+        aria-label={label}
+        className={`${wide ? "w-full" : "w-24"} rounded border border-gray-300 px-1 py-0.5 text-sm text-gray-800`}
+        value={draft ?? value}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft !== null && draft !== value) onCommit(draft);
+          setDraft(null);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+    </label>
+  );
+}
+
+/**
+ * このウィジェットが表示するセンサーの名前を変える（どの種類のウィジェットでも同じ）。
+ * 変えると、センサーそのものの名前が変わる。空欄は変えない。変えたあとは、センサーの一覧を取り直す。
+ */
+function SensorNameFields({ widget }: { widget: Widget }) {
+  const { data: sensors } = useSensors();
+  const queryClient = useQueryClient();
+  const ids = graphSensorIds(widget);
+  if (ids.length === 0) return null;
+  const nameOf = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  const rename = async (id: string, value: string) => {
+    const name = value.trim();
+    if (!name || name === nameOf(id)) return;
+    await updateSensor(id, { name });
+    await queryClient.invalidateQueries({ queryKey: ["sensors"] });
+  };
+  return (
+    <Section title="センサーの名前" note="ここで変えると、センサーそのものの名前が変わります（ほかの画面にも出ます）">
+      {ids.map((id) => (
+        <AxisUnitField
+          key={id}
+          label={nameOf(id)}
+          value={nameOf(id)}
+          placeholder={nameOf(id)}
+          wide
+          onCommit={(value) => void rename(id, value)}
+        />
+      ))}
+    </Section>
+  );
+}
+
+/** ウィジェットの位置（列・行）と大きさ（幅・高さ）を数字で指定する。範囲に収めてから保存する */
+function PlacementFields({ widget, actions }: SectionProps) {
+  const current = { column: widget.gridColumn, row: widget.gridRow, width: widget.gridWidth, height: widget.gridHeight };
+  const apply = (change: Partial<typeof current>) => {
+    const next = clampPlacement({ ...current, ...change });
+    void actions.saveLayout([{ i: widget.id, x: next.column - 1, y: next.row - 1, w: next.width, h: next.height }]);
+  };
+  return (
+    <Section title="位置とサイズ" note="列・行は 1 から。幅は 1〜12 マス。編集中は、枠をつかんでも変えられます">
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <NumberField label="列" value={current.column} min={1} max={12} step={1} onCommit={(v) => v !== null && apply({ column: v })} />
+        <NumberField label="行" value={current.row} min={1} step={1} onCommit={(v) => v !== null && apply({ row: v })} />
+        <NumberField label="幅" value={current.width} min={1} max={12} step={1} onCommit={(v) => v !== null && apply({ width: v })} />
+        <NumberField label="高さ" value={current.height} min={1} max={40} step={1} onCommit={(v) => v !== null && apply({ height: v })} />
+      </div>
+    </Section>
+  );
+}
+
+function GraphSettings({ widget, actions }: SectionProps) {
+  const ids = graphSensorIds(widget);
+  const config = widget.config;
+  const style = graphStyle(config);
+  const options = graphDataOptions(config, ids.length);
+  const { data: sensors } = useSensors();
+  const unitOf = (id: string) => sensors?.find((s) => s.id === id)?.unit;
+  const nameOfSensor = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  // 縦軸の左右（実際の値のとき。設定が無ければ単位で決まる既定を表示する）
+  const axis = graphAxisSides(config, ids, unitOf);
+  // 縦軸を手動で決められるのは、実際の値で描くとき（0〜100% や 100% 積み上げでは、軸が決まっている）
+  const axisIsFixed = options.axisMode === "normalized" || options.stack === "percent";
+  // 縦軸は、値があれば手動。値を入れる前でも入力欄を出し続けるため、「手動にした」操作だけ覚えておく
+  // （ウィジェットを切り替えたときは、SettingsPanel の key で作り直されるので、前のウィジェットの状態は引き継がない）
+  const [pickedManual, setPickedManual] = useState(false);
+  const manualAxis =
+    pickedManual ||
+    config.yAxisMin !== undefined ||
+    config.yAxisMax !== undefined ||
+    config.yAxisRightMin !== undefined ||
+    config.yAxisRightMax !== undefined;
+  // 左右 2 軸で描くときは、左と右の上下限を別々に入力する
+  const twoAxes = axis.dual && options.axisMode === "shared" && options.stack === "none";
+
+  // どちらも最新のウィジェットから作る（連続で押したときに、古い表示のまま上書きしないため）
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+    });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+  const recolor = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const colors = graphSensorIds(latest).map((_, i) => graphColor(latest, i));
+      colors[index] = nextGraphColor(colors[index]);
+      return { config: { ...latest.config, colors } };
+    });
+  const axisChange = (key: "yAxisMin" | "yAxisMax" | "yAxisRightMin" | "yAxisRightMax", value: number | null) =>
+    changeConfig(actions, widget, { [key]: value ?? undefined });
+
+  return (
+    <>
+      <Section title="センサー（複数OK）" note="丸い色をクリックすると線の色が変わります">
+        <SensorField
+          sensorIds={ids}
+          multiple
+          suited="measure"
+          colorOf={(i) => graphColor(widget, i)}
+          onRecolor={recolor}
+          onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
+          onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
+          onRemove={removeAt}
+          onMove={moveAt}
+        />
+      </Section>
+      <Section title="グラフの形">
+        <Segmented
+          label="グラフの形"
+          value={config.graphType ?? "line"}
+          options={[
+            { value: "line", label: "線" },
+            { value: "area", label: "面" },
+            { value: "bar", label: "棒" },
+          ]}
+          onChange={(graphType) => void changeConfig(actions, widget, { graphType })}
+        />
+      </Section>
+      <Section title="期間" note="「全体」は、画面上部の時間の操作と同じ期間にします">
+        <Segmented
+          label="期間"
+          value={config.rangeHours ?? 0}
+          options={RANGE_OPTIONS}
+          onChange={(hours) => void changeConfig(actions, widget, { rangeHours: hours === 0 ? undefined : hours })}
+        />
+      </Section>
+      {!axisIsFixed && (
+        <Section title="縦軸">
+          <Toggle
+            label="自動で合わせる"
+            checked={!manualAxis}
+            onChange={(auto) => {
+              setPickedManual(!auto);
+              if (auto) void changeConfig(actions, widget, { yAxisMin: undefined, yAxisMax: undefined, yAxisRightMin: undefined, yAxisRightMax: undefined });
+            }}
+          />
+          {manualAxis && (
+            <>
+              {twoAxes && <div className="text-xs text-gray-500">左の軸</div>}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  最小
+                  <NumberField label={twoAxes ? "左の縦軸の最小" : "縦軸の最小"} value={config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMin", v)} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  最大
+                  <NumberField label={twoAxes ? "左の縦軸の最大" : "縦軸の最大"} value={config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisMax", v)} />
+                </label>
+              </div>
+              {twoAxes && (
+                <>
+                  <div className="text-xs text-gray-500">右の軸</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      最小
+                      <NumberField label="右の縦軸の最小" value={config.yAxisRightMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisRightMin", v)} />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      最大
+                      <NumberField label="右の縦軸の最大" value={config.yAxisRightMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void axisChange("yAxisRightMax", v)} />
+                    </label>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </Section>
+      )}
+      <Section title="データのまとめ方" note="グラフは、期間を細かい区間に分けて描きます。最大や最小を選ぶと、一瞬の山や谷を見逃しにくくなります">
+        <Segmented
+          label="区間の値"
+          value={options.aggregation}
+          options={AGGREGATION_OPTIONS}
+          onChange={(aggregation) => void changeConfig(actions, widget, { aggregation })}
+        />
+        <div className="text-xs text-gray-500">自動で更新する間隔（長くすると、横軸の動きも遅くなります）</div>
+        <Segmented
+          label="更新間隔"
+          value={options.refreshMs / 1000}
+          options={REFRESH_OPTIONS}
+          onChange={(refreshSeconds) => void changeConfig(actions, widget, { refreshSeconds })}
+        />
+      </Section>
+      {ids.length > 0 && (
+        <Section title="凡例の名前" note="空欄はセンサーの名前。凡例と、マウスを乗せたときの表示に出ます">
+          {ids.map((id) => (
+            <AxisUnitField
+              key={id}
+              label={nameOfSensor(id)}
+              value={config.seriesNames?.[id] ?? ""}
+              placeholder={nameOfSensor(id)}
+              wide
+              onCommit={(value) => {
+                const names: Record<string, string> = { ...config.seriesNames };
+                if (value.trim()) names[id] = value.trim();
+                else delete names[id];
+                void changeConfig(actions, widget, { seriesNames: names });
+              }}
+            />
+          ))}
+        </Section>
+      )}
+      {ids.length > 1 && (
+        <Section title="複数センサーの重ね方" note="単位の違うセンサーを同じ高さで比べるときは「0〜100%」。積み上げは、単位が同じセンサー向けです">
+          <div className="text-xs text-gray-500">縦軸</div>
+          <Segmented
+            label="縦軸のモード"
+            value={options.axisMode}
+            options={AXIS_MODE_OPTIONS}
+            onChange={(axisMode) => void changeConfig(actions, widget, { axisMode })}
+          />
+          {options.axisMode === "shared" && (
+            <>
+              <div className="text-xs text-gray-500">縦軸の左右（単位が2種類以上のとき、右に載せたセンサーは右の軸で表示）</div>
+              {ids.map((id) => (
+                <div key={id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate">
+                    {nameOfSensor(id)}（{unitOf(id) || "単位なし"}）
+                  </span>
+                  <Segmented
+                    label={`${nameOfSensor(id)} の縦軸`}
+                    value={axis.sides[id]}
+                    options={[
+                      { value: "left", label: "左" },
+                      { value: "right", label: "右" },
+                    ]}
+                    onChange={(side) => void changeConfig(actions, widget, { axisSides: { ...axis.sides, [id]: side } })}
+                  />
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-3">
+                <AxisUnitField
+                  label="左の軸の単位"
+                  value={config.axisUnits?.left ?? ""}
+                  placeholder={axis.leftUnit || "自動"}
+                  onCommit={(left) => void changeConfig(actions, widget, { axisUnits: { ...config.axisUnits, left: left.trim() || undefined } })}
+                />
+                <AxisUnitField
+                  label="右の軸の単位"
+                  value={config.axisUnits?.right ?? ""}
+                  placeholder={axis.rightUnit || "自動"}
+                  onCommit={(right) => void changeConfig(actions, widget, { axisUnits: { ...config.axisUnits, right: right.trim() || undefined } })}
+                />
+              </div>
+            </>
+          )}
+          {options.stackable && (
+            <>
+              <div className="text-xs text-gray-500">積み上げ</div>
+              <Segmented
+                label="積み上げ"
+                value={options.stack}
+                options={STACK_OPTIONS}
+                onChange={(stack) => void changeConfig(actions, widget, { stack })}
+              />
+            </>
+          )}
+        </Section>
+      )}
+      <Section title="線の見た目">
+        {(config.graphType ?? "line") !== "bar" && (
+          <Segmented
+            label="線の形"
+            value={config.lineShape ?? defaultLineShape(config)}
+            options={LINE_SHAPE_OPTIONS}
+            onChange={(lineShape) => void changeConfig(actions, widget, { lineShape })}
+          />
+        )}
+        <label className="flex flex-col gap-1 text-xs text-gray-500">
+          線の太さ
+          <NumberField
+            label="線の太さ"
+            value={style.lineWidth}
+            min={0.5}
+            max={MAX_LINE_WIDTH}
+            step={0.5}
+            unit="px"
+            onCommit={(v) => void changeConfig(actions, widget, { lineWidth: v ?? undefined })}
+          />
+        </label>
+        {(config.graphType ?? "line") === "area" && (
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            塗りの濃さ
+            <NumberField
+              label="塗りの濃さ"
+              value={Math.round(style.fillOpacity * 100)}
+              min={0}
+              max={100}
+              step={10}
+              unit="%"
+              onCommit={(v) => void changeConfig(actions, widget, { fillOpacity: v === null ? undefined : v / 100 })}
+            />
+          </label>
+        )}
+        <Toggle label="点を表示" checked={style.showPoints} onChange={(showPoints) => void changeConfig(actions, widget, { showPoints })} />
+      </Section>
+      <Section title="目盛りと表示">
+        <Toggle label="目盛りの線" checked={style.showGrid} onChange={(showGrid) => void changeConfig(actions, widget, { showGrid })} />
+        <Toggle label="ツールチップ（なぞると値が出る）" checked={style.showTooltip} onChange={(showTooltip) => void changeConfig(actions, widget, { showTooltip })} />
+        {ids.length > 1 && (
+          <>
+            <div className="text-xs text-gray-500">凡例の場所</div>
+            <Segmented
+              label="凡例の場所"
+              value={style.legendPosition}
+              options={LEGEND_OPTIONS}
+              onChange={(legendPosition) => void changeConfig(actions, widget, { legendPosition })}
+            />
+          </>
+        )}
+      </Section>
+      <Section title="しきい値" note="センサー1つのときに、軽故障・重故障を線や色の帯で重ねます">
+        {ids.length === 1 ? (
+          <Segmented
+            label="しきい値の表示"
+            value={thresholdMode(config)}
+            options={THRESHOLD_OPTIONS}
+            // 古い設定の showThresholds は、thresholdMode に置き換わるので消す
+            onChange={(mode) => void changeConfig(actions, widget, { thresholdMode: mode, showThresholds: undefined })}
+          />
+        ) : (
+          <p className="text-sm text-gray-400">センサーを1つにすると使えます</p>
+        )}
+      </Section>
+    </>
+  );
+}
+
+function GaugeSettings({ widget, actions }: SectionProps) {
+  const config = widget.config;
+  // 最小・最大は、両方そろったときだけ手動になる（片方だけだと、自動のまま）
+  return (
+    <>
+      <SingleSensorField widget={widget} actions={actions} suited="measure" />
+      <Section title="目盛りの範囲" note="空欄なら、しきい値と現在値から自動で決めます。最小と最大の両方を入れると、その範囲で固定します">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最小
+            <NumberField label="目盛りの最小" value={config.gaugeMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { gaugeMin: v ?? undefined })} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最大
+            <NumberField label="目盛りの最大" value={config.gaugeMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { gaugeMax: v ?? undefined })} />
+          </label>
+        </div>
+        {config.gaugeMin !== undefined && config.gaugeMax !== undefined && config.gaugeMin >= config.gaugeMax && (
+          <p role="alert" className="text-xs text-red-600">最小は、最大より小さくしてください（いまは、自動の範囲で表示しています）</p>
+        )}
+      </Section>
+      <Section title="小数点以下">
+        <NumberField
+          label="小数点以下の桁数"
+          value={config.decimals ?? 1}
+          min={0}
+          max={6}
+          step={1}
+          unit="桁"
+          onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? 1 })}
+        />
+      </Section>
+    </>
+  );
+}
+
+function StatValueSettings({ widget, actions }: SectionProps) {
+  return (
+    <>
+      <SingleSensorField widget={widget} actions={actions} suited="measure" />
+      <Section title="小数点以下">
+        <NumberField
+          label="小数点以下の桁数"
+          value={widget.config.decimals ?? 1}
+          min={0}
+          max={6}
+          step={1}
+          unit="桁"
+          onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? 1 })}
+        />
+      </Section>
+      <Section title="推移の表示期間" note="下の小さな推移線に使う期間です">
+        <NumberField
+          label="推移の表示期間（時間）"
+          value={widget.config.timeRangeHours ?? 1}
+          min={0.1}
+          max={720}
+          step={1}
+          unit="時間"
+          onCommit={(v) => void changeConfig(actions, widget, { timeRangeHours: v ?? 1 })}
+        />
+      </Section>
+    </>
+  );
+}
+
+function ProductionStatusSettings({ widget, actions }: SectionProps) {
+  return (
+    <>
+      <SingleSensorField widget={widget} actions={actions} suited="state" />
+      <Section title="稼働とみなす値" note="最新の値がこれを超えたら「稼働中」と表示します">
+        <NumberField
+          label="稼働中とみなす値"
+          value={widget.config.onThreshold ?? 0}
+          onCommit={(v) => void changeConfig(actions, widget, { onThreshold: v ?? 0 })}
+        />
+      </Section>
+      <Section title="本日の生産目標数" note="空欄なら、達成率は表示しません">
+        <NumberField
+          label="本日の生産目標数"
+          value={widget.config.dailyTarget ?? null}
+          min={0}
+          allowEmpty
+          placeholder="未設定"
+          onCommit={(v) => void changeConfig(actions, widget, { dailyTarget: v ?? undefined })}
+        />
+      </Section>
+    </>
+  );
+}
+
+function ProductionPlanSettings({ widget, actions }: SectionProps) {
+  const config = widget.config;
+  const schedule = scheduleFromConfig(config);
+
+  // 開始を終了以降にしたときは、終了を開始の1時間後に直す（稼働時間が 0 になるのを防ぐ）
+  const changeStart = (hour: number) =>
+    actions.patchFromLatest(widget, (latest) => ({
+      config: {
+        ...latest.config,
+        workStartHour: hour,
+        workEndHour: Math.max(scheduleFromConfig(latest.config).endHour, hour + 1),
+      },
+    }));
+
+  return (
+    <>
+      <SingleSensorField widget={widget} actions={actions} suited="count" />
+      <Section title="1日の目標" note="ここだけ決めれば使えます。残りは初期値のままで大丈夫です">
+        <NumberField
+          label="1日の目標"
+          value={config.dailyTarget ?? null}
+          min={0}
+          step={50}
+          unit="個"
+          onCommit={(v) => void changeConfig(actions, widget, { dailyTarget: v ?? undefined })}
+        />
+      </Section>
+      <Section title="勤務時間">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            開始
+            <NumberField label="勤務開始（時）" value={schedule.startHour} min={0} max={23} onCommit={(v) => void changeStart(v ?? 8)} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            終了
+            <NumberField
+              label="勤務終了（時）"
+              value={schedule.endHour}
+              min={schedule.startHour + 1}
+              max={24}
+              onCommit={(v) => void changeConfig(actions, widget, { workEndHour: v ?? 17 })}
+            />
+          </label>
+        </div>
+        <div className="text-xs text-gray-500">昼休み（12:00〜）</div>
+        <Segmented
+          label="昼休み"
+          value={schedule.breakMinutes}
+          options={[
+            { value: 0, label: "なし" },
+            { value: 45, label: "45分" },
+            { value: 60, label: "60分" },
+          ]}
+          onChange={(breakMinutes) => void changeConfig(actions, widget, { breakMinutes })}
+        />
+      </Section>
+      {(config.dailyTarget ?? 0) > 0 && (
+        <div className="py-3">
+          <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+            計画は<b className="text-gray-900">目標 ÷ 稼働時間</b>で自動作成します。
+            <br />
+            稼働 <b className="text-gray-900">{(totalWorkMinutes(schedule) / 60).toFixed(1)}</b> 時間 → 1時間あたり{" "}
+            <b className="text-gray-900">{Math.round(planPerWorkHour(config.dailyTarget ?? 0, schedule)).toLocaleString("ja-JP")}</b> 個
+          </p>
+        </div>
+      )}
+      <Section title="表示する項目">
+        <Toggle label="時間別の実績グラフ" checked={config.showHourly ?? true} onChange={(v) => void changeConfig(actions, widget, { showHourly: v })} />
+        <Toggle label="終業時の見込み" checked={config.showForecast ?? true} onChange={(v) => void changeConfig(actions, widget, { showForecast: v })} />
+        <Toggle label="稼働率と停止時間" checked={config.showUptime ?? true} onChange={(v) => void changeConfig(actions, widget, { showUptime: v })} />
+      </Section>
+    </>
+  );
+}
+
+/** 達成ストリップの設定。センサー（複数）、1 マスの長さ、1 時間あたりの目標、期間、勤務時間だけ判定するか。 */
+function TargetStripSettings({ widget, actions }: SectionProps) {
+  const config = widget.config;
+  const settings = stripSettingsFromConfig(config);
+  const schedule = scheduleFromConfig(config);
+  const ids = graphSensorIds(widget);
+
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+    });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+  // 開始を終了以降にしたときは、終了を開始の 1 時間後に直す（生産管理と同じ）
+  const changeStart = (hour: number) =>
+    actions.patchFromLatest(widget, (latest) => ({
+      config: {
+        ...latest.config,
+        workStartHour: hour,
+        workEndHour: Math.max(scheduleFromConfig(latest.config).endHour, hour + 1),
+      },
+    }));
+
+  return (
+    <>
+      <Section title="センサー（複数OK）" note="受信の確認なら、機器ごとの heartbeat のセンサー。生産の目標なら、生産数のセンサー">
+        <SensorField
+          sensorIds={ids}
+          multiple
+          suited="count"
+          onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
+          onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
+          onRemove={removeAt}
+          onMove={moveAt}
+        />
+      </Section>
+      <Section title="判定の方法" note="受信の確認は「受信の間隔」、生産の目標は「件数」">
+        <Segmented
+          label="判定の方法"
+          value={settings.judge}
+          options={[
+            { value: "interval", label: "受信の間隔" },
+            { value: "count", label: "件数" },
+          ]}
+          onChange={(stripJudge) => void changeConfig(actions, widget, { stripJudge })}
+        />
+      </Section>
+      <Section title="1 マスの長さ" note="帯の 1 マスの長さです。表示期間は、グラフと同じ（画面上部の時間操作）で、長いときは自動で広げます">
+        <Segmented
+          label="1 マスの長さ"
+          value={settings.bucketMinutes}
+          options={STRIP_BUCKET_OPTIONS.map((value) => ({ value, label: `${value}分` }))}
+          onChange={(stripBucketMinutes) => void changeConfig(actions, widget, { stripBucketMinutes })}
+        />
+      </Section>
+      {settings.judge === "interval" ? (
+        <Section title="最大の間隔" note="前回の受信から、この秒数を超えて次の受信が無い時間にかかるマスを、赤にします">
+          <NumberField
+            label="最大の間隔"
+            value={settings.maxGapSeconds}
+            min={10}
+            max={3600}
+            step={10}
+            unit="秒"
+            // 空や範囲外のときは、今の値を保つ
+            onCommit={(v) => {
+              if (v !== null && v >= 10 && v <= 3600) void changeConfig(actions, widget, { stripMaxGapSeconds: v });
+            }}
+          />
+          <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+            60 秒ごとに届く受信は、90 秒（初期値）なら、数秒のずれでは赤になりません。1 回抜けると（約 120 秒の間隔）、赤になります。
+          </p>
+        </Section>
+      ) : (
+        <>
+          <Section title="1 時間あたりの目標" note="生産は 1 時間に作る数">
+            <NumberField
+              label="1 時間あたりの目標"
+              value={settings.hourlyTarget}
+              min={1}
+              step={10}
+              unit="個"
+              // 空にしたときは、今の値を保つ（黙って初期値の 60 に戻さない）。0 以下も認めない
+              onCommit={(v) => {
+                if (v !== null && v > 0) void changeConfig(actions, widget, { stripHourlyTarget: v });
+              }}
+            />
+            <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+              1 マス（{settings.bucketMinutes} 分）の目標は{" "}
+              <b className="text-gray-900">{formatTargetNumber(bucketTarget(settings.hourlyTarget, settings.bucketMinutes))}</b>{" "}
+              個以上。満たせば緑、満たさなければ赤です。
+            </p>
+          </Section>
+          {settings.bucketMinutes === 1 && (
+            <Section title="判定のゆるさ" note="件数を 1 分ごとに見るときのスイッチです">
+              <Toggle
+                label="前後の分と融通する（1 分のマスだけ）"
+                checked={settings.tolerant}
+                onChange={(v) => void changeConfig(actions, widget, { stripTolerant: v })}
+              />
+              <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+                入れると、「ある分に 2 回、次の分に 0 回」（または逆）は、赤にしません。2 分続けて足りないときは、どちらでも赤です。
+              </p>
+            </Section>
+          )}
+        </>
+      )}
+      <Section title="勤務時間" note="生産の目標のとき。勤務時間の外（夜間・昼休み）を、赤にせず対象外にします">
+        <Toggle
+          label="勤務時間だけ判定する"
+          checked={settings.workOnly}
+          onChange={(v) => void changeConfig(actions, widget, { stripWorkOnly: v })}
+        />
+        {settings.workOnly && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                開始
+                <NumberField label="勤務開始（時）" value={schedule.startHour} min={0} max={23} onCommit={(v) => void changeStart(v ?? 8)} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                終了
+                <NumberField
+                  label="勤務終了（時）"
+                  value={schedule.endHour}
+                  min={schedule.startHour + 1}
+                  max={24}
+                  onCommit={(v) => void changeConfig(actions, widget, { workEndHour: v ?? 17 })}
+                />
+              </label>
+            </div>
+            <div className="text-xs text-gray-500">昼休み（12:00〜）</div>
+            <Segmented
+              label="昼休み"
+              value={schedule.breakMinutes}
+              options={[
+                { value: 0, label: "なし" },
+                { value: 45, label: "45分" },
+                { value: 60, label: "60分" },
+              ]}
+              onChange={(breakMinutes) => void changeConfig(actions, widget, { breakMinutes })}
+            />
+          </>
+        )}
+      </Section>
+    </>
+  );
+}
+
