@@ -11,6 +11,7 @@ function setUrl(search: string) {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   setUrl("");
   useTimeRangeStore.setState({ range: DEFAULT_RANGE });
 });
@@ -60,6 +61,26 @@ describe("useTimeRangeStore の永続化", () => {
     initTimeRangeFromUrl();
 
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 15 * 60 * 1000 });
+  });
+
+  it("ホーム画面のショートカットなどで開いた URL の固定の期間は使わず、URL からも消して、最後の直近の範囲で開く", () => {
+    localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 }));
+    setUrl("?from=2026-11-02T03:51:00.000Z&to=2026-11-02T04:06:00.000Z");
+
+    initTimeRangeFromUrl();
+
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 });
+    expect(window.location.search).toBe("");
+  });
+
+  it("同じタブで選んだ固定の期間は、再読み込みしても URL から復元する", () => {
+    const fixed = { mode: "absolute" as const, from: Date.parse("2026-11-02T03:51:00Z"), to: Date.parse("2026-11-02T04:06:00Z") };
+    useTimeRangeStore.getState().setRange(fixed);
+    useTimeRangeStore.setState({ range: DEFAULT_RANGE });
+
+    initTimeRangeFromUrl();
+
+    expect(useTimeRangeStore.getState().range).toEqual(fixed);
   });
 
   it("URL も localStorage も無ければ既定（直近 1 時間）", () => {
