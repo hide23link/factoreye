@@ -83,7 +83,7 @@ const sensors = [makeSensor("s1", "乾燥炉 温度"), makeSensor("s2", "ライ�
 beforeEach(() => {
   useEditorStore.getState().reset();
   useUiStore.setState({ kiosk: false });
-  useKioskStore.setState({ scale: 1, fit: true, cycleSeconds: 0, cycleExcluded: [] });
+  useKioskStore.setState({ cycleSeconds: 0, cycleExcluded: [] });
   vi.mocked(api.fetchSensors).mockResolvedValue(sensors);
   vi.mocked(api.fetchDashboards).mockResolvedValue([]);
   vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
