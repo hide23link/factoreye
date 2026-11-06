@@ -54,6 +54,15 @@ function writeStoredRange(range: TimeRange) {
   }
 }
 
+// このタブで URL に書いた範囲（sessionStorage は、同じタブの再読み込みでは残り、新しいタブ・ホーム画面のショートカットでは空）
+const SESSION_URL_KEY = "factoreye.timeRange.url";
+
+/** URL のクエリのうち、範囲の部分だけを文字にする（比べるため） */
+function rangeQueryOf(search: string): string {
+  const params = new URLSearchParams(search);
+  return ["range", "from", "to"].map((key) => `${key}=${params.get(key) ?? ""}`).join("&");
+}
+
 /** 範囲の部分だけを、URL のクエリに書き換える（ほかのクエリは残す） */
 function writeUrl(range: TimeRange) {
   try {
@@ -63,6 +72,11 @@ function writeUrl(range: TimeRange) {
     url.searchParams.delete("to");
     toSearchParams(range).forEach((value, key) => url.searchParams.set(key, value));
     window.history.replaceState(null, "", url.toString());
+    try {
+      sessionStorage.setItem(SESSION_URL_KEY, rangeQueryOf(url.search));
+    } catch {
+      // 覚えられなくても、URL の書き換えはできている
+    }
   } catch {
     // URL を書き換えられない環境（プレビューなど）では、画面の状態だけを使う
   }
@@ -94,16 +108,31 @@ export const useTimeRangeStore = create<TimeRangeState>()((set) => ({
 
 /**
  * ダッシュボードを開くとき: URL に範囲があればそれを使う。
+ * ただし固定の期間（開始〜終了）は、このタブで書いたもの（再読み込み）だけを使う。ホーム画面のショートカットや
+ * 新しいタブで開いた URL に残っていた固定の期間は、古い日時のままグラフが空になるので使わず、URL からも消す。
  * 無ければ、この端末で最後に見ていた範囲（localStorage）を使う。どちらも無ければ既定（直近 1 時間）。
  */
 export function initTimeRangeFromUrl() {
   let fromUrl: TimeRange | null = null;
   try {
     fromUrl = fromSearchParams(window.location.search);
+    if (fromUrl?.mode === "absolute" && !writtenInThisTab()) {
+      fromUrl = null;
+      clearUrl();
+    }
   } catch {
     fromUrl = null;
   }
   useTimeRangeStore.setState({ range: fromUrl ?? readStoredRange() ?? DEFAULT_RANGE });
+}
+
+/** 今の URL の範囲が、このタブで書いたものか */
+function writtenInThisTab(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_URL_KEY) === rangeQueryOf(window.location.search);
+  } catch {
+    return false;
+  }
 }
 
 /**
