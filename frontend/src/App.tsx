@@ -184,11 +184,13 @@ function BottomNav() {
 function AppShell() {
   const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
+  // 画面表示モード（キオスク）では、ヘッダーと下部メニューを隠す
+  const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <ImpersonationBanner />
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-2">
+      {!kiosk && <ImpersonationBanner />}
+      {!kiosk && <header className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-2">
         <div className="flex min-w-0 items-center gap-4 overflow-x-auto">
           <span className="shrink-0 text-lg font-bold">FactorEye</span>
           <Nav />
@@ -197,8 +199,8 @@ function AppShell() {
           <UserBadge />
           <HealthBadge />
         </div>
-      </header>
-      <main className="pb-20 sm:pb-0">
+      </header>}
+      <main className={kiosk ? "" : "pb-20 sm:pb-0"}>
         {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。一覧と詳細の行き来も含む） */}
         <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>
           <Suspense fallback={<PageFallback />}>
@@ -213,7 +215,7 @@ function AppShell() {
           </Suspense>
         </ChunkErrorBoundary>
       </main>
-      <BottomNav />
+      {!kiosk && <BottomNav />}
     </div>
   );
 }

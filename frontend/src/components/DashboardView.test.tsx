@@ -97,6 +97,20 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>, card: HTML
 }
 
 describe("DashboardView", () => {
+  it("「画面表示」で操作類を隠し、「終える」で元に戻る", async () => {
+    vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [makeWidget({ type: "StatValue", sensorId: "s1" })] });
+    const user = userEvent.setup();
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+
+    await user.click(await screen.findByRole("button", { name: /画面表示$/ }));
+    expect(useUiStore.getState().kiosk).toBe(true);
+    expect(screen.queryByRole("button", { name: /編集する/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "画面表示を終える" }));
+    expect(useUiStore.getState().kiosk).toBe(false);
+    expect(await screen.findByRole("button", { name: /編集する/ })).toBeInTheDocument();
+  });
+
   it("ローディング中はスピナーテキストを表示する", () => {
     vi.mocked(api.fetchDashboard).mockReturnValue(new Promise(() => {}));
 
