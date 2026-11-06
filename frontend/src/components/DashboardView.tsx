@@ -45,6 +45,8 @@ const VIEW_BREAKPOINTS = { lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 };
 // 編集中は、棚と設定パネルで格子が狭くなる。列数が変わると置いた位置が崩れるため、常に 12 列で編集する
 const EDIT_COLS = { lg: 12 };
 const EDIT_BREAKPOINTS = { lg: 0 };
+// スマホで、2 つ横に並べる小さなウィジェット
+const COMPACT_WIDGET_TYPES: Widget["type"][] = ["StatValue", "Gauge"];
 // スマホ用の下部ナビ（App.tsx の BottomNav、min-h-14）の高さ（px）
 const BOTTOM_NAV_HEIGHT = 56;
 
@@ -133,6 +135,47 @@ function LoadedDashboard({
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const historySize = useEditorStore((s) => s.history.length);
   const actions = useWidgetActions(dashboard);
+  const kiosk = useUiStore((s) => s.kiosk);
+  const setKiosk = useUiStore((s) => s.setKiosk);
+
+  // 画面表示モード: 全画面にして、画面が消えないようにする。全画面を Esc などで抜けたら、モードも終える
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  useEffect(() => {
+    if (!kiosk) return;
+    let wakeLock: { release: () => Promise<void> } | null = null;
+    const requestWakeLock = () => {
+      // 対応していない端末（古いブラウザ）では何もしない。画面を隠したあと戻ったときは取り直す
+      void (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<typeof wakeLock> } }).wakeLock
+        ?.request("screen")
+        .then((lock) => (wakeLock = lock))
+        .catch(() => undefined);
+    };
+    requestWakeLock();
+    const onVisible = () => document.visibilityState === "visible" && requestWakeLock();
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setKiosk(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => e.key === "Escape" && setKiosk(false);
+    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("keydown", onKeyDown);
+      void wakeLock?.release().catch(() => undefined);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, [kiosk, setKiosk]);
+  // 編集に入ったら、画面表示モードは終える
+  useEffect(() => {
+    if (editing) setKiosk(false);
+  }, [editing, setKiosk]);
 
   // キーボード: Ctrl/⌘+Z で元に戻す、Delete で選択中を削除、Esc で選択を外す
   useEffect(() => {
@@ -172,20 +215,30 @@ function LoadedDashboard({
         cols: GRID_COLS,
       };
 
+  // 画面表示モードで、パソコンの大きな画面なら、行の高さを調整して、全体が 1 画面に収まるようにする（スクロール不要）。
+  // 格子の高さ = 行数 × 行の高さ + (行数 + 1) × 間隔（上下の余白も間隔と同じ）
+  const rowCount = Math.max(1, ...dashboard.widgets.map((w) => w.gridRow - 1 + w.gridHeight));
+  const rowHeight = kiosk && !isNarrow
+    ? Math.max(20, Math.floor((viewportHeight - 16 - (rowCount + 1) * GRID_MARGIN) / rowCount))
+    : GRID_ROW_HEIGHT;
+
   const grid = isNarrow ? (
-    // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
-    <div className="flex flex-col gap-3">
-      {dashboard.widgets.map((widget) => (
-        <div key={widget.id} className="h-80">
-          <WidgetCard widget={widget} dashboard={dashboard} />
-        </div>
-      ))}
+    // スマホ: 格子をやめて、ウィジェットを縦に並べる。小さな数値・メーターは 2 つ横に並べ、グラフなどは全幅にする
+    <div className="grid grid-cols-2 gap-3">
+      {dashboard.widgets.map((widget) => {
+        const compact = COMPACT_WIDGET_TYPES.includes(widget.type);
+        return (
+          <div key={widget.id} className={compact ? "col-span-1 h-36" : widget.type === "SensorGraph" || widget.type === "MultiSensorComparison" ? "col-span-2 h-72" : "col-span-2 h-44"}>
+            <WidgetCard widget={widget} dashboard={dashboard} />
+          </div>
+        );
+      })}
     </div>
   ) : (
     <ResponsiveGridLayout
       className="layout"
       {...gridProps}
-      rowHeight={GRID_ROW_HEIGHT}
+      rowHeight={rowHeight}
       margin={[GRID_MARGIN, GRID_MARGIN]}
       isDraggable={editing}
       isResizable={editing}
@@ -354,11 +407,22 @@ function LoadedDashboard({
 
   return (
     <div
-      className="px-2 py-4 sm:p-4"
+      className={kiosk ? "min-h-screen bg-gray-50 p-1" : "px-2 py-4 sm:p-4"}
       // 設定パネルを下に出すときは、ページの下に窓の高さの余白を足す（ウィジェットを窓の上までスクロールできるように）。上の位置は変わらない
       style={editing && panelOpen && placement === "bottom" ? { paddingBottom: "50vh" } : undefined}
     >
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      {kiosk && (
+        // 画面表示モードの終了ボタン。邪魔にならないよう小さく、薄く右上に置く（Esc でも終えられる）
+        <button
+          type="button"
+          onClick={() => setKiosk(false)}
+          aria-label="画面表示を終える"
+          className="fixed right-2 top-2 z-50 rounded-full bg-gray-900/40 px-3 py-1.5 text-xs text-white opacity-50 hover:opacity-100 active:opacity-100"
+        >
+          ✕ 終える
+        </button>
+      )}
+      {!kiosk && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -438,20 +502,35 @@ function LoadedDashboard({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => store().startEditing()}
-              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
-            >
-              ✎ 編集する
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  // 全画面は、ボタンを押した操作の中でしか要求できない。対応していない端末（iPhone など）は、全画面なしで表示だけ切り替える
+                  setKiosk(true);
+                  void document.documentElement.requestFullscreen?.().catch(() => undefined);
+                }}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+              >
+                ▣ 画面表示
+              </button>
+              <button
+                type="button"
+                onClick={() => store().startEditing()}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                ✎ 編集する
+              </button>
+            </>
           )}
         </div>
-      </div>
+      </div>}
 
-      <div ref={controlsRef}>
-        <TimeRangeControls />
-      </div>
+      {!kiosk && (
+        <div ref={controlsRef}>
+          <TimeRangeControls />
+        </div>
+      )}
 
       {!editing && dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-400">
