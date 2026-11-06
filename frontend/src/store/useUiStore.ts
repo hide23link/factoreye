@@ -14,6 +14,9 @@ interface UiState {
   selectedDashboardId: string | null;
   // 選んだダッシュボードを、編集モードで開くか（新しく作った直後に、そのまま編集に入るため）
   openInEditMode: boolean;
+  // 画面表示モード（キオスク）。ヘッダー・メニュー・操作類を隠して、ダッシュボードだけを大きく出す（壁掛けのモニター・スマホ向け）
+  kiosk: boolean;
+  setKiosk: (kiosk: boolean) => void;
   setView: (view: AppView) => void;
   selectDashboard: (id: string | null, options?: { edit?: boolean }) => void;
 }
@@ -22,7 +25,9 @@ export const useUiStore = create<UiState>((set) => ({
   view: "main",
   selectedDashboardId: null,
   openInEditMode: false,
-  setView: (view) => set({ view }),
+  kiosk: false,
+  setKiosk: (kiosk) => set({ kiosk }),
+  setView: (view) => set({ view, kiosk: false }),
   // ダッシュボードを選ぶ操作は常にメイン画面に戻る（設定/ウィザードから選択した場合も含む）
-  selectDashboard: (id, options) => set({ selectedDashboardId: id, view: "main", openInEditMode: options?.edit === true }),
+  selectDashboard: (id, options) => set({ selectedDashboardId: id, view: "main", openInEditMode: options?.edit === true, kiosk: false }),
 }));
