@@ -50,6 +50,7 @@ import {
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
+import { useCoarsePointer } from "../../hooks/useCoarsePointer";
 import { GRAPH_BUCKETS, formatTooltipValue, formatYTick, renderThresholdBands, renderThresholdLines } from "./graph-parts";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
@@ -88,6 +89,8 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
     range.mode === "relative",
     options.refreshMs,
   );
+  // 指の画面では、なぞっても数字を出さず（スクロールの邪魔になる）、タップしたときだけ出す。なぞって期間を選ぶ操作もしない
+  const coarse = useCoarsePointer();
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
     if (next && !hasOwnRange) setRange(next);
@@ -151,25 +154,25 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
         {sensor?.name ?? "センサー"}
         {sensor ? ` (${sensor.unit})` : ""}
       </p>
-      <div ref={chartRef} className="min-h-0 flex-1 select-none">
+      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: "pan-y" }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData} {...drag.handlers}>
+            <BarChart data={chartData} {...(coarse ? {} : drag.handlers)}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              {style.showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Bar dataKey="value" name={seriesName} fill={color} isAnimationActive={false} />
               {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} {...drag.handlers}>
+            <AreaChart data={chartData} {...(coarse ? {} : drag.handlers)}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              {style.showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Area
                 dataKey="value"
                 name={seriesName}
@@ -186,11 +189,11 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} {...drag.handlers}>
+            <LineChart data={chartData} {...(coarse ? {} : drag.handlers)}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
-              {style.showTooltip && <Tooltip labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              {style.showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Line
                 type={style.curveType}
                 dataKey="value"

@@ -53,6 +53,7 @@ import {
   graphStyle,
   thresholdOverlay,
 } from "../../lib/graph-config";
+import { useCoarsePointer } from "../../hooks/useCoarsePointer";
 import { GRAPH_BUCKETS, formatTooltipValue, formatYTick, renderThresholdBands, renderThresholdLines } from "./graph-parts";
 
 /**
@@ -74,6 +75,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   const now = useNow(options.refreshMs);
   const bounds = resolveRange(range, now);
   const live = range.mode === "relative";
+  // 指の画面では、なぞっても数字を出さず（スクロールの邪魔になる）、タップしたときだけ出す。なぞって期間を選ぶ操作もしない
+  const coarse = useCoarsePointer();
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
     if (next && !hasOwnRange) setRange(next);
@@ -203,6 +206,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     style.showTooltip ? (
       <Tooltip
         key="tip"
+        trigger={coarse ? "click" : "hover"}
         labelFormatter={(label: ReactNode) => formatTime(Number(label))}
         formatter={tooltipValueFormatter}
       />
@@ -281,20 +285,20 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     <div className="flex h-full flex-col">
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
       {sensorIds.length === 1 && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
-      <div ref={chartRef} className="min-h-0 flex-1 select-none">
+      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: "pan-y" }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...drag.handlers}>
+            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...(coarse ? {} : drag.handlers)}>
               {parts}
               {series}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...drag.handlers}>
+            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...(coarse ? {} : drag.handlers)}>
               {parts}
               {series}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} {...drag.handlers}>
+            <LineChart data={chartData} {...(coarse ? {} : drag.handlers)}>
               {parts}
               {series}
             </LineChart>
