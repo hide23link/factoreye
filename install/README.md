@@ -34,6 +34,23 @@ docker compose --env-file config/.env up -d
 
 画面は http://localhost:3001 です。
 
+## インターネットへの公開
+
+出す口は、画面を配る nginx の 3001 番だけです（`/api` と `/health` は nginx が backend へ転送します。DB と backend は出しません）。配布版の nginx は **HTTPS に対応していません**。外に出すときは、前段で HTTPS にします。
+
+| 方法 | 向く場面 | 要点 |
+|---|---|---|
+| Cloudflare Tunnel | ポートを開けたくない | サーバーで `cloudflared` を動かし、公開ホスト名を `http://localhost:3001` に向ける。HTTPS は Cloudflare が担当。画面は Cloudflare Access で保護できる |
+| AWS（EC2・Lightsail） | クラウドで動かす | 同じ `install.sh` で導入。前段に ALB + ACM、または Caddy（Let's Encrypt）を置く。セキュリティグループは 80/443 だけ開ける（例。手順は環境により異なる） |
+| VPN（Tailscale など） | 社内の人だけが見る | ポートを開けず、VPN 内から `http://<VPN の IP>:3001` を開く |
+| Caddy / nginx + 固定 IP | 固定 IP とドメインがある | 前段にもう 1 つ置き、`reverse_proxy localhost:3001` と書くだけで HTTPS になる |
+
+どの方法でも守ること:
+
+- `config/.env` の `FRONTEND_URL` を、外から開く URL にする
+- 画面と取り込み以外の API には認証がありません。**画面は認証の内側（Cloudflare Access や VPN）に置き**、外に直接出すのは `/api/ingest` だけにする
+- 外から取り込みを受けるときは、`INGEST_AUTH=key` のまま、機器ごとのキー（`X-Device-Key`）で送る。HTTPS 必須
+
 ## 注意
 
 `INGEST_AUTH=off`（キーなしの取り込み）にするときは、取り込みの口を LAN に限定してください。
