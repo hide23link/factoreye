@@ -49,8 +49,6 @@ const EDIT_COLS = { lg: 12 };
 const EDIT_BREAKPOINTS = { lg: 0 };
 // 操作バーが自動で隠れるまでの時間（ミリ秒）
 const BAR_HIDE_MS = 6000;
-// スマホで、2 つ横に並べる小さなウィジェット
-const COMPACT_WIDGET_TYPES: Widget["type"][] = ["StatValue", "Gauge"];
 // スマホ用の下部ナビ（App.tsx の BottomNav、min-h-14）の高さ（px）
 const BOTTOM_NAV_HEIGHT = 56;
 
@@ -142,7 +140,7 @@ function LoadedDashboard({
   const kiosk = useUiStore((s) => s.kiosk);
   const setKiosk = useUiStore((s) => s.setKiosk);
   const switchDashboard = useUiStore((s) => s.switchDashboard);
-  const { scale, fit, cycleSeconds, cycleExcluded } = useKioskStore();
+  const { cycleSeconds, cycleExcluded } = useKioskStore();
   const { data: allDashboards } = useDashboards();
 
   // 操作バー: 上の端のタップで出し、数秒操作がなければ隠す
@@ -171,12 +169,6 @@ function LoadedDashboard({
   }, [kiosk, cycleSeconds, cycleExcluded, allDashboards, dashboard.id, switchDashboard]);
 
   // 画面表示モード: 全画面にして、画面が消えないようにする。全画面を Esc などで抜けたら、モードも終える
-  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
-  useEffect(() => {
-    const onResize = () => setViewportHeight(window.innerHeight);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
   useEffect(() => {
     if (!kiosk) return;
     let wakeLock: { release: () => Promise<void> } | null = null;
@@ -248,32 +240,20 @@ function LoadedDashboard({
         cols: GRID_COLS,
       };
 
-  // 画面表示モードで、パソコンの大きな画面なら、行の高さを調整して、全体が 1 画面に収まるようにする（スクロール不要）。
-  // 格子の高さ = 行数 × 行の高さ + (行数 + 1) × 間隔（上下の余白も間隔と同じ）
-  const rowCount = Math.max(1, ...dashboard.widgets.map((w) => w.gridRow - 1 + w.gridHeight));
-  // 拡大すると画面の見かけの高さが縮むので、拡大率で割る
-  const zoom = kiosk ? scale : 1;
-  const rowHeight = kiosk && fit && !isNarrow
-    ? Math.max(20, Math.floor((viewportHeight / zoom - 16 - (rowCount + 1) * GRID_MARGIN) / rowCount))
-    : GRID_ROW_HEIGHT;
-
   const grid = isNarrow ? (
-    // スマホ: 格子をやめて、ウィジェットを縦に並べる。小さな数値・メーターは 2 つ横に並べ、グラフなどは全幅にする
-    <div className="grid grid-cols-2 gap-3">
-      {dashboard.widgets.map((widget) => {
-        const compact = COMPACT_WIDGET_TYPES.includes(widget.type);
-        return (
-          <div key={widget.id} className={compact ? "col-span-1 h-36" : widget.type === "SensorGraph" || widget.type === "MultiSensorComparison" ? "col-span-2 h-72" : "col-span-2 h-44"}>
-            <WidgetCard widget={widget} dashboard={dashboard} />
-          </div>
-        );
-      })}
+    // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
+    <div className="flex flex-col gap-3">
+      {dashboard.widgets.map((widget) => (
+        <div key={widget.id} className="h-80">
+          <WidgetCard widget={widget} dashboard={dashboard} />
+        </div>
+      ))}
     </div>
   ) : (
     <ResponsiveGridLayout
       className="layout"
       {...gridProps}
-      rowHeight={rowHeight}
+      rowHeight={GRID_ROW_HEIGHT}
       margin={[GRID_MARGIN, GRID_MARGIN]}
       isDraggable={editing}
       isResizable={editing}
@@ -442,7 +422,7 @@ function LoadedDashboard({
 
   return (
     <div
-      className={kiosk ? "min-h-screen bg-gray-50 p-1" : "px-2 py-4 sm:p-4"}
+      className={`px-2 py-4 sm:p-4 ${kiosk ? "min-h-screen bg-gray-50" : ""}`}
       // 設定パネルを下に出すときは、ページの下に窓の高さの余白を足す（ウィジェットを窓の上までスクロールできるように）。上の位置は変わらない
       style={editing && panelOpen && placement === "bottom" ? { paddingBottom: "50vh" } : undefined}
     >
@@ -575,12 +555,9 @@ function LoadedDashboard({
           まだウィジェットがありません。「編集する」を押して、センサーを置いてみましょう。
         </p>
       ) : (
-        // 画面表示モードの拡大率は、CSS の zoom で画面全体に掛ける
-        <div style={zoom === 1 ? undefined : { zoom }}>
-          <DropSurface dashboard={dashboard} editing={editing}>
-            {grid}
-          </DropSurface>
-        </div>
+        <DropSurface dashboard={dashboard} editing={editing}>
+          {grid}
+        </DropSurface>
       )}
 
       {editing && shelfOpen && (

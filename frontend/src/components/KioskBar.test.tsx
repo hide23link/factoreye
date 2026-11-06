@@ -23,22 +23,19 @@ const dashboards = ["a", "b", "c"].map((id) => ({
 
 beforeEach(() => {
   localStorage.clear();
-  useKioskStore.setState({ scale: 1, fit: true, cycleSeconds: 0, cycleExcluded: [] });
+  useKioskStore.setState({ cycleSeconds: 0, cycleExcluded: [] });
   useUiStore.setState({ selectedDashboardId: "a", kiosk: true });
   vi.mocked(api.fetchDashboards).mockResolvedValue(dashboards);
 });
 afterEach(cleanup);
 
 describe("KioskBar", () => {
-  it("サイズ・収め方を変えると、設定が端末に保存される", async () => {
-    const user = userEvent.setup();
+  it("表示中のダッシュボード名を出し、サイズ・収め方の操作は無い（並びと大きさは通常と同じ）", async () => {
     renderWithQueryClient(<KioskBar dashboardId="a" onExit={() => {}} onInteract={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: "150%" }));
-    await user.click(screen.getByRole("button", { name: "1 画面に収める" }));
-
-    expect(useKioskStore.getState()).toMatchObject({ scale: 1.5, fit: false });
-    expect(JSON.parse(localStorage.getItem("factoreye.kiosk") ?? "{}")).toMatchObject({ scale: 1.5, fit: false });
+    expect(await screen.findByText("ボードa")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "150%" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "1 画面に収める" })).not.toBeInTheDocument();
   });
 
   it("「次」で画面表示モードを保ったまま次のダッシュボードへ移る", async () => {
@@ -50,7 +47,7 @@ describe("KioskBar", () => {
     expect(useUiStore.getState()).toMatchObject({ selectedDashboardId: "b", kiosk: true });
   });
 
-  it("自動切替の間隔を選ぶと、切替の対象を外せる", async () => {
+  it("自動切替の間隔を選ぶと、切替の対象を外せる。設定は端末に保存される", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<KioskBar dashboardId="a" onExit={() => {}} onInteract={() => {}} />);
 
@@ -59,6 +56,7 @@ describe("KioskBar", () => {
     await user.click(screen.getByRole("checkbox", { name: "ボードc" }));
 
     expect(useKioskStore.getState()).toMatchObject({ cycleSeconds: 30, cycleExcluded: ["c"] });
+    expect(JSON.parse(localStorage.getItem("factoreye.kiosk") ?? "{}")).toEqual({ cycleSeconds: 30, cycleExcluded: ["c"] });
   });
 
   it("操作すると onInteract を呼ぶ（バーが隠れるまでの時間を延ばすため）", async () => {
@@ -66,7 +64,7 @@ describe("KioskBar", () => {
     const user = userEvent.setup();
     renderWithQueryClient(<KioskBar dashboardId="a" onExit={() => {}} onInteract={onInteract} />);
 
-    await user.click(screen.getByRole("button", { name: "200%" }));
+    await user.click(await screen.findByRole("button", { name: "次のダッシュボード" }));
 
     expect(onInteract).toHaveBeenCalled();
   });
@@ -74,10 +72,10 @@ describe("KioskBar", () => {
 
 describe("useKioskStore", () => {
   it("保存された値が壊れていても、既定値で起動する", async () => {
-    localStorage.setItem("factoreye.kiosk", JSON.stringify({ scale: 9, fit: "yes", cycleSeconds: 7, cycleExcluded: [1, "x"] }));
+    localStorage.setItem("factoreye.kiosk", JSON.stringify({ cycleSeconds: 7, cycleExcluded: [1, "x"] }));
     vi.resetModules();
     const { useKioskStore: fresh } = await import("../store/useKioskStore");
     act(() => {});
-    expect(fresh.getState()).toMatchObject({ scale: 1, fit: true, cycleSeconds: 0, cycleExcluded: ["x"] });
+    expect(fresh.getState()).toMatchObject({ cycleSeconds: 0, cycleExcluded: ["x"] });
   });
 });
