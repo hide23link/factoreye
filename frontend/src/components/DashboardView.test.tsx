@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
 import { useEditorStore } from "../store/useEditorStore";
 import * as panelPlacement from "../lib/panel-placement";
+import { useKioskStore } from "../store/useKioskStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Sensor, Widget } from "../types";
 import { DashboardView } from "./DashboardView";
 
 vi.mock("../lib/api", () => ({
   fetchDashboard: vi.fn(),
+  fetchDashboards: vi.fn(),
   deleteDashboard: vi.fn(),
   updateDashboard: vi.fn(),
   updateWidget: vi.fn(),
@@ -80,7 +82,10 @@ const sensors = [makeSensor("s1", "乾燥炉 温度"), makeSensor("s2", "ライ�
 
 beforeEach(() => {
   useEditorStore.getState().reset();
+  useUiStore.setState({ kiosk: false });
+  useKioskStore.setState({ scale: 1, fit: true, cycleSeconds: 0, cycleExcluded: [] });
   vi.mocked(api.fetchSensors).mockResolvedValue(sensors);
+  vi.mocked(api.fetchDashboards).mockResolvedValue([]);
   vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
   vi.mocked(api.fetchSensorReadingsAggregate).mockResolvedValue({ sum: 0, count: 0 });
   vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
@@ -97,6 +102,20 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>, card: HTML
 }
 
 describe("DashboardView", () => {
+  it("画面表示中の自動切替は、間隔が過ぎたら次のダッシュボードへ移り、モードを保つ", async () => {
+    const other = { ...emptyDashboard, id: "d2", name: "工場B", widgets: [] };
+    vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+    vi.mocked(api.fetchDashboards).mockResolvedValue([emptyDashboard, other]);
+    useKioskStore.setState({ cycleSeconds: 10, cycleExcluded: [] });
+    useUiStore.setState({ selectedDashboardId: "d1", kiosk: true });
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+    await screen.findByRole("button", { name: "操作バーを出す" });
+
+    await waitFor(() => expect(useUiStore.getState().selectedDashboardId).toBe("d2"), { timeout: 12000 });
+    expect(useUiStore.getState().kiosk).toBe(true);
+    useKioskStore.setState({ cycleSeconds: 0 });
+  }, 15000);
+
   it("「画面表示」で操作類を隠し、「終える」で元に戻る", async () => {
     vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [makeWidget({ type: "StatValue", sensorId: "s1" })] });
     const user = userEvent.setup();
@@ -106,7 +125,8 @@ describe("DashboardView", () => {
     expect(useUiStore.getState().kiosk).toBe(true);
     expect(screen.queryByRole("button", { name: /編集する/ })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "画面表示を終える" }));
+    await user.click(screen.getByRole("button", { name: "操作バーを出す", hidden: true }));
+    await user.click(await screen.findByRole("button", { name: "画面表示を終える" }));
     expect(useUiStore.getState().kiosk).toBe(false);
     expect(await screen.findByRole("button", { name: /編集する/ })).toBeInTheDocument();
   });
