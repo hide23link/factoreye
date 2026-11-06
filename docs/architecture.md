@@ -292,6 +292,7 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
   - 毎日 3 時の cron、保持 7 日。復元は `infra/restore.sh`
   - 配布版は cron が自動で実行する
 - **配布版**: GHCR のイメージ（amd64 / arm64）を使う。手順は [`install/README.md`](../install/README.md)
+- **外部への公開**: 配布版の nginx（3001 番）は HTTPS 非対応。Cloudflare Tunnel・AWS・VPN・Caddy などを前段に置く。方法と注意は [`install/README.md`](../install/README.md#インターネットへの公開)
 
 **配布版の設定ファイル**
 - 設定は `config/.env` の 1 ファイル。backend はこれを読む（`FACTOREYE_ENV_FILE`）
