@@ -18,12 +18,13 @@ import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
-import { useDashboard } from "../hooks/queries";
+import { useDashboard, useDashboards } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
 import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
 import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
 import { useEditorStore } from "../store/useEditorStore";
+import { useKioskStore } from "../store/useKioskStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Widget } from "../types";
@@ -33,6 +34,7 @@ import { EditorToast } from "./editor/EditorToast";
 import { WidgetPalette } from "./editor/WidgetPalette";
 import { SettingsPanel } from "./editor/SettingsPanel";
 import { ErrorNotice } from "./ErrorNotice";
+import { KioskBar } from "./KioskBar";
 import { TimeRangeControls } from "./TimeRangeControls";
 import { WidgetCard } from "./WidgetCard";
 
@@ -45,6 +47,8 @@ const VIEW_BREAKPOINTS = { lg: 1024, md: 768, sm: 576, xs: 400, xxs: 0 };
 // 編集中は、棚と設定パネルで格子が狭くなる。列数が変わると置いた位置が崩れるため、常に 12 列で編集する
 const EDIT_COLS = { lg: 12 };
 const EDIT_BREAKPOINTS = { lg: 0 };
+// 操作バーが自動で隠れるまでの時間（ミリ秒）
+const BAR_HIDE_MS = 6000;
 // スマホで、2 つ横に並べる小さなウィジェット
 const COMPACT_WIDGET_TYPES: Widget["type"][] = ["StatValue", "Gauge"];
 // スマホ用の下部ナビ（App.tsx の BottomNav、min-h-14）の高さ（px）
@@ -137,6 +141,34 @@ function LoadedDashboard({
   const actions = useWidgetActions(dashboard);
   const kiosk = useUiStore((s) => s.kiosk);
   const setKiosk = useUiStore((s) => s.setKiosk);
+  const switchDashboard = useUiStore((s) => s.switchDashboard);
+  const { scale, fit, cycleSeconds, cycleExcluded } = useKioskStore();
+  const { data: allDashboards } = useDashboards();
+
+  // 操作バー: 上の端のタップで出し、数秒操作がなければ隠す
+  const [barShown, setBarShown] = useState(false);
+  const [barTick, setBarTick] = useState(0);
+  useEffect(() => {
+    if (!kiosk || !barShown) return;
+    const timer = setTimeout(() => setBarShown(false), BAR_HIDE_MS);
+    return () => clearTimeout(timer);
+  }, [kiosk, barShown, barTick]);
+  const showBar = () => {
+    setBarShown(true);
+    setBarTick((n) => n + 1);
+  };
+
+  // 自動切替: 間隔ごとに、対象のダッシュボードを順に表示する（切り替えると画面が作り直されるので、表示のたびに数え直す）
+  useEffect(() => {
+    if (!kiosk || cycleSeconds === 0 || !allDashboards) return;
+    const targets = allDashboards.filter((d) => d.id === dashboard.id || !cycleExcluded.includes(d.id));
+    if (targets.length < 2) return;
+    const timer = setTimeout(() => {
+      const at = targets.findIndex((d) => d.id === dashboard.id);
+      switchDashboard(targets[(at + 1) % targets.length].id);
+    }, cycleSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [kiosk, cycleSeconds, cycleExcluded, allDashboards, dashboard.id, switchDashboard]);
 
   // 画面表示モード: 全画面にして、画面が消えないようにする。全画面を Esc などで抜けたら、モードも終える
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
@@ -169,7 +201,8 @@ function LoadedDashboard({
       document.removeEventListener("fullscreenchange", onFullscreenChange);
       document.removeEventListener("keydown", onKeyDown);
       void wakeLock?.release().catch(() => undefined);
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      // 自動切替などで画面が作り直されただけ（モードは続く）なら、全画面は保つ
+      if (!useUiStore.getState().kiosk && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     };
   }, [kiosk, setKiosk]);
   // 編集に入ったら、画面表示モードは終える
@@ -218,8 +251,10 @@ function LoadedDashboard({
   // 画面表示モードで、パソコンの大きな画面なら、行の高さを調整して、全体が 1 画面に収まるようにする（スクロール不要）。
   // 格子の高さ = 行数 × 行の高さ + (行数 + 1) × 間隔（上下の余白も間隔と同じ）
   const rowCount = Math.max(1, ...dashboard.widgets.map((w) => w.gridRow - 1 + w.gridHeight));
-  const rowHeight = kiosk && !isNarrow
-    ? Math.max(20, Math.floor((viewportHeight - 16 - (rowCount + 1) * GRID_MARGIN) / rowCount))
+  // 拡大すると画面の見かけの高さが縮むので、拡大率で割る
+  const zoom = kiosk ? scale : 1;
+  const rowHeight = kiosk && fit && !isNarrow
+    ? Math.max(20, Math.floor((viewportHeight / zoom - 16 - (rowCount + 1) * GRID_MARGIN) / rowCount))
     : GRID_ROW_HEIGHT;
 
   const grid = isNarrow ? (
@@ -411,17 +446,20 @@ function LoadedDashboard({
       // 設定パネルを下に出すときは、ページの下に窓の高さの余白を足す（ウィジェットを窓の上までスクロールできるように）。上の位置は変わらない
       style={editing && panelOpen && placement === "bottom" ? { paddingBottom: "50vh" } : undefined}
     >
-      {kiosk && (
-        // 画面表示モードの終了ボタン。邪魔にならないよう小さく、薄く右上に置く（Esc でも終えられる）
-        <button
-          type="button"
-          onClick={() => setKiosk(false)}
-          aria-label="画面表示を終える"
-          className="fixed right-2 top-2 z-50 rounded-full bg-gray-900/40 px-3 py-1.5 text-xs text-white opacity-50 hover:opacity-100 active:opacity-100"
-        >
-          ✕ 終える
-        </button>
+      {kiosk && !barShown && (
+        // 操作バーを出す入口。上の端の細い帯と、右上の小さな薄いボタン（どちらもタップで操作バーが出る）
+        <>
+          <button type="button" aria-label="操作バーを出す" onClick={showBar} className="fixed inset-x-0 top-0 z-40 h-5 cursor-default" />
+          <button
+            type="button"
+            onClick={showBar}
+            className="fixed right-2 top-2 z-40 rounded-full bg-gray-900/40 px-3 py-1.5 text-xs text-white opacity-40 hover:opacity-100 active:opacity-100"
+          >
+            ⚙ 操作
+          </button>
+        </>
       )}
+      {kiosk && barShown && <KioskBar dashboardId={dashboard.id} onExit={() => setKiosk(false)} onInteract={() => setBarTick((n) => n + 1)} />}
       {!kiosk && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <button
@@ -537,9 +575,12 @@ function LoadedDashboard({
           まだウィジェットがありません。「編集する」を押して、センサーを置いてみましょう。
         </p>
       ) : (
-        <DropSurface dashboard={dashboard} editing={editing}>
-          {grid}
-        </DropSurface>
+        // 画面表示モードの拡大率は、CSS の zoom で画面全体に掛ける
+        <div style={zoom === 1 ? undefined : { zoom }}>
+          <DropSurface dashboard={dashboard} editing={editing}>
+            {grid}
+          </DropSurface>
+        </div>
       )}
 
       {editing && shelfOpen && (
