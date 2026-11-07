@@ -110,7 +110,8 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
           </button>
         </div>
       </div>
-      <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
+      {/* 右の 6px（mr-1.5）は、右辺の大きさのつかみ部分とスクロールバーが重ならないため */}
+      <div className="mr-1.5 flex flex-col overflow-auto px-3.5 pb-3.5">
         <Section title="名前">
           <input
             ref={nameRef}
