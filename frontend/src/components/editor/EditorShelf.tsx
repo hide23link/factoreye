@@ -325,7 +325,8 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
 
   return (
     <>
-      <div className="shelf-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5">
+      {/* 右の 6px（mr-1.5）は、右辺の大きさのつかみ部分とスクロールバーが重ならないため */}
+      <div className="shelf-scroll mr-1.5 flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5">
         <div className="flex items-center gap-1.5">
           <input
             type="search"
@@ -480,7 +481,8 @@ function SensorShelf({ dashboard }: { dashboard: DashboardDetail }) {
           </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-gray-50 px-2.5 py-2">
+      {/* 右の余白は、右下の大きさのつかみ部分（16px）とボタンが重ならないため */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-gray-50 py-2 pl-2.5 pr-5">
         <span className="min-w-0 flex-1 text-xs text-gray-600">
           {selectedSensors.length > 0 ? `${selectedSensors.length} 個を選択中` : "チェックして、まとめて追加"}
           {hiddenSelectedCount > 0 && `（うち ${hiddenSelectedCount} 個は表示外）`}

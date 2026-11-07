@@ -25,6 +25,12 @@ describe("clampWindowPosition", () => {
   it("右にはみ出したら、窓の幅が収まる位置（1280 − 272）に寄せる", () => {
     expect(clampWindowPosition("shelf", { x: 5000, y: 10 }, 1280, 800).x).toBe(1008);
   });
+  it("広げた窓は、その幅と縁の 8px が収まる位置（1280 − 570 − 8）で止める", () => {
+    expect(clampWindowPosition("shelf", { x: 5000, y: 10 }, 1280, 800, 570).x).toBe(702);
+  });
+  it("広げた窓が画面より広いときは、左端（0）に置く", () => {
+    expect(clampWindowPosition("shelf", { x: 300, y: 10 }, 500, 800, 600).x).toBe(0);
+  });
   it("下にはみ出したら、見出しが画面内に残る位置（800 − 44）に寄せる", () => {
     expect(clampWindowPosition("shelf", { x: 0, y: 5000 }, 1280, 800).y).toBe(756);
   });
