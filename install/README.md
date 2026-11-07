@@ -17,6 +17,8 @@ curl -fsSL https://raw.githubusercontent.com/hide23link/factoreye/main/install/i
 
 設定ファイルは `/opt/factoreye/config/.env` の 1 つです。ひな形は `.env.template` です。秘密の値（`JWT_SECRET`・DB パスワード）は、このファイルでだけ変えます。
 
+`docker compose` を直接使うときは、必ず `--env-file config/.env` を付けてください（例: `docker compose --env-file config/.env ps`）。設定ファイルが `config/` の中にあるため、付けないと「`POSTGRES_PASSWORD` を .env に設定してください」と出て止まります。ふだんの操作は `./factoreye.sh` を使えば、付ける必要はありません。
+
 ## Mac / Windows（Docker Desktop）
 
 ```bash
