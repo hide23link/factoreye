@@ -45,11 +45,28 @@ run >/dev/null
 [ "$(deploys)" = "0" ] || fail "文書だけの変更で作り直している"
 [ "$(cat "$T/app/docs/a.md")" = "d2" ] || fail "コードが更新されていない"
 
-# 4. backend の変更: 作り直す（-f docker-compose.cloud.yml up -d --build）
+# 4. backend だけの変更: backend だけを作り直す（DB には触れない）
 push_change backend/app.py v2
 run >/dev/null
 [ "$(deploys)" = "1" ] || fail "backend の変更で作り直していない"
 grep -q "compose -f docker-compose.cloud.yml up -d --build" "$T/docker.log" || fail "docker の呼び方が違う: $(cat "$T/docker.log")"
+last() { tail -1 "$T/docker.log"; }
+[ "$(last)" = "compose -f docker-compose.cloud.yml up -d --build --no-deps backend" ] || fail "backend だけを作り直していない: $(last)"
+
+# 4b. frontend だけの変更: frontend だけを作り直す（DB には触れない）
+push_change frontend/app.js f1
+run >/dev/null
+[ "$(last)" = "compose -f docker-compose.cloud.yml up -d --build --no-deps frontend" ] || fail "frontend だけを作り直していない: $(last)"
+
+# 4c. backend と frontend の両方: その 2 つだけ
+(cd "$T/work" && echo v2b > backend/app.py && echo f2 > frontend/app.js && $GIT add -A && $GIT commit -qm both && git push -q origin main)
+run >/dev/null
+[ "$(last)" = "compose -f docker-compose.cloud.yml up -d --build --no-deps backend frontend" ] || fail "2 つだけを作り直していない: $(last)"
+
+# 4d. infra/cloud（DB のイメージなど）の変更: 全部を作り直す
+push_change infra/cloud/postgres/Dockerfile p1
+run >/dev/null
+[ "$(last)" = "compose -f docker-compose.cloud.yml up -d --build" ] || fail "全部を作り直していない: $(last)"
 
 # 5. 作り直しに失敗したら、記録せず、次の回にもう一度試す
 push_change backend/app.py v3
