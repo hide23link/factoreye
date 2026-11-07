@@ -5,8 +5,15 @@
 #   /opt/factoreye/infra/cloud/deploy-pull.sh
 #
 # 流れ: GitHub から最新を取得 → 前回デプロイした版から変わっていて、本番に関係するファイル
-#       （backend/・frontend/・infra/cloud/・docker-compose.cloud.yml）が変わっていれば、
-#       `docker compose up -d --build` で作り直す。それ以外（文書だけの変更など）は、コードを更新するだけ。
+#       （backend/・frontend/・infra/cloud/・docker-compose.cloud.yml）が変わっていれば、作り直す。
+#       それ以外（文書だけの変更など）は、コードを更新するだけ。
+#
+# 作り直す範囲（変わったものだけ。2026-11-07 から）:
+#   - backend/ だけ・frontend/ だけの変更 → そのサービスだけ（`up -d --build --no-deps backend` など）
+#   - infra/cloud/（DB のイメージ・Caddyfile など）や docker-compose.cloud.yml の変更 → 全部（`up -d --build`）
+#   理由: 全部を作り直すと、画面だけの変更でも DB のイメージを組み立て直す。元の postgres:15 が
+#   ビルドの一時保存から消えていると新しい版を取り直し、DB のコンテナが作り直されて数秒止まる
+#   （2026-11-07 16:51 JST に、frontend だけの変更で約 7 秒止まった）。
 #
 # なぜこの方式か: 以前は、本番サーバーに GitHub の自己ホスト型ランナーを置いていた。リポジトリを公開すると、
 #   外部の人の PR の中身が、ランナー経由で本番サーバー上で実行される恐れがある（GitHub も公開リポジトリでの
@@ -63,9 +70,20 @@ if ! git merge --ff-only --quiet "origin/$BRANCH"; then
   exit 1
 fi
 
-if git diff --name-only "$deployed" "$latest" | grep -Eq "$WATCHED_PATHS"; then
+changed="$(git diff --name-only "$deployed" "$latest")"
+if grep -Eq "$WATCHED_PATHS" <<<"$changed"; then
   log "デプロイします: $(echo "$deployed" | cut -c1-7) → $(echo "$latest" | cut -c1-7)"
-  docker compose -f "$COMPOSE_FILE" up -d --build
+  if grep -Eq '^(infra/cloud/|docker-compose\.cloud\.yml$)' <<<"$changed"; then
+    # 構成・DB のイメージ・Caddy の設定が変わった: 全部を作り直す
+    docker compose -f "$COMPOSE_FILE" up -d --build
+  else
+    # backend/・frontend/ だけが変わった: 変わったサービスだけを作り直す（DB には触れない）
+    services=()
+    grep -q '^backend/' <<<"$changed" && services+=(backend)
+    grep -q '^frontend/' <<<"$changed" && services+=(frontend)
+    log "作り直すサービス: ${services[*]}"
+    docker compose -f "$COMPOSE_FILE" up -d --build --no-deps "${services[@]}"
+  fi
   log "デプロイが終わりました"
 else
   log "本番に関係するファイルの変更はありません。コードだけ更新しました: $(echo "$latest" | cut -c1-7)"
