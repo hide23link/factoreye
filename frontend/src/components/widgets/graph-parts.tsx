@@ -43,7 +43,8 @@ export function renderThresholdBands(bands: ThresholdBand[], ends: { low: number
 
 /** 縦軸の目盛りの文字。しきい値で範囲を広げると端数の多い目盛りになり、軸の幅に入らないため、有効数字 4 桁に丸める */
 export function formatYTick(value: number): string {
-  return String(Number(value.toPrecision(4)));
+  // 100 以上は小数 2 桁まで（有効数字 4 桁だと、1028.3 も 1028.5 も「1028」になり、狭い幅の値の目盛りが区別できない）
+  return String(Math.abs(value) >= 100 ? Number(value.toFixed(2)) : Number(value.toPrecision(4)));
 }
 
 /** ツールチップの値の文字。長い小数にならないよう有効数字 4 桁に丸め、単位があれば付ける（例: 「83.6 ℃」） */

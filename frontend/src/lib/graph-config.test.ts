@@ -17,6 +17,7 @@ import {
   graphStyle,
   graphYAxisPlan,
   graphYDomain,
+  autoAxisRange,
   thresholdBands,
   thresholdLines,
   thresholdMode,
@@ -247,6 +248,57 @@ describe("graphDataOptions", () => {
   });
 });
 
+describe("autoAxisRange（縦軸が自動のときの範囲）", () => {
+  it("最小・最大の外に余白をとる（気圧 1028.3〜1028.5 で、1028.3 が下端にならない）", () => {
+    const range = autoAxisRange([1028.4, 1028.3, 1028.5])!;
+    expect(range.low).toBeLessThan(1028.3);
+    expect(range.high).toBeGreaterThan(1028.5);
+    // 4 区間の目盛りが、切りのよい数に並ぶ
+    expect(range).toEqual({ low: 1028.25, high: 1028.55 });
+  });
+
+  it("全部同じ値でも、値が真ん中あたりに来る", () => {
+    const range = autoAxisRange([1028.4, 1028.4])!;
+    expect(range.low).toBeLessThan(1028.4);
+    expect(range.high).toBeGreaterThan(1028.4);
+    expect(autoAxisRange([0, 0])).toEqual({ low: -0.2, high: 0.2 });
+  });
+
+  it("ふつうの幅の値", () => {
+    expect(autoAxisRange([20.3, 25.1])).toEqual({ low: 18, high: 26 });
+    expect(autoAxisRange([-12.5, -3])).toEqual({ low: -14, high: -2 });
+  });
+
+  it("0 以上のデータは、負の側へ伸ばさない（湿度・個数など）", () => {
+    expect(autoAxisRange([0, 100])).toEqual({ low: 0, high: 120 });
+    expect(autoAxisRange([3, 97])).toEqual({ low: 0, high: 120 });
+    expect(autoAxisRange([0, 37])).toEqual({ low: 0, high: 50 });
+    expect(autoAxisRange([0, 5])).toEqual({ low: 0, high: 6 });
+    // 0 以下のデータは、正の側へ伸ばさない
+    expect(autoAxisRange([-100, 0])).toEqual({ low: -120, high: 0 });
+  });
+
+  it("極端な値でも、例外にならず、終わる（決められなければ undefined）", () => {
+    expect(autoAxisRange([-1e308, 1e308])).toBeUndefined();
+    expect(() => autoAxisRange([1e-99, 2e-99])).not.toThrow();
+    expect(autoAxisRange([1e12, 1e12 + 3])).toBeDefined();
+  });
+
+  it("値が無ければ undefined", () => {
+    expect(autoAxisRange([])).toBeUndefined();
+    expect(autoAxisRange([NaN])).toBeUndefined();
+  });
+
+  it("graphYDomain: データがあれば余白つきの数で返す。手動の値は優先", () => {
+    expect(graphYDomain({}, [], [1028.3, 1028.5])).toEqual([1028.25, 1028.55]);
+    expect(graphYDomain({ yAxisMin: 1020 }, [], [1028.3, 1028.5])).toEqual([1020, 1028.55]);
+    // しきい値も範囲に入る
+    const [low, high] = graphYDomain({}, [195], [180, 185]) as [number, number];
+    expect(low).toBeLessThan(180);
+    expect(high).toBeGreaterThan(195);
+  });
+});
+
 describe("graphYAxisPlan", () => {
   it("実際の値: 手動の範囲、無ければしきい値込みの自動", () => {
     const plan = graphYAxisPlan({ yAxisMin: 0, yAxisMax: 100 }, graphDataOptions({}, 2), []);
@@ -273,8 +325,14 @@ describe("graphDataOptions: stackable", () => {
 });
 
 describe("bandEnds", () => {
-  it("手動の縦軸が無ければ、データとしきい値の最小〜最大から、少し外へ余らせる", () => {
-    expect(bandEnds({}, [70, 92], [80, 90])).toEqual({ low: 70 - 0.44, high: 92 + 0.44 });
+  it("手動の縦軸が無ければ、自動の縦軸の範囲（autoAxisRange）から、少し外へ余らせる", () => {
+    // データとしきい値 70〜92 → 縦軸は 65〜95
+    const ends = bandEnds({}, [70, 92], [80, 90]);
+    expect(ends.low).toBeCloseTo(64.4);
+    expect(ends.high).toBeCloseTo(95.6);
+  });
+  it("データが無ければ、しきい値の最小〜最大から、少し外へ余らせる", () => {
+    expect(bandEnds({}, [], [80, 90])).toEqual({ low: 80 - 0.2, high: 90 + 0.2 });
   });
   it("手動の縦軸があれば、その範囲を使う", () => {
     const ends = bandEnds({ yAxisMin: 0, yAxisMax: 100 }, [70, 92], [80, 90]);
@@ -283,7 +341,10 @@ describe("bandEnds", () => {
   });
   it("データもしきい値も無いときは、0〜1。値がすべて同じでも幅を持たせる", () => {
     expect(bandEnds({}, [], [])).toEqual({ low: 0, high: 1 });
-    expect(bandEnds({}, [5, 5], [5])).toEqual({ low: 4, high: 6 });
+    expect(bandEnds({}, [], [5])).toEqual({ low: 4, high: 6 });
+    const ends = bandEnds({}, [5, 5], [5]);
+    expect(ends.low).toBeLessThan(5);
+    expect(ends.high).toBeGreaterThan(5);
   });
 });
 

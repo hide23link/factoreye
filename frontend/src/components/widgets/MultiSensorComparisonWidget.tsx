@@ -45,6 +45,7 @@ import type { Widget } from "../../types";
 import {
   effectiveRange,
   graphColor,
+  autoAxisRange,
   bandEnds,
   graphAxisSides,
   graphDataOptions,
@@ -136,15 +137,27 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     chartData.flatMap((row) => (typeof row[sensorIds[0]] === "number" ? [row[sensorIds[0]]] : [])),
     overlay.axisValues,
   );
-  const axisPlan = graphYAxisPlan(widget.config, options, overlay.axisValues);
+  // 単位が2種類以上なら、縦軸を左右の2つにする（実際の値のときだけ。積み上げ・0〜100% は1つの軸）
+  const axis = graphAxisSides(widget.config, sensorIds, (id) => sensors?.find((s) => s.id === id)?.unit);
+  const dualAxis = axis.dual && options.axisMode === "shared" && options.stack === "none";
+  // 左の軸の範囲は、左に描くセンサーの値から決める（右の軸のセンサーは、右の軸の自動に任せる）
+  const leftValues = chartData.flatMap((row) =>
+    sensorIds.flatMap((id) => (axis.sides[id] !== "right" || !dualAxis) && typeof row[id] === "number" ? [row[id] as number] : []),
+  );
+  const axisPlan = graphYAxisPlan(widget.config, options, overlay.axisValues, leftValues);
+  // 右の軸も、値に余白をとる（幅の狭い値が、軸の端に貼りついて消えたように見えないように）
+  const rightRange = dualAxis
+    ? autoAxisRange(
+        chartData.flatMap((row) =>
+          sensorIds.flatMap((id) => (axis.sides[id] === "right" && typeof row[id] === "number" ? [row[id] as number] : [])),
+        ),
+      )
+    : undefined;
   const formatYAxis = {
     values: formatYTick,
     percent: (v: number) => `${Math.round(v)}%`,
     percentStack: (v: number) => `${Math.round(v * 100)}%`,
   }[axisPlan.scale];
-  // 単位が2種類以上なら、縦軸を左右の2つにする（実際の値のときだけ。積み上げ・0〜100% は1つの軸）
-  const axis = graphAxisSides(widget.config, sensorIds, (id) => sensors?.find((s) => s.id === id)?.unit);
-  const dualAxis = axis.dual && options.axisMode === "shared" && options.stack === "none";
   // ツールチップの値は、有効数字 4 桁＋センサーの単位。0〜100% にそろえたときは、グラフの値が換算後なので、元の値を出す
   const tooltipValueFormatter = (value: unknown, _name: unknown, item: { dataKey?: unknown; payload?: unknown }) => {
     const unit = sensors?.find((s) => s.id === item.dataKey)?.unit;
@@ -182,7 +195,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
             key="y-right"
             yAxisId="right"
             orientation="right"
-            domain={[widget.config.yAxisRightMin ?? "auto", widget.config.yAxisRightMax ?? "auto"]}
+            domain={[widget.config.yAxisRightMin ?? rightRange?.low ?? "auto", widget.config.yAxisRightMax ?? rightRange?.high ?? "auto"]}
             width={52}
             tick={{ fontSize: 10 }}
             tickFormatter={formatYTick}

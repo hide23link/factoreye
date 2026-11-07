@@ -127,7 +127,11 @@ function SingleSensorGraph({ widget }: { widget: Widget }) {
   const style = graphStyle(widget.config);
   const overlay = thresholdOverlay(widget.config, sensor);
   const { lines, bands } = overlay;
-  const yDomain = graphYDomain(widget.config, overlay.axisValues);
+  const yDomain = graphYDomain(
+    widget.config,
+    overlay.axisValues,
+    chartData.flatMap((point) => (typeof point.value === "number" ? [point.value] : [])),
+  );
   const ends = bandEnds(
     widget.config,
     chartData.map((point) => point.value),
