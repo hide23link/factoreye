@@ -113,11 +113,58 @@ export function thresholdLines(
 
 type AxisBound = number | "auto" | ((dataValue: number) => number);
 
+/** 自動の縦軸の区間の数。4〜6 区間に収める（4 未満なら 4 区間に広げる） */
+const AUTO_AXIS_MIN_INTERVALS = 4;
+const AUTO_AXIS_MAX_INTERVALS = 6;
+
 /**
- * 縦軸の範囲。手動で決めた値を優先し、自動のときは、しきい値の線が見えるように範囲を広げる
- * （線が範囲の外にあると、描かれずに「しきい値が出ない」ように見えるため）。
+ * 自動の縦軸の範囲。データ（としきい値）の最小〜最大の外に、幅の 1 割の余白をとり、目盛りが切りのよい数になるように決める。
+ * 余白がないと、最小の値がちょうど縦軸の下端になり、棒グラフの棒の高さが 0 に、折れ線が横軸の線に重なって、消えたように見える
+ * （値の幅が狭い気圧 1028.3〜1028.5 hPa で起きた。2026-11-07）。
+ * 0 以上のデータ（湿度・個数など）は、余白で負の側へ伸ばさない（0 で止める）。0 以下のデータも同じく、正の側へ伸ばさない。
+ * 値が無い・極端な値で決められないときは undefined（recharts の自動に任せる）。
  */
-export function graphYDomain(config: WidgetConfig, thresholdValues: number[]): [AxisBound, AxisBound] {
+export function autoAxisRange(values: number[]): { low: number; high: number } | undefined {
+  const finite = values.filter(Number.isFinite);
+  if (finite.length === 0) return undefined;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  // 値が 1 つだけ（全部同じ）なら、値の 1% の幅があるとみなす（0 なら 1）
+  const span = max - min || Math.abs(max) * 0.01 || 1;
+  if (!Number.isFinite(span)) return undefined;
+  const margin = span * 0.1;
+  const lowTarget = min >= 0 && max > 0 ? Math.max(0, min - margin) : min - margin;
+  const highTarget = max <= 0 && min < 0 ? Math.min(0, max + margin) : max + margin;
+  // 目盛りの間隔を 1・2・2.5・5 × 10 の累乗から、細かい順に試し、範囲が 6 区間以内に収まる最初のものにする
+  let power = 10 ** Math.floor(Math.log10(span / AUTO_AXIS_MAX_INTERVALS));
+  for (let tries = 0; tries < 20; tries++, power *= 10) {
+    for (const factor of [1, 2, 2.5, 5]) {
+      const step = power * factor;
+      let start = Math.floor(lowTarget / step);
+      const end = Math.ceil(highTarget / step);
+      if (end - start > AUTO_AXIS_MAX_INTERVALS) continue;
+      // 4 区間に満たなければ、上下に広げる。ただし 0 以上のデータは 0 より下へ、0 以下のデータは 0 より上へは広げない
+      const intervals = Math.max(end - start, AUTO_AXIS_MIN_INTERVALS);
+      start -= Math.ceil((intervals - (end - start)) / 2);
+      if (lowTarget >= 0 && start < 0) start = 0;
+      if (highTarget <= 0 && start + intervals > 0) start = -intervals;
+      // 小数の誤差は、間隔の桁で丸める（例: 1028.2000000001 → 1028.2）
+      const digits = Math.min(20, Math.max(0, -Math.floor(Math.log10(step)) + 2));
+      const round = (v: number) => Number(v.toFixed(digits));
+      return { low: round(start * step), high: round((start + intervals) * step) };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 縦軸の範囲。手動で決めた値を優先する。自動のときは、データとしきい値の線が、余白をとって見えるようにする
+ * （しきい値の線が範囲の外にあると描かれず、データの最小が下端にあると消えたように見えるため。autoAxisRange）。
+ * dataValues を渡さない（積み上げなど、実際の値と軸の値が違う）ときは、しきい値が入るように広げるだけにする。
+ */
+export function graphYDomain(config: WidgetConfig, thresholdValues: number[], dataValues?: number[]): [AxisBound, AxisBound] {
+  const range = dataValues && dataValues.length > 0 ? autoAxisRange([...dataValues, ...thresholdValues]) : undefined;
+  if (range) return [config.yAxisMin ?? range.low, config.yAxisMax ?? range.high];
   const low = Math.min(...thresholdValues);
   const high = Math.max(...thresholdValues);
   const hasThresholds = thresholdValues.length > 0;
@@ -316,10 +363,16 @@ export interface GraphYAxisPlan {
   scale: "values" | "percent" | "percentStack";
 }
 
-export function graphYAxisPlan(config: WidgetConfig, options: GraphDataOptions, thresholdValues: number[]): GraphYAxisPlan {
+export function graphYAxisPlan(
+  config: WidgetConfig,
+  options: GraphDataOptions,
+  thresholdValues: number[],
+  dataValues?: number[],
+): GraphYAxisPlan {
   if (options.axisMode === "normalized") return { domain: [0, 100], scale: "percent" };
   if (options.stack === "percent") return { domain: [0, 1], scale: "percentStack" };
-  return { domain: graphYDomain(config, thresholdValues), scale: "values" };
+  // 積み上げは、軸の値が合計になるので、個々の値から範囲を決めない（recharts の自動に任せる）
+  return { domain: graphYDomain(config, thresholdValues, options.stack === "none" ? dataValues : undefined), scale: "values" };
 }
 
 /**
@@ -330,8 +383,10 @@ export function graphYAxisPlan(config: WidgetConfig, options: GraphDataOptions, 
 export function bandEnds(config: WidgetConfig, dataValues: number[], thresholdValues: number[]): { low: number; high: number } {
   const all = [...dataValues, ...thresholdValues];
   if (all.length === 0) return { low: 0, high: 1 };
-  const low = config.yAxisMin ?? Math.min(...all);
-  const high = config.yAxisMax ?? Math.max(...all);
+  // 自動の縦軸は autoAxisRange の範囲になる（graphYDomain）ので、その端から少し外へ余らせる
+  const range = dataValues.length > 0 ? autoAxisRange(all) : undefined;
+  const low = config.yAxisMin ?? range?.low ?? Math.min(...all);
+  const high = config.yAxisMax ?? range?.high ?? Math.max(...all);
   const margin = (high - low) * 0.02 || 1;
   return { low: low - margin, high: high + margin };
 }
