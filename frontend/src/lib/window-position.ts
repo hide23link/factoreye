@@ -90,15 +90,21 @@ export function saveWindowSize(kind: MovableWindow, size: WindowSize | null): vo
   }
 }
 
-/** 位置を、窓の幅いっぱいが横に、見出しが縦に、画面内へ収まる範囲に制限する */
+/**
+ * 位置を、窓の幅いっぱいが横に、見出しが縦に、画面内へ収まる範囲に制限する。
+ * width = 利用者が変えた窓の幅（省略は既定の幅）。広げた窓は、右の縁から 8px の間隔を残して止める
+ * （止めずに動かすと、大きさの制限で窓が既定の幅まで縮んでしまうため）
+ */
 export function clampWindowPosition(
   kind: MovableWindow,
   pos: WindowPosition,
   viewportWidth: number,
   viewportHeight: number,
+  width?: number,
 ): WindowPosition {
+  const span = width === undefined ? WINDOW_WIDTH[kind] : width + SCREEN_EDGE;
   return {
-    x: Math.round(Math.min(Math.max(pos.x, 0), Math.max(0, viewportWidth - WINDOW_WIDTH[kind]))),
+    x: Math.round(Math.min(Math.max(pos.x, 0), Math.max(0, viewportWidth - span))),
     y: Math.round(Math.min(Math.max(pos.y, 0), Math.max(0, viewportHeight - WINDOW_HEADER_HEIGHT))),
   };
 }

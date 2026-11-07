@@ -82,7 +82,9 @@ export function useMovableWindow(kind: MovableWindow, label: string): {
     const box = header.closest("aside")?.getBoundingClientRect();
     return { x: box?.left ?? 8, y: box?.top ?? 0 };
   };
-  const clampToViewport = (p: WindowPosition) => clampWindowPosition(kind, p, window.innerWidth, window.innerHeight);
+  // 大きさを変えた窓は、その幅で制限する（既定の幅で制限すると、右端へ動かしたときに窓が縮む）
+  const clampToViewport = (p: WindowPosition) =>
+    clampWindowPosition(kind, p, window.innerWidth, window.innerHeight, currentSize()?.width);
 
   /** いまの窓の位置と大きさ。動かした・大きさを変えたことが無ければ、画面に出ている実測値 */
   const currentBox = (handle: HTMLElement): { pos: WindowPosition; size: WindowSize } => {

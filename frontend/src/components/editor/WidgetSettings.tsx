@@ -89,7 +89,8 @@ export function WidgetSettings({ widget, dashboard }: { widget: Widget; dashboar
           ✕
         </button>
       </div>
-      <div className="flex flex-col overflow-auto px-3.5 pb-3.5">
+      {/* 右の 6px（mr-1.5）は、右辺の大きさのつかみ部分とスクロールバーが重ならないため */}
+      <div className="mr-1.5 flex flex-col overflow-auto px-3.5 pb-3.5">
         <Section title="タイトル" note="枠の上に出す名前。空欄なら出しません">
           <AxisUnitField label="タイトル" value={widget.config.title ?? ""} placeholder="タイトルなし" wide onCommit={(value) => void changeConfig(actions, widget, { title: value.trim() || undefined })} />
         </Section>
