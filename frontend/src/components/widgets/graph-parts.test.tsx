@@ -15,6 +15,8 @@ describe("formatTooltipValue", () => {
   });
   it("整数や大きな値も壊れない", () => {
     expect(formatTooltipValue(1234, "個")).toBe("1234 個");
-    expect(formatTooltipValue(1234567, "個")).toBe("1235000 個");
+    expect(formatTooltipValue(1234567, "個")).toBe("1234567 個");
+    // 100 以上は小数 2 桁まで出す（1028.3 と 1028.5 を区別できるように）
+    expect(formatTooltipValue(1028.349, "hPa")).toBe("1028.35 hPa");
   });
 });
