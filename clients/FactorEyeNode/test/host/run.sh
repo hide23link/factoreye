@@ -1,5 +1,5 @@
 #!/bin/sh
-# FactorEyeNode の設定の決まりを PC 上でテストする（実機・Arduino 不要。C++17 のコンパイラだけ使う）。
+# FactorEyeNode の機種ごとのピン・設定の決まり・パルスの数え方を PC 上でテストする（実機・Arduino 不要。C++17 のコンパイラだけ使う）。
 # 機種ごとに、コンパイルし直して実行する
 set -e
 cd "$(dirname "$0")"
@@ -8,10 +8,10 @@ for board in ARDUINO_M5STACK_ATOM ARDUINO_M5STACK_ATOMS3 ARDUINO_M5STACK_NANOC6 
   echo "== $board"
   c++ -std=c++17 -Wall -Wextra -g -D$board=1 \
     -I fakes -I ../.. \
-    test_nodeconfig.cpp -o build/nodeconfig_test
-  build/nodeconfig_test
+    test_calc.cpp -o build/calc_test
+  build/calc_test
 done
 
 echo "== パルスを数える部分・稼働の判定"
-c++ -std=c++17 -Wall -Wextra -g -I ../.. test_pulse.cpp -o build/pulse_test
+c++ -std=c++17 -Wall -Wextra -g -I fakes -I ../.. test_pulse.cpp -o build/pulse_test
 build/pulse_test
