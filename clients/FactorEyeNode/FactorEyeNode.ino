@@ -1,7 +1,7 @@
 /* FactorEyeNode ver3.00
  *  M5Stack（ATOM Lite など）の ENV センサー（温度・湿度・気圧）と入出力ポートの値を、FactorEye に送る。
  *  2026/11/5 ver1 作成。2026/11/8 ver2 .ino と node_calc.h の 2 つに整理。
- *  2026/11/9 ver3 書き方をプロジェクトリードの形にそろえた（動きは ver2 と同じ）
+ *  2026/11/9 ver3 書き方をそろえた（動きは ver2 と同じ）
  *  （SPEC.md の「版 0.3」は仕様の版で、この版とは別に数える）
  *  使い方は README.md、仕様の詳細は SPEC.md
  *
@@ -18,7 +18,7 @@
  *  loop()    : WiFi のつなぎ直し → ENV のやり直し → サーバーの確認 → 間隔ごとに読んで送る → 5秒ごとにパルスの個数を送る
  *              → 異常の LED → 画面
  *  割り込み  : パルスのポートに信号が来たら、数えるだけ（node_calc.h の pulse_edge）
- *  データの流れ: ENV・ポート → send_（1つの値ずつ FactorEyeClient で POST）→ FactorEye
+ *  データの流れ: ENV・ポート → send_（FactorEyeClient が ID ごとに POST する。溜まった分もまとめて送る）→ FactorEye
  *               パルス → 割り込みで数える → send_pulses（5秒ごとの個数と稼働 1/0）→ FactorEye
  *
  *  ---- 関数のまとまり ----
@@ -606,7 +606,7 @@ void server_health() {
 }
 
 //****************************************************************
-//  send_ … 送る（FactorEyeClient が 1つの値ずつ POST する。送れなかった分は溜めて再送する）
+//  send_ … 送る（FactorEyeClient が ID ごとに POST する。溜まった分もまとめて送る。送れなかった分は溜めて再送する）
 //****************************************************************
 FactorEyeClient g_factoreye;   // FactorEye に送る部品。setup で始め、loop で送る
 
@@ -684,7 +684,7 @@ void send_pulses() {
 // 1つの値を送る。送れたら、その ID の「最後に送れた時刻」を新しくする
 // 引数: id    … 送る ID（例: "atom-b665-temp"。空なら送らない）
 //       value … 値（例: 23.4）
-// 戻り値: true = 送れた、false = 送れない（FactorEyeClient が溜めて、あとで再送する）
+// 戻り値: true = 送れた、false = 送れない（FactorEyeClient が、たいていは溜めて、あとで再送する。400・422 などは捨てる）
 bool send_value(const String &id, float value) {
   if (id.isEmpty()) return false;
   bool sent = g_factoreye.send(id, value);
