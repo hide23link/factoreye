@@ -169,6 +169,31 @@ describe("DashboardView", () => {
     expect(await screen.findByText(/まだウィジェットがありません/)).toBeInTheDocument();
   });
 
+  it("グラフが 1 つも無いダッシュボードでは「🔗 リンク」を押せない（グラフがありません）", async () => {
+    vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [makeWidget()] });
+
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+
+    const button = await screen.findByRole("button", { name: "🔗 リンク" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "グラフがありません");
+  });
+
+  it("「🔗 リンク」で、リンクを作る窓を開く", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchDashboard).mockResolvedValue({
+      ...emptyDashboard,
+      widgets: [makeWidget({ id: "g1", type: "SensorGraph", sensorId: "s1" })],
+    });
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+    await user.click(await screen.findByRole("button", { name: "🔗 リンク" }));
+
+    expect(await screen.findByRole("heading", { name: "リンクを作る（工場A）" })).toBeInTheDocument();
+    expect(screen.getByText(/\?dashboard=d1&graph=g1&range=30m$/)).toBeInTheDocument();
+  });
+
   describe("編集モード", () => {
     // センサー棚は、広い画面（1600px 以上）でだけ最初から開く。テストは広い画面として動かす
     const originalWidth = window.innerWidth;
