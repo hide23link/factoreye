@@ -1,7 +1,7 @@
 /**
  * グラフ系ウィジェット（センサーグラフ・複数センサー比較）で共通の部品。
  *
- * 【誰が使うか】SensorGraphWidget、MultiSensorComparisonWidget。
+ * 【誰が使うか】SensorGraphWidget、MultiSensorComparisonWidget、GraphLinkView（LinkGraphView の型）。
  */
 import { ReferenceArea, ReferenceLine } from "recharts";
 
@@ -9,6 +9,31 @@ import type { ThresholdBand, ThresholdLine } from "../../lib/graph-config";
 
 /** グラフの区間数（表示の横幅に合わせた本数の目安。API の上限は 1000） */
 export const GRAPH_BUCKETS = 500;
+
+/**
+ * リンクの画面（グラフ 1 つを 1 画面で見る）が、グラフに渡す表示の指定。
+ * 渡すと、ダッシュボードの期間（useTimeRangeStore）を読まず、この範囲で描く。
+ * 指の操作はリンクの画面が受けるので、グラフのドラッグ選択・吹き出し・凡例・見出しは出さない（線・色・縦軸は同じ）。
+ */
+export interface LinkGraphView {
+  /** 表示する範囲（ミリ秒）。指を動かしている間は、指に合わせて毎回変わる */
+  bounds: { from: number; to: number };
+  /**
+   * 取得する範囲（ミリ秒）。指を離して少ししてから決まる（指を動かすたびに取り直さないため）。
+   * 決まるまでは、前に取れたデータを、表示する範囲の横軸に描く
+   */
+  fetchBounds: { from: number; to: number };
+  /** 今を見ているか（true なら、グラフの設定の間隔で取り直す） */
+  live: boolean;
+  /** タップした時刻（縦の点線を引く）。無ければ null */
+  cursorTime: number | null;
+}
+
+/** リンクの画面でタップした時刻の、縦の点線。yAxisId は、縦軸が左右 2 つのときに載せる軸 */
+export function renderCursorLine(cursorTime: number | null, yAxisId?: string) {
+  if (cursorTime === null) return null;
+  return <ReferenceLine key="cursor" x={cursorTime} yAxisId={yAxisId} stroke="#6b7280" strokeDasharray="3 3" ifOverflow="hidden" />;
+}
 
 const THRESHOLD_COLOR: Record<ThresholdLine["severity"], string> = { warning: "#d97706", critical: "#dc2626" };
 

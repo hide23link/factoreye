@@ -2,7 +2,7 @@
  * グラフに描く「行」（時刻ごとに、各センサーの値を並べた表）を作る。
  * 区間の値の選び方（平均・最大・最小）、積み上げのための欠けの補い、センサーごとの 0〜100% への換算をここで行う。
  *
- * 【誰が使うか】MultiSensorComparisonWidget、SensorGraphWidget。
+ * 【誰が使うか】MultiSensorComparisonWidget、SensorGraphWidget、GraphLinkView（今の値・タップした時刻の値）。
  */
 import type { DownsampledBucket } from "./api";
 import type { Aggregation } from "./graph-config";
@@ -84,4 +84,23 @@ export function normalizeRows(rows: ReadonlyArray<GraphRow>, sensorIds: Readonly
 export function rawValueOf(item: { dataKey?: unknown; payload?: unknown }): number | undefined {
   const raw = (item.payload as Record<string, unknown> | undefined)?.[`${String(item.dataKey)}${RAW_SUFFIX}`];
   return typeof raw === "number" ? raw : undefined;
+}
+
+/**
+ * ある時刻にいちばん近い行の、そのセンサーの値（リンクの画面で、今の値・タップした時刻の値を出すため）。
+ * そのセンサーの値がある行だけから選ぶ。1 つも無ければ null。
+ */
+export function nearestValue(rows: ReadonlyArray<GraphRow>, sensorId: string, at: number): number | null {
+  let best: number | null = null;
+  let bestGap = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    const value = row[sensorId];
+    if (value === undefined) continue;
+    const gap = Math.abs(row.time - at);
+    if (gap < bestGap) {
+      best = value;
+      bestGap = gap;
+    }
+  }
+  return best;
 }

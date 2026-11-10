@@ -6,7 +6,9 @@
  * 同じ範囲・同じ区間数で取るので、時間軸はすべてのセンサーで一致する。
  *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "MultiSensorComparison" のときに出す。
+ * リンクの画面（GraphLinkView）も、同じ線・色・縦軸で描くために使う。
  * 【引数（props）】widget = このウィジェット（センサーの ID や設定を持つ）。WidgetCard が渡す。
+ * linkView = リンクの画面のときだけ、GraphLinkView が渡す（範囲・今か・タップした時刻。graph-parts の LinkGraphView）。
  */
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -55,33 +57,46 @@ import {
   thresholdOverlay,
 } from "../../lib/graph-config";
 import { useCoarsePointer } from "../../hooks/useCoarsePointer";
-import { GRAPH_BUCKETS, formatTooltipValue, formatYTick, renderThresholdBands, renderThresholdLines } from "./graph-parts";
+import {
+  GRAPH_BUCKETS,
+  formatTooltipValue,
+  formatYTick,
+  renderCursorLine,
+  renderThresholdBands,
+  renderThresholdLines,
+  type LinkGraphView,
+} from "./graph-parts";
 
 /**
  * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
  * センサーグラフ（SensorGraph）でセンサーを2つ以上にしたときも、これで描く。
  * 線・面・棒の種類と、線の色（config.colors）、ウィジェット固有の期間も反映する。
  */
-export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
+export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widget; linkView?: LinkGraphView }) {
   const { data: sensors } = useSensors();
   const sensorIds = graphSensorIds(widget);
   const dashboardRange = useTimeRangeStore((s) => s.range);
   // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
   const range = effectiveRange(widget, dashboardRange);
-  const hasOwnRange = range !== dashboardRange;
+  // リンクの画面では、期間の操作はリンクの画面が受ける（ダッシュボードの期間を変えない）
+  const hasOwnRange = range !== dashboardRange || linkView !== undefined;
   const setRange = useTimeRangeStore((s) => s.setRange);
   // 直近モードでは、横軸（表示範囲）を設定の間隔（既定 30 秒）ごとに動かす
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
   const options = graphDataOptions(widget.config, sensorIds.length);
   const now = useNow(options.refreshMs);
-  const bounds = resolveRange(range, now);
-  const live = range.mode === "relative";
+  const bounds = linkView?.bounds ?? resolveRange(range, now);
+  // リンクの画面では、取得の範囲は表示の範囲と別に決まる（指を動かす間は取り直さない）
+  const fetchBounds = linkView?.fetchBounds ?? bounds;
+  const live = linkView ? linkView.live : range.mode === "relative";
   // 指の画面では、なぞっても数字を出さず（スクロールの邪魔になる）、タップしたときだけ出す。なぞって期間を選ぶ操作もしない
   const coarse = useCoarsePointer();
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
     if (next && !hasOwnRange) setRange(next);
   });
+  // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）
+  const pointerHandlers = coarse || linkView ? {} : drag.handlers;
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
@@ -93,15 +108,15 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       queryKey: [
         "readings-downsampled",
         sensorId,
-        Math.round(bounds.from / 1000),
-        Math.round(bounds.to / 1000),
+        Math.round(fetchBounds.from / 1000),
+        Math.round(fetchBounds.to / 1000),
         GRAPH_BUCKETS,
       ],
       queryFn: () =>
         fetchSensorReadingsDownsampled(
           sensorId,
-          new Date(bounds.from).toISOString(),
-          new Date(bounds.to).toISOString(),
+          new Date(fetchBounds.from).toISOString(),
+          new Date(fetchBounds.to).toISOString(),
           GRAPH_BUCKETS,
         ),
       refetchInterval: live ? options.refreshMs : false,
@@ -114,7 +129,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-400">比較対象のセンサーが設定されていません</p>;
   }
 
-  const hours = spanHours(range, now);
+  const hours = linkView ? (bounds.to - bounds.from) / 3_600_000 : spanHours(range, now);
   const formatTime = (ms: number) => formatChartTime(ms, hours);
 
   // 区間の中央の時刻ごとに、各センサーの値（平均・最大・最小）を1行にまとめる。
@@ -176,6 +191,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
       dataKey="time"
       type="number"
       domain={[bounds.from, bounds.to]}
+      // リンクの画面では、取得の範囲が表示の範囲より広いことがある。はみ出す線は枠で切る（軸を広げない）
+      allowDataOverflow={linkView !== undefined}
       tickFormatter={formatTime}
       tick={{ fontSize: 10 }}
     />,
@@ -216,7 +233,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
             }
           />,
         ]),
-    style.showTooltip ? (
+    style.showTooltip && !linkView ? (
       <Tooltip
         key="tip"
         trigger={coarse ? "click" : "hover"}
@@ -224,7 +241,8 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
         formatter={tooltipValueFormatter}
       />
     ) : null,
-    style.legendPosition === "off" ? null : (
+    // リンクの画面は、上の今の値に色の印を出すので、凡例を出さない
+    style.legendPosition === "off" || linkView ? null : (
       <Legend
         key="legend"
         wrapperStyle={{ fontSize: 10 }}
@@ -236,6 +254,7 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
     ...renderThresholdBands(bands, ends),
     ...renderThresholdLines(lines),
     drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
+    renderCursorLine(linkView?.cursorTime ?? null, dualAxis ? "left" : undefined),
   ];
   // 凡例に出す名前: 利用者が付けた名前（空欄なら、センサーの名前）
   const nameOf = (sensorId: string) =>
@@ -297,21 +316,21 @@ export function MultiSensorComparisonWidget({ widget }: { widget: Widget }) {
   return (
     <div className="flex h-full flex-col">
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
-      {sensorIds.length === 1 && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
-      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: "pan-y" }}>
+      {sensorIds.length === 1 && !linkView && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
+      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...(coarse ? {} : drag.handlers)}>
+            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
               {parts}
               {series}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...(coarse ? {} : drag.handlers)}>
+            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
               {parts}
               {series}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} {...(coarse ? {} : drag.handlers)}>
+            <LineChart data={chartData} {...pointerHandlers}>
               {parts}
               {series}
             </LineChart>

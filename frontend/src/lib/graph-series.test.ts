@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RAW_SUFFIX, bucketValue, buildRows, normalizeRows, rawValueOf } from "./graph-series";
+import { RAW_SUFFIX, bucketValue, buildRows, nearestValue, normalizeRows, rawValueOf, type GraphRow } from "./graph-series";
 
 const bucket = (start: string, min: number, avg: number, max: number) => ({ start, min, avg, max });
 
@@ -113,5 +113,23 @@ describe("rawValueOf", () => {
   it("元の値が無い（換算していない）ときは undefined", () => {
     expect(rawValueOf({ dataKey: "a", payload: { a: 50 } })).toBeUndefined();
     expect(rawValueOf({ dataKey: "a" })).toBeUndefined();
+  });
+});
+
+describe("nearestValue", () => {
+  const rows = [
+    { time: 1000, s1: 10 },
+    { time: 2000, s2: 5 },
+    { time: 3000, s1: 30 },
+  ] as GraphRow[];
+
+  it("その時刻にいちばん近い、そのセンサーの値を返す", () => {
+    expect(nearestValue(rows, "s1", 3500)).toBe(30);
+    expect(nearestValue(rows, "s1", 1200)).toBe(10);
+    expect(nearestValue(rows, "s2", 9000)).toBe(5);
+  });
+
+  it("値が 1 つも無ければ null", () => {
+    expect(nearestValue(rows, "s3", 1000)).toBeNull();
   });
 });

@@ -9,12 +9,14 @@
  * 【誰が使うか】main.tsx が、通常の画面として描画する（/admin 以外のとき）。引数（props）はない。
  * 【画面の切り替え】ルーター（URL で画面を替える道具）は使わず、useUiStore の view を見て、
  * ダッシュボード・設定・セットアップガイドのどれを出すかを選ぶ。
+ * リンク（?dashboard=…&graph=…&range=…m）で開いたときは、ヘッダー・メニューを出さず、そのグラフ 1 つの画面（GraphLinkView）を出す。
  */
 import { Suspense, useEffect } from "react";
 
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
+import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
@@ -29,6 +31,7 @@ const DashboardView = lazyNamed(() => import("./components/DashboardView"), "Das
 const SettingsPage = lazyNamed(() => import("./components/SettingsPage"), "SettingsPage");
 const SetupWizard = lazyNamed(() => import("./components/SetupWizard"), "SetupWizard");
 const LegalPage = lazyNamed(() => import("./components/LegalPage"), "LegalPage");
+const GraphLinkView = lazyNamed(() => import("./components/link/GraphLinkView"), "GraphLinkView");
 
 /** 遅延読み込み中の表示。他の「読み込み中」と同じ見た目にする。 */
 function PageFallback() {
@@ -180,10 +183,32 @@ function BottomNav() {
   );
 }
 
-/** ログイン後（または self-hosted）の画面の枠。ヘッダーと、選ばれた画面の本体を並べる。 */
+/** ログイン後（または self-hosted）の画面。リンクで開いたときはグラフ 1 つの画面、それ以外はふだんの枠（MainShell）。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
+  const graphLink = useUiStore((s) => s.graphLink);
+  const linkNotFound = useUiStore((s) => s.linkNotFound);
+
+  // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（一覧に黄色の帯が出る）
+  useEffect(() => {
+    if (linkNotFound) clearGraphLinkFromUrl();
+  }, [linkNotFound]);
+
+  if (graphLink) {
+    return (
+      <ChunkErrorBoundary>
+        <Suspense fallback={<PageFallback />}>
+          <GraphLinkView link={graphLink} />
+        </Suspense>
+      </ChunkErrorBoundary>
+    );
+  }
+  return <MainShell view={view} selectedDashboardId={selectedDashboardId} />;
+}
+
+/** ヘッダー・メニューつきの、ふだんの画面の枠。 */
+function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashboardId: string | null }) {
   // 画面表示モード（キオスク）では、ヘッダーと下部メニューを隠す
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 

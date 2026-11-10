@@ -7,13 +7,14 @@
  * - 左: センサー棚（ドラッグ、または「＋」で追加）
  * - 上のバー: 「＋ ウィジェット」で種類の部品バーを開く（ドラッグ、またはクリックで追加）
  * - 右: 設定パネル（ウィジェットの「⚙」で、そのウィジェットの設定。未選択ならダッシュボードの名前・説明）
+ * 閲覧中の「🔗 リンク」で、グラフ 1 つを 1 画面で開くリンクを作る（GraphLinkDialog）。
  * ウィジェットは、カードをつかんで移動、右下の角・左右と下の端で大きさを変える。設定は、ウィジェット内の「⚙」ボタンで開く。
  * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除（Backspace は誤操作しやすいので使わない）。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んだときに出す。
  * 【引数（props）】dashboardId = 表示するダッシュボードの ID（App.tsx が渡す）。
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -23,6 +24,8 @@ import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
 import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
 import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
+import { isGraphWidget } from "../lib/graph-link";
+import { lazyNamed } from "../lib/lazyWithRetry";
 import { useEditorStore } from "../store/useEditorStore";
 import { useKioskStore } from "../store/useKioskStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
@@ -37,6 +40,9 @@ import { ErrorNotice } from "./ErrorNotice";
 import { KioskBar } from "./KioskBar";
 import { TimeRangeControls } from "./TimeRangeControls";
 import { WidgetCard } from "./WidgetCard";
+
+// 「リンクを作る」の窓は、開いたときに読み込む（見本のグラフに recharts を使うため）
+const GraphLinkDialog = lazyNamed(() => import("./link/GraphLinkDialog"), "GraphLinkDialog");
 
 // 幅に応じて列数を変える（画面が狭いほど列が少なくなる）。lg は 12 列
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -142,6 +148,9 @@ function LoadedDashboard({
   const switchDashboard = useUiStore((s) => s.switchDashboard);
   const { cycleSeconds, cycleExcluded } = useKioskStore();
   const { data: allDashboards } = useDashboards();
+  // 「リンクを作る」の窓を開いているか。グラフが 1 つも無いダッシュボードでは、ボタンを押せない
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const hasGraph = dashboard.widgets.some(isGraphWidget);
 
   // 操作バー: 上の端のタップで出し、数秒操作がなければ隠す
   const [barShown, setBarShown] = useState(false);
@@ -523,6 +532,15 @@ function LoadedDashboard({
             <>
               <button
                 type="button"
+                disabled={!hasGraph}
+                title={hasGraph ? "グラフを 1 画面で開くリンクを作る" : "グラフがありません"}
+                onClick={() => setLinkDialogOpen(true)}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
+              >
+                🔗 リンク
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   // 全画面は、ボタンを押した操作の中でしか要求できない。対応していない端末（iPhone など）は、全画面なしで表示だけ切り替える
                   setKiosk(true);
@@ -596,6 +614,11 @@ function LoadedDashboard({
       )}
 
       <EditorToast />
+      {linkDialogOpen && (
+        <Suspense fallback={null}>
+          <GraphLinkDialog dashboard={dashboard} onClose={() => setLinkDialogOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

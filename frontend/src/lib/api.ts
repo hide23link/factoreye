@@ -304,7 +304,8 @@ export const acknowledgeAlarm = (alarmId: string, acknowledgedBy: string) =>
 
 export const fetchDashboards = () => request<Dashboard[]>("/api/dashboards");
 
-export const fetchDashboard = (id: string) => request<DashboardDetail>(`/api/dashboards/${id}`);
+// id はリンクの URL から来ることがあるので、パスに入れるときはエンコードする（形は lib/graph-link.ts でも確かめている）
+export const fetchDashboard = (id: string) => request<DashboardDetail>(`/api/dashboards/${encodeURIComponent(id)}`);
 
 export const createDashboard = (data: { name: string; description?: string }) =>
   request<DashboardDetail>("/api/dashboards", { method: "POST", body: JSON.stringify(data) });
