@@ -22,7 +22,7 @@ function Harness({ now = NOW, maxMs = NO_LIMIT, onJump }: { now?: number; maxMs?
 }
 
 const slider = () => screen.getByRole("slider", { name: "時刻を選ぶ" });
-const day = (month: number, date: number, time = "8:00") => screen.getByRole("button", { name: `${month}月${date}日 ${time}から` });
+const day = (month: number, date: number, time = "8時00分") => screen.getByRole("button", { name: `${month}月${date}日 ${time}から` });
 const monthTitle = () => screen.getByText(/^\d{4}年\d{1,2}月$/).textContent;
 
 beforeEach(() => {
@@ -40,11 +40,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("近道", () => {
   it("5 つあり、押すとすぐ、その時刻へ移る", () => {
+    // 「1 時間前」は押した時刻（Date.now）から数えるので、時刻を NOW に固定する
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
     const onJump = vi.fn();
     render(<Harness onJump={onJump} />);
 
@@ -121,7 +125,7 @@ describe("② カレンダー", () => {
     expect(monthTitle()).toBe("2026年11月");
     expect(day(11, 10)).toHaveAttribute("aria-current", "date");
     fireEvent.pointerDown(slider(), { pointerId: 1, clientX: 30 }); // 3:00
-    fireEvent.click(day(11, 3, "3:00"));
+    fireEvent.click(day(11, 3, "3時00分"));
     expect(onJump).toHaveBeenCalledWith(new Date(2026, 10, 3, 3, 0).getTime());
   });
 
@@ -131,8 +135,8 @@ describe("② カレンダー", () => {
     expect(day(11, 10)).toBeEnabled(); // 今日 8:00 は過ぎている（今は 11:30）
     expect(day(11, 11)).toBeDisabled();
     fireEvent.pointerDown(slider(), { pointerId: 1, clientX: 120 }); // 12:00
-    expect(day(11, 10, "12:00")).toBeDisabled();
-    expect(day(11, 9, "12:00")).toBeEnabled();
+    expect(day(11, 10, "12時00分")).toBeDisabled();
+    expect(day(11, 9, "12時00分")).toBeEnabled();
   });
 
   it("self-hosted: ▶ は今月で押せない。◀ は 12 か月前の月まで戻れる", () => {
@@ -168,5 +172,16 @@ describe("② カレンダー", () => {
     expect(cells.slice(0, 7).map((c) => c.textContent)).toEqual(["日", "月", "火", "水", "木", "金", "土"]);
     expect(cells.slice(7, 11).every((c) => c.textContent === "")).toBe(true);
     expect(cells[11].textContent).toBe("1");
+  });
+});
+
+describe("キーボード", () => {
+  it("開くと ✕ にフォーカスし、Esc で閉じる", () => {
+    const onClose = vi.fn();
+    render(<LinkTimeSheet now={NOW} maxMs={NO_LIMIT} pickedMinutes={480} onPick={vi.fn()} onJump={vi.fn()} onClose={onClose} />);
+
+    expect(screen.getByRole("button", { name: "閉じる" })).toHaveFocus();
+    fireEvent.keyDown(slider(), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

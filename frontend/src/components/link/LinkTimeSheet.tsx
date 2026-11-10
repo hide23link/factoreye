@@ -4,16 +4,17 @@
  * - 近道 5 つ（1 時間前・3 時間前・今日 8:00・昨日 8:00・昨日 13:00）: 押すとすぐ移る。未来になるものは押せない
  * - ① 時刻の帯（0:00〜24:00）: 押すか、なぞって 15 分刻みで時刻を選ぶ。ここでは移らない
  * - ② カレンダー: 日付を押すと「その日＋① の時刻」へすぐ移る。◀ ▶ で月を変える
- * 日付・時刻は端末の時刻。戻れる最も古い時刻は oldestStart（SaaS は保持期間の 14 日、self-hosted は 12 か月前の月）。
+ * 開くと ✕ にフォーカスし、Esc で閉じる。日付・時刻は端末の時刻。戻れる最も古い時刻は oldestStart（SaaS は保持期間の 14 日、self-hosted は 12 か月前の月）。
  *
  * 【誰が使うか】LinkScreen が、上の期間の表示（🕘）を押したときに出す。
  * 【引数（props）】now = シートを開いた時刻、maxMs = 表示できる最長（maxRangeForBuild）、
  * pickedMinutes = ① で選んでいる時刻（0:00 からの分。閉じても LinkScreen が覚えておく）、onPick = ① で選んだとき、
  * onJump = 移るとき（開始の時刻）、onClose = ✕ を押したとき。
  */
-import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import {
+  LAST_PICK_MINUTES,
   atMinutes,
   calendarDays,
   canStartAt,
@@ -49,26 +50,33 @@ export function LinkTimeSheet({
   onClose: () => void;
 }) {
   const oldestMs = oldestStart(now, maxMs);
+  // 開いたら ✕ にフォーカスする（キーボード・読み上げで、シートの中から操作を始められるように）
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => closeButton.current?.focus(), []);
 
   return (
     <div
       role="dialog"
       aria-label="この時刻から表示"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
       className="absolute inset-x-0 bottom-0 z-10 flex max-h-full flex-col gap-2 overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-3.5 text-xs shadow-[0_-8px_24px_rgba(0,0,0,0.15)]"
     >
       <div className="flex items-center justify-between">
         <b className="text-sm">この時刻から表示</b>
-        <button type="button" aria-label="閉じる" onClick={onClose} className="px-1.5 py-0.5 text-base text-gray-500">
+        <button ref={closeButton} type="button" aria-label="閉じる" onClick={onClose} className="px-1.5 py-0.5 text-base text-gray-500">
           ✕
         </button>
       </div>
       <div role="group" aria-label="近道" className="flex gap-1.5 overflow-x-auto">
-        {quickStarts(now).map((quick) => (
+        {quickStarts(now).map((quick, index) => (
           <button
             key={quick.label}
             type="button"
             disabled={!canStartAt(quick.startMs, now, oldestMs)}
-            onClick={() => onJump(quick.startMs)}
+            // 「1 時間前」などは、開いた時刻ではなく押した時刻から数える（開いたまま置いても、ずれないように）
+            onClick={() => onJump(quickStarts(Date.now())[index].startMs)}
             className="shrink-0 rounded-full border border-gray-200 px-3 py-1.5 text-xs disabled:opacity-40"
           >
             {quick.label}
@@ -107,7 +115,7 @@ function TimeTrack({ pickedMinutes, onPick }: { pickedMinutes: number; onPick: (
         tabIndex={0}
         aria-label="時刻を選ぶ"
         aria-valuemin={0}
-        aria-valuemax={24 * 60 - 15}
+        aria-valuemax={LAST_PICK_MINUTES}
         aria-valuenow={pickedMinutes}
         aria-valuetext={minutesText(pickedMinutes)}
         onPointerDown={(e) => {
@@ -170,7 +178,8 @@ function MonthCalendar({
   const [view, setView] = useState<CalendarMonth>(() => monthOf(now));
   const { blanks, days } = calendarDays(view);
   const today = dayStart(now);
-  const time = minutesText(pickedMinutes);
+  // 読み上げ用の「8時00分」（モックと同じ書き方）
+  const time = `${Math.floor(pickedMinutes / 60)}時${String(pickedMinutes % 60).padStart(2, "0")}分`;
 
   return (
     <>
