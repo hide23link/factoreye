@@ -363,10 +363,12 @@ void port_pin_begin(PortSetting &setting) {
 //  target_ … 送る ID の一覧（ID ごとに最後に送れた時刻）
 //  1つの ID だけ送れない（FactorEye に未登録で 404 など）ことも見つけて、黄色の点滅で知らせるため
 //****************************************************************
-const int TARGET_MAX = 12;   // 一覧に入れる ID の数の上限
+// 一覧に入れる ID の数の上限 = 19。ENV 3 つ＋ポートごとに最大 2 つ（パルスの個数・稼働）
+// （デジタル入力・アナログ入力は 1 つ、出力は 0。上限より少ないと、入らなかった ID は送れなくても黄色の点滅にならない）
+const int TARGET_MAX = 3 + PORT_SETTING_MAX * 2;
 
 SEND_TARGET g_targets[TARGET_MAX];   // 送る ID と、最後に送れた時刻（node_calc.h の SEND_TARGET）
-int g_target_count = 0;              // 一覧の数（0〜12）
+int g_target_count = 0;              // 一覧の数（0〜19）
 unsigned long g_start_ms = 0;        // 起動した時刻 ミリ秒（送れたかの判断に使う。setup で決め、loop で使う）
 
 // 送る ID の一覧を作り、FactorEye 側で自動で作られるときのセンサーの名前と単位を渡す（setup から 1回）
