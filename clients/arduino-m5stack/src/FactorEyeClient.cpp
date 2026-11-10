@@ -22,7 +22,7 @@ size_t FactorEyeClient::pendingCount() const { return _bufferCount; }
 void FactorEyeClient::setSensorInfo(const String& ingestKey, const String& name, const String& unit) {
   SensorInfo* info = _findSensorInfo(ingestKey);
   if (info == nullptr) {
-    if (_sensorInfoCount >= kSensorInfoCapacity) return;  // 上限（16 個）を超えた分は、名前を付けずに送る
+    if (_sensorInfoCount >= kSensorInfoCapacity) return;  // 上限（20 個）を超えた分は、名前を付けずに送る
     info = &_sensorInfo[_sensorInfoCount++];
     info->ingestKey = ingestKey;
   }
