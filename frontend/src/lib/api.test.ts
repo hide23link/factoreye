@@ -4,6 +4,7 @@ import {
   acknowledgeAlarm,
   createSensor,
   deleteSensor,
+  fetchDashboard,
   fetchSensorReadingsAggregate,
   fetchSensors,
   logout,
@@ -92,6 +93,14 @@ describe("api client", () => {
     const fetchMock = vi.mocked(fetch);
     const [url] = fetchMock.mock.calls[0];
     expect(url).toContain("to=");
+  });
+
+  it("ダッシュボードの ID は、パスに入れるときにエンコードする（リンクの URL から来る値で、別の API に届かないように）", async () => {
+    mockFetchOnce(200, {});
+    await fetchDashboard("../sensors?x#y");
+
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toContain("/api/dashboards/..%2Fsensors%3Fx%23y");
   });
 });
 

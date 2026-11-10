@@ -21,6 +21,9 @@ function makeWidget(overrides: Partial<Widget> = {}): Widget {
 }
 
 const sensor = { id: "s1", name: "乾燥炉 温度" } as Sensor;
+// リンクの ID は UUID の形
+const D = "3f8c2a1e-7b4d-4e19-9a52-c0d1e6f2a8b3";
+const G = "9d41b7c2-0e5a-4f38-b1d6-7a2c9e4f0b13";
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -28,23 +31,23 @@ afterEach(() => {
 
 describe("parseGraphLink", () => {
   it("ダッシュボード・グラフ・直近の分数を読む", () => {
-    expect(parseGraphLink("?dashboard=d1&graph=w1&range=180m")).toEqual({
+    expect(parseGraphLink(`?dashboard=${D}&graph=${G}&range=180m`)).toEqual({
       kind: "link",
-      link: { dashboardId: "d1", graphId: "w1", rangeMinutes: 180 },
+      link: { dashboardId: D, graphId: G, rangeMinutes: 180 },
     });
   });
 
   it.each(["", "&range=abc", "&range=5m", "&range=10081m", "&range=1h", "&range=-30m"])(
     "range がおかしい・無いとき（%s）は、既定の 30 分にする",
     (range) => {
-      const result = parseGraphLink(`?dashboard=d1&graph=w1${range}`);
+      const result = parseGraphLink(`?dashboard=${D}&graph=${G}${range}`);
       expect(result.kind === "link" && result.link.rangeMinutes).toBe(30);
     },
   );
 
   it("range の下限 10 分・上限 10080 分は使える", () => {
     const at = (text: string) => {
-      const result = parseGraphLink(`?dashboard=d1&graph=w1&range=${text}`);
+      const result = parseGraphLink(`?dashboard=${D}&graph=${G}&range=${text}`);
       return result.kind === "link" ? result.link.rangeMinutes : null;
     };
     expect(at("10m")).toBe(10);
@@ -61,13 +64,18 @@ describe("parseGraphLink", () => {
     expect(parseGraphLink("?graph=w1")).toEqual({ kind: "broken" });
     expect(parseGraphLink("?dashboard=d1&graph=")).toEqual({ kind: "broken" });
   });
+
+  it.each(["..%2Fsensors", "a%3Fb", "x%23y", "d1", `${D}%2F..`])("ID が UUID の形でなければ、壊れたリンク（%s）", (id) => {
+    expect(parseGraphLink(`?dashboard=${id}&graph=${G}`)).toEqual({ kind: "broken" });
+    expect(parseGraphLink(`?dashboard=${D}&graph=${id}`)).toEqual({ kind: "broken" });
+  });
 });
 
 describe("buildGraphLinkUrl", () => {
   it("リンクの形 /?dashboard=…&graph=…&range=Nm で組み立てる（読み直すと同じ）", () => {
-    const url = buildGraphLinkUrl("https://example.com/", "d1", "w1", 45);
-    expect(url).toBe("https://example.com/?dashboard=d1&graph=w1&range=45m");
-    expect(parseGraphLink(new URL(url).search)).toEqual({ kind: "link", link: { dashboardId: "d1", graphId: "w1", rangeMinutes: 45 } });
+    const url = buildGraphLinkUrl("https://example.com/", D, G, 45);
+    expect(url).toBe(`https://example.com/?dashboard=${D}&graph=${G}&range=45m`);
+    expect(parseGraphLink(new URL(url).search)).toEqual({ kind: "link", link: { dashboardId: D, graphId: G, rangeMinutes: 45 } });
   });
 });
 

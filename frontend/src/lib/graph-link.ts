@@ -20,13 +20,17 @@ export interface GraphLink {
   rangeMinutes: number;
 }
 
-/** URL を読んだ結果。none = リンクではない、broken = ID が片方しか無い、link = 開けるリンク */
+/** URL を読んだ結果。none = リンクではない、broken = ID が片方しか無い・形がおかしい、link = 開けるリンク */
 export type GraphLinkParse = { kind: "none" } | { kind: "broken" } | { kind: "link"; link: GraphLink };
 
 /** リンクの「直近」の下限・上限（分）と、range がおかしいときの既定 */
 export const LINK_MIN_MINUTES = 10;
 export const LINK_MAX_MINUTES = 10080; // 7 日
 export const LINK_DEFAULT_MINUTES = 30;
+
+// ダッシュボード・ウィジェットの ID の形（UUID）。URL から入る値なので、API のパスに入れる前に形を確かめる
+// （`../sensors` のような値で、別の API に届かないように）
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // リンクが使う URL のクエリの名前（range は、ダッシュボードの期間の ?range=1h と同じ名前）
 const LINK_KEYS = ["dashboard", "graph", "range"] as const;
@@ -45,7 +49,7 @@ export function parseGraphLink(search: string): GraphLinkParse {
   const dashboardId = params.get("dashboard")?.trim() ?? "";
   const graphId = params.get("graph")?.trim() ?? "";
   if (!dashboardId && !graphId) return { kind: "none" };
-  if (!dashboardId || !graphId) return { kind: "broken" };
+  if (!UUID_PATTERN.test(dashboardId) || !UUID_PATTERN.test(graphId)) return { kind: "broken" };
   const rangeMinutes = parseLinkMinutes(params.get("range")) ?? LINK_DEFAULT_MINUTES;
   return { kind: "link", link: { dashboardId, graphId, rangeMinutes } };
 }

@@ -45,11 +45,11 @@ describe("useUiStore", () => {
   });
 
   it("開いたときの URL がリンクなら、そのグラフの画面から始める（SaaS はログインの後もこの状態のまま）", async () => {
-    window.history.replaceState(null, "", "/?dashboard=d1&graph=w1&range=60m");
+    window.history.replaceState(null, "", "/?dashboard=3f8c2a1e-7b4d-4e19-9a52-c0d1e6f2a8b3&graph=9d41b7c2-0e5a-4f38-b1d6-7a2c9e4f0b13&range=60m");
     vi.resetModules();
     const { useUiStore: fresh } = await import("./useUiStore");
     window.history.replaceState(null, "", "/");
-    expect(fresh.getState().graphLink).toEqual({ dashboardId: "d1", graphId: "w1", rangeMinutes: 60 });
+    expect(fresh.getState().graphLink).toEqual({ dashboardId: "3f8c2a1e-7b4d-4e19-9a52-c0d1e6f2a8b3", graphId: "9d41b7c2-0e5a-4f38-b1d6-7a2c9e4f0b13", rangeMinutes: 60 });
     expect(fresh.getState().linkNotFound).toBe(false);
   });
 });
