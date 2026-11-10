@@ -70,3 +70,90 @@ describe("LinkScreen の取得の数", () => {
     expect(fetchCount()).toBe(before + 2);
   });
 });
+
+describe("LinkScreen の時刻の指定", () => {
+  // 例の「今」（端末の時刻で 2026-11-10 11:30）
+  const NOW = new Date(2026, 10, 10, 11, 30);
+  const timeButton = () => screen.getByRole("button", { name: "時刻を指定" });
+  const sheet = () => screen.queryByRole("dialog", { name: "この時刻から表示" });
+
+  beforeEach(() => {
+    vi.setSystemTime(NOW);
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("日付を押すと「その日＋① の時刻」から、長さはそのままで表示し、シートを閉じる。今日でない日は日付つきで知らせる", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    expect(sheet()).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "11月3日 8:00から" }));
+    expect(timeButton()).toHaveTextContent("8:00〜8:30");
+    expect(screen.getByText("11/3 8:00 から表示")).toBeInTheDocument();
+    expect(sheet()).not.toBeInTheDocument();
+  });
+
+  it("近道は押すとすぐ移る。今日なら時刻だけを知らせる", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    fireEvent.click(screen.getByRole("button", { name: "1 時間前" }));
+    expect(timeButton()).toHaveTextContent("10:30〜11:00");
+    expect(screen.getByText("10:30 から表示")).toBeInTheDocument();
+    expect(sheet()).not.toBeInTheDocument();
+  });
+
+  it("開始＋長さが今を越えるときは、直近の表示にして、そう知らせる", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={180} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    fireEvent.click(screen.getByRole("button", { name: "1 時間前" }));
+    expect(timeButton()).toHaveTextContent("直近 3 時間");
+    expect(screen.getByText("直近 3 時間を表示（今を越えるため）")).toBeInTheDocument();
+  });
+
+  it("① の帯では移らない。選んだ時刻は、閉じて開き直しても残る", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    const slider = screen.getByRole("slider", { name: "時刻を選ぶ" });
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    expect(timeButton()).toHaveTextContent("直近 30 分");
+    expect(sheet()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(sheet()).not.toBeInTheDocument();
+    fireEvent.click(timeButton());
+    expect(screen.getByRole("slider", { name: "時刻を選ぶ" })).toHaveAttribute("aria-valuetext", "8:30");
+  });
+
+  it("シートを開いている間は、グラフの指の操作を受けない", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    const chart = screen.getByLabelText(/グラフ。上下になぞると/);
+    fireEvent.pointerDown(chart, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(chart, { pointerId: 1, clientX: 100, clientY: 250 });
+    fireEvent.pointerUp(chart, { pointerId: 1, clientX: 100, clientY: 250 });
+    expect(timeButton()).toHaveTextContent("直近 30 分");
+  });
+
+  it("移った期間は保存しない（localStorage・sessionStorage・URL に書かない）", async () => {
+    const searchBefore = window.location.search;
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    fireEvent.click(screen.getByRole("button", { name: "11月3日 8:00から" }));
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+    expect(window.location.search).toBe(searchBefore);
+  });
+});
