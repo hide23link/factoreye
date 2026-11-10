@@ -45,7 +45,7 @@ void loop() {
   - SaaS: ヘッダーは見られないので、任意の文字列でよい
 - **センサーの自動登録**（backend が `INGEST_AUTO_CREATE=on` のとき）
   - 画面で登録しなくても、送り始められる
-  - 名前と単位は `setSensorInfo` で結びつける（最大 16 個。最初の送信が成功するまで本文に付く）
+  - 名前と単位は `setSensorInfo` で結びつける（最大 20 個。最初の送信が成功するまで本文に付く）
 
   ```cpp
   factoreye.setSensorInfo("atom-temp-1", "ATOM 温度", "℃");

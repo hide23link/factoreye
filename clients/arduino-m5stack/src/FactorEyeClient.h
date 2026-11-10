@@ -45,7 +45,7 @@ class FactorEyeClient {
   // 現在リングバッファに溜まっている未送信件数（Serial表示等のデバッグ用）。
   size_t pendingCount() const;
 
-  // ingestKey に、センサーの名前と単位を結びつける（最大 16 個）。
+  // ingestKey に、センサーの名前と単位を結びつける（最大 20 個）。
   // backend が INGEST_AUTO_CREATE=on（self-hosted）のとき、未登録の ingestKey は、この名前・単位でセンサーが自動で作られる。
   // 名前と単位は、最初に送信が成功するまでの間だけ、本文に付ける（成功したら、登録済みなので付けない）。
   // 自動で作らない backend では、無視される（付けても、登録済みのセンサーは上書きされない）。
@@ -72,7 +72,8 @@ class FactorEyeClient {
     String unit;
     bool confirmed;  // 送信が成功したか（成功したら、名前と単位は付けない）
   };
-  static const size_t kSensorInfoCapacity = 16;
+  // 20 個 = FactorEyeNode の最大 19 個（ENV 3 つ＋ポート 8 つ×パルスの個数・稼働の 2 つ）に、少し余裕を足した数
+  static const size_t kSensorInfoCapacity = 20;
 
   String _host;
   String _apiKey;
