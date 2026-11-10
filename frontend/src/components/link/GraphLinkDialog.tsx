@@ -22,6 +22,9 @@ const RANGE_CHOICES = [
   { minutes: 480, label: "8 時間" },
 ];
 
+/** 「ほか ◯ 分」を打ち終わってから、見本を作り直すまでの時間（ミリ秒）。1 文字ごとに取り直さないため */
+const PREVIEW_DELAY_MS = 500;
+
 /** リンクの頭（このページのアドレス。例: https://<アドレス>/） */
 function linkBase(): string {
   return `${window.location.origin}${window.location.pathname}`;
@@ -48,6 +51,12 @@ export function GraphLinkDialog({ dashboard, onClose }: { dashboard: DashboardDe
   const [copied, setCopied] = useState(false);
   const linkRef = useRef<HTMLDivElement>(null);
   const graph = graphs.find((w) => w.id === graphId);
+  // 見本の分数。リンクの文字はすぐ変え、見本は打ち終わって少ししてから変える
+  const [previewMinutes, setPreviewMinutes] = useState(minutes);
+  useEffect(() => {
+    const timer = setTimeout(() => setPreviewMinutes(minutes), PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [minutes]);
   const url = buildGraphLinkUrl(linkBase(), dashboard.id, graphId, minutes);
 
   // Esc で閉じる
@@ -156,7 +165,7 @@ export function GraphLinkDialog({ dashboard, onClose }: { dashboard: DashboardDe
         </div>
         <div className="flex flex-col items-center gap-1.5">
           <div aria-hidden="true" className="h-[420px] w-[240px] overflow-hidden rounded-[30px] border-[9px] border-gray-800">
-            {graph && <LinkScreen key={`${graph.id}:${minutes}`} widget={graph} rangeMinutes={minutes} preview />}
+            {graph && <LinkScreen key={`${graph.id}:${previewMinutes}`} widget={graph} rangeMinutes={previewMinutes} preview />}
           </div>
           <small className="text-xs text-gray-500">開いたときの画面</small>
         </div>
