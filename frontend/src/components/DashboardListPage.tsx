@@ -1,6 +1,7 @@
 /**
  * ダッシュボードの一覧画面。ミニプレビューつきのカードで一覧し、「新しいダッシュボード」で空のダッシュボードを作って、そのまま編集モードで開く。
  * 1つもまだ無いときは、セットアップガイドへの案内を出す。
+ * リンクのグラフが見つからなかったとき（useUiStore の linkNotFound）は、上に黄色の帯で知らせる。
  *
  * 【誰が使うか】App.tsx が、ダッシュボードを選んでいないときに出す。引数（props）はない。
  */
@@ -50,6 +51,7 @@ export function DashboardListPage() {
   const { data: dashboards, isLoading, isError, refetch } = useDashboards();
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const setView = useUiStore((s) => s.setView);
+  const linkNotFound = useUiStore((s) => s.linkNotFound);
   const queryClient = useQueryClient();
 
   // 型の選択は設けず、名前だけ仮に付けた空のダッシュボードを作って、編集モードで開く（名前は設定パネルで変えられる）
@@ -73,6 +75,11 @@ export function DashboardListPage() {
 
   return (
     <div className="mx-auto max-w-5xl p-4">
+      {linkNotFound && (
+        <p role="status" className="mb-4 rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-800">
+          リンクのグラフが見つかりません。消されたか、別のワークスペースのものです。
+        </p>
+      )}
       <h1 className="mb-4 text-2xl font-bold text-gray-900">ダッシュボード一覧</h1>
 
       {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}

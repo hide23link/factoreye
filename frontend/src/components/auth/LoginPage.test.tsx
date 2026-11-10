@@ -15,6 +15,7 @@ import * as api from "../../lib/api";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
 });
 
 async function submitLogin() {
@@ -51,5 +52,27 @@ describe("LoginPage", () => {
       "href",
       "https://github.com/hide23link/factoreye",
     );
+  });
+
+  it("グラフのリンクから来たときは、ログインのタブで開き、案内を出す。ログインしても URL のリンクは残る（その後リンクの画面を開く）", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?dashboard=d1&graph=w1&range=30m");
+    vi.mocked(api.loginUser).mockResolvedValue({ accessToken: "a", refreshToken: "r" } as Awaited<ReturnType<typeof api.loginUser>>);
+    vi.mocked(api.fetchMe).mockResolvedValue({} as Awaited<ReturnType<typeof api.fetchMe>>);
+    const onAuthenticated = vi.fn();
+    render(<LoginPage onAuthenticated={onAuthenticated} />);
+
+    expect(screen.getByText("ログインすると、リンクのグラフを開きます")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("メールアドレス"), "a@example.com");
+    await user.type(screen.getByLabelText("パスワード"), "password1");
+    await user.click(screen.getAllByRole("button", { name: "ログイン" }).at(-1)!);
+
+    expect(onAuthenticated).toHaveBeenCalled();
+    expect(window.location.search).toBe("?dashboard=d1&graph=w1&range=30m");
+  });
+
+  it("リンクから来ていなければ、案内は出さない", () => {
+    render(<LoginPage onAuthenticated={() => {}} />);
+    expect(screen.queryByText("ログインすると、リンクのグラフを開きます")).not.toBeInTheDocument();
   });
 });

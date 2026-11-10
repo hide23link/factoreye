@@ -2,6 +2,8 @@
  * SaaS 版の入口の画面。「新規登録」と「ログイン」の2つのタブを持つ。
  * 成功するとトークンを保存し、利用者の情報を読み込んでから、画面の本体へ進む。
  * self-hosted では表示されない（App.tsx で SaaS のときだけ使う）。
+ * グラフのリンク（?dashboard=…&graph=…）から来たときは、ログインのタブで開き、「ログインすると、リンクのグラフを開きます」と出す。
+ * URL はそのまま残るので、ログインした後に App.tsx がリンクの画面を開く。
  *
  * 【誰が使うか】App.tsx が、SaaS 版でログインしていないときに出す。
  * 【引数（props）】onAuthenticated = ログイン・登録に成功したときに呼ぶ処理。
@@ -10,6 +12,7 @@ import { useState } from "react";
 
 import { fetchMe, loginUser, registerUser } from "../../lib/api";
 import { describeAuthError } from "../../lib/errors";
+import { readGraphLinkFromUrl } from "../../lib/graph-link";
 import { useAuthStore } from "../../store/useAuthStore";
 
 // 画面のタブ（ログイン・新規登録）
@@ -183,7 +186,9 @@ interface LoginPageProps {
 
 /** ログイン・新規登録の画面（タブで切り替える）。 */
 export function LoginPage({ onAuthenticated }: LoginPageProps) {
-  const [tab, setTab] = useState<Tab>("register");
+  // リンクから来た人は登録済みのはずなので、ログインのタブから始める
+  const [fromLink] = useState(() => readGraphLinkFromUrl().kind === "link");
+  const [tab, setTab] = useState<Tab>(fromLink ? "login" : "register");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
@@ -211,6 +216,11 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
             ))}
           </div>
 
+          {fromLink && (
+            <p role="status" className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              ログインすると、リンクのグラフを開きます
+            </p>
+          )}
           {tab === "login" ? (
             <LoginForm onSuccess={onAuthenticated} />
           ) : (
