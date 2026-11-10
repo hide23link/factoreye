@@ -108,20 +108,19 @@ describe("GraphLinkView", () => {
     expect(screen.getByRole("button", { name: "時刻を指定" })).toHaveTextContent("直近 30 分");
   });
 
-  it("時刻の指定で未来の時刻を選ぶと「まだ来ていない時刻です」", async () => {
+  it("時刻の指定の近道で移っても保存しない（localStorage・URL・ダッシュボードの期間はそのまま）", async () => {
     const user = userEvent.setup();
     vi.mocked(api.fetchDashboard).mockResolvedValue(makeDashboard([makeWidget()]));
+    const rangeBefore = useTimeRangeStore.getState().range;
     renderWithQueryClient(<GraphLinkView link={link} />);
 
     await user.click(await screen.findByRole("button", { name: "時刻を指定" }));
-    const input = screen.getByLabelText("この時刻から");
-    const future = new Date(Date.now() + 2 * 86_400_000);
-    const two = (n: number) => String(n).padStart(2, "0");
-    await user.clear(input);
-    await user.type(input, `${future.getFullYear()}-${two(future.getMonth() + 1)}-${two(future.getDate())}T08:00`);
-    await user.click(screen.getByRole("button", { name: "表示" }));
-
-    expect(screen.getByText("まだ来ていない時刻です")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "3 時間前" }));
+    expect(screen.getByRole("button", { name: "時刻を指定" })).not.toHaveTextContent("直近");
+    expect(screen.queryByRole("dialog", { name: "この時刻から表示" })).not.toBeInTheDocument();
+    expect(localStorage.getItem("factoreye_time_range")).toBeNull();
+    expect(window.location.search).toBe("?dashboard=d1&graph=w1&range=30m");
+    expect(useTimeRangeStore.getState().range).toBe(rangeBefore);
   });
 
   it.each([

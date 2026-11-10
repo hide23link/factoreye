@@ -10,6 +10,7 @@
  * 【誰が使うか】GraphLinkView（リンクで開いたとき。画面いっぱい）と、GraphLinkDialog（開いたときの画面の小さな見本）。
  * 【引数（props）】widget = 出すグラフのウィジェット、rangeMinutes = リンクの「直近 ◯ 分」、
  * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止める）。
+ * 時刻の指定のシート（LinkTimeSheet）を開いている間も、グラフの指の操作は受けない（シートの操作とぶつからないように）。
  */
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import { graphColor, graphDataOptions, graphSensorIds } from "../../lib/graph-co
 import { graphName } from "../../lib/graph-link";
 import { buildRows, nearestValue } from "../../lib/graph-series";
 import {
+  DEFAULT_PICKED_MINUTES,
   LINK_CHIPS_MINUTES,
   chipPeriod,
   chipText,
@@ -29,6 +31,7 @@ import {
   durationText,
   isAtLink,
   isChipActive,
+  jumpText,
   linkPeriod,
   periodBounds,
   periodLabel,
@@ -106,7 +109,16 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
   const now = useNow(options.refreshMs);
   const [period, setPeriod] = useState<LinkPeriod>(() => linkPeriod(rangeMinutes));
   const [cursorTime, setCursorTime] = useState<number | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // 時刻の指定のシートを開いた時刻（閉じているときは null）。近道・押せる日は、この時刻で決める
+  const [sheetOpenedAt, setSheetOpenedAt] = useState<number | null>(null);
+  // シートの ① で選んだ時刻（0:00 からの分）。閉じても覚えておき、次に開いたときもそのまま
+  const [pickedMinutes, setPickedMinutes] = useState(DEFAULT_PICKED_MINUTES);
+  // 閉じたら 🕘 へフォーカスを戻す（キーボード・読み上げで、元の場所から続けられるように）
+  const timeButton = useRef<HTMLButtonElement>(null);
+  const closeSheet = () => {
+    setSheetOpenedAt(null);
+    timeButton.current?.focus();
+  };
   const toast = useToast();
   const maxMs = maxRangeForBuild();
   const bounds = periodBounds(period, now);
@@ -126,6 +138,8 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     period,
     now,
     maxMs,
+    // シートを開いている間は、グラフの指の操作を受けない（ハンドラーは外さない。離した知らせは受けるため）
+    disabled: sheetOpenedAt !== null,
     onChange: (next, zoomed) => {
       setPeriod(next);
       setCursorTime(null);
@@ -137,16 +151,18 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     onEnd: () => setHolding(false),
   });
   const applyStart = (startMs: number) => {
-    const next = startAtPeriod(period, startMs, Date.now());
+    // シートを開いたままの間に時刻が進んでも、未来へは移らない（念のため、押した時刻で確かめる）
+    const pressedAt = Date.now();
+    const next = startAtPeriod(period, startMs, pressedAt, maxMs);
     if (!next) {
       toast.flash("まだ来ていない時刻です");
       return;
     }
     setPeriod(next);
     setCursorTime(null);
-    setSheetOpen(false);
+    closeSheet();
     // 開始＋長さが今を越えると、今まで（直近 ◯）の表示になる。知らせも実際の表示に合わせる
-    toast.flash(next.endMs === null ? `${periodLabel(next, now)}を表示（今を越えるため）` : `${clockText(startMs)} から表示`);
+    toast.flash(jumpText(next, startMs, pressedAt));
   };
 
   const valueAt = cursorTime ?? bounds.to;
@@ -160,9 +176,10 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
         <b className="min-w-0 truncate text-sm">{graphName(widget, sensors)}</b>
         <button
           type="button"
+          ref={timeButton}
           aria-label="時刻を指定"
           disabled={preview}
-          onClick={() => setSheetOpen(true)}
+          onClick={() => setSheetOpenedAt(Date.now())}
           className="flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2 text-xs tabular-nums text-gray-500"
         >
           {periodLabel(period, now)} 🕘
@@ -231,7 +248,16 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
           </button>
         )}
       </div>
-      {sheetOpen && <LinkTimeSheet startMs={bounds.from} now={now} onApply={applyStart} onCancel={() => setSheetOpen(false)} />}
+      {sheetOpenedAt !== null && (
+        <LinkTimeSheet
+          now={sheetOpenedAt}
+          maxMs={maxMs}
+          pickedMinutes={pickedMinutes}
+          onPick={setPickedMinutes}
+          onJump={applyStart}
+          onClose={closeSheet}
+        />
+      )}
     </div>
   );
 }

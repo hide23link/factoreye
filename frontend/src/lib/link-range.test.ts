@@ -3,11 +3,19 @@ import { describe, expect, it } from "vitest";
 import {
   LINK_VIEW_MAX_MS,
   LINK_VIEW_MIN_MS,
+  atMinutes,
+  calendarDays,
+  canStartAt,
   chipPeriod,
   durationText,
-  fromLocalInput,
   isAtLink,
+  jumpText,
   linkPeriod,
+  minutesAtRatio,
+  minutesText,
+  monthIndex,
+  monthOf,
+  oldestStart,
   panPeriod,
   periodBounds,
   periodLabel,
@@ -15,8 +23,9 @@ import {
   quickStarts,
   startAtPeriod,
   statusText,
+  shiftMonth,
+  stepPicked,
   swipeZoom,
-  toLocalInput,
   zoomPeriod,
   type LinkPeriod,
 } from "./link-range";
@@ -27,6 +36,8 @@ const DAY = 24 * HOUR;
 // 例の「今」（端末の時刻で 2026-11-10 11:30）
 const NOW = new Date(2026, 10, 10, 11, 30).getTime();
 const NO_LIMIT = Number.POSITIVE_INFINITY;
+// SaaS（Free Tier）の表示できる最長＝測定値の保持期間（maxRangeMs(true)）
+const SAAS_LIMIT = 14 * DAY;
 
 describe("上下スワイプ・ピンチ（拡大・縮小）", () => {
   it("上へなぞると短く、下へなぞると長くなる。今を見ているときは右端（今）のまま", () => {
@@ -75,17 +86,35 @@ describe("上下スワイプ・ピンチ（拡大・縮小）", () => {
 
 describe("左右ドラッグ（時間の移動）", () => {
   it("右へなぞると過去へ（グラフの幅の分なぞると、長さ 1 つ分）", () => {
-    const next = panPeriod(linkPeriod(30), 300, 300, NOW);
+    const next = panPeriod(linkPeriod(30), 300, 300, NOW, NO_LIMIT);
     expect(next).toEqual({ durationMs: 30 * MINUTE, endMs: NOW - 30 * MINUTE });
   });
 
   it("今より先には行かない（今に届いたら、今を見ている状態に戻る）", () => {
-    expect(panPeriod(linkPeriod(30), -300, 300, NOW).endMs).toBeNull();
-    expect(panPeriod({ durationMs: 30 * MINUTE, endMs: NOW - 10 * MINUTE }, -300, 300, NOW).endMs).toBeNull();
+    expect(panPeriod(linkPeriod(30), -300, 300, NOW, NO_LIMIT).endMs).toBeNull();
+    expect(panPeriod({ durationMs: 30 * MINUTE, endMs: NOW - 10 * MINUTE }, -300, 300, NOW, NO_LIMIT).endMs).toBeNull();
   });
 
-  it("30 日より前には行かない", () => {
-    expect(panPeriod(linkPeriod(30), 300 * 10_000, 300, NOW).endMs).toBe(NOW - 30 * DAY);
+  it("左端が、戻れる最も古い時刻より前に出ない（self-hosted は 12 か月前の月の 1 日、SaaS は保持期間の 14 日前）", () => {
+    const ossOldest = new Date(2025, 10, 1).getTime();
+    expect(periodBounds(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, NO_LIMIT), NOW).from).toBe(ossOldest);
+    expect(periodBounds(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, SAAS_LIMIT), NOW).from).toBe(NOW - 14 * DAY);
+    // SaaS で長さ 7 日: 左端が 14 日前で止まる（右端は 7 日前）
+    const week = { durationMs: 7 * DAY, endMs: NOW - 8 * DAY };
+    expect(panPeriod(week, 300, 300, NOW, SAAS_LIMIT)).toEqual({ durationMs: 7 * DAY, endMs: NOW - 7 * DAY });
+  });
+
+  it("長さが「戻れる最も古い時刻〜今」以上なら、今を見ている状態にする（全部が入るため）", () => {
+    const threeDays = 3 * DAY;
+    expect(panPeriod({ durationMs: threeDays, endMs: NOW - DAY }, 300, 300, NOW, threeDays).endMs).toBeNull();
+    expect(startAtPeriod({ durationMs: threeDays, endMs: null }, NOW - threeDays, NOW, threeDays)?.endMs).toBeNull();
+  });
+
+  it("時刻の指定で 6 か月前へ移った後でも、なぞると、そこから動く（30 日前へ飛ばない）", () => {
+    const start = new Date(2026, 4, 10, 8, 0).getTime();
+    const moved = startAtPeriod(linkPeriod(30), start, NOW, NO_LIMIT);
+    expect(moved?.endMs).toBe(start + 30 * MINUTE);
+    expect(panPeriod(moved as LinkPeriod, 30, 300, NOW, NO_LIMIT).endMs).toBe(start + 27 * MINUTE);
   });
 });
 
@@ -97,16 +126,16 @@ describe("期間のボタン・時刻の指定・今に戻る", () => {
 
   it("時刻の指定: その時刻から、長さは今のまま", () => {
     const start = new Date(2026, 10, 10, 8, 0).getTime();
-    expect(startAtPeriod(linkPeriod(30), start, NOW)).toEqual({ durationMs: 30 * MINUTE, endMs: start + 30 * MINUTE });
+    expect(startAtPeriod(linkPeriod(30), start, NOW, NO_LIMIT)).toEqual({ durationMs: 30 * MINUTE, endMs: start + 30 * MINUTE });
   });
 
   it("時刻の指定: 未来の時刻は null（「まだ来ていない時刻です」）", () => {
-    expect(startAtPeriod(linkPeriod(30), NOW + MINUTE, NOW)).toBeNull();
-    expect(startAtPeriod(linkPeriod(30), NOW, NOW)).toBeNull();
+    expect(startAtPeriod(linkPeriod(30), NOW + MINUTE, NOW, NO_LIMIT)).toBeNull();
+    expect(startAtPeriod(linkPeriod(30), NOW, NOW, NO_LIMIT)).toBeNull();
   });
 
   it("時刻の指定: 終わりが今を越えるなら、今を見ている状態になる", () => {
-    expect(startAtPeriod(linkPeriod(30), NOW - 10 * MINUTE, NOW)?.endMs).toBeNull();
+    expect(startAtPeriod(linkPeriod(30), NOW - 10 * MINUTE, NOW, NO_LIMIT)?.endMs).toBeNull();
   });
 
   it("リンクの設定のままかを見分ける（「今に戻る」を出すか）", () => {
@@ -127,10 +156,71 @@ describe("表示の文字", () => {
     expect(statusText({ durationMs: HOUR, endMs: NOW - 2 * HOUR }, NOW, NOW)).toBe("2 時間前まで・更新を止めています");
   });
 
-  it("日時の欄の値と時刻を行き来できる。近道は今日 8:00・今日 13:00・昨日 8:00", () => {
-    expect(toLocalInput(NOW)).toBe("2026-11-10T11:30");
-    expect(fromLocalInput("2026-11-10T11:30")).toBe(NOW);
-    expect(fromLocalInput("")).toBeNull();
-    expect(quickStarts(NOW).map((q) => q.value)).toEqual(["2026-11-10T08:00", "2026-11-10T13:00", "2026-11-09T08:00"]);
+  it("移ったときの知らせ: 今日は「8:00 から表示」、ほかの日は「11/3 8:00 から表示」、今を越えるなら「直近 ◯ を表示（今を越えるため）」", () => {
+    const today8 = new Date(2026, 10, 10, 8, 0).getTime();
+    const nov3 = new Date(2026, 10, 3, 8, 0).getTime();
+    expect(jumpText({ durationMs: 30 * MINUTE, endMs: today8 + 30 * MINUTE }, today8, NOW)).toBe("8:00 から表示");
+    expect(jumpText({ durationMs: 30 * MINUTE, endMs: nov3 + 30 * MINUTE }, nov3, NOW)).toBe("11/3 8:00 から表示");
+    expect(jumpText(linkPeriod(30), NOW - 10 * MINUTE, NOW)).toBe("直近 30 分を表示（今を越えるため）");
+  });
+});
+
+describe("時刻の指定のシート", () => {
+  it("近道は 1 時間前・3 時間前・今日 8:00・昨日 8:00・昨日 13:00", () => {
+    expect(quickStarts(NOW)).toEqual([
+      { label: "1 時間前", startMs: NOW - HOUR },
+      { label: "3 時間前", startMs: NOW - 3 * HOUR },
+      { label: "今日 8:00", startMs: new Date(2026, 10, 10, 8, 0).getTime() },
+      { label: "昨日 8:00", startMs: new Date(2026, 10, 9, 8, 0).getTime() },
+      { label: "昨日 13:00", startMs: new Date(2026, 10, 9, 13, 0).getTime() },
+    ]);
+  });
+
+  it("時刻の帯: 位置を 15 分刻みにする（0:00〜23:45）", () => {
+    expect(minutesAtRatio(0)).toBe(0);
+    expect(minutesAtRatio(8 / 24)).toBe(480);
+    expect(minutesAtRatio((8 * 60 + 7) / 1440)).toBe(480); // 8:07 → 8:00
+    expect(minutesAtRatio((8 * 60 + 8) / 1440)).toBe(495); // 8:08 → 8:15
+    expect(minutesAtRatio(1)).toBe(1425);
+    expect(minutesAtRatio(-0.2)).toBe(0);
+    expect(minutesText(495)).toBe("8:15");
+    expect(minutesText(0)).toBe("0:00");
+  });
+
+  it("時刻の帯: 矢印で 15 分ずつ。0:00 と 23:45 で止まる", () => {
+    expect(stepPicked(480, 1)).toBe(495);
+    expect(stepPicked(480, -1)).toBe(465);
+    expect(stepPicked(0, -1)).toBe(0);
+    expect(stepPicked(1425, 1)).toBe(1425);
+  });
+
+  it("日付＋時刻、押せるか（未来・今日の先の時刻・保持期間より前は押せない）", () => {
+    const nov3 = new Date(2026, 10, 3).getTime();
+    expect(atMinutes(nov3, 480)).toBe(new Date(2026, 10, 3, 8, 0).getTime());
+    const oldest = oldestStart(NOW, SAAS_LIMIT);
+    expect(canStartAt(atMinutes(nov3, 480), NOW, oldest)).toBe(true);
+    expect(canStartAt(new Date(2026, 10, 10, 13, 0).getTime(), NOW, oldest)).toBe(false); // 今日の先の時刻
+    expect(canStartAt(new Date(2026, 10, 11, 8, 0).getTime(), NOW, oldest)).toBe(false); // 明日
+    // SaaS は 14 日前（10/27 11:30）より前は押せない
+    expect(canStartAt(new Date(2026, 9, 27, 13, 0).getTime(), NOW, oldest)).toBe(true);
+    expect(canStartAt(new Date(2026, 9, 27, 8, 0).getTime(), NOW, oldest)).toBe(false);
+    expect(canStartAt(new Date(2026, 9, 26, 13, 0).getTime(), NOW, oldest)).toBe(false);
+  });
+
+  it("戻れる最も古い月: self-hosted は 12 か月前、SaaS は 14 日前の月", () => {
+    expect(monthOf(oldestStart(NOW, NO_LIMIT))).toEqual({ year: 2025, month: 10 });
+    expect(monthOf(oldestStart(NOW, SAAS_LIMIT))).toEqual({ year: 2026, month: 9 });
+    expect(monthIndex({ year: 2026, month: 10 }) - monthIndex({ year: 2025, month: 10 })).toBe(12);
+  });
+
+  it("月を前後に動かす（年をまたぐ）。表は 1 日の曜日の分だけ空ける", () => {
+    expect(shiftMonth({ year: 2026, month: 0 }, -1)).toEqual({ year: 2025, month: 11 });
+    expect(shiftMonth({ year: 2025, month: 11 }, 1)).toEqual({ year: 2026, month: 0 });
+    const november = calendarDays({ year: 2026, month: 10 });
+    expect(november.blanks).toBe(0); // 2026-11-01 は日曜
+    expect(november.days).toHaveLength(30);
+    expect(november.days[2]).toBe(new Date(2026, 10, 3).getTime());
+    expect(calendarDays({ year: 2026, month: 1 })).toMatchObject({ blanks: 0 }); // 2026-02-01 は日曜
+    expect(calendarDays({ year: 2026, month: 9 }).blanks).toBe(4); // 2026-10-01 は木曜
   });
 });
