@@ -4,6 +4,8 @@
  * グラフは、ダッシュボードと同じウィジェット（SensorGraphWidget・MultiSensorComparisonWidget）で描く（線・色・縦軸が同じ）。
  * 期間はこの画面の中だけで持つ（lib/link-range.ts）。ダッシュボードの期間（useTimeRangeStore）を通さないので、
  * 端末に覚えた期間・URL では上書きせず、指で変えた期間も保存しない。今を見ている間は、グラフの設定の間隔で自動更新する。
+ * 期間は 2 つ持つ: 表示の期間（指に合わせて毎回変わる）と、取得の期間（指を離して 0.3 秒たってから表示に合わせる）。
+ * 指を動かすたびに読み値を取り直すと、サーバーへの要求が 1 秒に何十回にもなるため。
  *
  * 【誰が使うか】GraphLinkView（リンクで開いたとき。画面いっぱい）と、GraphLinkDialog（開いたときの画面の小さな見本）。
  * 【引数（props）】widget = 出すグラフのウィジェット、rangeMinutes = リンクの「直近 ◯ 分」、
@@ -43,6 +45,8 @@ import { LinkTimeSheet } from "./LinkTimeSheet";
 
 /** 短い知らせ（「リンクの設定に戻しました」など）を出す時間（ミリ秒） */
 const TOAST_MS = 900;
+/** 指を離してから、取得の期間を表示に合わせるまでの時間（ミリ秒）。ホイール・続けて押したボタンもまとめて 1 回にする */
+export const SETTLE_MS = 300;
 
 /**
  * グラフと同じ取得（同じ queryKey なので、通信はグラフと共有される）で、時刻ごとの行を作る。今の値・タップした時刻の値に使う。
@@ -66,6 +70,19 @@ function useLinkRows(widget: Widget, bounds: { from: number; to: number }, live:
   });
   const updatedAt = Math.max(0, ...results.map((r) => r.dataUpdatedAt));
   return { rows: buildRows(inputs, options.aggregation), updatedAt };
+}
+
+/**
+ * 取得に使う期間。指を置いている間（holding）は変えず、離してから SETTLE_MS たって、表示の期間に合わせる。
+ */
+function useSettledPeriod(period: LinkPeriod, holding: boolean): LinkPeriod {
+  const [settled, setSettled] = useState(period);
+  useEffect(() => {
+    if (holding) return;
+    const timer = setTimeout(() => setSettled(period), SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [period, holding]);
+  return settled;
 }
 
 /** 短い知らせ。flash で出し、少しして消す */
@@ -92,9 +109,13 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
   const [sheetOpen, setSheetOpen] = useState(false);
   const toast = useToast();
   const maxMs = maxRangeForBuild();
-  const live = period.endMs === null;
   const bounds = periodBounds(period, now);
-  const { rows, updatedAt } = useLinkRows(widget, bounds, live);
+  // 指を置いている間は、取得の期間を変えない（表示だけを動かす）
+  const [holding, setHolding] = useState(false);
+  const fetchPeriod = useSettledPeriod(period, holding);
+  const fetchBounds = periodBounds(fetchPeriod, now);
+  const fetchLive = fetchPeriod.endMs === null;
+  const { rows, updatedAt } = useLinkRows(widget, fetchBounds, fetchLive);
 
   const backToLink = () => {
     setPeriod(linkPeriod(rangeMinutes));
@@ -112,6 +133,8 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     },
     onTap: (ratio) => setCursorTime(bounds.from + (bounds.to - bounds.from) * ratio),
     onDoubleTap: backToLink,
+    onStart: () => setHolding(true),
+    onEnd: () => setHolding(false),
   });
   const applyStart = (startMs: number) => {
     const next = startAtPeriod(period, startMs, Date.now());
@@ -122,11 +145,12 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     setPeriod(next);
     setCursorTime(null);
     setSheetOpen(false);
-    toast.flash(`${clockText(startMs)} から表示`);
+    // 開始＋長さが今を越えると、今まで（直近 ◯）の表示になる。知らせも実際の表示に合わせる
+    toast.flash(next.endMs === null ? `${periodLabel(next, now)}を表示（今を越えるため）` : `${clockText(startMs)} から表示`);
   };
 
   const valueAt = cursorTime ?? bounds.to;
-  const linkView = { bounds, live, cursorTime };
+  const linkView = { bounds, fetchBounds, live: fetchLive, cursorTime };
   const unitOf = (id: string) => sensors?.find((s) => s.id === id)?.unit ?? "";
   const nameOf = (id: string) => widget.config.seriesNames?.[id]?.trim() || sensors?.find((s) => s.id === id)?.name || id;
 

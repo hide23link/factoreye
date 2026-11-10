@@ -58,8 +58,13 @@ describe("上下スワイプ・ピンチ（拡大・縮小）", () => {
     expect(swipeZoom(linkPeriod(30), 5000, NOW, 3 * DAY).durationMs).toBe(3 * DAY);
   });
 
-  it("ピンチで指の間が 2 倍に広がると、長さは半分", () => {
-    expect(pinchZoom(linkPeriod(60), 100, 200, NOW, NO_LIMIT).durationMs).toBe(30 * MINUTE);
+  it("ピンチで指の間が 2 倍に広がると、長さは半分。今を見ているときは、上下スワイプと同じく右端（今）を保つ", () => {
+    expect(pinchZoom(linkPeriod(60), 100, 200, NOW, NO_LIMIT)).toEqual({ durationMs: 30 * MINUTE, endMs: null });
+  });
+
+  it("過去を見ているときのピンチは、真ん中を保つ", () => {
+    const next = pinchZoom({ durationMs: HOUR, endMs: NOW - 2 * HOUR }, 100, 200, NOW, NO_LIMIT);
+    expect(periodBounds(next, NOW)).toEqual({ from: NOW - 2.75 * HOUR, to: NOW - 2.25 * HOUR });
   });
 
   it("ホイール: カーソルの位置を保つ。今を見ていても、真ん中で拡大すると過去の表示になる", () => {

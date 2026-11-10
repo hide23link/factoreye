@@ -93,9 +93,11 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const options = graphDataOptions(widget.config, 1);
   const now = useNow(options.refreshMs);
   const bounds = linkView?.bounds ?? resolveRange(range, now);
+  // リンクの画面では、取得の範囲は表示の範囲と別に決まる（指を動かす間は取り直さない）
+  const fetchBounds = linkView?.fetchBounds ?? bounds;
   const { data, isError, refetch } = useDownsampledReadings(
     widget.sensorId,
-    bounds,
+    fetchBounds,
     GRAPH_BUCKETS,
     linkView ? linkView.live : range.mode === "relative",
     options.refreshMs,
@@ -156,6 +158,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     dataKey: "time",
     type: "number" as const,
     domain: [bounds.from, bounds.to] as [number, number],
+    // リンクの画面では、取得の範囲が表示の範囲より広いことがある。はみ出す線は枠で切る（軸を広げない）
+    allowDataOverflow: linkView !== undefined,
     tickFormatter: formatTime,
     tick: { fontSize: 10 },
   };

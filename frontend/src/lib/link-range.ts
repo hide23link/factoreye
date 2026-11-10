@@ -68,10 +68,13 @@ export function swipeZoom(start: LinkPeriod, dy: number, now: number, maxMs: num
   return zoomPeriod(start, start.durationMs * factor, start.endMs === null ? 1 : 0.5, now, maxMs);
 }
 
-/** ピンチ: 指の間が広がると短く（拡大）、狭まると長くする。真ん中を保つ */
+/**
+ * ピンチ: 指の間が広がると短く（拡大）、狭まると長くする。
+ * 上下スワイプと同じく、今を見ているときは右端（今）を保ち、過去を見ているときは真ん中を保つ。
+ */
 export function pinchZoom(start: LinkPeriod, startDistance: number, distance: number, now: number, maxMs: number): LinkPeriod {
   const ratio = Math.max(startDistance, 1) / Math.max(distance, 1);
-  return zoomPeriod(start, start.durationMs * ratio, 0.5, now, maxMs);
+  return zoomPeriod(start, start.durationMs * ratio, start.endMs === null ? 1 : 0.5, now, maxMs);
 }
 
 /**

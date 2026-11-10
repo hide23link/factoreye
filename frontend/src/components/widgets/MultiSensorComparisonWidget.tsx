@@ -86,6 +86,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   const options = graphDataOptions(widget.config, sensorIds.length);
   const now = useNow(options.refreshMs);
   const bounds = linkView?.bounds ?? resolveRange(range, now);
+  // リンクの画面では、取得の範囲は表示の範囲と別に決まる（指を動かす間は取り直さない）
+  const fetchBounds = linkView?.fetchBounds ?? bounds;
   const live = linkView ? linkView.live : range.mode === "relative";
   // 指の画面では、なぞっても数字を出さず（スクロールの邪魔になる）、タップしたときだけ出す。なぞって期間を選ぶ操作もしない
   const coarse = useCoarsePointer();
@@ -106,15 +108,15 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
       queryKey: [
         "readings-downsampled",
         sensorId,
-        Math.round(bounds.from / 1000),
-        Math.round(bounds.to / 1000),
+        Math.round(fetchBounds.from / 1000),
+        Math.round(fetchBounds.to / 1000),
         GRAPH_BUCKETS,
       ],
       queryFn: () =>
         fetchSensorReadingsDownsampled(
           sensorId,
-          new Date(bounds.from).toISOString(),
-          new Date(bounds.to).toISOString(),
+          new Date(fetchBounds.from).toISOString(),
+          new Date(fetchBounds.to).toISOString(),
           GRAPH_BUCKETS,
         ),
       refetchInterval: live ? options.refreshMs : false,
@@ -189,6 +191,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
       dataKey="time"
       type="number"
       domain={[bounds.from, bounds.to]}
+      // リンクの画面では、取得の範囲が表示の範囲より広いことがある。はみ出す線は枠で切る（軸を広げない）
+      allowDataOverflow={linkView !== undefined}
       tickFormatter={formatTime}
       tick={{ fontSize: 10 }}
     />,

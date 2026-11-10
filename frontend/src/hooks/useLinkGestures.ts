@@ -6,6 +6,8 @@
  * - 左右ドラッグ: 時間を動かす。右へなぞると過去へ
  * - タップ: その位置の時刻を onTap に渡す。ダブルタップ: onDoubleTap（リンクの設定に戻す）
  * なぞり始め（8px）の向きで左右か上下かを決め、指を離すまで変えない（斜めになっても途中で切り替えない）。
+ * ピンチの後に指が 1 本になったら、残った指の今の位置と今の期間から、なぞりをやり直す（ピンチ前の期間に戻さない）。
+ * 指を置いたとき onStart、すべて離したとき onEnd を呼ぶ（呼ぶ側は、離すまでデータを取り直さない）。
  * 期間の計算は lib/link-range.ts。このフックは、指の動きを計算に渡すだけ。
  *
  * 【誰が使うか】GraphLinkView のグラフの枠。戻り値の ref と handlers を、枠の要素に付ける。
@@ -31,6 +33,9 @@ export interface LinkGestureOptions {
   /** タップした位置の割合（0 = グラフの左端、1 = 右端） */
   onTap: (ratio: number) => void;
   onDoubleTap: () => void;
+  /** 1 本目の指を置いたとき・すべての指を離したとき */
+  onStart?: () => void;
+  onEnd?: () => void;
 }
 
 /** なぞり始めの状態 */
@@ -63,6 +68,13 @@ export function useLinkGestures(options: LinkGestureOptions) {
   const gesture = useRef<Gesture | null>(null);
   const pinch = useRef<{ distance: number; period: LinkPeriod } | null>(null);
   const lastTap = useRef(0);
+  // 最後に onChange で渡した期間（指の数が変わったとき、ここから続ける。描き直しを待たずに使えるように持つ）
+  const lastPeriod = useRef<LinkPeriod | null>(null);
+  const change = (period: LinkPeriod, zoomed: boolean) => {
+    lastPeriod.current = period;
+    latest.current.onChange(period, zoomed);
+  };
+  const currentPeriod = () => lastPeriod.current ?? latest.current.period;
 
   const distanceOfPointers = () => {
     const [a, b] = Array.from(pointers.current.values());
@@ -72,7 +84,11 @@ export function useLinkGestures(options: LinkGestureOptions) {
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const { period } = latest.current;
+    if (pointers.current.size === 1) {
+      lastPeriod.current = null;
+      latest.current.onStart?.();
+    }
+    const period = currentPeriod();
     if (pointers.current.size === 1) {
       gesture.current = { startX: e.clientX, startY: e.clientY, period, direction: null, moved: false };
     }
@@ -85,9 +101,9 @@ export function useLinkGestures(options: LinkGestureOptions) {
   const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const { now, maxMs, onChange } = latest.current;
+    const { now, maxMs } = latest.current;
     if (pointers.current.size >= 2 && pinch.current) {
-      onChange(pinchZoom(pinch.current.period, pinch.current.distance, distanceOfPointers(), now, maxMs), true);
+      change(pinchZoom(pinch.current.period, pinch.current.distance, distanceOfPointers(), now, maxMs), true);
       return;
     }
     const current = gesture.current;
@@ -98,16 +114,23 @@ export function useLinkGestures(options: LinkGestureOptions) {
       current.direction = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
       current.moved = true;
     }
-    if (current.direction === "x") onChange(panPeriod(current.period, dx, plotBox(e.currentTarget).width, now), false);
-    if (current.direction === "y") onChange(swipeZoom(current.period, dy, now, maxMs), true);
+    if (current.direction === "x") change(panPeriod(current.period, dx, plotBox(e.currentTarget).width, now), false);
+    if (current.direction === "y") change(swipeZoom(current.period, dy, now, maxMs), true);
   };
 
   const onPointerEnd = (e: ReactPointerEvent<HTMLElement>) => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 1 && pinch.current) {
+      // ピンチから 1 本に減った: 残った指の今の位置と、今の期間から、なぞりをやり直す（タップにはしない）
+      const [rest] = Array.from(pointers.current.values());
+      gesture.current = { startX: rest.x, startY: rest.y, period: currentPeriod(), direction: null, moved: true };
+    }
     if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size > 0) return;
+    latest.current.onEnd?.();
     const current = gesture.current;
-    if (pointers.current.size > 0 || !current) return;
+    if (!current) return;
     gesture.current = null;
     // 動かさずに離したときだけ、タップ（2 回続けばダブルタップ）
     if (current.moved || e.type === "pointercancel") return;
