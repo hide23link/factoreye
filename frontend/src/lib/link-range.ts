@@ -52,10 +52,14 @@ export function oldestStart(now: number, maxMs: number): number {
   return new Date(date.getFullYear(), date.getMonth() - OSS_PAST_MONTHS, 1).getTime();
 }
 
-/** 右端を、戻れる最も古い時刻〜今に収める。今に届いたら「今」（null）にする */
-function clampEnd(endMs: number, now: number, maxMs: number): number | null {
-  if (endMs >= now) return null;
-  return Math.max(endMs, oldestStart(now, maxMs));
+/**
+ * 右端を収める。左端（右端 − 長さ）が戻れる最も古い時刻より前に出ないようにし、今に届いたら「今」（null）にする。
+ * 長さが「最も古い時刻〜今」より長いとき（SaaS で長さが保持期間と同じなど）は、今（null）にする（全部が入るため）。
+ */
+function clampEnd(endMs: number, durationMs: number, now: number, maxMs: number): number | null {
+  const lowestEnd = oldestStart(now, maxMs) + durationMs;
+  if (endMs >= now || lowestEnd >= now) return null;
+  return Math.max(endMs, lowestEnd);
 }
 
 /**
@@ -68,7 +72,7 @@ export function zoomPeriod(period: LinkPeriod, durationMs: number, anchor: numbe
   // anchor の時刻を保ったまま、長さだけを変える
   const anchorTime = end - period.durationMs * (1 - anchor);
   const nextEnd = anchorTime + nextDuration * (1 - anchor);
-  return { durationMs: nextDuration, endMs: clampEnd(nextEnd, now, maxMs) };
+  return { durationMs: nextDuration, endMs: clampEnd(nextEnd, nextDuration, now, maxMs) };
 }
 
 /**
@@ -97,19 +101,19 @@ export function pinchZoom(start: LinkPeriod, startDistance: number, distance: nu
 export function panPeriod(start: LinkPeriod, dx: number, width: number, now: number, maxMs: number): LinkPeriod {
   const end = start.endMs ?? now;
   const shift = (dx / Math.max(width, 1)) * start.durationMs;
-  return { durationMs: start.durationMs, endMs: clampEnd(end - shift, now, maxMs) };
+  return { durationMs: start.durationMs, endMs: clampEnd(end - shift, start.durationMs, now, maxMs) };
 }
 
 /** 期間のボタン: 長さだけを変える（今を見ているときは今のまま、過去なら右端のまま） */
 export function chipPeriod(period: LinkPeriod, minutes: number, now: number, maxMs: number): LinkPeriod {
   const durationMs = clampDuration(minutes * MINUTE, maxMs);
-  return { durationMs, endMs: period.endMs === null ? null : clampEnd(period.endMs, now, maxMs) };
+  return { durationMs, endMs: period.endMs === null ? null : clampEnd(period.endMs, durationMs, now, maxMs) };
 }
 
 /** 時刻の指定: その時刻から（長さは今のまま）。未来の時刻なら null（呼ぶ側が「まだ来ていない時刻です」を出す） */
 export function startAtPeriod(period: LinkPeriod, startMs: number, now: number, maxMs: number): LinkPeriod | null {
   if (!Number.isFinite(startMs) || startMs >= now) return null;
-  return { durationMs: period.durationMs, endMs: clampEnd(startMs + period.durationMs, now, maxMs) };
+  return { durationMs: period.durationMs, endMs: clampEnd(startMs + period.durationMs, period.durationMs, now, maxMs) };
 }
 
 /** リンクの設定（直近 N 分・今） */
@@ -168,7 +172,7 @@ export function statusText(period: LinkPeriod, now: number, updatedAt: number): 
 export const PICK_STEP_MINUTES = 15;
 export const DEFAULT_PICKED_MINUTES = 8 * 60;
 /** 時刻の帯で選べる最後の時刻（23:45） */
-const LAST_PICK_MINUTES = 24 * 60 - PICK_STEP_MINUTES;
+export const LAST_PICK_MINUTES = 24 * 60 - PICK_STEP_MINUTES;
 
 /** その日の 0:00（端末の時刻） */
 export function dayStart(ms: number): number {

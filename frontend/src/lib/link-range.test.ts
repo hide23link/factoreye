@@ -95,9 +95,19 @@ describe("左右ドラッグ（時間の移動）", () => {
     expect(panPeriod({ durationMs: 30 * MINUTE, endMs: NOW - 10 * MINUTE }, -300, 300, NOW, NO_LIMIT).endMs).toBeNull();
   });
 
-  it("戻れる最も古い時刻より前には行かない（self-hosted は 12 か月前の月の 1 日、SaaS は保持期間の 14 日前）", () => {
-    expect(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, NO_LIMIT).endMs).toBe(new Date(2025, 10, 1).getTime());
-    expect(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, SAAS_LIMIT).endMs).toBe(NOW - 14 * DAY);
+  it("左端が、戻れる最も古い時刻より前に出ない（self-hosted は 12 か月前の月の 1 日、SaaS は保持期間の 14 日前）", () => {
+    const ossOldest = new Date(2025, 10, 1).getTime();
+    expect(periodBounds(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, NO_LIMIT), NOW).from).toBe(ossOldest);
+    expect(periodBounds(panPeriod(linkPeriod(30), 300 * 100_000, 300, NOW, SAAS_LIMIT), NOW).from).toBe(NOW - 14 * DAY);
+    // SaaS で長さ 7 日: 左端が 14 日前で止まる（右端は 7 日前）
+    const week = { durationMs: 7 * DAY, endMs: NOW - 8 * DAY };
+    expect(panPeriod(week, 300, 300, NOW, SAAS_LIMIT)).toEqual({ durationMs: 7 * DAY, endMs: NOW - 7 * DAY });
+  });
+
+  it("長さが「戻れる最も古い時刻〜今」以上なら、今を見ている状態にする（全部が入るため）", () => {
+    const threeDays = 3 * DAY;
+    expect(panPeriod({ durationMs: threeDays, endMs: NOW - DAY }, 300, 300, NOW, threeDays).endMs).toBeNull();
+    expect(startAtPeriod({ durationMs: threeDays, endMs: null }, NOW - threeDays, NOW, threeDays)?.endMs).toBeNull();
   });
 
   it("時刻の指定で 6 か月前へ移った後でも、なぞると、そこから動く（30 日前へ飛ばない）", () => {
