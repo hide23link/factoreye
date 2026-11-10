@@ -89,7 +89,7 @@ describe("LinkScreen の時刻の指定", () => {
 
     fireEvent.click(timeButton());
     expect(sheet()).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "11月3日 8:00から" }));
+    fireEvent.click(screen.getByRole("button", { name: "11月3日 8時00分から" }));
     expect(timeButton()).toHaveTextContent("8:00〜8:30");
     expect(screen.getByText("11/3 8:00 から表示")).toBeInTheDocument();
     expect(sheet()).not.toBeInTheDocument();
@@ -151,9 +151,77 @@ describe("LinkScreen の時刻の指定", () => {
     await flush();
 
     fireEvent.click(timeButton());
-    fireEvent.click(screen.getByRole("button", { name: "11月3日 8:00から" }));
+    fireEvent.click(screen.getByRole("button", { name: "11月3日 8時00分から" }));
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(window.location.search).toBe(searchBefore);
+  });
+
+  it("グラフに指を置いたままシートを開いても、離した扱いにする（日付で移ると取り直し、その後の 1 本指の左右ドラッグは移動）", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+    const before = fetchCount();
+
+    const chart = screen.getByLabelText(/グラフ。上下になぞると/);
+    fireEvent.pointerDown(chart, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.click(timeButton()); // 指 1 は置いたまま（離した知らせは来ない）
+    fireEvent.click(screen.getByRole("button", { name: "11月3日 8時00分から" }));
+    expect(timeButton()).toHaveTextContent("8:00〜8:30");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    });
+    expect(fetchCount()).toBe(before + 2);
+
+    // 1 本指で右へなぞる → 長さ 30 分のまま過去へ動く（古い指が残っていると、ピンチ扱いで長さが変わる）
+    fireEvent.pointerDown(chart, { pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(chart, { pointerId: 2, clientX: 250, clientY: 100 });
+    fireEvent.pointerUp(chart, { pointerId: 2, clientX: 250, clientY: 100 });
+    expect(timeButton()).toHaveTextContent("5:00〜5:30");
+  });
+
+  it("シートを開いている間は、ホイールでも拡大・縮小しない", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    fireEvent.wheel(screen.getByLabelText(/グラフ。上下になぞると/), { deltaY: 300 });
+    expect(timeButton()).toHaveTextContent("直近 30 分");
+  });
+
+  it("開くと ✕ にフォーカス、Esc で閉じて 🕘 へ戻す。移った後も 🕘 へ戻す", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    expect(screen.getByRole("button", { name: "閉じる" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("button", { name: "閉じる" }), { key: "Escape" });
+    expect(sheet()).not.toBeInTheDocument();
+    expect(timeButton()).toHaveFocus();
+
+    fireEvent.click(timeButton());
+    fireEvent.click(screen.getByRole("button", { name: "昨日 8:00" }));
+    expect(timeButton()).toHaveFocus();
+  });
+
+  it("「1 時間前」は押した時刻から数える（開いたまま 20 分置いても、ずれない）", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    vi.setSystemTime(new Date(2026, 10, 10, 11, 50));
+    fireEvent.click(screen.getByRole("button", { name: "1 時間前" }));
+    expect(timeButton()).toHaveTextContent("10:50〜11:20");
+  });
+
+  it("開いた後に端末の時刻が戻り、押した時刻が未来になったら「まだ来ていない時刻です」で移らない", async () => {
+    renderWithQueryClient(<LinkScreen widget={widget} rangeMinutes={30} />);
+    await flush();
+
+    fireEvent.click(timeButton());
+    vi.setSystemTime(new Date(2026, 10, 10, 7, 30)); // 端末の時計が直された（11:30 → 7:30）
+    fireEvent.click(screen.getByRole("button", { name: "11月10日 8時00分から" }));
+    expect(screen.getByText("まだ来ていない時刻です")).toBeInTheDocument();
+    expect(timeButton()).toHaveTextContent("直近 30 分");
+    expect(sheet()).toBeInTheDocument();
   });
 });

@@ -113,7 +113,12 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
   const [sheetOpenedAt, setSheetOpenedAt] = useState<number | null>(null);
   // シートの ① で選んだ時刻（0:00 からの分）。閉じても覚えておき、次に開いたときもそのまま
   const [pickedMinutes, setPickedMinutes] = useState(DEFAULT_PICKED_MINUTES);
-  const gesturesOff = preview || sheetOpenedAt !== null;
+  // 閉じたら 🕘 へフォーカスを戻す（キーボード・読み上げで、元の場所から続けられるように）
+  const timeButton = useRef<HTMLButtonElement>(null);
+  const closeSheet = () => {
+    setSheetOpenedAt(null);
+    timeButton.current?.focus();
+  };
   const toast = useToast();
   const maxMs = maxRangeForBuild();
   const bounds = periodBounds(period, now);
@@ -133,6 +138,8 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     period,
     now,
     maxMs,
+    // シートを開いている間は、グラフの指の操作を受けない（ハンドラーは外さない。離した知らせは受けるため）
+    disabled: sheetOpenedAt !== null,
     onChange: (next, zoomed) => {
       setPeriod(next);
       setCursorTime(null);
@@ -153,7 +160,7 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
     }
     setPeriod(next);
     setCursorTime(null);
-    setSheetOpenedAt(null);
+    closeSheet();
     // 開始＋長さが今を越えると、今まで（直近 ◯）の表示になる。知らせも実際の表示に合わせる
     toast.flash(jumpText(next, startMs, pressedAt));
   };
@@ -169,6 +176,7 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
         <b className="min-w-0 truncate text-sm">{graphName(widget, sensors)}</b>
         <button
           type="button"
+          ref={timeButton}
           aria-label="時刻を指定"
           disabled={preview}
           onClick={() => setSheetOpenedAt(Date.now())}
@@ -190,8 +198,8 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
         {cursorTime !== null && <span>{clockText(cursorTime)} の値</span>}
       </div>
       <div
-        ref={gesturesOff ? undefined : gestures.ref}
-        {...(gesturesOff ? {} : gestures.handlers)}
+        ref={preview ? undefined : gestures.ref}
+        {...(preview ? {} : gestures.handlers)}
         aria-label="グラフ。上下になぞると拡大・縮小、左右になぞると時間を動かす"
         // タップでグラフ（recharts）に付く、フォーカスの枠は出さない（タップは時刻の値を出す操作のため）
         className="relative min-h-0 flex-1 cursor-grab px-1.5 active:cursor-grabbing [&_:focus]:outline-none"
@@ -247,7 +255,7 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
           pickedMinutes={pickedMinutes}
           onPick={setPickedMinutes}
           onJump={applyStart}
-          onClose={() => setSheetOpenedAt(null)}
+          onClose={closeSheet}
         />
       )}
     </div>

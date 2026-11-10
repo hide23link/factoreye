@@ -8,6 +8,9 @@
  * なぞり始め（8px）の向きで左右か上下かを決め、指を離すまで変えない（斜めになっても途中で切り替えない）。
  * ピンチの後に指が 1 本になったら、残った指の今の位置と今の期間から、なぞりをやり直す（ピンチ前の期間に戻さない）。
  * 指を置いたとき onStart、すべて離したとき onEnd を呼ぶ（呼ぶ側は、離すまでデータを取り直さない）。
+ * disabled の間（時刻の指定のシートを開いている間）は、指を置く・動かす・ホイールを受けない。
+ * 指を離す（up・cancel・lostpointercapture）は常に受ける。disabled になったときに指が置かれていれば、
+ * なぞりの状態を消して onEnd を呼ぶ（離した知らせが来ないまま残ると、取得が止まり、次の 1 本指がピンチになるため）。
  * 期間の計算は lib/link-range.ts。このフックは、指の動きを計算に渡すだけ。
  *
  * 【誰が使うか】GraphLinkView のグラフの枠。戻り値の ref と handlers を、枠の要素に付ける。
@@ -28,6 +31,8 @@ export interface LinkGestureOptions {
   period: LinkPeriod;
   now: number;
   maxMs: number;
+  /** true の間は、指を置く・動かす・ホイールを受けない（離すのは受ける） */
+  disabled?: boolean;
   /** 期間が変わったとき。zoomed は拡大・縮小のとき true（長さの表示を出すため） */
   onChange: (period: LinkPeriod, zoomed: boolean) => void;
   /** タップした位置の割合（0 = グラフの左端、1 = 右端） */
@@ -81,7 +86,18 @@ export function useLinkGestures(options: LinkGestureOptions) {
     return Math.hypot(a.x - b.x, a.y - b.y);
   };
 
+  // 受けなくなったとき、置かれていた指を離したことにする（離した知らせが来なくても、状態を残さない）
+  const disabled = options.disabled ?? false;
+  useEffect(() => {
+    if (!disabled || pointers.current.size === 0) return;
+    pointers.current.clear();
+    gesture.current = null;
+    pinch.current = null;
+    latest.current.onEnd?.();
+  }, [disabled]);
+
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (latest.current.disabled) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 1) {
@@ -99,7 +115,7 @@ export function useLinkGestures(options: LinkGestureOptions) {
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    if (!pointers.current.has(e.pointerId)) return;
+    if (latest.current.disabled || !pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const { now, maxMs } = latest.current;
     if (pointers.current.size >= 2 && pinch.current) {
@@ -133,7 +149,7 @@ export function useLinkGestures(options: LinkGestureOptions) {
     if (!current) return;
     gesture.current = null;
     // 動かさずに離したときだけ、タップ（2 回続けばダブルタップ）
-    if (current.moved || e.type === "pointercancel") return;
+    if (current.moved || e.type !== "pointerup") return;
     const time = Date.now();
     if (time - lastTap.current < DOUBLE_TAP_MS) {
       lastTap.current = 0;
@@ -153,7 +169,8 @@ export function useLinkGestures(options: LinkGestureOptions) {
     if (!element) return;
     const listener = (event: WheelEvent) => {
       event.preventDefault();
-      const { period, now, maxMs, onChange } = latest.current;
+      const { period, now, maxMs, onChange, disabled: off } = latest.current;
+      if (off) return;
       const box = plotBox(element);
       const anchor = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(box.width, 1)));
       const factor = event.deltaY > 0 ? WHEEL_FACTOR : 1 / WHEEL_FACTOR;
@@ -165,6 +182,12 @@ export function useLinkGestures(options: LinkGestureOptions) {
 
   return {
     ref,
-    handlers: { onPointerDown, onPointerMove, onPointerUp: onPointerEnd, onPointerCancel: onPointerEnd },
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: onPointerEnd,
+      onPointerCancel: onPointerEnd,
+      onLostPointerCapture: onPointerEnd,
+    },
   };
 }
