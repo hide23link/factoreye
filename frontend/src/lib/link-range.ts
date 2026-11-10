@@ -6,7 +6,9 @@
  *
  * 画面（React）に依存しない関数だけを置く（テストしやすくするため）。
  *
- * 【誰が使うか】GraphLinkView（指の操作・期間のボタン・時刻の指定）。
+ * 日付・時刻は端末の時刻で扱う（ダッシュボードのグラフと同じ「表示はブラウザの地域時刻」）。
+ *
+ * 【誰が使うか】LinkScreen・useLinkGestures（指の操作・期間のボタン）、LinkTimeSheet（時刻の指定のシート）。
  */
 
 const MINUTE = 60 * 1000;
@@ -16,8 +18,8 @@ const DAY = 24 * HOUR;
 /** 拡大・縮小の下限・上限。上限は 7 日（ただし、表示できる最長 maxRangeForBuild を超えない） */
 export const LINK_VIEW_MIN_MS = 10 * MINUTE;
 export const LINK_VIEW_MAX_MS = 7 * DAY;
-/** 過去へ動かせる限り（今から 30 日前まで） */
-const PAST_LIMIT_MS = 30 * DAY;
+/** self-hosted（OSS 版）で戻れる月の数（12 か月前の月の 1 日まで） */
+const OSS_PAST_MONTHS = 12;
 
 /** 下の期間のボタン（分）: 30 分・1・3・8・24 時間 */
 export const LINK_CHIPS_MINUTES = [30, 60, 180, 480, 1440] as const;
@@ -39,10 +41,21 @@ function clampDuration(durationMs: number, maxMs: number): number {
   return Math.min(Math.max(durationMs, LINK_VIEW_MIN_MS), Math.min(LINK_VIEW_MAX_MS, maxMs));
 }
 
-/** 右端を、30 日前〜今に収める。今に届いたら「今」（null）にする */
-function clampEnd(endMs: number, now: number): number | null {
+/**
+ * 戻れる最も古い時刻（左右ドラッグ・時刻の指定で、これより前には行かない）。
+ * maxMs = 表示できる最長（maxRangeForBuild）。SaaS は測定値の保持期間（14 日）なので、今から maxMs 前まで。
+ * self-hosted は保持期間の制限が無い（maxMs が無限）ので、12 か月前の月の 1 日 0:00 まで（カレンダーで 12 か月戻れる）。
+ */
+export function oldestStart(now: number, maxMs: number): number {
+  if (Number.isFinite(maxMs)) return now - maxMs;
+  const date = new Date(now);
+  return new Date(date.getFullYear(), date.getMonth() - OSS_PAST_MONTHS, 1).getTime();
+}
+
+/** 右端を、戻れる最も古い時刻〜今に収める。今に届いたら「今」（null）にする */
+function clampEnd(endMs: number, now: number, maxMs: number): number | null {
   if (endMs >= now) return null;
-  return Math.max(endMs, now - PAST_LIMIT_MS);
+  return Math.max(endMs, oldestStart(now, maxMs));
 }
 
 /**
@@ -55,7 +68,7 @@ export function zoomPeriod(period: LinkPeriod, durationMs: number, anchor: numbe
   // anchor の時刻を保ったまま、長さだけを変える
   const anchorTime = end - period.durationMs * (1 - anchor);
   const nextEnd = anchorTime + nextDuration * (1 - anchor);
-  return { durationMs: nextDuration, endMs: clampEnd(nextEnd, now) };
+  return { durationMs: nextDuration, endMs: clampEnd(nextEnd, now, maxMs) };
 }
 
 /**
@@ -81,22 +94,22 @@ export function pinchZoom(start: LinkPeriod, startDistance: number, distance: nu
  * 左右ドラッグ: 時間を動かす。右へなぞる（dx > 0）と過去へ。長さは変えない。今より先には行かない。
  * width はグラフの横幅（px）。なぞった幅の割合だけ動かす。
  */
-export function panPeriod(start: LinkPeriod, dx: number, width: number, now: number): LinkPeriod {
+export function panPeriod(start: LinkPeriod, dx: number, width: number, now: number, maxMs: number): LinkPeriod {
   const end = start.endMs ?? now;
   const shift = (dx / Math.max(width, 1)) * start.durationMs;
-  return { durationMs: start.durationMs, endMs: clampEnd(end - shift, now) };
+  return { durationMs: start.durationMs, endMs: clampEnd(end - shift, now, maxMs) };
 }
 
 /** 期間のボタン: 長さだけを変える（今を見ているときは今のまま、過去なら右端のまま） */
 export function chipPeriod(period: LinkPeriod, minutes: number, now: number, maxMs: number): LinkPeriod {
   const durationMs = clampDuration(minutes * MINUTE, maxMs);
-  return { durationMs, endMs: period.endMs === null ? null : clampEnd(period.endMs, now) };
+  return { durationMs, endMs: period.endMs === null ? null : clampEnd(period.endMs, now, maxMs) };
 }
 
 /** 時刻の指定: その時刻から（長さは今のまま）。未来の時刻なら null（呼ぶ側が「まだ来ていない時刻です」を出す） */
-export function startAtPeriod(period: LinkPeriod, startMs: number, now: number): LinkPeriod | null {
+export function startAtPeriod(period: LinkPeriod, startMs: number, now: number, maxMs: number): LinkPeriod | null {
   if (!Number.isFinite(startMs) || startMs >= now) return null;
-  return { durationMs: period.durationMs, endMs: clampEnd(startMs + period.durationMs, now) };
+  return { durationMs: period.durationMs, endMs: clampEnd(startMs + period.durationMs, now, maxMs) };
 }
 
 /** リンクの設定（直近 N 分・今） */
@@ -149,44 +162,93 @@ export function statusText(period: LinkPeriod, now: number, updatedAt: number): 
   return `${durationText(now - period.endMs)}前まで・更新を止めています`;
 }
 
-// ── 時刻の指定（<input type="datetime-local">）────────────────
+// ── 時刻の指定のシート（近道・① 時刻の帯・② カレンダー）────────────
 
-/** 時刻を、datetime-local の値（「2026-11-10T08:00」端末の時刻）にする */
-export function toLocalInput(ms: number): string {
-  const d = new Date(ms);
-  const two = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+/** 時刻の帯の刻み（分）と、初めて開いたときの時刻（8:00） */
+export const PICK_STEP_MINUTES = 15;
+export const DEFAULT_PICKED_MINUTES = 8 * 60;
+/** 時刻の帯で選べる最後の時刻（23:45） */
+const LAST_PICK_MINUTES = 24 * 60 - PICK_STEP_MINUTES;
+
+/** その日の 0:00（端末の時刻） */
+export function dayStart(ms: number): number {
+  const date = new Date(ms);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-/** datetime-local の値を時刻（ミリ秒）にする。読めなければ null */
-export function fromLocalInput(text: string): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(text);
-  if (!match) return null;
-  const [year, month, day, hour, minute] = match.slice(1).map(Number);
-  return new Date(year, month - 1, day, hour, minute).getTime();
+/** その日（0:00 の時刻）の、0:00 から minutes 分の時刻。例: atMinutes(11/3 0:00, 480) → 11/3 8:00 */
+export function atMinutes(dayMs: number, minutes: number): number {
+  const date = new Date(dayMs);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, minutes).getTime();
 }
 
-/** 5 分刻みに切り下げる（時刻の指定の初期値。入力欄の step=300 と合わせる） */
-export function floorToFiveMinutes(ms: number): number {
-  return Math.floor(ms / (5 * MINUTE)) * 5 * MINUTE;
+/** 0:00 からの分を「8:00」の形にする */
+export function minutesText(minutes: number): string {
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
-/** 時刻の指定の近道: 今日 8:00・今日 13:00・昨日 8:00（端末の日付） */
-export function quickStarts(now: number): { label: string; value: string }[] {
-  const at = (daysAgo: number, hour: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - daysAgo);
-    d.setHours(hour, 0, 0, 0);
-    return toLocalInput(d.getTime());
-  };
+/** 時刻の帯の位置（0 = 左端の 0:00、1 = 右端の 24:00）を、15 分刻みの分（0〜1425）にする */
+export function minutesAtRatio(ratio: number): number {
+  const minutes = Math.round((ratio * 24 * 60) / PICK_STEP_MINUTES) * PICK_STEP_MINUTES;
+  return Math.min(Math.max(minutes, 0), LAST_PICK_MINUTES);
+}
+
+/** 時刻の帯を、キーボードの左右の矢印で 15 分ずつ動かす（steps = -1 か 1） */
+export function stepPicked(minutes: number, steps: number): number {
+  return Math.min(Math.max(minutes + steps * PICK_STEP_MINUTES, 0), LAST_PICK_MINUTES);
+}
+
+/** 時刻の指定の近道（押すとすぐ移る）。未来になるものは呼ぶ側で押せなくする */
+export function quickStarts(now: number): { label: string; startMs: number }[] {
+  const today = dayStart(now);
+  const yesterday = dayStart(today - HOUR); // 1 日前の 0:00（日の長さが 24 時間でない日でも合うように）
   return [
-    { label: "今日 8:00", value: at(0, 8) },
-    { label: "今日 13:00", value: at(0, 13) },
-    { label: "昨日 8:00", value: at(1, 8) },
+    { label: "1 時間前", startMs: now - HOUR },
+    { label: "3 時間前", startMs: now - 3 * HOUR },
+    { label: "今日 8:00", startMs: atMinutes(today, 8 * 60) },
+    { label: "昨日 8:00", startMs: atMinutes(yesterday, 8 * 60) },
+    { label: "昨日 13:00", startMs: atMinutes(yesterday, 13 * 60) },
   ];
 }
 
-/** 時刻の指定で選べる最も古い時刻（今から 30 日前） */
-export function earliestStart(now: number): number {
-  return now - PAST_LIMIT_MS;
+/** その時刻から表示できるか（今より前で、戻れる最も古い時刻より後） */
+export function canStartAt(startMs: number, now: number, oldestMs: number): boolean {
+  return startMs < now && startMs >= oldestMs;
+}
+
+/** カレンダーの月。month は 0〜11（Date と同じ） */
+export interface CalendarMonth {
+  year: number;
+  month: number;
+}
+
+/** その時刻の月 */
+export function monthOf(ms: number): CalendarMonth {
+  const date = new Date(ms);
+  return { year: date.getFullYear(), month: date.getMonth() };
+}
+
+/** 月を数にする（前後を比べるため）。例: 2026 年 11 月 → 2026 × 12 + 10 */
+export function monthIndex({ year, month }: CalendarMonth): number {
+  return year * 12 + month;
+}
+
+/** 月を前後に動かす（steps = -1 で前の月、1 で次の月） */
+export function shiftMonth({ year, month }: CalendarMonth, steps: number): CalendarMonth {
+  return monthOf(new Date(year, month + steps, 1).getTime());
+}
+
+/** カレンダーの表。blanks = 1 日の前の空き（日曜始まり。1 日が火曜なら 2）、days = 各日の 0:00 の時刻 */
+export function calendarDays({ year, month }: CalendarMonth): { blanks: number; days: number[] } {
+  const count = new Date(year, month + 1, 0).getDate();
+  const days = Array.from({ length: count }, (_, i) => new Date(year, month, i + 1).getTime());
+  return { blanks: new Date(year, month, 1).getDay(), days };
+}
+
+/** 移ったときの知らせ。今を越えるなら「直近 30 分を表示（今を越えるため）」、今日なら「8:00 から表示」、ほかの日は「11/3 8:00 から表示」 */
+export function jumpText(next: LinkPeriod, startMs: number, now: number): string {
+  if (next.endMs === null) return `${periodLabel(next, now)}を表示（今を越えるため）`;
+  if (dayStart(startMs) === dayStart(now)) return `${clockText(startMs)} から表示`;
+  const date = new Date(startMs);
+  return `${date.getMonth() + 1}/${date.getDate()} ${clockText(startMs)} から表示`;
 }

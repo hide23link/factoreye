@@ -114,7 +114,7 @@ export function useLinkGestures(options: LinkGestureOptions) {
       current.direction = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
       current.moved = true;
     }
-    if (current.direction === "x") change(panPeriod(current.period, dx, plotBox(e.currentTarget).width, now), false);
+    if (current.direction === "x") change(panPeriod(current.period, dx, plotBox(e.currentTarget).width, now, maxMs), false);
     if (current.direction === "y") change(swipeZoom(current.period, dy, now, maxMs), true);
   };
 
