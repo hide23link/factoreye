@@ -106,13 +106,33 @@ export const useTimeRangeStore = create<TimeRangeState>()((set) => ({
   },
 }));
 
+// タブで別のダッシュボードへ移るとき、今の範囲（固定の期間も含む）を次の画面へ引き継ぐための控え
+let carriedRange: TimeRange | null = null;
+
 /**
- * ダッシュボードを開くとき: URL に範囲があればそれを使う。
+ * タブで別のダッシュボードへ移る直前に呼ぶ: 今の範囲を、次に開くダッシュボードでもそのまま使う。
+ * （移ると画面が作り直され、閉じる側の resetTimeRange が URL の範囲を消すため、ここで控えておく）
+ * 控えは、次の画面を開いた後に消す。すぐに消さないのは、開発時の StrictMode が「開く→閉じる→開く」と 2 回開くため
+ */
+export function keepTimeRangeForNextDashboard() {
+  carriedRange = useTimeRangeStore.getState().range;
+  setTimeout(() => {
+    carriedRange = null;
+  }, 0);
+}
+
+/**
+ * ダッシュボードを開くとき: タブから移ったときは、前の画面の範囲をそのまま使う。
+ * それ以外は、URL に範囲があればそれを使う。
  * ただし固定の期間（開始〜終了）は、このタブで書いたもの（再読み込み）だけを使う。ホーム画面のショートカットや
  * 新しいタブで開いた URL に残っていた固定の期間は、古い日時のままグラフが空になるので使わず、URL からも消す。
  * 無ければ、この端末で最後に見ていた範囲（localStorage）を使う。どちらも無ければ既定（直近 1 時間）。
  */
 export function initTimeRangeFromUrl() {
+  if (carriedRange) {
+    useTimeRangeStore.getState().setRange(carriedRange);
+    return;
+  }
   let fromUrl: TimeRange | null = null;
   try {
     fromUrl = fromSearchParams(window.location.search);
