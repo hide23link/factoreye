@@ -78,7 +78,7 @@ export function SensorConnectGuide({ sensor, onClose }: { sensor: GuideSensor; o
         ))}
       </div>
       <pre className="mb-2 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{ingestSnippets(sensor.ingestKey)[tab]}</pre>
-      <p className="mb-2 text-xs text-gray-400">
+      <p className="mb-2 text-xs text-gray-500">
         URL（<code>{API_BASE_URL}</code>）と <code>INGEST_API_KEY</code> は、自分の環境の値に置き換えます（<code>INGEST_API_KEY</code> は backend の <code>.env</code> の値。<code>INGEST_AUTH=off</code> ならキーは不要です）。
       </p>
 

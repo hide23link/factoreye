@@ -82,7 +82,7 @@ export function DashboardListPage() {
       )}
       <h1 className="mb-4 text-2xl font-bold text-gray-900">ダッシュボード一覧</h1>
 
-      {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+      {isLoading && <p className="text-sm text-gray-500">読み込み中...</p>}
 
       {!isLoading && !dashboards && isError && (
         <ErrorNotice message="ダッシュボードの一覧を取得できませんでした。" onRetry={() => void refetch()} />

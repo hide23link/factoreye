@@ -568,7 +568,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
             onChange={(mode) => void changeConfig(actions, widget, { thresholdMode: mode, showThresholds: undefined })}
           />
         ) : (
-          <p className="text-sm text-gray-400">センサーを1つにすると使えます</p>
+          <p className="text-sm text-gray-500">センサーを1つにすると使えます</p>
         )}
       </Section>
     </>

@@ -150,7 +150,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
             ))}
             {users.isSuccess && filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-3 py-6 text-center text-gray-500">
                   該当するユーザーはいません
                 </td>
               </tr>

@@ -18,7 +18,7 @@ function describeZone(zone: { severity: keyof typeof ZONE_LABEL; from: number | 
 
 export function ThresholdBar({ sensor }: { sensor: Sensor }) {
   const zones = thresholdZones(sensor);
-  if (!zones) return <div className="mt-1 text-[11px] font-normal text-gray-400">しきい値なし</div>;
+  if (!zones) return <div className="mt-1 text-[11px] font-normal text-gray-500">しきい値なし</div>;
 
   return (
     <div role="img" aria-label={`しきい値: ${zones.map(describeZone).join("、")}`} className="mt-1 flex h-1.5 w-32 overflow-hidden rounded-full">

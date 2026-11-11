@@ -33,7 +33,7 @@ createRoot(rootElement).render(
     <QueryClientProvider client={queryClient}>
       {isAdminPath ? (
         <ChunkErrorBoundary>
-          <Suspense fallback={<p className="p-4 text-sm text-gray-400">読み込み中...</p>}>
+          <Suspense fallback={<p className="p-4 text-sm text-gray-500">読み込み中...</p>}>
             <AdminApp />
           </Suspense>
         </ChunkErrorBoundary>

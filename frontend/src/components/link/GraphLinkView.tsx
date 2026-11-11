@@ -42,7 +42,7 @@ export function GraphLinkView({ link }: { link: GraphLink }) {
     );
   }
   if (!widget || missing) {
-    return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
+    return <p className="p-4 text-sm text-gray-500">読み込み中...</p>;
   }
   return (
     // 画面の大きさに固定する（ページを縦スクロールさせない。指の操作とぶつからないように）
