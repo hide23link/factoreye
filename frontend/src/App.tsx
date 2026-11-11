@@ -15,6 +15,7 @@ import { Suspense, useEffect } from "react";
 
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
+import { DashboardTabs } from "./components/DashboardTabs";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
@@ -225,6 +226,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
           <HealthBadge />
         </div>
       </header>}
+      {!kiosk && view === "main" && <DashboardTabs />}
       <main className={kiosk ? "" : "pb-20 sm:pb-0"}>
         {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。一覧と詳細の行き来も含む） */}
         <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>

@@ -140,7 +140,6 @@ function LoadedDashboard({
   isNarrow: boolean;
   editing: boolean;
 }) {
-  const selectDashboard = useUiStore((s) => s.selectDashboard);
   const historySize = useEditorStore((s) => s.history.length);
   const actions = useWidgetActions(dashboard);
   const kiosk = useUiStore((s) => s.kiosk);
@@ -450,18 +449,9 @@ function LoadedDashboard({
       )}
       {kiosk && barShown && <KioskBar dashboardId={dashboard.id} onExit={() => setKiosk(false)} onInteract={() => setBarTick((n) => n + 1)} />}
       {!kiosk && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => selectDashboard(null)}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            ← 一覧へ
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
-            {dashboard.description && <p className="text-xs text-gray-400">{dashboard.description}</p>}
-          </div>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
+          {dashboard.description && <p className="text-xs text-gray-400">{dashboard.description}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {editing ? (
