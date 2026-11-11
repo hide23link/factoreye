@@ -18,7 +18,9 @@ const pages = [
   },
   {
     name: "アラーム",
+    // アラームは設定画面の中のタブ
     open: async (page: import("@playwright/test").Page) => {
+      await page.getByRole("button", { name: "設定" }).click();
       await page.getByRole("button", { name: "アラーム" }).click();
     },
   },
