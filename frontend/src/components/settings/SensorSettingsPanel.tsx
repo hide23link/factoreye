@@ -153,8 +153,8 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
 
   const errorRow = error && (
     <tr className="border-b border-gray-100 bg-red-50">
-      <td colSpan={8} role="alert" className="px-2 py-1 text-xs text-red-600">
-        {error}
+      <td colSpan={8} className="px-2 py-1 text-xs text-red-600">
+        <div role="alert">{error}</div>
       </td>
     </tr>
   );

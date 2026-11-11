@@ -24,15 +24,11 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // jsx-a11y は既存の違反（27件）を直すまで警告にとどめる。直したら error に戻す
-      ...Object.fromEntries(
-        Object.entries(jsxA11y.flatConfigs.recommended.rules)
-          .filter(([, setting]) => setting !== "off" && setting?.[0] !== "off")
-          .map(([rule, setting]) => [
-            rule,
-            Array.isArray(setting) ? ["warn", ...setting.slice(1)] : "warn",
-          ]),
-      ),
+      // <label> の中に置く自作の入力部品。中で <input>/<select> に aria-label を付けているので、ラベルの対象として扱う
+      "jsx-a11y/label-has-associated-control": [
+        "error",
+        { controlComponents: ["NumberField", "UnitSelect"], depth: 3 },
+      ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },

@@ -163,9 +163,12 @@ export function useMovableWindow(kind: MovableWindow, label: string): {
   // 大きさのつかみ部分。640px 未満は下寄せの固定なので、出さない
   const resizeHandles = movable()
     ? RESIZE_HANDLES.map(({ axis, name, hint, className }) => (
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- 矢印キーで大きさを変えられる、フォーカスできる区切り（ARIA の window splitter）。lint が separator を操作部品と見なさないための例外
         <div
           key={name}
-          role="group"
+          role="separator"
+          aria-orientation={axis === "x" ? "vertical" : axis === "y" ? "horizontal" : undefined}
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- 矢印キーで大きさを変えられる、フォーカスできる区切り（ARIA の window splitter）。lint が separator を操作部品と見なさないための例外
           tabIndex={0}
           aria-label={`${label}の${hint}を変える（つかんで大きさを変更。矢印キーでも変えられます。Shift で大きく）`}
           data-testid={`${kind}-resize-${name}`}

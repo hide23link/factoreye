@@ -469,6 +469,7 @@ function UnlockDialog({
         <p className="mb-2 text-xs text-gray-500">設定を変えるには、管理パスワードが必要です（30 分間は入力不要）。</p>
         <input
           type="password"
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- 利用者が押して開いた入力欄なので、続けて入力できるようにフォーカスする
           autoFocus
           aria-label="管理パスワード"
           value={password}
