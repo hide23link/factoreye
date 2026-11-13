@@ -69,20 +69,20 @@ export function AlarmSettingsPanel() {
         </p>
       )}
 
-      {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+      {isLoading && <p className="text-sm text-gray-500">読み込み中...</p>}
 
       {!isLoading && !data && isError && (
         <ErrorNotice message="アラームを取得できませんでした。" onRetry={() => void refetch()} />
       )}
 
       {data && data.total > data.alarms.length && (
-        <p className="mb-2 text-xs text-gray-400">
+        <p className="mb-2 text-xs text-gray-500">
           新しい順に {data.alarms.length} 件を表示しています（該当は全部で {data.total} 件）。
         </p>
       )}
 
       {!isLoading && data?.alarms.length === 0 && (
-        <p className="text-sm text-gray-400">該当するアラームはありません。</p>
+        <p className="text-sm text-gray-500">該当するアラームはありません。</p>
       )}
 
       {!isLoading && data && data.alarms.length > 0 && (
@@ -122,7 +122,7 @@ export function AlarmSettingsPanel() {
                   <td className="p-2 text-sm text-gray-600">
                     {alarm.thresholdBreached === "max" ? "上限超過" : "下限未達"}
                   </td>
-                  <td className="p-2 text-xs text-gray-400">
+                  <td className="p-2 text-xs text-gray-500">
                     {new Date(alarm.triggeredAt).toLocaleString("ja-JP")}
                   </td>
                   <td className="p-2 text-sm">

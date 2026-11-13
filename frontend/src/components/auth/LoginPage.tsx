@@ -148,7 +148,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
       <div>
         <label htmlFor="reg-password" className="block text-sm font-medium text-gray-700 mb-1">
           パスワード
-          <span className="ml-1 text-xs text-gray-400">（8文字以上）</span>
+          <span className="ml-1 text-xs text-gray-500">（8文字以上）</span>
         </label>
         <input
           id="reg-password"
@@ -172,7 +172,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
       >
         {loading ? "登録中..." : "無料で始める"}
       </button>
-      <p className="text-center text-xs text-gray-400">
+      <p className="text-center text-xs text-gray-500">
         センサー10個まで永続無料
       </p>
     </form>
@@ -228,7 +228,7 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
+        <p className="mt-6 text-center text-xs text-gray-500">
           セルフホストで使いたい方は
           <a
             href="https://github.com/hide23link/factoreye"

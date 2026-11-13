@@ -51,7 +51,7 @@ function WidgetBody({ widget }: { widget: Widget }) {
     case "TargetStrip":
       return <TargetStripWidget widget={widget} />;
     default:
-      return <p className="text-sm text-gray-400">未対応のウィジェットタイプ: {widget.type}</p>;
+      return <p className="text-sm text-gray-500">未対応のウィジェットタイプ: {widget.type}</p>;
   }
 }
 
@@ -74,11 +74,13 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   const showsTitleLine = title !== "";
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- 編集中のカード選択。キーボードは下の onKeyDown（Enter/Space）で対応済み
     <div
       data-widget-id={widget.id}
       role="group"
       aria-label={label}
       aria-current={editing && selected ? "true" : undefined}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- 編集中は、カード全体を選択できる（枠にフォーカスして Enter/Space で選ぶ）。外枠は group のまま、中のボタンを入れ子にしないため
       tabIndex={editing ? 0 : undefined}
       onClick={editing ? () => select(widget.id) : undefined}
       onKeyDown={
@@ -102,6 +104,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
     >
       {titleDraft !== null ? (
         <input
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- 利用者が押して開いた入力欄なので、続けて入力できるようにフォーカスする
           autoFocus
           aria-label="タイトル"
           value={titleDraft}
@@ -127,20 +130,19 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
         />
       ) : editing ? (
         // 編集モードでは、タイトルの文字をクリックするだけで書き換えられる（タイトルがないときは、入力の場所を出す）
-        <p
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           title="クリックしてタイトルを変える"
           onClick={(e) => {
             e.stopPropagation();
             setTitleDraft(title);
           }}
-          className={`widget-no-drag cursor-text truncate rounded px-1 text-sm font-semibold text-gray-800 hover:bg-blue-50 ${
+          className={`widget-no-drag block cursor-text truncate rounded px-1 text-left text-sm font-semibold text-gray-800 hover:bg-blue-50 ${
             title ? "mb-1 shrink-0" : "absolute left-1 top-1 z-10 max-w-[60%] bg-white/90"
           }`}
         >
-          {title || <span className="font-normal text-gray-400">タイトルを入力</span>}
-        </p>
+          {title || <span className="font-normal text-gray-500">タイトルを入力</span>}
+        </button>
       ) : (
         title && (
           <p className="mb-1 shrink-0 truncate text-sm font-semibold text-gray-800" title={title}>
@@ -150,7 +152,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       )}
       <div className={`${showsTitleLine ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
-          <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
+          <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
             <WidgetBody widget={widget} />
           </Suspense>
         </ChunkErrorBoundary>
@@ -158,7 +160,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       {editing && (
         // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・設定・複製・削除
         <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white/90 px-0.5 shadow-sm">
-          <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-400">
+          <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-500">
             ⋮⋮
           </span>
           <button

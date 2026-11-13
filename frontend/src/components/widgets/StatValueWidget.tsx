@@ -34,13 +34,13 @@ export function StatValueWidget({ widget }: { widget: Widget }) {
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
   }
   if (!data && isError) {
     return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (isLoading || !data || !sensor) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   // 最新の測定値（新しい順なので先頭）。無ければ「—」を出す
@@ -55,14 +55,14 @@ export function StatValueWidget({ widget }: { widget: Widget }) {
       className={`flex h-full flex-col items-center justify-center gap-1 rounded p-2 ${style.bg}`}
     >
       <p className="flex max-w-full items-center gap-1.5 text-sm font-medium text-gray-600">
-        <SensorKindIcon kind={guessSensorKind(sensor)} className="shrink-0 text-gray-400" />
+        <SensorKindIcon kind={guessSensorKind(sensor)} className="shrink-0 text-gray-500" />
         <span className="truncate" title={sensor.name}>
           {sensor.name}
         </span>
       </p>
       <p className={`text-4xl font-bold tabular-nums ${style.text}`}>
         {latest ? latest.value.toFixed(decimals) : "—"}
-        <span className="ml-1 text-base font-normal text-gray-400">{sensor.unit}</span>
+        <span className="ml-1 text-base font-normal text-gray-500">{sensor.unit}</span>
       </p>
       {style.label && <span className={`text-xs font-medium ${style.text}`}>{style.label}</span>}
       {latest && <ThresholdMeter sensor={sensor} value={latest.value} />}

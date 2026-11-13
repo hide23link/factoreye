@@ -48,6 +48,7 @@ export function SensorField({ sensorIds, multiple, suited, colorOf, onRecolor, o
 
   return (
     // data-sensor-field: DashboardView が、この中のキー操作（Delete・Ctrl+Z）を画面のウィジェットに効かせないための目印
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- 中のボタン・入力欄から伝わるキー入力（Esc）を受ける外枠。この div 自体は操作の対象ではない
     <div
       data-sensor-field
       className="flex flex-col gap-2"

@@ -55,6 +55,7 @@ export function LinkTimeSheet({
   useEffect(() => closeButton.current?.focus(), []);
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ダイアログの Esc は、中のボタンから伝わるキー入力をここで受ける標準的な作り方
     <div
       role="dialog"
       aria-label="この時刻から表示"

@@ -108,6 +108,7 @@ export function ShelfWordFilter({ words, selected, counts, onSelect, onAdd, onRe
             onChange={(e) => setInput(e.target.value)}
             maxLength={MAX_WORD_LENGTH + 5}
             placeholder="例: 温度"
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- 利用者が押して開いた入力欄なので、続けて入力できるようにフォーカスする
             autoFocus
             className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs"
           />

@@ -125,7 +125,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     );
   }
   if (isLoading || !dashboard) {
-    return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
+    return <p className="p-4 text-sm text-gray-500">読み込み中...</p>;
   }
 
   return <LoadedDashboard dashboard={dashboard} isNarrow={isNarrow} editing={editing} />;
@@ -451,7 +451,7 @@ function LoadedDashboard({
       {!kiosk && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
-          {dashboard.description && <p className="text-xs text-gray-400">{dashboard.description}</p>}
+          {dashboard.description && <p className="text-xs text-gray-500">{dashboard.description}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {editing ? (
@@ -559,7 +559,7 @@ function LoadedDashboard({
       )}
 
       {!editing && dashboard.widgets.length === 0 ? (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-gray-500">
           まだウィジェットがありません。「編集する」を押して、センサーを置いてみましょう。
         </p>
       ) : (

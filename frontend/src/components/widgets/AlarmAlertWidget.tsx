@@ -54,7 +54,7 @@ export function AlarmAlertWidget() {
     );
   }
   if (activeLoading || ackedLoading || !activeData || !ackedData) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   // 発生中を先に、確認済みを後に並べる

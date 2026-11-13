@@ -71,6 +71,7 @@ export function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ダイアログの Esc は、中のボタンから伝わるキー入力をここで受ける標準的な作り方 */}
       <div
         ref={dialogRef}
         role="dialog"

@@ -153,8 +153,8 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
 
   const errorRow = error && (
     <tr className="border-b border-gray-100 bg-red-50">
-      <td colSpan={8} role="alert" className="px-2 py-1 text-xs text-red-600">
-        {error}
+      <td colSpan={8} className="px-2 py-1 text-xs text-red-600">
+        <div role="alert">{error}</div>
       </td>
     </tr>
   );
@@ -181,21 +181,21 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
               className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
             />
           </td>
-          <td className="p-2 text-sm text-gray-400">{sensor.ingestKey}</td>
+          <td className="p-2 text-sm text-gray-500">{sensor.ingestKey}</td>
           <td className="p-2">
             <UnitSelect value={unit} onChange={setUnit} />
           </td>
           <td className="p-2">
             <div className="flex items-center gap-1">
               {thresholdInput(minWarning, setMinWarning, "軽故障の下限")}
-              <span className="text-gray-400">/</span>
+              <span className="text-gray-500">/</span>
               {thresholdInput(maxWarning, setMaxWarning, "軽故障の上限")}
             </div>
           </td>
           <td className="p-2">
             <div className="flex items-center gap-1">
               {thresholdInput(minCritical, setMinCritical, "重故障の下限")}
-              <span className="text-gray-400">/</span>
+              <span className="text-gray-500">/</span>
               {thresholdInput(maxCritical, setMaxCritical, "重故障の上限")}
             </div>
           </td>
@@ -209,7 +209,7 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
               className="w-14 rounded border border-gray-300 px-1.5 py-1 text-sm"
             />
           </td>
-          <td className="p-2 text-sm text-gray-400">{sensor.enabled ? "有効" : "無効"}</td>
+          <td className="p-2 text-sm text-gray-500">{sensor.enabled ? "有効" : "無効"}</td>
           <td className="p-2 text-right">
             <button
               type="button"
@@ -240,7 +240,7 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
           {sensor.name}
           <ThresholdBar sensor={sensor} />
         </td>
-        <td className="p-2 font-mono text-xs text-gray-400">{sensor.ingestKey}</td>
+        <td className="p-2 font-mono text-xs text-gray-500">{sensor.ingestKey}</td>
         <td className="p-2 text-sm text-gray-600">{sensor.unit}</td>
         <td className="p-2 text-sm text-gray-600">
           {sensor.thresholdMinWarning ?? "—"} / {sensor.thresholdMaxWarning ?? "—"}
@@ -404,7 +404,7 @@ export function SensorSettingsPanel() {
           追加
         </button>
       </form>
-      <p className="mb-3 text-xs text-gray-400">
+      <p className="mb-3 text-xs text-gray-500">
         しきい値（軽故障・重故障・不感帯）は作成後、一覧の「編集」から設定します。
       </p>
       {error && (
@@ -413,7 +413,7 @@ export function SensorSettingsPanel() {
         </p>
       )}
 
-      {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+      {isLoading && <p className="text-sm text-gray-500">読み込み中...</p>}
 
       {!isLoading && !sensors && isError && (
         <ErrorNotice message="センサーの一覧を取得できませんでした。" onRetry={() => void refetch()} />
@@ -449,7 +449,7 @@ export function SensorSettingsPanel() {
       )}
 
       {!isLoading && sensors?.length === 0 && (
-        <p className="text-sm text-gray-400">まだセンサーが登録されていません。</p>
+        <p className="text-sm text-gray-500">まだセンサーが登録されていません。</p>
       )}
     </div>
   );

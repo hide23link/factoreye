@@ -160,7 +160,7 @@ function ImportSection() {
         />
         <span>
           通知設定も移す
-          <span className="block text-xs text-gray-400">
+          <span className="block text-xs text-gray-500">
             移行先の Discord 通知設定（現在の値）を、ファイルの内容で上書きします。
           </span>
         </span>
@@ -206,7 +206,7 @@ function ImportSection() {
 export function MigrationSettingsPanel() {
   const { data: status, isLoading, isError } = useMigrationStatus();
 
-  if (isLoading) return <p className="text-sm text-gray-400">読み込み中...</p>;
+  if (isLoading) return <p className="text-sm text-gray-500">読み込み中...</p>;
   if (isError || !status) {
     return <p className="text-sm text-red-600">移行機能の状態を取得できませんでした</p>;
   }
@@ -218,7 +218,7 @@ export function MigrationSettingsPanel() {
     <div className="space-y-6">
       <div>
         <h2 className="mb-1 text-lg font-bold text-gray-900">データ移行</h2>
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           {status.mode === "self_hosted"
             ? "このサーバーの全データを書き出し、別の OSS 版サーバーへ取り込みます。"
             : "SaaS版のワークスペースを、OSS版（セルフホスト）へ移します。"}

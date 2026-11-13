@@ -63,7 +63,7 @@ export function NotificationSettingsPanel() {
         アラーム発生時にDiscordへ通知します。重故障と軽故障を別々のチャンネル（Webhook URL）に送り分けられます。重故障は通常送信（通知音・プッシュあり）、軽故障はサイレント送信（チャンネルには表示されるが通知音・プッシュ無し）になります。
       </p>
 
-      {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+      {isLoading && <p className="text-sm text-gray-500">読み込み中...</p>}
 
       {!isLoading && !data && isError && (
         <ErrorNotice message="通知設定を取得できませんでした。" onRetry={() => void refetch()} />
@@ -110,7 +110,7 @@ export function NotificationSettingsPanel() {
               />
               <span>分</span>
             </div>
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500">
               チェックを外すと、重故障は発生時に1回だけ通知します。
             </p>
           </div>
@@ -125,7 +125,7 @@ export function NotificationSettingsPanel() {
               className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
           </label>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Discordサーバーの「連携サービス」→「ウェブフック」で作成したURLを指定します。同じチャンネルに送る場合は両方に同じURLを指定してください。
           </p>
 

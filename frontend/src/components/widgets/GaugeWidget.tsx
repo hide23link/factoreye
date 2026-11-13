@@ -39,13 +39,13 @@ export function GaugeWidget({ widget }: { widget: Widget }) {
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
   }
   if (!data && isError) {
     return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (isLoading || !data || !sensor) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   const latest = data.readings[0]?.value;
@@ -89,7 +89,7 @@ export function GaugeWidget({ widget }: { widget: Widget }) {
         {/* いまの値は、図の中（針の根元の下）に置く。図と一緒に拡縮するので、狭いウィジェットでも針に重ならない */}
         <text x={GAUGE_CENTER_X} y={134} fontSize={24} fontWeight={700} textAnchor="middle" className={`tabular-nums ${style.text}`} fill="currentColor">
           {latest === undefined ? "—" : latest.toFixed(decimals)}
-          <tspan fontSize={11} fontWeight={400} dx={3} fill="#9ca3af">
+          <tspan fontSize={11} fontWeight={400} dx={3} fill="#6b7280">
             {sensor.unit}
           </tspan>
         </text>
