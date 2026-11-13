@@ -9,7 +9,18 @@ on:
 
 jobs:
   e2e:
+    name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
+    # chromium だけが必須。他のブラウザ・スマホ画面は互換性の確認用なので、失敗してもマージを止めない
+    continue-on-error: ${{ matrix.project != 'chromium' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { project: chromium, browser: chromium }
+          - { project: firefox, browser: firefox }
+          - { project: webkit, browser: webkit }
+          - { project: mobile-chrome, browser: chromium }
     steps:
       - uses: actions/checkout@v4
 
@@ -57,11 +68,11 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: e2e
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Run E2E tests
         working-directory: e2e
-        run: npm test
+        run: npx playwright test --project=${{ matrix.project }}
 
       - name: Dump container logs on failure
         if: failure()
@@ -71,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           # playwright-report/ は HTML レポート、test-results/ は失敗時のトレース（trace.zip）
           path: |
             e2e/playwright-report/

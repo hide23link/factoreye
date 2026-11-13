@@ -17,10 +17,13 @@ export default defineConfig({
     baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
   },
+  // chromium は必須（CI で失敗するとマージ不可）。それ以外は互換性の確認用で、CI では失敗しても
+  // マージを止めない（.github/workflows/e2e-test.yml の matrix 参照）。
   projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    // スマホ縦画面（タブレット・現場の携帯端末を想定）
+    { name: "mobile-chrome", use: { ...devices["Pixel 7"] } },
   ],
 });

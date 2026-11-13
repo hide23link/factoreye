@@ -42,7 +42,8 @@ npm run dev
 ```bash
 npm run test        # 単体テスト
 npm run typecheck   # 型チェック
-npm run lint        # lint
+npm run lint        # lint（アクセシビリティの警告 jsx-a11y も含む。既存の違反を直したら error に戻す）
+npm run test:coverage  # カバレッジ（stmt/line 80%・branch/func 75% を下回ると失敗）
 ```
 
 ## E2E
@@ -53,3 +54,5 @@ npm run lint        # lint
 docker compose up -d --build
 cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
 ```
+
+E2E は chromium が必須で、firefox・webkit・スマホ画面（mobile-chrome）は互換性の確認用です（失敗してもマージは止まりません）。ブラウザを指定して実行するには `npx playwright test --project=firefox` のようにします。`tests/a11y.spec.ts` は axe-core で主要画面を検査し、致命的（critical）な違反があると失敗します。

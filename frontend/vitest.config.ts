@@ -15,10 +15,11 @@ export default defineConfig({
       reporter: ["text", "html", "json-summary"],
       exclude: ["src/test/**", "src/main.tsx", "**/*.d.ts", "**/*.config.*"],
       thresholds: {
-        lines: 50,
-        functions: 50,
-        branches: 50,
-        statements: 50,
+        // 2026-11-11 時点の実測（stmt 85.7 / branch 82.4 / func 79.3 / line 87.2）より少し下に置き、低下を防ぐ
+        lines: 80,
+        functions: 75,
+        branches: 75,
+        statements: 80,
       },
     },
   },
