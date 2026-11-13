@@ -172,7 +172,7 @@ export function useMovableWindow(kind: MovableWindow, label: string): {
           tabIndex={0}
           aria-label={`${label}の${hint}を変える（つかんで大きさを変更。矢印キーでも変えられます。Shift で大きく）`}
           data-testid={`${kind}-resize-${name}`}
-          className={`${className} touch-none ${axis === "both" ? "text-gray-400 hover:text-blue-600" : ""} focus-visible:bg-blue-200`}
+          className={`${className} touch-none ${axis === "both" ? "text-gray-500 hover:text-blue-600" : ""} focus-visible:bg-blue-200`}
           onPointerDown={(e) => {
             if (e.button > 0) return;
             const { pos: origin, size: originSize } = currentBox(e.currentTarget);

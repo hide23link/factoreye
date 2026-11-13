@@ -118,7 +118,7 @@ function CountRow({ widget, sensor, sensorId, window, settings, nowMs }: RowProp
   if (!data && isError) {
     return <ErrorNotice message={`「${name}」の測定値を取得できませんでした。`} onRetry={() => void refetch()} />;
   }
-  if (!data) return <p className="text-sm text-gray-400">{name} 読み込み中...</p>;
+  if (!data) return <p className="text-sm text-gray-500">{name} 読み込み中...</p>;
 
   const createdAtMs = sensor ? new Date(sensor.createdAt).getTime() : null;
   const cells = buildCells(data.buckets, window, nowMs, settings, widget.config, createdAtMs);
@@ -145,7 +145,7 @@ function IntervalRow({ widget, sensor, sensorId, window, settings, nowMs }: RowP
   if (!data && isError) {
     return <ErrorNotice message={`「${name}」の測定値を取得できませんでした。`} onRetry={() => void refetch()} />;
   }
-  if (!data) return <p className="text-sm text-gray-400">{name} 読み込み中...</p>;
+  if (!data) return <p className="text-sm text-gray-500">{name} 読み込み中...</p>;
 
   const times = data.readings.map((r) => new Date(r.recordedAt).getTime());
   // 取得は新しい順。上限に達したときは、古い側が欠けているので、読めた最も古い受信より前は判定しない
@@ -171,11 +171,11 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
   const ids = graphSensorIds(widget);
 
   if (ids.length === 0) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません（編集モードで設定できます）</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません（編集モードで設定できます）</p>;
   }
   // センサーの一覧（名前・作成時刻）が来る前に描くと、作る前の期間が未達に見え、名前が ID のままになる
   if (!sensors) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   const range = resolveRange(effectiveRange(widget, dashboardRange), now);
@@ -211,7 +211,7 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
           />
         ))}
       </div>
-      <div className="grid gap-x-3 text-[11px] tabular-nums text-gray-400 sm:grid-cols-[minmax(120px,190px)_minmax(0,1fr)]">
+      <div className="grid gap-x-3 text-[11px] tabular-nums text-gray-500 sm:grid-cols-[minmax(120px,190px)_minmax(0,1fr)]">
         <span className="hidden sm:block" />
         <div className="flex justify-between">
           {ticks.map((t, i) => (

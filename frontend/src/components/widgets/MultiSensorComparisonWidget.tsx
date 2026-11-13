@@ -126,7 +126,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   });
 
   if (sensorIds.length === 0) {
-    return <p className="text-sm text-gray-400">比較対象のセンサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">比較対象のセンサーが設定されていません</p>;
   }
 
   const hours = linkView ? (bounds.to - bounds.from) / 3_600_000 : spanHours(range, now);

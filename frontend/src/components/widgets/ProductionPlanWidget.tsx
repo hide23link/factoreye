@@ -84,16 +84,16 @@ export function ProductionPlanWidget({ widget }: { widget: Widget }) {
   const { data, isError, refetch } = useDownsampledReadings(widget.sensorId, range, bucketCount, true);
 
   if (!widget.sensorId) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
   }
   if (!data && isError) {
     return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (!data) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
   if (!(target > 0)) {
-    return <p className="text-sm text-gray-400">1日の目標が設定されていません（編集モードで設定できます）</p>;
+    return <p className="text-sm text-gray-500">1日の目標が設定されていません（編集モードで設定できます）</p>;
   }
 
   const summary = summarizeProduction(target, schedule, data.buckets.map(toCountBucket), minuteOfDay(now));

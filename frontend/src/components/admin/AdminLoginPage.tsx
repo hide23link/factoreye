@@ -40,7 +40,7 @@ export function AdminLoginPage() {
         }}
       >
         <h1 className="mb-1 text-lg font-bold text-gray-900">FactorEye 管理者</h1>
-        <p className="mb-5 text-xs text-gray-400">管理者IDとパスワードでログインしてください</p>
+        <p className="mb-5 text-xs text-gray-500">管理者IDとパスワードでログインしてください</p>
 
         <label className="mb-3 block text-sm text-gray-700">
           管理者ID

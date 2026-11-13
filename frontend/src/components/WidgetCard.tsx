@@ -51,7 +51,7 @@ function WidgetBody({ widget }: { widget: Widget }) {
     case "TargetStrip":
       return <TargetStripWidget widget={widget} />;
     default:
-      return <p className="text-sm text-gray-400">未対応のウィジェットタイプ: {widget.type}</p>;
+      return <p className="text-sm text-gray-500">未対応のウィジェットタイプ: {widget.type}</p>;
   }
 }
 
@@ -141,7 +141,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
             title ? "mb-1 shrink-0" : "absolute left-1 top-1 z-10 max-w-[60%] bg-white/90"
           }`}
         >
-          {title || <span className="font-normal text-gray-400">タイトルを入力</span>}
+          {title || <span className="font-normal text-gray-500">タイトルを入力</span>}
         </button>
       ) : (
         title && (
@@ -152,7 +152,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       )}
       <div className={`${showsTitleLine ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
-          <Suspense fallback={<p className="text-sm text-gray-400">読み込み中...</p>}>
+          <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
             <WidgetBody widget={widget} />
           </Suspense>
         </ChunkErrorBoundary>
@@ -160,7 +160,7 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       {editing && (
         // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・設定・複製・削除
         <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white/90 px-0.5 shadow-sm">
-          <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-400">
+          <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-500">
             ⋮⋮
           </span>
           <button

@@ -49,13 +49,13 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
   const { data: today } = useSensorReadingsAggregate(widget.sensorId, todayFrom);
 
   if (!widget.sensorId) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
   }
   if (!data && isError) {
     return <ErrorNotice message="測定値を取得できませんでした。" onRetry={() => void refetch()} />;
   }
   if (isLoading || !data) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   // 最新の生産数（新しい順の先頭）と、稼働判定のしきい値（既定 0）
@@ -72,7 +72,7 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
         isRunning ? "border-green-500 bg-green-50" : "border-transparent bg-gray-100"
       }`}
     >
-      <GearIcon spinning={isRunning} className={isRunning ? "text-green-600" : "text-gray-400"} />
+      <GearIcon spinning={isRunning} className={isRunning ? "text-green-600" : "text-gray-500"} />
       <p className="max-w-full truncate text-sm font-medium text-gray-700" title={sensor?.name}>
         {sensor?.name ?? "センサー"}
       </p>
@@ -101,7 +101,7 @@ export function ProductionStatusWidget({ widget }: { widget: Widget }) {
       </div>
 
       {achievementRate !== null && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           目標達成率: {achievementRate.toFixed(0)}%（目標 {dailyTarget}
           {sensor?.unit}）
         </p>

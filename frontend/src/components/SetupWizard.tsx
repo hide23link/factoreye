@@ -25,7 +25,7 @@ type Step = 1 | 2 | 3 | 4;
 function StepHeader({ step }: { step: Step }) {
   const labels = ["センサー登録", "データ送信", "ダッシュボード作成", "完了"];
   return (
-    <div className="mb-6 flex items-center gap-2 text-xs text-gray-400">
+    <div className="mb-6 flex items-center gap-2 text-xs text-gray-500">
       {labels.map((label, i) => {
         const n = i + 1;
         const active = n === step;
@@ -219,16 +219,16 @@ export function SetupWizard() {
             {codeSnippets[codeTab]}
           </pre>
           {codeTab === "arduino" && (
-            <p className="mb-3 text-xs text-gray-400">
+            <p className="mb-3 text-xs text-gray-500">
               ライブラリの入手方法・詳細は <code>clients/arduino-m5stack/README.md</code> を参照してください。
             </p>
           )}
           {codeTab === "python" && (
-            <p className="mb-3 text-xs text-gray-400">
+            <p className="mb-3 text-xs text-gray-500">
               入手方法・詳細は <code>clients/raspberry-pi/README.md</code> を参照してください。
             </p>
           )}
-          <p className="text-xs text-gray-400">データの到着を待っています...（5秒ごとに自動確認）</p>
+          <p className="text-xs text-gray-500">データの到着を待っています...（5秒ごとに自動確認）</p>
         </div>
       )}
 
@@ -270,7 +270,7 @@ export function SetupWizard() {
       <button
         type="button"
         onClick={() => setView("main")}
-        className="mt-4 text-xs text-gray-400 hover:text-gray-600"
+        className="mt-4 text-xs text-gray-500 hover:text-gray-600"
       >
         スキップしてダッシュボード一覧へ
       </button>

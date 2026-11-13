@@ -57,7 +57,7 @@ export function RuntimeSettingsPanel() {
   const [restarting, setRestarting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  if (isLoading) return <p className="text-sm text-gray-400">読み込み中...</p>;
+  if (isLoading) return <p className="text-sm text-gray-500">読み込み中...</p>;
   if (isError || !data) {
     return <ErrorNotice message="設定を取得できませんでした。" onRetry={() => void refetch()} />;
   }
@@ -345,14 +345,14 @@ function SettingsForm({
             />
             <span>個</span>
           </div>
-          <p className="ml-6 text-xs text-gray-400">打ち間違いの ID でもセンサーができます。機器の追加のたびに画面で登録しなくてよくなります。</p>
+          <p className="ml-6 text-xs text-gray-500">打ち間違いの ID でもセンサーができます。機器の追加のたびに画面で登録しなくてよくなります。</p>
         </div>
         <div>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={values.ingestDeviceTime} onChange={(e) => update({ ingestDeviceTime: e.target.checked })} className="h-4 w-4" />
             機器が付けた測定時刻を使う（INGEST_DEVICE_TIME）
           </label>
-          <p className="ml-6 text-xs text-gray-400">機器の時計が NTP で合っているときだけ。オフなら受信した時刻で保存します。</p>
+          <p className="ml-6 text-xs text-gray-500">機器の時計が NTP で合っているときだけ。オフなら受信した時刻で保存します。</p>
         </div>
         <div>
           <label className="flex items-center gap-2">
@@ -364,7 +364,7 @@ function SettingsForm({
             />
             Webhook の送信先に社内ネットワークを許可する（WEBHOOK_ALLOW_PRIVATE_NETWORKS）
           </label>
-          <p className="ml-6 text-xs text-gray-400">社内 LAN の n8n などへ送るときだけオンにします（http・プライベート IP）。</p>
+          <p className="ml-6 text-xs text-gray-500">社内 LAN の n8n などへ送るときだけオンにします（http・プライベート IP）。</p>
         </div>
       </fieldset>
 
@@ -372,12 +372,12 @@ function SettingsForm({
         <label className="block">
           取り込みの上限（INGEST_RATE_LIMIT）
           <input value={values.ingestRateLimit} onChange={(e) => update({ ingestRateLimit: e.target.value })} className={inputClass} />
-          <span className="text-xs text-gray-400">同じ接続元から。例: 100/minute、off で解除</span>
+          <span className="text-xs text-gray-500">同じ接続元から。例: 100/minute、off で解除</span>
         </label>
         <label className="block">
           照合を覚えておく秒数（INGEST_CACHE_SECONDS）
           <input type="number" min={0} value={values.ingestCacheSeconds} onChange={(e) => update({ ingestCacheSeconds: e.target.value })} className={inputClass} />
-          <span className="text-xs text-gray-400">0 で無効。多数の機器が 1 秒ごとに送るときに負荷が下がります</span>
+          <span className="text-xs text-gray-500">0 で無効。多数の機器が 1 秒ごとに送るときに負荷が下がります</span>
         </label>
       </fieldset>
 
@@ -388,7 +388,7 @@ function SettingsForm({
         </label>
       </fieldset>
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-500">
         🔒 JWT_SECRET・データベースのパスワードは、安全のためこの画面には表示も変更もできません（<code>.env</code> を直接編集してください）。
       </p>
     </div>
@@ -481,7 +481,7 @@ function UnlockDialog({
             {error}
           </p>
         )}
-        <p className="mb-3 text-xs text-gray-400">
+        <p className="mb-3 text-xs text-gray-500">
           忘れたとき: サーバーで <code>./factoreye.sh set-password</code>
         </p>
         <div className="flex justify-end gap-2">

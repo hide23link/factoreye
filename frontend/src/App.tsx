@@ -36,7 +36,7 @@ const GraphLinkView = lazyNamed(() => import("./components/link/GraphLinkView"),
 
 /** 遅延読み込み中の表示。他の「読み込み中」と同じ見た目にする。 */
 function PageFallback() {
-  return <p className="p-4 text-sm text-gray-400">読み込み中...</p>;
+  return <p className="p-4 text-sm text-gray-500">読み込み中...</p>;
 }
 
 // ログイン無しで読める公開の文書（パスと画面の対応）
@@ -67,7 +67,7 @@ function HealthBadge() {
   const color = error ? "bg-red-400" : health?.status === "ok" ? "bg-green-400" : "bg-gray-300";
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-gray-400">
+    <div className="flex items-center gap-1.5 text-xs text-gray-500">
       <span className={`h-2 w-2 rounded-full ${color}`} />
       {label}
     </div>
@@ -82,11 +82,11 @@ function UserBadge() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
       <span>{me.workspaceName}</span>
-      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-400">{me.plan}</span>
+      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">{me.plan}</span>
       <button
         type="button"
         onClick={() => void logout()}
-        className="text-gray-400 hover:text-gray-600"
+        className="text-gray-500 hover:text-gray-600"
       >
         ログアウト
       </button>
@@ -311,7 +311,7 @@ function App() {
   if (IS_MULTI_TENANT && isInitializing) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="text-sm text-gray-400">読み込み中...</div>
+        <div className="text-sm text-gray-500">読み込み中...</div>
       </div>
     );
   }

@@ -117,14 +117,14 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
 
   if (!widget.sensorId) {
-    return <p className="text-sm text-gray-400">センサーが設定されていません</p>;
+    return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
   }
   if (!data && isError) {
     return <ErrorNotice message="グラフのデータを取得できませんでした。" onRetry={() => void refetch()} />;
   }
   // 最初の 1 回だけ「読み込み中」を出す（以後は前のデータを残して、取り直す）
   if (!data) {
-    return <p className="text-sm text-gray-400">読み込み中...</p>;
+    return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
   const hours = linkView ? (bounds.to - bounds.from) / 3_600_000 : spanHours(range, now);

@@ -23,7 +23,7 @@ import { ErrorNotice } from "../ErrorNotice";
 
 /** キーの目印の表示。先頭 6 文字だけを見せ、残りは伏せる。目印のない（古い）機器は「なし」。 */
 function KeyHint({ hint }: { hint: string | null }) {
-  if (hint === null) return <span className="text-gray-400">目印なし</span>;
+  if (hint === null) return <span className="text-gray-500">目印なし</span>;
   return (
     <span data-testid="key-hint" className="font-mono">
       {hint}••••••••
@@ -203,7 +203,7 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
           </span>
         </dd>
         <dt className="text-gray-500">系統</dt>
-        <dd>{device.line ?? <span className="text-gray-400">なし</span>}</dd>
+        <dd>{device.line ?? <span className="text-gray-500">なし</span>}</dd>
         <dt className="text-gray-500">最後の受信</dt>
         <dd>{formatLastReceived(device.lastReceivedAt)}</dd>
         <dt className="text-gray-500">キー</dt>
@@ -216,7 +216,7 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
       <section>
         <h4 className="mb-1 text-xs font-bold text-gray-500">所属しているセンサー（この機器のキーでしか送れません）</h4>
         {device.sensors.length === 0 ? (
-          <p className="text-sm text-gray-400">まだありません</p>
+          <p className="text-sm text-gray-500">まだありません</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {device.sensors.map((key) => (
@@ -232,7 +232,7 @@ function DeviceDetail({ device, unattached }: { device: Device; unattached: stri
         <section>
           <h4 className="mb-1 text-xs font-bold text-gray-500">センサーを所属させる（未所属のセンサー {unattached.length} 件）</h4>
           {unattached.length === 0 ? (
-            <p className="text-sm text-gray-400">未所属のセンサーはありません</p>
+            <p className="text-sm text-gray-500">未所属のセンサーはありません</p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <select

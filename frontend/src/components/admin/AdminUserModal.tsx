@@ -130,7 +130,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
           <div>
             <h2 className="text-lg font-bold text-gray-900">{detail.data?.email ?? "読み込み中..."}</h2>
             {detail.data && (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 ワークスペース: {detail.data.workspaceName ?? "—"} ／ 登録日:{" "}
                 {formatDateTime(detail.data.createdAt)}
               </p>
@@ -158,7 +158,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                 {formatDateTime(detail.data.lastReadingAt)}
               </p>
               {detail.data.sensors.length === 0 ? (
-                <p className="text-sm text-gray-400">センサーは未登録です</p>
+                <p className="text-sm text-gray-500">センサーは未登録です</p>
               ) : (
                 <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
@@ -241,7 +241,7 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                   />
                 </label>
               </div>
-              <p className="mt-2 text-xs text-gray-400">
+              <p className="mt-2 text-xs text-gray-500">
                 パスワードを変更すると、そのユーザーの既存のログインは全て無効になります。
               </p>
               {passwordTooShort && (

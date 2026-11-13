@@ -77,7 +77,7 @@ function WebhookRow({ webhook }: { webhook: WebhookSubscription }) {
             type="button"
             onClick={() => setConfirmingDelete(true)}
             disabled={deleteMutation.isPending}
-            className="text-xs text-gray-400 hover:text-red-600"
+            className="text-xs text-gray-500 hover:text-red-600"
           >
             削除
           </button>
@@ -171,11 +171,11 @@ export function WebhookSettingsPanel() {
   return (
     <div>
       <h2 className="mb-1 text-lg font-bold text-gray-900">Webhook連携</h2>
-      <p className="mb-4 text-xs text-gray-400">
+      <p className="mb-4 text-xs text-gray-500">
         Zapier・Make・n8n等のノーコード自動化サービスで受け口（Webhook URL）を作り、ここに貼り付けるだけで連携できます。コードを書く必要はありません。センサー値の受信・アラームの発生をきっかけに、指定したURLへ通知を送ります。
       </p>
 
-      {isLoading && <p className="text-sm text-gray-400">読み込み中...</p>}
+      {isLoading && <p className="text-sm text-gray-500">読み込み中...</p>}
 
       {!isLoading && !webhooks && isError && (
         <ErrorNotice message="Webhookの一覧を取得できませんでした。" onRetry={() => void refetch()} />
