@@ -1,0 +1,142 @@
+# 災害時の控え（AWS の EC2）が使う FactorEye のイメージを作り、署名して Cloudflare R2 に置く。
+# main の backend・frontend・PostgreSQL が変わったときに動く。Actions の画面から手動でも動かせる（同じ版でも置き直すときは force）。
+#
+# 置くもの（R2 のバケット factoreye-backup の images/ 以下）:
+#   <版>/images.tar.gz（docker save の gzip。backend・frontend・WAL-G 入りの PostgreSQL、amd64）と .sha256
+#   latest.json      版・Alembic の head と全リビジョン・tar の sha256 とサイズ・フロントの主バンドル名・作った日時
+#   latest.json.sig  latest.json への署名（RSA-SHA256）。控えは、公開鍵で確かめられたものだけを使う
+# 直近 2 版だけ残す。
+#
+# 必要な設定（Settings → Secrets and variables → Actions）:
+#   Secrets:   DR_R2_ACCESS_KEY_ID、DR_R2_SECRET_ACCESS_KEY（factoreye-backup だけに書ける専用のトークン）、DR_R2_ENDPOINT、
+#              DR_SIGNING_KEY（署名の秘密鍵。PEM）
+#   Variables: DR_SIGNING_PUBKEY（署名の公開鍵。PEM。秘密鍵と組か確かめる）
+# 秘密は main への push と手動の実行だけで使われる（他人の PR からは使えない）。
+name: dr-images
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'frontend/**', 'infra/cloud/postgres/**', '.github/workflows/dr-images.yml']
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '同じ版でも置き直す'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dr-images
+  cancel-in-progress: false
+
+env:
+  BUCKET: factoreye-backup
+  IMAGES_PREFIX: images
+  DOMAIN: factoreye.hide23.link   # フロントに焼き込む API の URL（本番と同じ）
+
+jobs:
+  publish:
+    # 鍵が登録されていないフォーク等では何もしない
+    if: github.repository == 'hide23link/factoreye'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.DR_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DR_R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.DR_R2_ENDPOINT }}
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required   # R2 は新しいチェックサムの方式に対応していない
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 版と、同じ版が置いてあるか
+        id: version
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA::12}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          old=""
+          if aws s3 cp "s3://$BUCKET/$IMAGES_PREFIX/latest.json" old.json --no-progress >/dev/null 2>&1; then
+            old=$(python3 -c "import json;print(json.load(open('old.json'))['sha'])")
+          fi
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          if [ "$old" = "$sha" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"; echo "同じ版（$sha）が R2 にある。何もしない"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"; echo "版: $sha（R2 の今の版: ${old:-なし}）"
+          fi
+
+      - name: イメージを作る（amd64。本番と同じ引数）
+        if: steps.version.outputs.skip == '0'
+        run: |
+          set -euo pipefail
+          docker build -q -t fe-backend:dr backend >/dev/null
+          # フロントは、動作モードと API の URL がビルド時に焼き込まれる。本番（docker-compose.cloud.yml）と同じにする（無いと自己ホスト版の画面になる）
+          docker build -q -t fe-frontend:dr --build-arg VITE_AUTH_MODE=multi_tenant --build-arg "VITE_API_URL=https://$DOMAIN" frontend >/dev/null
+          # 控えは本番の WAL から復元するので、本番と同じ WAL-G 入りの PostgreSQL が必須
+          docker build -q -t factoreye-postgres:15 infra/cloud/postgres >/dev/null
+
+      - name: Alembic の版とフロントの主バンドル名を調べる
+        if: steps.version.outputs.skip == '0'
+        id: meta
+        run: |
+          set -euo pipefail
+          hist=$(docker run --rm --entrypoint alembic fe-backend:dr history)
+          head=$(docker run --rm --entrypoint alembic fe-backend:dr heads | grep -oE '^[0-9a-z]{12}' | head -1)
+          [ -n "$head" ] || { echo "Alembic の head を取得できません"; exit 1; }
+          revs=$(echo "$hist" | grep -oE '(^|-> )[0-9a-z]{12}' | grep -oE '[0-9a-z]{12}' | sort -u | tr '\n' ' ')
+          echo "$revs" | grep -q "$head" || { echo "履歴に head が含まれません"; exit 1; }
+          # 本番の画面の同じ名前と比べて、DR コンソールが版ずれを警告する
+          asset=$(docker run --rm --entrypoint sh fe-frontend:dr -c 'grep -oE "/assets/index-[A-Za-z0-9_-]+\.js" /usr/share/nginx/html/index.html | head -1')
+          { echo "head=$head"; echo "revs=$revs"; echo "asset=$asset"; } >> "$GITHUB_OUTPUT"
+          echo "Alembic head: $head（リビジョン $(echo "$revs" | wc -w) 個）、フロントの主バンドル: $asset"
+
+      - name: 保存・署名する
+        if: steps.version.outputs.skip == '0'
+        env:
+          SIGNING_KEY: ${{ secrets.DR_SIGNING_KEY }}
+          SIGNING_PUBKEY: ${{ vars.DR_SIGNING_PUBKEY }}
+          SHA: ${{ steps.version.outputs.sha }}
+          HEAD_REV: ${{ steps.meta.outputs.head }}
+          REVS: ${{ steps.meta.outputs.revs }}
+          ASSET: ${{ steps.meta.outputs.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          docker save fe-backend:dr fe-frontend:dr factoreye-postgres:15 | gzip -6 > out/images.tar.gz
+          sum=$(sha256sum out/images.tar.gz | awk '{print $1}'); size=$(stat -c%s out/images.tar.gz)
+          echo "$sum  images.tar.gz" > out/images.tar.gz.sha256
+          python3 - "$SHA" "$HEAD_REV" "$REVS" "$sum" "$size" "$IMAGES_PREFIX" "$ASSET" > out/latest.json <<'PY'
+          import json,sys,datetime
+          sha,head,revs,sum_,size,ipfx,fasset=sys.argv[1:8]
+          print(json.dumps({"sha":sha,"alembic_head":head,"alembic_revisions":revs.split(),"file":f"{ipfx}/{sha}/images.tar.gz","sha256":sum_,"size":int(size),
+            "frontend_asset":fasset,"built_at":datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},ensure_ascii=False,sort_keys=True))
+          PY
+          # 秘密鍵は、権限 600 の一時ファイルにだけ書き、使ったらすぐ消す
+          umask 077; printf '%s\n' "$SIGNING_KEY" > key.pem; printf '%s\n' "$SIGNING_PUBKEY" > pub.pem
+          openssl dgst -sha256 -sign key.pem -out out/latest.json.sig out/latest.json; rm -f key.pem
+          openssl dgst -sha256 -verify pub.pem -signature out/latest.json.sig out/latest.json >/dev/null \
+            || { echo "署名が公開鍵（DR_SIGNING_PUBKEY）で確かめられない（鍵の組が違う）"; exit 1; }
+          echo "サイズ $(( size / 1048576 )) MB、sha256 ${sum:0:12}…"
+
+      - name: R2 に置き、古い版を消す
+        if: steps.version.outputs.skip == '0'
+        env:
+          SHA: ${{ steps.version.outputs.sha }}
+          OLD: ${{ steps.version.outputs.old }}
+        run: |
+          set -euo pipefail
+          aws s3 cp out/images.tar.gz "s3://$BUCKET/$IMAGES_PREFIX/$SHA/images.tar.gz" --no-progress >/dev/null
+          aws s3 cp out/images.tar.gz.sha256 "s3://$BUCKET/$IMAGES_PREFIX/$SHA/images.tar.gz.sha256" --no-progress >/dev/null
+          # 置く順番: 本体 → latest.json → 署名。控えは署名が確かめられたものだけを使うので、途中の状態を見ても壊れない
+          aws s3 cp out/latest.json "s3://$BUCKET/$IMAGES_PREFIX/latest.json" --no-progress >/dev/null
+          aws s3 cp out/latest.json.sig "s3://$BUCKET/$IMAGES_PREFIX/latest.json.sig" --no-progress >/dev/null
+          # 今の版と 1 つ前の版を残す（1 つ前は、起動中の控えが読んでいるかもしれない）
+          for d in $(aws s3 ls "s3://$BUCKET/$IMAGES_PREFIX/" | awk '$1=="PRE"{print $2}' | tr -d '/'); do
+            if [ "$d" != "$SHA" ] && [ "$d" != "$OLD" ]; then aws s3 rm "s3://$BUCKET/$IMAGES_PREFIX/$d/" --recursive >/dev/null; echo "古い版を消した: $d"; fi
+          done
+          echo "完了: $IMAGES_PREFIX/latest.json（版 $SHA）"
