@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# コミット前に、ステージした差分に秘密値（キー・トークン・秘密鍵など）がないか検査する。
+# 有効にする（clone したあとに 1 回）: git config core.hooksPath .githooks
+# gitleaks が無いときは警告だけ出して通す（CI の secret-scan が最後の確認）。
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "警告: gitleaks が無いので秘密値の検査を省きました（brew install gitleaks）" >&2
+  exit 0
+fi
+exec gitleaks git --pre-commit --staged --redact --no-banner --config "$(git rev-parse --show-toplevel)/.gitleaks.toml"
