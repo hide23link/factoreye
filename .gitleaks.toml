@@ -1,0 +1,12 @@
+# gitleaks の設定（コミット前の検査 .githooks/pre-commit と、CI の .github/workflows/secret-scan.yml が使う）。
+# 標準の規則に、テスト用のダミー値だけを例外として足す。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "テストの中のダミー値"
+paths = [
+  '''backend/tests/test_migrations\.py''',
+  '''tools/recovery/tests/test_compose\.py''',
+]

@@ -17,6 +17,7 @@
 - Backend は型ヒント必須で `mypy --strict` を通す。Frontend は `strict: true` で `any` を使わない
 - コメントには、コードから読み取れない「なぜ」を書く
 - DB スキーマの変更は Alembic マイグレーションで行い、破壊的変更は PR に明記する
+- 秘密値（キー・トークン・パスワード・秘密鍵）はコミットしない。clone したあとに `git config core.hooksPath .githooks` を 1 回実行すると、コミット前に [gitleaks](https://github.com/gitleaks/gitleaks) が検査する（`brew install gitleaks` など。CI の secret-scan も同じ設定 `.gitleaks.toml` で検査する）。サンプルの値は `change-this-...` や `<説明>` のような仮の文字にする
 - 依存ライブラリは、再配布できるライセンス（MIT / Apache 2.0 / BSD など。GPL 系は不可）のものだけ。PR にライブラリ名とライセンスを書く
 
 バージョンは [Semantic Versioning](https://semver.org/) に従います。
