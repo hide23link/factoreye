@@ -41,7 +41,7 @@ async def auth_client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_register_success(auth_client: httpx.AsyncClient) -> None:
     resp = await auth_client.post("/api/auth/register", json={
-        "email": "tanaka@example.com",
+        "email": "user1@example.com",
         "password": "password123",
         "workspaceName": "田中工場",
     })
