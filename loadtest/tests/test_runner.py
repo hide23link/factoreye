@@ -153,7 +153,7 @@ def test_cleanup_deletes_only_load_test_users() -> None:
                 200,
                 json=[
                     {"id": "u-lt", "email": "lt-1a2b3c4d-001@example.com"},
-                    {"id": "u-other", "email": "tanaka@example.com"},
+                    {"id": "u-other", "email": "user1@example.com"},
                     {"id": "u-lookalike", "email": "lt-xyz@example.com"},
                 ],
             )

@@ -203,12 +203,12 @@ async def test_login_is_rate_limited_when_enabled(api: httpx.AsyncClient) -> Non
 
 async def test_list_users_shows_sensor_and_reading_counts(api: httpx.AsyncClient) -> None:
     headers = await _admin_login(api)
-    await _register(api, "tanaka@example.com", "田中工場")
-    await _add_sensor_with_readings("tanaka@example.com", n_readings=3)
+    await _register(api, "user1@example.com", "田中工場")
+    await _add_sensor_with_readings("user1@example.com", n_readings=3)
 
     resp = await api.get("/api/admin/users", headers=headers)
     assert resp.status_code == 200
-    row = next(u for u in resp.json() if u["email"] == "tanaka@example.com")
+    row = next(u for u in resp.json() if u["email"] == "user1@example.com")
     assert row["workspaceName"] == "田中工場"
     assert row["plan"] == "free"
     assert row["sensorCount"] == 1
