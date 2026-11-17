@@ -36,6 +36,10 @@ function toLocalInput(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ボタンで出す、よく使う期間（PRESETS のキー）と、ボタンの文字
+const QUICK_PRESETS = ["15m", "1h", "6h", "24h", "7d"];
+const QUICK_LABELS: Record<string, string> = { "15m": "15M", "1h": "1H", "6h": "6H", "24h": "24H", "7d": "7D" };
+
 /** 直近モードの幅に合うプリセットのキー。合わなければ null（固定や、プリセット外の幅） */
 function presetKeyOf(range: TimeRange): string | null {
   if (range.mode !== "relative") return null;
@@ -129,6 +133,28 @@ export function TimeRangeControls() {
       >
         ＋
       </button>
+      </span>
+
+      {/* よく使う期間は、ボタンで 1 回で選べる（操作室の期間切り替えと同じ）。ほかの期間は、右の選択で */}
+      <span role="group" aria-label="よく使う表示期間" className="inline-flex overflow-hidden rounded border border-gray-300">
+        {QUICK_PRESETS.filter((key) => (PRESETS.find((p) => p.key === key)?.durationMs ?? Infinity) <= maxMs).map((key) => {
+          const preset = PRESETS.find((p) => p.key === key);
+          if (!preset) return null;
+          const active = visiblePresetKey === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setRange({ mode: "relative", durationMs: preset.durationMs })}
+              className={`min-h-10 border-r border-gray-300 px-2.5 font-num text-xs last:border-r-0 sm:min-h-0 sm:py-1 ${
+                active ? "bg-blue-50 font-bold text-blue-700 shadow-[inset_0_-2px_0_rgb(var(--blue-600))]" : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              {QUICK_LABELS[key]}
+            </button>
+          );
+        })}
       </span>
 
       <span className="inline-block">

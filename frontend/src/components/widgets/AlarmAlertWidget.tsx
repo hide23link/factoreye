@@ -13,6 +13,8 @@ import { ErrorNotice } from "../ErrorNotice";
 
 /** 一覧に出す件数の上限（状態ごと）。新しい順に取る。全件は取らない（応答が大きくなり、サーバーの負荷になるため）。 */
 const ALERT_LIMIT = 100;
+// 解消済みに出す件数の上限
+const RESOLVED_LIMIT = 6;
 
 /** アラームの一覧ウィジェット。センサーの設定は必要ない（全体のアラームを出す）。 */
 export function AlarmAlertWidget() {
@@ -30,6 +32,8 @@ export function AlarmAlertWidget() {
     isError: ackedError,
     refetch: refetchAcked,
   } = useAlarms("acknowledged", ALERT_LIMIT);
+  // 解消済みは参考の表示なので、取れなくても気にしない（isError は見ない）
+  const { data: resolvedData } = useAlarms("resolved", RESOLVED_LIMIT);
   const { data: sensors } = useSensors();
   const queryClient = useQueryClient();
 
@@ -59,54 +63,50 @@ export function AlarmAlertWidget() {
 
   // 発生中を先に、確認済みを後に並べる
   const alarms = [...activeData.alarms, ...ackedData.alarms];
-
-  if (alarms.length === 0) {
-    return <p className="text-sm text-green-600">現在アラームはありません</p>;
-  }
+  // 解消済み（直近 24 時間）。取れなくても、発生中の一覧は出す（失敗は黙って省く）
+  const resolved = (resolvedData?.alarms ?? []).filter((alarm) => alarm.status === "resolved" && isWithinDay(alarm.resolvedAt ?? alarm.triggeredAt));
 
   return (
-    <div className="flex h-full flex-col gap-2 overflow-y-auto">
+    <div className="flex h-full flex-col overflow-y-auto text-[13px]">
       {ackError && (
-        <p role="alert" className="text-xs text-red-600">
+        <p role="alert" className="px-2 py-1 text-xs text-red-600">
           {ackError}
         </p>
       )}
+      {alarms.length === 0 && <p className="px-2 py-2 text-sm" style={{ color: "var(--fe-ok)" }}>現在アラームはありません</p>}
       {alarms.map((alarm) => {
         const sensor = sensors?.find((s) => s.id === alarm.sensorId);
         const isCritical = alarm.severity === "critical";
         const isAcknowledged = alarm.status === "acknowledged";
+        const color = isCritical ? "var(--fe-red)" : "var(--fe-amb)";
         return (
           <div
             key={alarm.id}
-            className={
-              isCritical
-                ? "flex items-center justify-between rounded border border-red-200 bg-red-50 px-2 py-1.5 text-sm"
-                : "flex items-center justify-between rounded border border-yellow-200 bg-yellow-50 px-2 py-1.5 text-sm"
-            }
+            className="flex items-start gap-2.5 border-b px-2.5 py-2"
+            style={{ borderColor: "var(--fe-line)", background: isCritical && !isAcknowledged ? "var(--fe-red-bg)" : undefined }}
           >
-            <div>
-              <p className={isCritical ? "font-medium text-red-800" : "font-medium text-yellow-800"}>
-                {isCritical ? "🚨" : "⚠️"} {sensor?.name ?? "センサー"}
+            {/* 印は色だけに頼らない: ▲＝重故障、●＝軽故障 */}
+            <span className="font-num font-bold" style={{ color }} aria-hidden="true">
+              {isCritical ? "▲" : "●"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-bold" style={{ color }}>
+                {sensor?.name ?? "センサー"}
               </p>
-              <p className={isCritical ? "text-xs text-red-600" : "text-xs text-yellow-700"}>
-                値: {alarm.value} ({alarm.thresholdBreached === "max" ? "上限超過" : "下限未達"})
+              <p className="font-num text-[11px] text-gray-500">
+                {formatAlarmTime(alarm.triggeredAt)}&emsp;値: {alarm.value} ({alarm.thresholdBreached === "max" ? "上限超過" : "下限未達"})
                 {isAcknowledged && "・確認済み（対応中）"}
               </p>
             </div>
             {isAcknowledged ? (
-              <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-                確認済み
-              </span>
+              <span className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500">確認済み</span>
             ) : (
               <button
                 type="button"
                 onClick={() => ackMutation.mutate(alarm.id)}
                 disabled={ackMutation.isPending}
-                className={
-                  isCritical
-                    ? "rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-50"
-                    : "rounded bg-yellow-600 px-2 py-1 text-xs text-white hover:bg-yellow-700 disabled:opacity-50"
-                }
+                className="rounded border px-2 py-1 text-xs font-bold disabled:opacity-50"
+                style={{ borderColor: color, color }}
               >
                 確認
               </button>
@@ -114,6 +114,44 @@ export function AlarmAlertWidget() {
           </div>
         );
       })}
+      {resolved.length > 0 && (
+        <>
+          <p className="border-b px-2.5 py-1.5 text-[11px] font-bold tracking-wider text-gray-500" style={{ borderColor: "var(--fe-line)" }}>
+            解消済み（24 時間）
+          </p>
+          {resolved.slice(0, RESOLVED_LIMIT).map((alarm) => {
+            const sensor = sensors?.find((s) => s.id === alarm.sensorId);
+            return (
+              <div key={alarm.id} className="flex items-start gap-2.5 border-b px-2.5 py-1.5 text-gray-500" style={{ borderColor: "var(--fe-line)" }}>
+                <span className="font-num" aria-hidden="true">
+                  –
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">
+                    {sensor?.name ?? "センサー"} {alarm.thresholdBreached === "max" ? "上限超過" : "下限未達"}
+                  </p>
+                  <p className="font-num text-[11px]">
+                    {formatAlarmTime(alarm.triggeredAt)} — {formatAlarmTime(alarm.resolvedAt ?? alarm.triggeredAt)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
+}
+
+/** 24 時間以内か */
+function isWithinDay(iso: string): boolean {
+  return Date.now() - new Date(iso).getTime() <= 24 * 3_600_000;
+}
+
+/** 時刻の文字（今日なら時:分、それ以外は月/日 時:分。日本時間） */
+function formatAlarmTime(iso: string): string {
+  const date = new Date(iso);
+  const hhmm = date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const sameDay = new Date().toDateString() === date.toDateString();
+  return sameDay ? hhmm : `${date.getMonth() + 1}/${date.getDate()} ${hhmm}`;
 }

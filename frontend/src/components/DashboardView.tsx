@@ -31,6 +31,7 @@ import { useKioskStore } from "../store/useKioskStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Widget } from "../types";
+import { narrowHeightPx, widgetsInReadingOrder } from "../lib/narrow-layout";
 import { DropSurface } from "./editor/DropSurface";
 import { EditorShelf } from "./editor/EditorShelf";
 import { EditorToast } from "./editor/EditorToast";
@@ -251,8 +252,8 @@ function LoadedDashboard({
   const grid = isNarrow ? (
     // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
     <div className="flex flex-col gap-3">
-      {dashboard.widgets.map((widget) => (
-        <div key={widget.id} className="h-80">
+      {widgetsInReadingOrder(dashboard.widgets).map((widget) => (
+        <div key={widget.id} style={{ height: narrowHeightPx(widget) }}>
           <WidgetCard widget={widget} dashboard={dashboard} />
         </div>
       ))}

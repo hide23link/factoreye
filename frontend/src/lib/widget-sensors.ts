@@ -59,6 +59,8 @@ export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): 
       return { ok: true, sensorId: sensor.id, config: widget.config, message: `数値を「${sensor.name}」に切り替えました` };
     case "Gauge":
       return { ok: true, sensorId: sensor.id, config: widget.config, message: `ゲージを「${sensor.name}」に切り替えました` };
+    case "TapeGauge":
+      return { ok: true, sensorId: sensor.id, config: widget.config, message: `計器を「${sensor.name}」に切り替えました` };
     case "ProductionStatus":
       return { ok: true, sensorId: sensor.id, config: widget.config, message: `稼働ステータスを「${sensor.name}」に切り替えました` };
     case "ProductionPlan": {
@@ -79,5 +81,5 @@ export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): 
 
 /** このウィジェットにセンサーを割り当てられるか（ドラッグ中の見た目の判定に使う） */
 export function acceptsSensor(widget: Pick<Widget, "type">): boolean {
-  return widget.type !== "AlarmAlert";
+  return widget.type !== "AlarmAlert" && widget.type !== "DeviceTree" && widget.type !== "FloorPlan";
 }

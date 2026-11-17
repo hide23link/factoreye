@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../test/test-utils";
 import type { Alarm, Sensor } from "../types";
@@ -8,6 +8,8 @@ vi.mock("../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchLatestReadings: vi.fn(),
   fetchAlarms: vi.fn(),
+  fetchDashboards: vi.fn(),
+  fetchDashboard: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -29,6 +31,10 @@ function sensor(id: string, name: string, extra: Partial<Sensor> = {}): Sensor {
     ...extra,
   };
 }
+
+beforeEach(() => {
+  vi.mocked(api.fetchDashboards).mockResolvedValue([]);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
