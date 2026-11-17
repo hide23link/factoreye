@@ -14,6 +14,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@fontsource/b612-mono": "5.3.0",
     "@tanstack/react-query": "^5.59.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

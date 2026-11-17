@@ -258,15 +258,15 @@ function HourlyChart({ hours }: { hours: HourRow[] }) {
               const x = i * slot + slot * 0.15;
               const barWidth = slot * 0.7;
               const label = (
-                <text x={x + barWidth / 2} y={plotHeight + 12} textAnchor="middle" fontSize={10} fill="#6b7280">
+                <text x={x + barWidth / 2} y={plotHeight + 12} textAnchor="middle" fontSize={10} fill="var(--fe-mut)">
                   {h.hour}
                 </text>
               );
               if (h.state === "break") {
                 return (
                   <g key={h.hour}>
-                    <rect x={x} y={plotHeight - 14} width={barWidth} height={14} rx={2} fill="#e5e7eb" />
-                    <text x={x + barWidth / 2} y={plotHeight - 3} textAnchor="middle" fontSize={9} fill="#6b7280">
+                    <rect x={x} y={plotHeight - 14} width={barWidth} height={14} rx={2} fill="rgb(var(--gray-200))" />
+                    <text x={x + barWidth / 2} y={plotHeight - 3} textAnchor="middle" fontSize={9} fill="var(--fe-mut)">
                       休憩
                     </text>
                     {label}
@@ -286,7 +286,7 @@ function HourlyChart({ hours }: { hours: HourRow[] }) {
                       width={barWidth}
                       height={plotHeight - actualY}
                       rx={2}
-                      fill={behind ? "#d97706" : "#2563eb"}
+                      fill={behind ? "var(--fe-amb)" : "rgb(var(--blue-600))"}
                       opacity={h.state === "now" ? 0.55 : 1}
                     />
                   )}
@@ -297,7 +297,7 @@ function HourlyChart({ hours }: { hours: HourRow[] }) {
                     height={plotHeight - planY}
                     rx={2}
                     fill="none"
-                    stroke="#111827"
+                    stroke="var(--fe-ink)"
                     strokeOpacity={0.55}
                     strokeDasharray={h.state === "future" ? "3 3" : undefined}
                   />

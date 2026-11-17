@@ -142,14 +142,14 @@ function TimeTrack({ pickedMinutes, onPick }: { pickedMinutes: number; onPick: (
               x2={(240 * hour) / 24}
               y1={hour % 6 === 0 ? 4 : 26}
               y2={40}
-              stroke="#e5e7eb"
+              stroke="rgb(var(--gray-200))"
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
             />
           ))}
         </svg>
         <div
-          className="absolute -bottom-px -top-px -ml-[1.5px] w-[3px] bg-blue-600 shadow-[0_0_0_3px_#dbeafe]"
+          className="absolute -bottom-px -top-px -ml-[1.5px] w-[3px] bg-blue-600 shadow-[0_0_0_3px_rgb(var(--blue-100))]"
           style={{ left: `${(pickedMinutes / (24 * 60)) * 100}%` }}
         />
       </div>

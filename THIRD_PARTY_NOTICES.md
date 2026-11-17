@@ -7,6 +7,7 @@ FactorEye 本体は [MIT License](LICENSE) です。次のソフトウェアを�
 
 | パッケージ | 版 | ライセンス |
 |---|---|---|
+| @fontsource/b612-mono（字体 B612 Mono） | 5.3.0 | OFL-1.1（SIL Open Font License） |
 | @tanstack/react-query | 5.104.0 | MIT |
 | react | 18.3.1 | MIT |
 | react-dom | 18.3.1 | MIT |

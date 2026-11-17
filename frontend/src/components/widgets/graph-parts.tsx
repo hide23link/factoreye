@@ -32,10 +32,10 @@ export interface LinkGraphView {
 /** リンクの画面でタップした時刻の、縦の点線。yAxisId は、縦軸が左右 2 つのときに載せる軸 */
 export function renderCursorLine(cursorTime: number | null, yAxisId?: string) {
   if (cursorTime === null) return null;
-  return <ReferenceLine key="cursor" x={cursorTime} yAxisId={yAxisId} stroke="#6b7280" strokeDasharray="3 3" ifOverflow="hidden" />;
+  return <ReferenceLine key="cursor" x={cursorTime} yAxisId={yAxisId} stroke="var(--fe-mut)" strokeDasharray="3 3" ifOverflow="hidden" />;
 }
 
-const THRESHOLD_COLOR: Record<ThresholdLine["severity"], string> = { warning: "#d97706", critical: "#dc2626" };
+const THRESHOLD_COLOR: Record<ThresholdLine["severity"], string> = { warning: "var(--fe-amb)", critical: "var(--fe-red)" };
 
 /** しきい値の線（軽故障は橙、重故障は赤の破線）。recharts のグラフの子として並べる */
 export function renderThresholdLines(lines: ThresholdLine[]) {
