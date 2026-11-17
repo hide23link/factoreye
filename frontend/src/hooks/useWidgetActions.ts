@@ -369,7 +369,9 @@ export function useWidgetActions(dashboard: DashboardDetail) {
       const selectedId = useEditorStore.getState().selectedWidgetId;
       const selected = currentWidgets().find((w) => w.id === selectedId);
       const kind = guessSensorKind(sensor);
-      const isGraph = selected?.type === "SensorGraph" || selected?.type === "MultiSensorComparison";
+      // 選んでいるのが線を重ねられるウィジェット（グラフ・計器グラフ）なら、新しく作らずに足す
+      const isGraph =
+        selected?.type === "SensorGraph" || selected?.type === "MultiSensorComparison" || selected?.type === "TrendStack";
       if (!position && selected && isGraph && kind !== "state") {
         await doAssign(selected.id, sensor, "add");
         return;

@@ -154,7 +154,9 @@ export type WidgetType =
   // 生産管理（1日の目標に対する進み具合）。稼働ステータス（ProductionStatus）とは別の種類
   | "ProductionPlan"
   // 達成ストリップ（一定の間隔ごとに、目標を満たしたかを緑・赤の帯で見せる。受信の確認と、生産の目標に使う）
-  | "TargetStrip";
+  | "TargetStrip"
+  // 計器グラフ（1 センサー 1 行で縦に並べ、目盛りの数字・しきい値・最高・最低・今の値をきちんと読むグラフ）
+  | "TrendStack";
 
 /** ウィジェットの表示設定（色・Y 軸の範囲など）。 */
 export interface WidgetConfig {

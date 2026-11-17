@@ -136,6 +136,8 @@ function TypeSettings({ widget, actions }: SectionProps) {
       return <ProductionPlanSettings widget={widget} actions={actions} />;
     case "TargetStrip":
       return <TargetStripSettings widget={widget} actions={actions} />;
+    case "TrendStack":
+      return <TrendStackSettings widget={widget} actions={actions} />;
     case "AlarmAlert":
       return (
         <Section title="表示するアラーム">
@@ -736,6 +738,46 @@ function ProductionPlanSettings({ widget, actions }: SectionProps) {
         <Toggle label="時間別の実績グラフ" checked={config.showHourly ?? true} onChange={(v) => void changeConfig(actions, widget, { showHourly: v })} />
         <Toggle label="終業時の見込み" checked={config.showForecast ?? true} onChange={(v) => void changeConfig(actions, widget, { showForecast: v })} />
         <Toggle label="稼働率と停止時間" checked={config.showUptime ?? true} onChange={(v) => void changeConfig(actions, widget, { showUptime: v })} />
+      </Section>
+    </>
+  );
+}
+
+/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）と、値の小数の桁（空なら目盛りの間隔から自動）。 */
+function TrendStackSettings({ widget, actions }: SectionProps) {
+  const ids = graphSensorIds(widget);
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+    });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+
+  return (
+    <>
+      <Section title="センサー（複数OK）" note="1 センサーが 1 行になります。上から順に並びます">
+        <SensorField
+          sensorIds={ids}
+          multiple
+          suited="measure"
+          onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
+          onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
+          onRemove={removeAt}
+          onMove={moveAt}
+        />
+      </Section>
+      <Section title="小数点以下" note="空欄なら、目盛りの間隔に合わせて自動（例: 2 ごと → 1 桁）">
+        <NumberField
+          label="小数点以下の桁数"
+          value={widget.config.decimals ?? null}
+          min={0}
+          max={6}
+          step={1}
+          unit="桁"
+          onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? undefined })}
+        />
       </Section>
     </>
   );

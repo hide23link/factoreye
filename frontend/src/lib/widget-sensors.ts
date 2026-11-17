@@ -21,6 +21,16 @@ export type Assignment =
 
 export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): Assignment {
   switch (widget.type) {
+    case "TrendStack": {
+      // 行を足す（すでにあれば何もしない。「入れ替え」はそのセンサーだけにする）
+      const ids = graphSensorIds(widget);
+      if (mode === "add" && ids.includes(sensor.id)) {
+        return { ok: false, message: `「${sensor.name}」はすでにこの計器グラフにあります` };
+      }
+      const next = mode === "add" ? [...ids, sensor.id] : [sensor.id];
+      const patch = graphSensorPatch(widget, next, []);
+      return { ok: true, ...patch, message: mode === "add" ? `「${sensor.name}」を計器グラフに追加しました` : `計器グラフを「${sensor.name}」に入れ替えました` };
+    }
     case "TargetStrip": {
       // 複数のセンサーを並べる（グラフと同じ。すでにあれば何もしない。「入れ替え」はそのセンサーだけにする）
       const ids = graphSensorIds(widget);
