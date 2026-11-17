@@ -476,7 +476,7 @@ describe("SensorSettingsPanel", () => {
       expect(screen.getByText("該当するセンサーはありません。")).toBeInTheDocument();
     });
 
-    it("「詳細」を押すと、右に詳細パネル（しきい値の要約）が出る。もう一度押すか「閉じる」で閉じる", async () => {
+    it("「詳細」を押すと、その行の下に詳細パネル（しきい値の要約）が出る。もう一度押すか「閉じる」で閉じる", async () => {
       const user = userEvent.setup();
       setup();
       renderWithQueryClient(<SensorSettingsPanel />);

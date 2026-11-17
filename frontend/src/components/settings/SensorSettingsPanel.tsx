@@ -80,7 +80,7 @@ function LiveLine({ live, unit }: { live: SensorLive; unit: string }) {
   const text = { receiving: "受信中", stopped: "止まっている", never: "未受信" } as const;
   const valueColor = live.level === "critical" ? "var(--fe-red)" : live.level === "warning" ? "var(--fe-amb)" : undefined;
   return (
-    <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-num text-[11px] font-normal text-gray-500">
+    <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-num text-[11px] font-normal text-gray-600">
       <span style={{ color: colors[live.state] }} className="font-bold">
         {live.state === "receiving" ? "■" : live.state === "stopped" ? "●" : "○"} {text[live.state]}
       </span>
@@ -130,7 +130,7 @@ function SensorDetail({ sensor, live, onClose }: { sensor: Sensor; live?: Sensor
         <TrendStackWidget widget={widget} />
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-num text-xs">
-        <dt className="text-gray-500">軽故障（下限 / 上限）</dt>
+        <dt className="text-gray-600">軽故障（下限 / 上限）</dt>
         <dd>
           {sensor.thresholdMinWarning ?? "—"} / {sensor.thresholdMaxWarning ?? "—"} {sensor.unit}
         </dd>
@@ -344,7 +344,7 @@ function SensorRow({
               onClick={() => onSelect(sensor.id)}
               aria-pressed={selected}
               aria-label={`${sensor.name} の詳細`}
-              title="24 時間のグラフと詳細を右に出す"
+              title="24 時間のグラフと詳細を、この行の下に出す"
               className="ml-2 rounded border border-gray-300 px-1.5 py-px text-[11px] font-normal text-gray-500 hover:bg-gray-100"
             >
               詳細
@@ -608,7 +608,7 @@ export function SensorSettingsPanel() {
                     <Fragment key={group.key}>
                       {showGroups && (
                         <tr className="bg-gray-100">
-                          <td colSpan={8} className="px-2 py-1 text-[11px] font-bold tracking-wide text-gray-500">
+                          <td colSpan={8} className="px-2 py-1 text-[11px] font-bold tracking-wide text-gray-600">
                             {group.title}
                             {group.line ? ` · ${group.line}` : ""}
                             <span className="ml-2 font-num font-normal">{group.sensors.length} センサー</span>
