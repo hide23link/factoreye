@@ -182,4 +182,4 @@ export const useDownsampledReadings = (
 
 /** 全センサーの最新の測定値（全体監視の画面）。数が多くても 1 回の取得で済む。15 秒ごとに取り直す */
 export const useLatestReadings = () =>
-  useQuery({ queryKey: ["latest-readings"], queryFn: fetchLatestReadings, refetchInterval: 15000 });
+  useQuery({ queryKey: ["latest-readings"], queryFn: () => fetchLatestReadings(), refetchInterval: 15000 });

@@ -129,6 +129,7 @@ function TypeSettings({ widget, actions }: SectionProps) {
     case "StatValue":
       return <StatValueSettings widget={widget} actions={actions} />;
     case "Gauge":
+    case "TapeGauge":
       return <GaugeSettings widget={widget} actions={actions} />;
     case "ProductionStatus":
       return <ProductionStatusSettings widget={widget} actions={actions} />;
@@ -138,6 +139,18 @@ function TypeSettings({ widget, actions }: SectionProps) {
       return <TargetStripSettings widget={widget} actions={actions} />;
     case "TrendStack":
       return <TrendStackSettings widget={widget} actions={actions} />;
+    case "FloorPlan":
+      return (
+        <Section title="配置図の編集">
+          <p className="text-sm text-gray-500">部屋の枠と機器の札の置き方は、編集モードを終えたあと、配置図の左上の「配置を編集」から変えます（枠・札をドラッグ、保存で確定）。設定する項目はありません。</p>
+        </Section>
+      );
+    case "DeviceTree":
+      return (
+        <Section title="表示する機器">
+          <p className="text-sm text-gray-500">すべての機器（機器に属さないセンサーは 1 つずつ）を系統図で表示します。設定する項目はありません。</p>
+        </Section>
+      );
     case "AlarmAlert":
       return (
         <Section title="表示するアラーム">

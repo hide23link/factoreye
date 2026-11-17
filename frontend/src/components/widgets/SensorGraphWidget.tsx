@@ -26,7 +26,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -62,6 +62,7 @@ import {
   renderThresholdLines,
   type LinkGraphView,
 } from "./graph-parts";
+import { GraphValues } from "./GraphValues";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
 export { GRAPH_BUCKETS };
@@ -81,6 +82,8 @@ export function SensorGraphWidget({ widget, linkView }: { widget: Widget; linkVi
 
 function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: LinkGraphView }) {
   const { data: sensors } = useSensors();
+  // 右の「今の値」に使う、全センサーの最新の測定値（1 回の取得で、ほかのウィジェットと共有）
+  const { data: latest } = useLatestReadings();
   const dashboardRange = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
   // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
@@ -179,7 +182,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
           {sensor ? ` (${sensor.unit})` : ""}
         </p>
       )}
-      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
+      <div className="flex min-h-0 flex-1 gap-1.5">
+      <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
             <BarChart data={chartData} {...pointerHandlers}>
@@ -237,6 +241,14 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
             </LineChart>
           )}
         </ResponsiveContainer>
+      </div>
+      {/* 右に、今の値（リンクの画面では出さない） */}
+      {!linkView && (
+        <GraphValues
+          items={[{ name: seriesName, color, unit: sensor?.unit ?? "", value: latest?.readings.find((reading) => reading.sensorId === widget.sensorId)?.value }]}
+          decimals={widget.config.decimals}
+        />
+      )}
       </div>
     </div>
   );

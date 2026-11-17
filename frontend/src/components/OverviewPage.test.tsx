@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../test/test-utils";
 import type { Alarm, Sensor } from "../types";
@@ -8,6 +8,8 @@ vi.mock("../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchLatestReadings: vi.fn(),
   fetchAlarms: vi.fn(),
+  fetchDashboards: vi.fn(),
+  fetchDashboard: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -29,6 +31,10 @@ function sensor(id: string, name: string, extra: Partial<Sensor> = {}): Sensor {
     ...extra,
   };
 }
+
+beforeEach(() => {
+  vi.mocked(api.fetchDashboards).mockResolvedValue([]);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -82,5 +88,44 @@ describe("OverviewPage（全体監視）", () => {
     renderWithQueryClient(<OverviewPage />);
 
     expect(await screen.findByText(/センサーがまだありません/)).toBeInTheDocument();
+  });
+
+  it("配置図のウィジェットが無ければ、置き方を小さく案内する（大きな枠は出さない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("t", "温度", { unit: "℃" })]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [{ sensorId: "t", value: 20, recordedAt: new Date().toISOString() }], total: 1 });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+
+    renderWithQueryClient(<OverviewPage />);
+
+    expect(await screen.findByText(/「配置図」のウィジェットを置くと/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "配置図の枠" })).not.toBeInTheDocument();
+  });
+
+  it("どれかのダッシュボードに配置図のウィジェットがあれば、全部取れてから、その配置図を出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("t", "温度", { unit: "℃" })]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [{ sensorId: "t", value: 20, recordedAt: new Date().toISOString() }], total: 1 });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchDashboards).mockResolvedValue([
+      { id: "d1", name: "A", description: null, layoutConfig: {}, createdAt: "", updatedAt: "" },
+      { id: "d2", name: "B", description: null, layoutConfig: {}, createdAt: "", updatedAt: "" },
+    ]);
+    vi.mocked(api.fetchDashboard).mockImplementation((id: string) =>
+      Promise.resolve({
+        id,
+        name: id,
+        description: null,
+        layoutConfig: {},
+        createdAt: "",
+        updatedAt: "",
+        widgets:
+          id === "d2"
+            ? [{ id: "w1", dashboardId: "d2", sensorId: null, type: "FloorPlan" as const, gridColumn: 1, gridRow: 1, gridWidth: 8, gridHeight: 9, config: {}, createdAt: "", updatedAt: "" }]
+            : [],
+      }),
+    );
+
+    renderWithQueryClient(<OverviewPage />);
+
+    expect(await screen.findByRole("group", { name: "配置図" })).toBeInTheDocument();
   });
 });

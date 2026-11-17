@@ -50,6 +50,33 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     defaultConfig: { timeRangeHours: 1, decimals: 1 },
   },
   {
+    type: "TapeGauge",
+    label: "計器",
+    description: "今の値を四角の数字で出し、目盛りの帯で、しきい値までの余裕・1 時間の変化・15 分後の予測を見る",
+    width: 3,
+    height: 4,
+    suitedSensor: "measure",
+    defaultConfig: { decimals: 1 },
+  },
+  {
+    type: "FloorPlan",
+    label: "配置図",
+    description: "部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見る（管制塔のように）",
+    width: 8,
+    height: 9,
+    suitedSensor: null,
+    defaultConfig: {},
+  },
+  {
+    type: "DeviceTree",
+    label: "機器の系統",
+    description: "サーバーとつながる機器の受信の様子（最後の受信・注意・受信なし）を系統図で見る",
+    width: 12,
+    height: 6,
+    suitedSensor: null,
+    defaultConfig: {},
+  },
+  {
     type: "Gauge",
     label: "ゲージ",
     description: "範囲の中で、いまの値を針で見る。しきい値の色つき",
@@ -116,7 +143,7 @@ export function widgetLabel(type: WidgetType): string {
 export function widgetChoicesFor(kind: SensorKind): WidgetType[] {
   if (kind === "count") return ["ProductionPlan", "SensorGraph", "StatValue"];
   if (kind === "state") return ["ProductionStatus", "SensorGraph"];
-  return ["SensorGraph", "TrendStack", "StatValue", "Gauge"];
+  return ["SensorGraph", "TrendStack", "TapeGauge", "StatValue", "Gauge"];
 }
 
 /** センサーを置いたときに作るウィジェットの種類（計測値→グラフ、生産数→生産管理、稼働→稼働ステータス） */

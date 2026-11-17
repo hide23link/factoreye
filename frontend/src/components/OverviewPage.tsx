@@ -5,11 +5,15 @@
  *
  * 【誰が使うか】App.tsx が、メニューで「全体監視」を選んだときに出す。引数（props）はない。
  */
-import { useAlarms, useLatestReadings, useSensors } from "../hooks/queries";
+import { useQueries } from "@tanstack/react-query";
+
+import { useAlarms, useDashboards, useLatestReadings, useSensors } from "../hooks/queries";
+import { fetchDashboard } from "../lib/api";
 import { useNow } from "../hooks/useNow";
 import { buildStrips, countStates, formatAge, type Strip, type StripState } from "../lib/overview";
-import type { Alarm, Sensor } from "../types";
+import type { Alarm, Sensor, Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
+import { FloorPlanWidget } from "./widgets/FloorPlanWidget";
 
 // 記録に出す件数（新しい順）
 const LOG_LIMIT = 30;
@@ -21,8 +25,33 @@ const BAYS: { state: StripState; title: string; color: string }[] = [
   { state: "never", title: "未受信", color: "var(--fe-mut)" },
 ];
 
+/**
+ * 配置図のウィジェット（どれかのダッシュボードに置いたもの）。無ければ null。
+ * 配置は、ウィジェットの設定として保存されているので、ここでは、その最初の 1 つを探して出す。
+ * ダッシュボードの中身は、すでに開いて取っていれば、その取得を使う（キーが同じ）。ここでは取り直し続けない。
+ */
+function useFloorPlanWidget(): { widget: Widget | null; loading: boolean } {
+  const { data: dashboards } = useDashboards();
+  const details = useQueries({
+    queries: (dashboards ?? []).map((dashboard) => ({
+      queryKey: ["dashboard", dashboard.id],
+      queryFn: () => fetchDashboard(dashboard.id),
+      staleTime: 60_000,
+    })),
+  });
+  // すべての詳細が取れるまで、配置図を選ばない（1 つずつ取れるので、先に取れた後ろの配置図が採用され、のちに入れ替わるのを防ぐ）
+  const loading = dashboards === undefined || details.some((detail) => detail.isLoading);
+  if (loading) return { widget: null, loading: true };
+  for (const detail of details) {
+    const found = detail.data?.widgets.find((widget) => widget.type === "FloorPlan");
+    if (found) return { widget: found, loading: false };
+  }
+  return { widget: null, loading: false };
+}
+
 /** 全体監視の画面の本体 */
 export function OverviewPage() {
+  const { widget: floorPlan, loading: floorPlanLoading } = useFloorPlanWidget();
   const sensors = useSensors();
   const latest = useLatestReadings();
   const active = useAlarms("active", 200);
@@ -59,13 +88,28 @@ export function OverviewPage() {
           札 {strips.length}・センサー {sensors.data.filter((sensor) => sensor.enabled).length}
         </span>
       </div>
+      {!floorPlan && !floorPlanLoading && strips.length > 0 && (
+        <p className="text-xs text-gray-500">
+          ダッシュボードの編集で「配置図」のウィジェットを置くと、ここに配置図が出ます（部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見られます）。
+        </p>
+      )}
       {strips.length === 0 ? (
         <p className="rounded border border-gray-200 bg-white p-4 text-sm text-gray-500">
           センサーがまだありません。セットアップガイドから、最初のセンサーを登録してください。
         </p>
       ) : (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-          <section aria-label="機器の札" className="flex min-w-0 flex-[2] flex-col rounded border border-gray-200 bg-white">
+          {/* 左: 配置図（管制塔の画面のように、部屋の上に機器の札を置いたもの）。配置図が無いときは、場所を取らず、右だけにする */}
+          {floorPlan && (
+            <section aria-label="配置図の枠" className="flex min-h-[320px] min-w-0 flex-[3] flex-col rounded border border-gray-200 bg-white p-2.5 lg:h-[560px]">
+              <h2 className="mb-1 text-[11px] font-bold tracking-wider text-gray-500">配置図</h2>
+              {/* 別のダッシュボードの配置図に替わったときは、編集中の下書きを持ち越さない（key） */}
+              <FloorPlanWidget key={floorPlan.id} widget={floorPlan} />
+            </section>
+          )}
+          {/* 右: 機器の札と記録 */}
+          <div className="flex min-w-0 flex-[2] flex-col gap-3">
+          <section aria-label="機器の札" className="flex min-w-0 flex-col rounded border border-gray-200 bg-white">
             {BAYS.map((bay) => {
               const inBay = strips.filter((strip) => strip.state === bay.state);
               if (inBay.length === 0) return null;
@@ -75,7 +119,7 @@ export function OverviewPage() {
                     <span>{bay.title}</span>
                     <span className="font-num">{counts[bay.state]}</span>
                   </h2>
-                  <ul className="grid gap-1 xl:grid-cols-2">
+                  <ul className="grid gap-1 2xl:grid-cols-2">
                     {inBay.map((strip) => (
                       <li key={strip.key}>
                         <StripCard strip={strip} now={now} />
@@ -86,10 +130,11 @@ export function OverviewPage() {
               );
             })}
           </section>
-          <section aria-label="アラームの記録" className="flex min-w-0 flex-1 flex-col rounded border border-gray-200 bg-white">
+          <section aria-label="アラームの記録" className="flex min-w-0 flex-col rounded border border-gray-200 bg-white">
             <h2 className="border-b border-gray-200 px-3 py-2 text-[11px] font-bold tracking-wider text-gray-500">記録（アラームの新しい順）</h2>
             <AlarmLog alarms={recent.data?.alarms ?? []} sensorById={sensorById} />
           </section>
+          </div>
         </div>
       )}
     </div>

@@ -30,6 +30,9 @@ const StatValueWidget = lazyNamed(() => import("./widgets/StatValueWidget"), "St
 const GaugeWidget = lazyNamed(() => import("./widgets/GaugeWidget"), "GaugeWidget");
 const ProductionPlanWidget = lazyNamed(() => import("./widgets/ProductionPlanWidget"), "ProductionPlanWidget");
 const TargetStripWidget = lazyNamed(() => import("./widgets/TargetStripWidget"), "TargetStripWidget");
+const FloorPlanWidget = lazyNamed(() => import("./widgets/FloorPlanWidget"), "FloorPlanWidget");
+const DeviceTreeWidget = lazyNamed(() => import("./widgets/DeviceTreeWidget"), "DeviceTreeWidget");
+const TapeGaugeWidget = lazyNamed(() => import("./widgets/TapeGaugeWidget"), "TapeGaugeWidget");
 const TrendStackWidget = lazyNamed(() => import("./widgets/TrendStackWidget"), "TrendStackWidget");
 
 /** ウィジェットの種類（type）に応じて、中身の部品を切り替える。未知の種類は注意文を出す。 */
@@ -53,6 +56,12 @@ function WidgetBody({ widget }: { widget: Widget }) {
       return <TargetStripWidget widget={widget} />;
     case "TrendStack":
       return <TrendStackWidget widget={widget} />;
+    case "TapeGauge":
+      return <TapeGaugeWidget widget={widget} />;
+    case "DeviceTree":
+      return <DeviceTreeWidget />;
+    case "FloorPlan":
+      return <FloorPlanWidget widget={widget} />;
     default:
       return <p className="text-sm text-gray-500">未対応のウィジェットタイプ: {widget.type}</p>;
   }

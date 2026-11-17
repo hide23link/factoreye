@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { WIDGET_KINDS, widgetChoicesFor, widgetKind, widgetLabel } from "./widget-catalog";
 
 describe("widgetChoicesFor", () => {
-  it("計測値は グラフ（おすすめ）・計器グラフ・数値・ゲージ", () => {
-    expect(widgetChoicesFor("measure")).toEqual(["SensorGraph", "TrendStack", "StatValue", "Gauge"]);
+  it("計測値は グラフ（おすすめ）・計器グラフ・計器・数値・ゲージ", () => {
+    expect(widgetChoicesFor("measure")).toEqual(["SensorGraph", "TrendStack", "TapeGauge", "StatValue", "Gauge"]);
   });
   it("生産数は 生産管理（おすすめ）・グラフ・数値", () => {
     expect(widgetChoicesFor("count")).toEqual(["ProductionPlan", "SensorGraph", "StatValue"]);

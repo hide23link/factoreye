@@ -156,7 +156,26 @@ export type WidgetType =
   // 達成ストリップ（一定の間隔ごとに、目標を満たしたかを緑・赤の帯で見せる。受信の確認と、生産の目標に使う）
   | "TargetStrip"
   // 計器グラフ（1 センサー 1 行で縦に並べ、目盛りの数字・しきい値・最高・最低・今の値をきちんと読むグラフ）
-  | "TrendStack";
+  | "TrendStack"
+  // 計器（帯の目盛りと、今の値の印・しきい値・予測）
+  | "TapeGauge"
+  // 機器の系統図（サーバーとつながる機器の受信の様子）
+  | "DeviceTree"
+  // 配置図（部屋の枠の上に、機器の札を置いて、状態を見る）
+  | "FloorPlan";
+
+/** 配置図の部屋（枠）。位置と大きさは、配置図の全体に対する割合（0〜100） */
+export interface FloorRoom {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 配置図での機器の札の位置（配置図の全体に対する割合 0〜100）。キーは機器（または単独のセンサー）の札のキー */
+export type FloorPlacements = Record<string, { x: number; y: number }>;
 
 /** ウィジェットの表示設定（色・Y 軸の範囲など）。 */
 export interface WidgetConfig {
@@ -207,6 +226,9 @@ export interface WidgetConfig {
   axisUnits?: { left?: string; right?: string };
   // 全ウィジェット共通: 枠の上に出すタイトル。未指定・空欄なら出さない
   title?: string;
+  // 配置図用: 部屋の枠と、機器の札の位置
+  floorRooms?: FloorRoom[];
+  floorPlacements?: FloorPlacements;
   // グラフ用: 凡例に出す系列の名前（センサーID → 名前）。未指定はセンサーの名前
   seriesNames?: Record<string, string>;
   // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
