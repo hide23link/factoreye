@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { useUiStore } from "./store/useUiStore";
-import { renderWithQueryClient, screen } from "./test/test-utils";
+import { renderWithQueryClient, screen, within } from "./test/test-utils";
 import type { DashboardDetail, Widget } from "./types";
 
 vi.mock("./lib/api", () => ({
@@ -13,6 +13,7 @@ vi.mock("./lib/api", () => ({
   fetchSensorReadingsDownsampled: vi.fn(),
   createDashboard: vi.fn(),
   fetchMe: vi.fn(),
+  fetchAlarms: vi.fn(),
   logout: vi.fn(),
   refreshTokens: vi.fn(),
 }));
@@ -49,6 +50,7 @@ beforeEach(() => {
   vi.mocked(api.fetchDashboards).mockResolvedValue([dashboard]);
   vi.mocked(api.fetchSensors).mockResolvedValue([]);
   vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+  vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
 });
 
 afterEach(() => {
@@ -72,6 +74,16 @@ describe("App の画面の分け方", () => {
     expect(await screen.findByText("ダッシュボード一覧")).toBeInTheDocument();
     expect(screen.getByText("FactorEye")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "画面の切り替え" })).toBeInTheDocument();
+  });
+
+  it("左のメニューに全体監視があり、上の帯に警報・注意の表示灯を出す", async () => {
+    renderWithQueryClient(<App />);
+
+    const rail = await screen.findByRole("navigation", { name: "メインメニュー" });
+    expect(within(rail).getByRole("button", { name: "全体監視" })).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "ダッシュボード" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("button", { name: /警報 0 件/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /注意 0 件/ })).toBeInTheDocument();
   });
 
   it("画面表示モード（kiosk）は、前と同じくヘッダーと下のメニューを隠す", async () => {
