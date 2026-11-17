@@ -21,9 +21,21 @@ const LINE_COLOR: Record<StripState, string> = {
   never: "var(--fe-mut)",
 };
 
+/**
+ * 外側の枠は、読み込み中も常に出す（枠の幅を測り始めるのは最初の描画の後 1 回だけなので、枠がデータの到着後に現れると、
+ * 幅が 0 のままになり、列の数が枠の幅を無視して常に最大になってしまう）。
+ */
 export function DeviceTreeWidget() {
   const rootRef = useRef<HTMLDivElement>(null);
   const { width } = useElementSize(rootRef);
+  return (
+    <div ref={rootRef} className="flex h-full flex-col overflow-y-auto px-1 text-xs" role="group" aria-label="機器の系統図">
+      <DeviceTreeBody width={width} />
+    </div>
+  );
+}
+
+function DeviceTreeBody({ width }: { width: number }) {
   const sensors = useSensors();
   const latest = useLatestReadings();
   const active = useAlarms("active", 200);
@@ -50,7 +62,7 @@ export function DeviceTreeWidget() {
   if (strips.length === 0) return <p className="text-sm text-gray-500">センサーがまだありません</p>;
 
   return (
-    <div ref={rootRef} className="flex h-full flex-col overflow-y-auto px-1 text-xs" role="group" aria-label="機器の系統図">
+    <>
       <div className="mx-auto flex flex-col items-center rounded-sm border px-4 py-1.5" style={{ borderColor: "var(--fe-mut)", background: "var(--fe-panel)" }}>
         <span className="font-bold">サーバー（FactorEye）</span>
         <span className="font-num text-[11px] text-gray-500">
@@ -92,7 +104,7 @@ export function DeviceTreeWidget() {
           </ul>
         </div>
       ))}
-    </div>
+    </>
   );
 }
 

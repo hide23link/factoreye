@@ -114,4 +114,15 @@ describe("TimeRangeControls", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(useTimeRangeStore.getState().range.mode).toBe("absolute");
   });
+
+  it("よく使う期間のボタン（15M・1H・6H・24H・7D）で、その幅の直近モードになる。今の期間のボタンは押された状態", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+
+    await user.click(screen.getByRole("button", { name: "直近 6 時間" }));
+
+    expect(screen.getByRole("button", { name: "直近 6 時間" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "直近 1 時間" })).toHaveAttribute("aria-pressed", "false");
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 });
+  });
 });

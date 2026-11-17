@@ -11,7 +11,7 @@ import { useAlarms, useDashboards, useLatestReadings, useSensors } from "../hook
 import { fetchDashboard } from "../lib/api";
 import { useNow } from "../hooks/useNow";
 import { buildStrips, countStates, formatAge, type Strip, type StripState } from "../lib/overview";
-import type { Alarm, Sensor } from "../types";
+import type { Alarm, Sensor, Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
 import { FloorPlanWidget } from "./widgets/FloorPlanWidget";
 
@@ -30,7 +30,7 @@ const BAYS: { state: StripState; title: string; color: string }[] = [
  * 配置は、ウィジェットの設定として保存されているので、ここでは、その最初の 1 つを探して出す。
  * ダッシュボードの中身は、すでに開いて取っていれば、その取得を使う（キーが同じ）。ここでは取り直し続けない。
  */
-function useFloorPlanWidget() {
+function useFloorPlanWidget(): { widget: Widget | null; loading: boolean } {
   const { data: dashboards } = useDashboards();
   const details = useQueries({
     queries: (dashboards ?? []).map((dashboard) => ({
@@ -39,16 +39,19 @@ function useFloorPlanWidget() {
       staleTime: 60_000,
     })),
   });
+  // すべての詳細が取れるまで、配置図を選ばない（1 つずつ取れるので、先に取れた後ろの配置図が採用され、のちに入れ替わるのを防ぐ）
+  const loading = dashboards === undefined || details.some((detail) => detail.isLoading);
+  if (loading) return { widget: null, loading: true };
   for (const detail of details) {
     const found = detail.data?.widgets.find((widget) => widget.type === "FloorPlan");
-    if (found) return found;
+    if (found) return { widget: found, loading: false };
   }
-  return null;
+  return { widget: null, loading: false };
 }
 
 /** 全体監視の画面の本体 */
 export function OverviewPage() {
-  const floorPlan = useFloorPlanWidget();
+  const { widget: floorPlan, loading: floorPlanLoading } = useFloorPlanWidget();
   const sensors = useSensors();
   const latest = useLatestReadings();
   const active = useAlarms("active", 200);
@@ -85,23 +88,25 @@ export function OverviewPage() {
           札 {strips.length}・センサー {sensors.data.filter((sensor) => sensor.enabled).length}
         </span>
       </div>
+      {!floorPlan && !floorPlanLoading && strips.length > 0 && (
+        <p className="text-xs text-gray-500">
+          ダッシュボードの編集で「配置図」のウィジェットを置くと、ここに配置図が出ます（部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見られます）。
+        </p>
+      )}
       {strips.length === 0 ? (
         <p className="rounded border border-gray-200 bg-white p-4 text-sm text-gray-500">
           センサーがまだありません。セットアップガイドから、最初のセンサーを登録してください。
         </p>
       ) : (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-          {/* 左: 配置図（管制塔の画面のように、部屋の上に機器の札を置いたもの） */}
-          <section aria-label="配置図" className="flex min-h-[320px] min-w-0 flex-[3] flex-col rounded border border-gray-200 bg-white p-2.5 lg:h-[560px]">
-            <h2 className="mb-1 text-[11px] font-bold tracking-wider text-gray-500">配置図</h2>
-            {floorPlan ? (
-              <FloorPlanWidget widget={floorPlan} />
-            ) : (
-              <p className="text-sm text-gray-500">
-                ダッシュボードの編集で「配置図」のウィジェットを置くと、ここにも出ます。部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見られます。
-              </p>
-            )}
-          </section>
+          {/* 左: 配置図（管制塔の画面のように、部屋の上に機器の札を置いたもの）。配置図が無いときは、場所を取らず、右だけにする */}
+          {floorPlan && (
+            <section aria-label="配置図の枠" className="flex min-h-[320px] min-w-0 flex-[3] flex-col rounded border border-gray-200 bg-white p-2.5 lg:h-[560px]">
+              <h2 className="mb-1 text-[11px] font-bold tracking-wider text-gray-500">配置図</h2>
+              {/* 別のダッシュボードの配置図に替わったときは、編集中の下書きを持ち越さない（key） */}
+              <FloorPlanWidget key={floorPlan.id} widget={floorPlan} />
+            </section>
+          )}
           {/* 右: 機器の札と記録 */}
           <div className="flex min-w-0 flex-[2] flex-col gap-3">
           <section aria-label="機器の札" className="flex min-w-0 flex-col rounded border border-gray-200 bg-white">

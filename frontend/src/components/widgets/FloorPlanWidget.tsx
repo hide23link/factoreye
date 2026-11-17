@@ -20,7 +20,7 @@ import { updateWidget } from "../../lib/api";
 import { describeActionError } from "../../lib/errors";
 import { clampPoint, moveRoom, newRoom, readFloorPlan, resizeRoom, unplacedKeys } from "../../lib/floor-plan";
 import { buildStrips, formatAge, type Strip, type StripState } from "../../lib/overview";
-import type { FloorPlacements, FloorRoom, Widget } from "../../types";
+import type { DashboardDetail, FloorPlacements, FloorRoom, Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 
 const STATE_COLOR: Record<StripState, string> = {
@@ -66,9 +66,12 @@ export function FloorPlanWidget({ widget }: { widget: Widget }) {
   const save = useMutation({
     mutationFn: (plan: { rooms: FloorRoom[]; placements: FloorPlacements }) =>
       updateWidget(widget.id, { config: { ...widget.config, floorRooms: plan.rooms, floorPlacements: plan.placements } }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      // 下書きを消す前に、保存した内容を取得済みのダッシュボードに書く（取り直しを待つ間、古い配置に一瞬戻らないように）
+      queryClient.setQueryData<DashboardDetail>(["dashboard", widget.dashboardId], (old) =>
+        old ? { ...old, widgets: old.widgets.map((w) => (w.id === saved.id ? saved : w)) } : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ["dashboard", widget.dashboardId] });
-      void queryClient.invalidateQueries({ queryKey: ["floor-plan-widgets"] });
       setDraft(null);
       setSelectedRoom(null);
     },

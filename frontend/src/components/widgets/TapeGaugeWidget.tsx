@@ -21,6 +21,9 @@ import { ErrorNotice } from "../ErrorNotice";
 // 直近 1 時間の測定値を取る件数の上限（変化と予測に使う。新しい順）
 const TREND_READINGS = 200;
 
+// 最後の受信がこれより古いと「受信なし」とみなす（全体監視の札と同じ 15 分）
+const STALE_MS = 15 * 60_000;
+
 const SEVERITY_COLOR: Record<Severity, string> = { normal: "var(--fe-ink)", warning: "var(--fe-amb)", critical: "var(--fe-red)" };
 const ZONE_COLOR: Record<Severity, string> = { normal: "transparent", warning: "var(--fe-amb)", critical: "var(--fe-red)" };
 
@@ -44,6 +47,8 @@ export function TapeGaugeWidget({ widget }: { widget: Widget }) {
   const zones = gaugeZones(sensor, range);
   const severity = latest === undefined ? "normal" : classifySeverity(latest, sensor);
   const color = SEVERITY_COLOR[severity];
+  // 最後の受信が 15 分より古ければ「受信なし」（値は最後の値のまま出す）
+  const stale = data.readings[0] !== undefined && Date.now() - new Date(data.readings[0].recordedAt).getTime() > STALE_MS;
   const trend = latest === undefined ? null : hourlyTrend(data.readings);
   const predicted = latest === undefined ? null : predictedValue(latest, trend);
   const pointer = latest === undefined ? null : gaugeFraction(latest, range);
@@ -59,6 +64,7 @@ export function TapeGaugeWidget({ widget }: { widget: Widget }) {
         <span className="truncate text-xs font-bold" style={{ color: severity === "normal" ? "var(--fe-mut)" : color }} title={sensor.name}>
           {sensor.name}
           {severity === "critical" ? "　重故障のしきい値の外" : severity === "warning" ? "　軽故障のしきい値の外" : ""}
+          {stale ? "　受信なし" : ""}
         </span>
         <span className="font-num text-[11px] text-gray-500">{sensor.unit}</span>
       </div>

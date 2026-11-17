@@ -146,6 +146,7 @@ export function TimeRangeControls() {
               key={key}
               type="button"
               aria-pressed={active}
+              aria-label={preset.label}
               onClick={() => setRange({ mode: "relative", durationMs: preset.durationMs })}
               className={`min-h-10 border-r border-gray-300 px-2.5 font-num text-xs last:border-r-0 sm:min-h-0 sm:py-1 ${
                 active ? "bg-blue-50 font-bold text-blue-700 shadow-[inset_0_-2px_0_rgb(var(--blue-600))]" : "text-gray-600 hover:bg-gray-100"

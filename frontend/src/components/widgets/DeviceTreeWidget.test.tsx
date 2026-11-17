@@ -62,4 +62,13 @@ describe("DeviceTreeWidget（機器の系統）", () => {
     renderWithQueryClient(<DeviceTreeWidget />);
     expect(await screen.findByText("センサーがまだありません")).toBeInTheDocument();
   });
+
+  it("読み込み中も、外側の枠（幅を測る要素）を出す", () => {
+    vi.mocked(api.fetchSensors).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.fetchLatestReadings).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.fetchAlarms).mockReturnValue(new Promise(() => {}));
+    renderWithQueryClient(<DeviceTreeWidget />);
+    expect(screen.getByRole("group", { name: "機器の系統図" })).toBeInTheDocument();
+    expect(screen.getByText("読み込み中...")).toBeInTheDocument();
+  });
 });
