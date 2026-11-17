@@ -81,6 +81,7 @@ flowchart LR
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`） |
 | GET | `/api/sensors/{id}/readings/downsampled` | グラフ用の間引き（`buckets` 既定 500・上限 1000） |
 | GET | `/api/sensors/{id}/readings/aggregate` | 期間の合計と件数 |
+| GET | `/api/sensors/latest` | 全センサーの最新の測定値を 1 件ずつ（受信の無いセンサーは含めない。全体監視の画面が使う） |
 | GET | `/api/readings` | 全センサーの直近測定値 |
 | GET | `/api/alarms` | 一覧（`status` / `sensor_id` / `limit` / `offset`） |
 | GET / PATCH | `/api/alarms/{id}` `/ack` | 詳細・確認 |
@@ -220,6 +221,21 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 | `AlarmAlert` | 発生中・確認済みのアラーム（各 100 件まで）と確認ボタン |
 | `ProductionStatus` | 稼働 ON/OFF、直近 1 時間と本日の生産数、目標達成率 |
 | `TargetStrip` | 達成ストリップ（下記） |
+| `TrendStack` | 計器グラフ（下記） |
+
+**TrendStack**（計器グラフ）: 1 センサーを 1 行にして、時間の軸をそろえて縦に並べる。値をきちんと読むためのグラフ。
+- 行ごとに、切りのよい目盛りの数字と横線・しきい値の点線と数値・最高と最低（値と時刻。区間の max・min から）・平均・右端の今の値の札を出す
+- しきい値を超えた部分は、重故障＝赤、軽故障＝橙の線を重ねる。直近の表示で最後の受信が古い（区間 3 つ分、最短 10 分）と、今の値を「---」にして橙で「受信なし」
+- グラフに触れると、全行で同じ時刻の縦線と値を出す（カーソル）
+- センサーは `config.sensorIds`（先頭は `sensorId` にも入れる）。小数の桁は `config.decimals`（未指定は目盛りの間隔から自動）
+- 計算は `frontend/src/lib/trend-stack.ts`（線・目盛り・数値を同じ値から求める）
+
+### 画面の外枠と明るさ
+- 操作室の計器盤にならう。パソコンは左の縦のメニュー（ダッシュボード・全体監視・設定・セットアップガイド）、上の帯に「警報・注意」の表示灯（発生中で未確認のアラームの数）、接続状態（LIVE）、時計（日本時間）。スマホは下のメニュー
+- **全体監視**: 機器ごと（機器に属さないセンサーは 1 つずつ）の札を、警報・注意・正常・未受信の欄に並べ、アラームの記録を新しい順に出す。最新の値は `GET /api/sensors/latest` で 1 回で取る。受信が 15 分より古い札は「受信なし」で注意
+- **画面の明るさ**: 設定 › 表示 › 画面の明るさで、暗い（初期値）・明るい・端末に合わせる。この端末のブラウザ（`localStorage` の `factoreye.theme`）にだけ保存する
+- 色は CSS 変数（`frontend/src/theme.css`）。Tailwind の gray・blue・red などを変数に向け（`tailwind.config.js`）、`<html data-theme>` で切り替える。色の意味は両方で同じ（白／黒＝今の値、水色＝しきい値、桃＝目標、橙＝注意、赤＝警報）
+- 数字は B612 Mono（操作室の表示用に作られた等幅の字体。OFL-1.1。`@fontsource/b612-mono` で同梱し、外部から読み込まない）
 
 **TargetStrip**: センサーごとに 1 行。一定の間隔（1・5・10 分）を 1 マスにした帯。
 - `stripJudge: "count"`（既定）: マスの合計が目標以上なら緑
