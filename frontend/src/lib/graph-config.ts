@@ -12,7 +12,7 @@ import type { Sensor, Widget, WidgetConfig } from "../types";
 import { resolveRange, type ResolvedRange, type TimeRange } from "./timeRange";
 
 /** 色の選択肢（クリックで順に切り替える）。先頭の青は、センサーグラフの従来の既定色 */
-export const GRAPH_COLORS = ["#2563eb", "#ea580c", "#16a34a", "#9333ea", "#0d9488", "#db2777", "#dc2626", "#4b5563"];
+export const GRAPH_COLORS = ["#2563eb", "#ea580c", "#16a34a", "#9333ea", "#0d9488", "#db2777", "#dc2626", "#6b7280"];
 
 // 複数センサー比較が従来使っていた色。色を選んでいない古いウィジェットの見た目を変えないために残す
 const LEGACY_MULTI_PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];

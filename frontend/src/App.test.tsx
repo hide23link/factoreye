@@ -86,6 +86,28 @@ describe("App の画面の分け方", () => {
     expect(screen.getByRole("button", { name: /注意 0 件/ })).toBeInTheDocument();
   });
 
+  it("警報・注意は重さで分けて数え、押すと全体監視へ移る", async () => {
+    const alarm = (id: string, severity: "warning" | "critical") => ({
+      id,
+      sensorId: "s",
+      triggeredAt: "2026-11-18T00:00:00Z",
+      resolvedAt: null,
+      acknowledgedAt: null,
+      acknowledgedBy: null,
+      value: 1,
+      status: "active" as const,
+      thresholdBreached: "max" as const,
+      severity,
+    });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [alarm("1", "critical"), alarm("2", "warning"), alarm("3", "warning")], total: 3 });
+    renderWithQueryClient(<App />);
+
+    const lamp = await screen.findByRole("button", { name: /警報 1 件/ });
+    expect(screen.getByRole("button", { name: /注意 2 件/ })).toBeInTheDocument();
+    lamp.click();
+    expect(useUiStore.getState().view).toBe("overview");
+  });
+
   it("画面表示モード（kiosk）は、前と同じくヘッダーと下のメニューを隠す", async () => {
     useUiStore.setState({ selectedDashboardId: "d1", kiosk: true });
     renderWithQueryClient(<App />);

@@ -8,6 +8,7 @@ import { TrendStackWidget } from "./TrendStackWidget";
 vi.mock("../../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchSensorReadingsDownsampled: vi.fn(),
+  fetchLatestReadings: vi.fn(),
 }));
 
 import * as api from "../../lib/api";
@@ -55,6 +56,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 
 beforeEach(() => {
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
+  vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [], total: 0 });
 });
 
 afterEach(() => {
@@ -113,5 +115,22 @@ describe("TrendStackWidget（計器グラフ）", () => {
     expect((await screen.findAllByText("センサーA")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("センサーB").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("img", { name: /の推移/ })).toHaveLength(2);
+  });
+
+  it("今の値は、区間の平均ではなく本当の最新の測定値（区間の平均がしきい値の内でも、最新が外なら赤）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("co2", "洋室 CO2", { thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(10, 700), bucketAgo(1, 950, 1080, 900)],
+    });
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({
+      readings: [{ sensorId: "co2", value: 1080, recordedAt: new Date(Date.now() - 5_000).toISOString() }],
+      total: 1,
+    });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["co2"])} />);
+
+    const tag = await screen.findByText("1080", { selector: "span.font-num" });
+    expect(tag).toHaveStyle({ color: "var(--fe-red)" });
   });
 });

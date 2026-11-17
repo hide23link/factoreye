@@ -84,10 +84,10 @@ export function trendStats(
 }
 
 /**
- * 縦軸の目盛り。データの最低〜最高に、しきい値も入るように広げ、切りのよい数で 3〜maxIntervals 区間に分ける。
+ * 縦軸の目盛り。データの最低〜最高に、しきい値も入るように広げ、切りのよい数で maxIntervals 区間以内に分ける。
  * 例: 18.4〜23.1 ℃としきい値 18・28 → 16〜30 を 2 ごと
  */
-export function niceScale(low: number, high: number, maxIntervals = 5): AxisScale {
+export function niceScale(low: number, high: number, maxIntervals = 7): AxisScale {
   let lo = low;
   let hi = high;
   if (hi - lo < 1e-9) {
@@ -97,21 +97,38 @@ export function niceScale(low: number, high: number, maxIntervals = 5): AxisScal
     hi += pad;
   }
   const span = hi - lo;
-  const rough = span / maxIntervals;
-  const magnitude = 10 ** Math.floor(Math.log10(rough));
-  const step = (NICE_STEPS.find((n) => n * magnitude >= rough) ?? 10) * magnitude;
-  // データが目盛りの端に貼り付かないよう、範囲の 3% だけ外側に余白を取ってから、切りのよい数に丸める
-  const min = Math.floor((lo - span * 0.03) / step) * step;
-  const max = Math.ceil((hi + span * 0.03) / step) * step;
-  const ticks: number[] = [];
-  for (let value = min; value <= max + step / 1000; value += step) ticks.push(roundTo(value, step));
+  const magnitude = 10 ** Math.floor(Math.log10(span / maxIntervals));
+  // 候補の間隔を小さい順に試し、外側に余白を取って丸めても maxIntervals 区間に収まる最初のものを使う
+  const candidates = [...NICE_STEPS, 20, 25, 50, 100].map((n) => n * magnitude);
+  for (const step of candidates) {
+    const min = Math.floor((lo - span * 0.03) / step) * step;
+    const max = Math.ceil((hi + span * 0.03) / step) * step;
+    if (Math.round((max - min) / step) <= maxIntervals) return buildScale(min, max, step);
+  }
+  const step = candidates[candidates.length - 1];
+  return buildScale(Math.floor(lo / step) * step, Math.ceil(hi / step) * step, step);
+}
+
+/** 目盛りの一覧を作る（丸めの誤差を消して） */
+function buildScale(min: number, max: number, step: number): AxisScale {
+  const count = Math.round((max - min) / step);
+  const ticks = Array.from({ length: count + 1 }, (_, i) => roundTo(min + i * step, step));
   return { min: roundTo(min, step), max: roundTo(max, step), step, ticks };
+}
+
+/** 間隔を書くのに要る小数の桁（2 → 0、2.5 → 1、0.25 → 2、0.00005 → 5） */
+export function decimalsOf(step: number): number {
+  for (let digits = 0; digits < 12; digits += 1) {
+    const scaled = step * 10 ** digits;
+    // 整数（1 以上）になった桁で止める。誤差は大きさに比べて判定する（とても小さな間隔でも 0 桁にしない）
+    if (Math.round(scaled) >= 1 && Math.abs(scaled - Math.round(scaled)) < 1e-6 * scaled) return digits;
+  }
+  return 12;
 }
 
 /** 目盛りの間隔に合った桁で丸める（0.1 + 0.2 のような小数の誤差を消す） */
 function roundTo(value: number, step: number): number {
-  const digits = Math.max(0, -Math.floor(Math.log10(step)) + 1);
-  return Number(value.toFixed(digits));
+  return Number(value.toFixed(decimalsOf(step)));
 }
 
 /** 値を縦の位置（%）にする。上が大きい値 */
@@ -234,14 +251,13 @@ export function formatTickTime(time: number, spanMs: number): string {
  * （間隔 100 以上 → 0 桁（例: 1050 ppm）、1〜50 → 1 桁（例: 96.8 ℃）、0.1〜0.5 → 2 桁、もっと細かい → 3 桁）
  */
 export function formatTrendValue(value: number, scale: AxisScale, decimals?: number): string {
-  const digits = decimals ?? (scale.step >= 100 ? 0 : scale.step >= 1 ? 1 : scale.step >= 0.1 ? 2 : 3);
+  const digits = decimals ?? (scale.step >= 100 ? 0 : scale.step >= 1 ? 1 : decimalsOf(scale.step) + 1);
   return value.toFixed(digits);
 }
 
-/** 目盛りの文字。間隔と同じ桁にする（間隔 2 → 「18」、2.5 → 「17.5」、0.25 → 「0.75」） */
+/** 目盛りの文字。間隔と同じ桁にする（間隔 2 → 「18」、2.5 → 「17.5」、0.25 → 「0.75」、0.00005 → 「0.00105」） */
 export function formatTick(value: number, scale: AxisScale): string {
-  const fraction = String(scale.step).split(".")[1] ?? "";
-  return value.toFixed(Math.min(fraction.length, 4));
+  return value.toFixed(decimalsOf(scale.step));
 }
 
 /** 最後のデータから、受信が止まっているとみなすまでの時間（区間 3 つ分、ただし 10 分より短くしない） */

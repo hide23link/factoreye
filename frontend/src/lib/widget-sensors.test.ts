@@ -81,3 +81,13 @@ describe("assignSensor（達成ストリップ）", () => {
     expect(result).toMatchObject({ ok: true, sensorId: "c", config: { sensorIds: ["c"] } });
   });
 });
+
+describe("assignSensor（計器グラフ）", () => {
+  it("行を足す。同じセンサーは重ねない。入れ替えはそのセンサーだけ", () => {
+    const added = assignSensor(widget("TrendStack", "a", { sensorIds: ["a"] }), sensor("b", "B"), "add");
+    expect(added).toMatchObject({ ok: true, sensorId: "a", config: { sensorIds: ["a", "b"] } });
+    expect(assignSensor(widget("TrendStack", "a", { sensorIds: ["a"] }), sensor("a", "A"), "add").ok).toBe(false);
+    const replaced = assignSensor(widget("TrendStack", "a", { sensorIds: ["a", "b"] }), sensor("c", "C"), "replace");
+    expect(replaced).toMatchObject({ ok: true, sensorId: "c", config: { sensorIds: ["c"] } });
+  });
+});

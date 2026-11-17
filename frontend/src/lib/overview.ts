@@ -4,9 +4,11 @@
  *
  * 札の状態の決め方（上ほど優先）:
  * - 警報: 重故障のアラームが未解決、または最新の値が重故障のしきい値の外
- * - 注意: 軽故障のアラームが未解決、最新の値が軽故障のしきい値の外、または受信が止まっている（STALE_MS より古い）
+ * - 注意: 軽故障のアラームが未解決、最新の値が軽故障のしきい値の外、またはどれかのセンサーの受信が止まっている（STALE_MS より古い）
  * - 未受信: どのセンサーにも、まだ受信が無い
  * - 正常: それ以外
+ *
+ * 無効にしたセンサー（enabled が false）は、札に入れない。
  *
  * 【誰が使うか】components/OverviewPage.tsx。
  */
@@ -63,6 +65,7 @@ export function buildStrips(
   const alarmBySensor = worstAlarmBySensor(alarms);
   const groups = new Map<string, { title: string; line: string | null; sensors: Sensor[] }>();
   for (const sensor of sensors) {
+    if (!sensor.enabled) continue;
     const key = sensor.deviceId ? `device:${sensor.deviceId}` : `sensor:${sensor.id}`;
     const group = groups.get(key) ?? { title: sensor.deviceName ?? sensor.name, line: sensor.deviceLine ?? null, sensors: [] };
     group.sensors.push(sensor);
@@ -97,7 +100,9 @@ function judgeStrip(
   if (critical) return { state: "critical", reason: `${critical.sensor.name} 重故障` };
   const warning = withAlarm("warning");
   if (warning) return { state: "warning", reason: `${warning.sensor.name} 軽故障` };
-  if (now - lastTime > STALE_MS) return { state: "warning", reason: "受信なし" };
+  // 機器の中の 1 センサーだけ止まっても気づけるよう、センサーごとに見る（まだ一度も受信の無いセンサーは除く）
+  const stopped = items.find((item) => item.latest && now - new Date(item.latest.recordedAt).getTime() > STALE_MS);
+  if (stopped) return { state: "warning", reason: items.length > 1 ? `${stopped.sensor.name} 受信なし` : "受信なし" };
   return { state: "normal", reason: null };
 }
 

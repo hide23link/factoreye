@@ -101,7 +101,8 @@ function Annunciators() {
   const setView = useUiStore((s) => s.setView);
   const alarms = data?.alarms ?? [];
   const critical = alarms.filter((alarm) => alarm.severity === "critical").length;
-  const warning = alarms.length - critical;
+  // 合計は API の total（200 件を超えても正しい数）。重さの内訳は取れた分で数え、残りは注意に入れる
+  const warning = Math.max(0, (data?.total ?? alarms.length) - critical);
   const lamp = (count: number, color: string, onText: string) =>
     count > 0
       ? { borderColor: color, background: onText === "fill" ? color : "transparent", color: onText === "fill" ? "var(--fe-on-red)" : color }

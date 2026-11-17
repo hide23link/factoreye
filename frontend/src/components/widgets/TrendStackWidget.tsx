@@ -16,7 +16,7 @@
  */
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 
-import { useDownsampledReadings, useSensors } from "../../hooks/queries";
+import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useNow } from "../../hooks/useNow";
 import { effectiveRange, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
@@ -38,12 +38,14 @@ import {
   trendStats,
   xPercent,
   yPercent,
+  PLOT_BOTTOM,
+  PLOT_TOP,
   type AxisScale,
   type TrendLimit,
   type TrendPoint,
 } from "../../lib/trend-stack";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
-import type { Sensor, Widget } from "../../types";
+import type { Reading, Sensor, Widget } from "../../types";
 import { GRAPH_BUCKETS } from "./graph-parts";
 
 // 色はすべて theme.css の意味の色（暗い・明るいで切り替わる）
@@ -62,6 +64,8 @@ function stateColor(level: "critical" | "warning" | "normal", stale: boolean): s
 /** 計器グラフの本体。行（センサー）ごとに TrendRow を並べ、カーソルの時刻を全行で共有する */
 export function TrendStackWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
+  // 今の値は、区間の平均ではなく本当の最新の測定値を使う（全センサー分を 1 回で取る。数値ウィジェットと同じ値・同じ色になる）
+  const { data: latest } = useLatestReadings();
   const dashboardRange = useTimeRangeStore((s) => s.range);
   const range = effectiveRange(widget, dashboardRange);
   const options = graphDataOptions(widget.config, 1);
@@ -116,6 +120,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
             key={id}
             sensorId={id}
             sensor={sensors?.find((s) => s.id === id)}
+            latest={latest?.readings.find((reading) => reading.sensorId === id)}
             bounds={bounds}
             live={range.mode === "relative"}
             refreshMs={options.refreshMs}
@@ -148,6 +153,8 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
 interface RowProps {
   sensorId: string;
   sensor: Sensor | undefined;
+  // このセンサーの最新の測定値（GET /api/sensors/latest）。取れないときは、最後の区間の値を使う
+  latest: Reading | undefined;
   bounds: ResolvedRange;
   live: boolean;
   refreshMs: number;
@@ -162,12 +169,12 @@ interface RowProps {
 }
 
 /** 1 センサー分の行。データの取得（間引き）は行ごとに行う */
-function TrendRow({ sensorId, sensor, bounds, live, refreshMs, aggregation, decimals, cursor, ticks, pointer }: RowProps) {
+function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, ticks, pointer }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
-  // 行の高さに合わせて目盛りの数を決める（1 目盛りに 24px。スマホの低い行で数字が重ならないように）
+  // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   const rowRef = useRef<HTMLDivElement>(null);
   const { height } = useElementSize(rowRef);
-  const maxIntervals = height > 0 ? Math.min(5, Math.max(2, Math.floor(height / 24))) : 5;
+  const maxIntervals = height > 0 ? Math.min(7, Math.max(2, Math.floor(height / 22))) : 7;
   const name = sensor?.name ?? "センサー";
   const unit = sensor?.unit ?? "";
 
@@ -198,19 +205,22 @@ function TrendRow({ sensorId, sensor, bounds, live, refreshMs, aggregation, deci
     ? niceScale(Math.min(stats.min.value, ...limitValues), Math.max(stats.max.value, ...limitValues), maxIntervals)
     : niceScale(Math.min(0, ...limitValues), Math.max(1, ...limitValues), maxIntervals);
   const bucketMs = data.bucketSeconds * 1000;
-  // 直近の表示で、最後のデータが古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
-  const stale = stats === null || (live && bounds.to - stats.last.time > staleAfterMs(data.bucketSeconds));
-  const level = stats ? levelOf(stats.last.value, limits) : "normal";
+  const now = nowPoint(stats?.last ?? null, latest, live, bounds);
+  // 直近の表示で、最後の受信が古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
+  const stale = now === null || (live && bounds.to - now.time > staleAfterMs(data.bucketSeconds));
+  const level = now ? levelOf(now.value, limits) : "normal";
+  // 線をつなぐ長さと、カーソルが点を拾う長さは同じ基準にする（線が見えている所で「データなし」と出さないため）
+  const gapMs = gapThreshold(points, bucketMs);
   const color = stateColor(level, stale);
   const span = bounds.to - bounds.from;
   const format = (value: number) => formatTrendValue(value, scale, decimals);
   const limitText = describeLimits(limits);
 
   let sub = limitText ? `${limitText} ${unit}` : unit || "しきい値なし";
-  if (stale && stats) sub = `受信なし\u3000最終 ${formatTickTime(stats.last.time, span)}`;
+  if (stale && now) sub = `受信なし\u3000最終 ${formatTickTime(now.time, span)}`;
   if (!stats) sub = "この期間のデータはありません";
 
-  const cursorPoint = cursor === null ? null : pointNear(points, cursor, bucketMs * 1.5);
+  const cursorPoint = cursor === null ? null : pointNear(points, cursor, gapMs / 2);
   const rowBackground = !stale && level === "critical" ? "var(--fe-red-row)" : undefined;
 
   return (
@@ -244,7 +254,7 @@ function TrendRow({ sensorId, sensor, bounds, live, refreshMs, aggregation, deci
           role="img"
           aria-label={describeRow(name, unit, stats, format)}
         >
-          <path d={linePath(points, scale, bounds.from, bounds.to, gapThreshold(points, bucketMs))} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+          <path d={linePath(points, scale, bounds.from, bounds.to, gapMs)} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
           <path d={overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
           <path d={overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
         </svg>
@@ -253,17 +263,28 @@ function TrendRow({ sensorId, sensor, bounds, live, refreshMs, aggregation, deci
         {cursor !== null && <Cursor time={cursor} point={cursorPoint} scale={scale} bounds={bounds} text={cursorPoint ? `${format(cursorPoint.value)} ${unit}` : "データなし"} />}
       </div>
       <div className="relative min-h-[64px] border-l" style={{ borderColor: "var(--fe-line)" }}>
-        {stats && (
+        {now && (
           <span
             className="absolute left-1.5 right-1 -translate-y-1/2 rounded-sm border-[1.5px] px-1 py-px text-right font-num text-[15px] font-bold"
-            style={{ top: `${yPercent(stats.last.value, scale)}%`, color, borderColor: color, background: "var(--fe-chrome)" }}
+            style={{ top: `${Math.min(PLOT_BOTTOM, Math.max(PLOT_TOP, yPercent(now.value, scale)))}%`, color, borderColor: color, background: "var(--fe-chrome)" }}
           >
-            {stale ? "---" : format(stats.last.value)}
+            {stale ? "---" : format(now.value)}
           </span>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * 今の値（右端の札・行の色に使う）。直近の表示で、最新の測定値が表示範囲の中にあればそれ、無ければ最後の区間の値。
+ * 固定の期間（過去を見ている）ときは、その期間の最後の区間の値。
+ */
+function nowPoint(lastBucket: TrendPoint | null, latest: Reading | undefined, live: boolean, bounds: ResolvedRange): TrendPoint | null {
+  if (!live || !latest) return lastBucket;
+  const time = new Date(latest.recordedAt).getTime();
+  if (time < bounds.from) return lastBucket;
+  return { time, value: latest.value };
 }
 
 /** しきい値の範囲の文字（例: 「範囲 18 〜 28」「上限 1000」）。重故障を優先して出す */

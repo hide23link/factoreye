@@ -82,6 +82,27 @@ describe("buildStrips（全体監視の札）", () => {
   });
 });
 
+describe("buildStrips の受信なし・無効", () => {
+  it("機器の中の 1 センサーだけ止まっても、注意（そのセンサー名 受信なし）", () => {
+    const sensors = [
+      sensor("t", "温度", { deviceId: "d", deviceName: "env" }),
+      sensor("h", "湿度", { deviceId: "d", deviceName: "env" }),
+    ];
+    const strips = buildStrips(sensors, [reading("t", 20), reading("h", 50, STALE_MS + 60_000)], [], NOW);
+    expect(strips[0].state).toBe("warning");
+    expect(strips[0].reason).toBe("湿度 受信なし");
+  });
+
+  it("15 分ちょうどまでは正常、超えたら受信なし", () => {
+    expect(buildStrips([sensor("a", "A")], [reading("a", 1, STALE_MS)], [], NOW)[0].state).toBe("normal");
+    expect(buildStrips([sensor("a", "A")], [reading("a", 1, STALE_MS + 1000)], [], NOW)[0].state).toBe("warning");
+  });
+
+  it("無効にしたセンサーは札に入れない", () => {
+    expect(buildStrips([sensor("a", "A", { enabled: false })], [reading("a", 1)], [], NOW)).toEqual([]);
+  });
+});
+
 describe("formatAge", () => {
   it("秒・分・時間・日", () => {
     expect(formatAge(12_000)).toBe("12 秒前");

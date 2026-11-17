@@ -31,8 +31,8 @@ describe("niceScale（縦軸の目盛り）", () => {
     expect(scale.ticks).toEqual([16, 18, 20, 22, 24, 26, 28, 30]);
   });
 
-  it("CO2 520〜1103 は、200 ごとで 400〜1200", () => {
-    const scale = niceScale(520, 1103);
+  it("CO2 520〜1103 を 5 区間までにすると、200 ごとで 400〜1200", () => {
+    const scale = niceScale(520, 1103, 5);
     expect(scale.step).toBe(200);
     expect(scale.ticks[0]).toBe(400);
     expect(scale.ticks[scale.ticks.length - 1]).toBe(1200);
@@ -47,6 +47,25 @@ describe("niceScale（縦軸の目盛り）", () => {
     const scale = niceScale(5, 5);
     expect(scale.max).toBeGreaterThan(5);
     expect(scale.min).toBeLessThan(5);
+  });
+});
+
+describe("niceScale の区間の数と小さな値", () => {
+  it("区間の数は maxIntervals 以下（0〜1 は 5 区間以内）", () => {
+    for (const [lo, hi, n] of [[0, 1, 5], [0, 1, 3], [18, 28, 5], [520, 1103, 4], [-3.2, 7.7, 2]] as const) {
+      const scale = niceScale(lo, hi, n);
+      expect(scale.ticks.length - 1).toBeLessThanOrEqual(n);
+      expect(scale.min).toBeLessThanOrEqual(lo);
+      expect(scale.max).toBeGreaterThanOrEqual(hi);
+    }
+  });
+
+  it("とても小さな値でも、目盛りの文字が重ならず 0 ばかりにならない", () => {
+    for (const [lo, hi] of [[0.001, 0.0012], [1e-7, 3e-7]] as const) {
+      const scale = niceScale(lo, hi);
+      const labels = scale.ticks.map((t) => formatTick(t, scale));
+      expect(new Set(labels).size).toBe(labels.length);
+    }
   });
 });
 

@@ -86,7 +86,7 @@ export function OverviewPage() {
               );
             })}
           </section>
-          <section aria-label="今日の記録" className="flex min-w-0 flex-1 flex-col rounded border border-gray-200 bg-white">
+          <section aria-label="アラームの記録" className="flex min-w-0 flex-1 flex-col rounded border border-gray-200 bg-white">
             <h2 className="border-b border-gray-200 px-3 py-2 text-[11px] font-bold tracking-wider text-gray-500">記録（アラームの新しい順）</h2>
             <AlarmLog alarms={recent.data?.alarms ?? []} sensorById={sensorById} />
           </section>
@@ -128,7 +128,7 @@ function StripCard({ strip, now }: { strip: Strip; now: number }) {
         <span className="truncate font-num text-xs text-gray-700">{describeValues(strip)}</span>
       </div>
       <div className="flex flex-col items-end justify-center border-l border-gray-200 px-2 py-1 font-num text-xs">
-        <span style={{ color: strip.reason === "受信なし" ? "var(--fe-amb)" : undefined }}>
+        <span style={{ color: strip.reason?.endsWith("受信なし") ? "var(--fe-amb)" : undefined }}>
           {strip.lastTime === null ? "---" : formatAge(now - strip.lastTime)}
         </span>
       </div>

@@ -51,7 +51,7 @@ export function DisplaySettingsPanel() {
         </p>
       </div>
       <div role="radiogroup" aria-label="画面の明るさ" className="grid gap-3 sm:grid-cols-3">
-        {OPTIONS.map((option) => {
+        {OPTIONS.map((option, index) => {
           const checked = mode === option.mode;
           return (
             <button
@@ -59,6 +59,17 @@ export function DisplaySettingsPanel() {
               type="button"
               role="radio"
               aria-checked={checked}
+              // ラジオボタンの決まり: 選ばれているものだけ Tab で止まり、矢印キーで前後を選ぶ
+              tabIndex={checked ? 0 : -1}
+              onKeyDown={(event) => {
+                const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+                if (step === 0) return;
+                event.preventDefault();
+                const next = OPTIONS[(index + step + OPTIONS.length) % OPTIONS.length];
+                setMode(next.mode);
+                const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role=radio]");
+                buttons?.[(index + step + OPTIONS.length) % OPTIONS.length]?.focus();
+              }}
               onClick={() => setMode(option.mode)}
               className={`flex flex-col gap-2 rounded border-2 p-3 text-left ${
                 checked ? "border-blue-600 bg-blue-50" : "border-gray-200 bg-white hover:border-gray-400"
