@@ -56,7 +56,7 @@ export function OverviewPage() {
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-lg font-bold tracking-wide text-gray-900">全体監視</h1>
         <span className="font-num text-xs text-gray-500">
-          札 {strips.length}・センサー {sensors.data.length}
+          札 {strips.length}・センサー {sensors.data.filter((sensor) => sensor.enabled).length}
         </span>
       </div>
       {strips.length === 0 ? (
