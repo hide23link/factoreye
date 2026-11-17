@@ -6,17 +6,21 @@
  * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 
-import { useSensors } from "../../hooks/queries";
+import { useLatestReadings, useSensors } from "../../hooks/queries";
+import { useNow } from "../../hooks/useNow";
 import { createSensor, deleteSensor, updateSensor } from "../../lib/api";
 import { describeActionError, describeSensorError } from "../../lib/errors";
 import { FREE_TIER_LIMIT_MESSAGE, isFreeTierLimitError } from "../../lib/freeTier";
 import { isImeComposing } from "../../lib/ime";
+import { formatAge } from "../../lib/overview";
+import { filterCounts, groupByDevice, matchesFilter, matchesQuery, sensorLive, type ListFilter, type SensorLive } from "../../lib/sensor-list";
 import { validateSensorBasics, validateThresholds } from "../../lib/sensor-validation";
-import type { Sensor } from "../../types";
+import type { Sensor, Widget } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ErrorNotice } from "../ErrorNotice";
+import { TrendStackWidget } from "../widgets/TrendStackWidget";
 import { UnitSelect } from "../UnitSelect";
 import { SensorConnectGuide } from "./SensorConnectGuide";
 import { ThresholdBar } from "./ThresholdBar";
@@ -62,11 +66,107 @@ const SENSOR_START_KINDS: ReadonlyArray<{ id: SensorStartKind; icon: string; lab
   { id: "state", icon: "🚦", label: "稼働", hint: "動いている=1、止まっている=0", unit: "0/1" },
 ];
 
+// 絞り込みのボタン（名前と、条件。条件は lib/sensor-list.ts の matchesFilter）
+const FILTERS: ReadonlyArray<{ value: ListFilter; label: string }> = [
+  { value: "all", label: "すべて" },
+  { value: "receiving", label: "受信中" },
+  { value: "stopped", label: "止まっている" },
+  { value: "limits", label: "しきい値あり" },
+];
+
+/** 名前の下に出す、今の値・受信の状態・最後の受信（操作室の計器の表示と同じ色づかい） */
+function LiveLine({ live, unit }: { live: SensorLive; unit: string }) {
+  const colors = { receiving: "var(--fe-ok)", stopped: "var(--fe-amb)", never: "var(--fe-mut)" } as const;
+  const text = { receiving: "受信中", stopped: "止まっている", never: "未受信" } as const;
+  const valueColor = live.level === "critical" ? "var(--fe-red)" : live.level === "warning" ? "var(--fe-amb)" : undefined;
+  return (
+    <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-num text-[11px] font-normal text-gray-600">
+      <span style={{ color: colors[live.state] }} className="font-bold">
+        {live.state === "receiving" ? "■" : live.state === "stopped" ? "●" : "○"} {text[live.state]}
+      </span>
+      {live.latest && (
+        <span style={{ color: valueColor }} className={live.level === "normal" ? "text-gray-900" : "font-bold"}>
+          {Math.abs(live.latest.value) >= 100 ? Math.round(live.latest.value) : Number(live.latest.value.toFixed(2))} {unit}
+        </span>
+      )}
+      {live.ageMs !== null && <span>{formatAge(live.ageMs)}</span>}
+      {live.state === "never" && <span>まだ受信なし</span>}
+    </span>
+  );
+}
+
+/** 詳細パネル（名前を押したセンサー）。24 時間の計器グラフ（目盛り・最高・最低・平均・しきい値）と、設定の要約 */
+function SensorDetail({ sensor, live, onClose }: { sensor: Sensor; live?: SensorLive; onClose: () => void }) {
+  // 計器グラフの部品を、1 センサー・24 時間の設定で使う（ダッシュボードの期間とは別）
+  const widget: Widget = {
+    id: `detail-${sensor.id}`,
+    dashboardId: "",
+    sensorId: sensor.id,
+    type: "TrendStack",
+    gridColumn: 1,
+    gridRow: 1,
+    gridWidth: 12,
+    gridHeight: 8,
+    config: { sensorIds: [sensor.id], rangeHours: 24 },
+    createdAt: "",
+    updatedAt: "",
+  };
+  return (
+    <aside aria-label={`${sensor.name} の詳細`} className="flex min-w-0 flex-col gap-2 rounded border border-gray-200 bg-white p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-gray-900">{sensor.name}</h3>
+          <p className="font-num text-[11px] text-gray-500">
+            {sensor.deviceName ? `${sensor.deviceName} · ` : ""}
+            {sensor.ingestKey}
+          </p>
+          {live && <LiveLine live={live} unit={sensor.unit} />}
+        </div>
+        <button type="button" onClick={onClose} aria-label="詳細を閉じる" className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100">
+          閉じる
+        </button>
+      </div>
+      <div className="h-44 rounded-sm border border-gray-200">
+        <TrendStackWidget widget={widget} />
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-num text-xs">
+        <dt className="text-gray-600">軽故障（下限 / 上限）</dt>
+        <dd>
+          {sensor.thresholdMinWarning ?? "—"} / {sensor.thresholdMaxWarning ?? "—"} {sensor.unit}
+        </dd>
+        <dt className="text-gray-500">重故障（下限 / 上限）</dt>
+        <dd>
+          {sensor.thresholdMinCritical ?? "—"} / {sensor.thresholdMaxCritical ?? "—"} {sensor.unit}
+        </dd>
+        <dt className="text-gray-500">不感帯</dt>
+        <dd>{sensor.thresholdDeadBand}</dd>
+      </dl>
+      <p className="text-xs text-gray-500">しきい値や名前は、一覧の「編集」で変えます。</p>
+    </aside>
+  );
+}
+
 /**
  * センサー1件の行。表示と編集を切り替える（編集中は、名前・単位・閾値を入力欄にする）。
  * 保存・有効/無効・削除の操作ごとに、一覧を取り直す。
  */
-function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId: string) => void }) {
+function SensorRow({
+  sensor,
+  live,
+  selected,
+  detail,
+  onSelect,
+  onDeleted,
+}: {
+  sensor: Sensor;
+  // 受信の状態（今の値・最後の受信）。取れていないときは undefined
+  live?: SensorLive;
+  selected?: boolean;
+  // 選んだ行のすぐ下に開く詳細（SensorDetail）。選んでいなければ undefined
+  detail?: ReactNode;
+  onSelect?: (sensorId: string) => void;
+  onDeleted: (sensorId: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [isEditing, setEditing] = useState(false);
   const [name, setName] = useState(sensor.name);
@@ -235,9 +335,22 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
 
   return (
     <>
-      <tr className="border-b border-gray-100">
+      <tr className={`border-b border-gray-100 ${selected ? "bg-blue-50" : ""}`}>
         <td className="p-2 text-sm font-medium text-gray-900">
           {sensor.name}
+          {onSelect && (
+            <button
+              type="button"
+              onClick={() => onSelect(sensor.id)}
+              aria-pressed={selected}
+              aria-label={`${sensor.name} の詳細`}
+              title="24 時間のグラフと詳細を、この行の下に出す"
+              className="ml-2 rounded border border-gray-300 px-1.5 py-px text-[11px] font-normal text-gray-500 hover:bg-gray-100"
+            >
+              詳細
+            </button>
+          )}
+          {live && <LiveLine live={live} unit={sensor.unit} />}
           <ThresholdBar sensor={sensor} />
         </td>
         <td className="p-2 font-mono text-xs text-gray-500">{sensor.ingestKey}</td>
@@ -282,6 +395,13 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
           </button>
         </td>
       </tr>
+      {detail && (
+        <tr className="border-b border-gray-100 bg-blue-50/30">
+          <td colSpan={8} className="p-2">
+            {detail}
+          </td>
+        </tr>
+      )}
       {errorRow}
       {confirmingDelete && (
         <tr>
@@ -306,7 +426,14 @@ function SensorRow({ sensor, onDeleted }: { sensor: Sensor; onDeleted: (sensorId
 /** センサー設定パネル（新規登録フォームと、センサー一覧）。 */
 export function SensorSettingsPanel() {
   const { data: sensors, isLoading, isError, refetch } = useSensors();
+  // 一覧の受信の状態（今の値・最後の受信）に使う、全センサーの最新の測定値（1 回の取得）
+  const { data: latestData } = useLatestReadings();
+  const now = useNow(10_000);
   const queryClient = useQueryClient();
+  // 検索の文字・絞り込みのボタン・詳細を出しているセンサー
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<ListFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // 新規登録フォームの入力値（登録に成功すると、次の入力のために初期値へ戻す）
   const [name, setName] = useState("");
@@ -333,6 +460,17 @@ export function SensorSettingsPanel() {
     onError: (e: Error) =>
       setError(isFreeTierLimitError(e) ? FREE_TIER_LIMIT_MESSAGE : describeSensorError(e, "センサーの登録")),
   });
+
+  const latestBySensor = new Map((latestData?.readings ?? []).map((reading) => [reading.sensorId, reading]));
+  const lives = new Map((sensors ?? []).map((sensor) => [sensor.id, sensorLive(sensor, latestBySensor.get(sensor.id), now)]));
+  const counts = filterCounts(sensors ?? [], lives, query);
+  const visible = (sensors ?? []).filter((sensor) => {
+    const live = lives.get(sensor.id);
+    return matchesQuery(sensor, query) && (live ? matchesFilter(filter, sensor, live) : true);
+  });
+  const groups = groupByDevice(visible);
+  // 機器に属するセンサーがあるときだけ、機器ごとの見出しを出す（機器の無い SaaS 版などでは出さない）
+  const showGroups = (sensors ?? []).some((sensor) => sensor.deviceId);
 
   return (
     <div>
@@ -420,32 +558,86 @@ export function SensorSettingsPanel() {
       )}
 
       {!isLoading && sensors && sensors.length > 0 && (
-        <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-gray-200 text-xs text-gray-500">
-              <th className="p-2">名前</th>
-              <th className="p-2">Ingest Key</th>
-              <th className="p-2">単位</th>
-              <th className="p-2">軽故障（下限/上限）</th>
-              <th className="p-2">重故障（下限/上限）</th>
-              <th className="p-2">不感帯</th>
-              <th className="p-2">状態</th>
-              <th className="p-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {sensors.map((sensor) => (
-              <SensorRow
-                key={sensor.id}
-                sensor={sensor}
-                // 削除したセンサーの「つなぎ方」の案内は、閉じる（削除済みのセンサーを待ち続けないように）
-                onDeleted={(id) => setJustCreated((current) => (current?.id === id ? null : current))}
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <label className="flex h-8 min-w-40 max-w-72 flex-1 items-center gap-1.5 rounded border border-gray-300 bg-white px-2 text-gray-500">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <input
+                type="search"
+                aria-label="センサーを絞り込む"
+                placeholder="名前・キー・機器で絞り込む"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 outline-none"
               />
+            </label>
+            {FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                aria-pressed={filter === item.value}
+                onClick={() => setFilter(item.value)}
+                className={`h-8 rounded border px-2.5 text-xs ${
+                  filter === item.value ? "border-blue-600 bg-blue-50 font-bold text-blue-700" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {item.label} <span className="font-num">{counts[item.value]}</span>
+              </button>
             ))}
-          </tbody>
-        </table>
-        </div>
+          </div>
+          <div>
+            <div className="min-w-0 overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-gray-200 text-xs text-gray-500">
+                    <th className="p-2">名前</th>
+                    <th className="p-2">Ingest Key</th>
+                    <th className="p-2">単位</th>
+                    <th className="p-2">軽故障（下限/上限）</th>
+                    <th className="p-2">重故障（下限/上限）</th>
+                    <th className="p-2">不感帯</th>
+                    <th className="p-2">状態</th>
+                    <th className="p-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((group) => (
+                    <Fragment key={group.key}>
+                      {showGroups && (
+                        <tr className="bg-gray-100">
+                          <td colSpan={8} className="px-2 py-1 text-[11px] font-bold tracking-wide text-gray-600">
+                            {group.title}
+                            {group.line ? ` · ${group.line}` : ""}
+                            <span className="ml-2 font-num font-normal">{group.sensors.length} センサー</span>
+                          </td>
+                        </tr>
+                      )}
+                      {group.sensors.map((sensor) => (
+                        <SensorRow
+                          key={sensor.id}
+                          sensor={sensor}
+                          live={lives.get(sensor.id)}
+                          selected={sensor.id === selectedId}
+                          detail={sensor.id === selectedId ? <SensorDetail sensor={sensor} live={lives.get(sensor.id)} onClose={() => setSelectedId(null)} /> : undefined}
+                          onSelect={(id) => setSelectedId((current) => (current === id ? null : id))}
+                          // 削除したセンサーの「つなぎ方」の案内は、閉じる（削除済みのセンサーを待ち続けないように）
+                          onDeleted={(id) => {
+                            setJustCreated((current) => (current?.id === id ? null : current));
+                            setSelectedId((current) => (current === id ? null : current));
+                          }}
+                        />
+                      ))}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+              {visible.length === 0 && <p className="py-3 text-sm text-gray-500">該当するセンサーはありません。</p>}
+            </div>
+          </div>
+        </>
       )}
 
       {!isLoading && sensors?.length === 0 && (

@@ -12,6 +12,8 @@ vi.mock("../../lib/api", () => ({
   updateSensor: vi.fn(),
   deleteSensor: vi.fn(),
   fetchSensorReadings: vi.fn(),
+  fetchLatestReadings: vi.fn(),
+  fetchSensorReadingsDownsampled: vi.fn(),
   API_BASE_URL: "http://localhost:8000",
 }));
 
@@ -413,5 +415,78 @@ describe("SensorSettingsPanel", () => {
 
     await user.click(within((await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement).getByText("編集"));
     expect(screen.getByRole("textbox", { name: "センサー名" })).toHaveValue("圧力計A-1");
+  });
+
+  describe("検索・絞り込み・機器ごとのグループ・詳細", () => {
+    const device = { deviceId: "d1", deviceName: "env-youshitsu" };
+    const co2: Sensor = { ...sensor, id: "s2", name: "洋室 CO2", ingestKey: "mk-co2", unit: "ppm", thresholdMaxCritical: 1000, ...device };
+    const temp: Sensor = { ...sensor, id: "s3", name: "洋室 温度", ingestKey: "mk-temp", unit: "℃", thresholdMaxCritical: null, ...device };
+    const alone: Sensor = { ...sensor, id: "s4", name: "単独センサー", ingestKey: "mk-alone", thresholdMaxCritical: null };
+    const fresh = (id: string, value: number) => ({ sensorId: id, value, recordedAt: new Date(Date.now() - 10_000).toISOString() });
+
+    function setup() {
+      vi.mocked(api.fetchSensors).mockResolvedValue([co2, temp, alone]);
+      // 洋室 CO2 は受信中（しきい値の外）、洋室 温度 は 1 時間前で止まっている、単独は未受信
+      vi.mocked(api.fetchLatestReadings).mockResolvedValue({
+        readings: [fresh("s2", 1050), { sensorId: "s3", value: 21, recordedAt: new Date(Date.now() - 3_600_000).toISOString() }],
+        total: 2,
+      });
+      vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [] });
+    }
+
+    it("機器ごとの見出しを出し、名前の下に今の値と受信の状態を出す", async () => {
+      setup();
+      renderWithQueryClient(<SensorSettingsPanel />);
+
+      expect(await screen.findByText("env-youshitsu")).toBeInTheDocument();
+      expect(screen.getByText("機器なし")).toBeInTheDocument();
+      expect(await screen.findByText(/受信中/, { selector: "span.font-bold" })).toBeInTheDocument();
+      expect(screen.getByText(/止まっている/, { selector: "span.font-bold" })).toBeInTheDocument();
+      expect(screen.getByText(/未受信/, { selector: "span.font-bold" })).toBeInTheDocument();
+      expect(screen.getByText("1050 ppm")).toBeInTheDocument();
+    });
+
+    it("絞り込みのボタンは件数つき。押すと、条件に合うものだけにする", async () => {
+      const user = userEvent.setup();
+      setup();
+      renderWithQueryClient(<SensorSettingsPanel />);
+      await screen.findByText("洋室 CO2");
+
+      await user.click(await screen.findByRole("button", { name: /^受信中 1$/ }));
+
+      expect(screen.getByText("洋室 CO2")).toBeInTheDocument();
+      expect(screen.queryByText("洋室 温度")).not.toBeInTheDocument();
+      expect(screen.queryByText("単独センサー")).not.toBeInTheDocument();
+      // 止まっている = 受信が古い + まだ無い
+      expect(screen.getByRole("button", { name: /^止まっている 2$/ })).toBeInTheDocument();
+    });
+
+    it("検索の文字で絞る。合うものが無ければ案内を出す", async () => {
+      const user = userEvent.setup();
+      setup();
+      renderWithQueryClient(<SensorSettingsPanel />);
+      await screen.findByText("洋室 CO2");
+
+      await user.type(screen.getByRole("searchbox", { name: "センサーを絞り込む" }), "co2");
+      expect(screen.getByText("洋室 CO2")).toBeInTheDocument();
+      expect(screen.queryByText("洋室 温度")).not.toBeInTheDocument();
+
+      await user.clear(screen.getByRole("searchbox", { name: "センサーを絞り込む" }));
+      await user.type(screen.getByRole("searchbox", { name: "センサーを絞り込む" }), "存在しない");
+      expect(screen.getByText("該当するセンサーはありません。")).toBeInTheDocument();
+    });
+
+    it("「詳細」を押すと、その行の下に詳細パネル（しきい値の要約）が出る。もう一度押すか「閉じる」で閉じる", async () => {
+      const user = userEvent.setup();
+      setup();
+      renderWithQueryClient(<SensorSettingsPanel />);
+
+      await user.click(await screen.findByRole("button", { name: "洋室 CO2 の詳細" }));
+      const panel = screen.getByRole("complementary", { name: "洋室 CO2 の詳細" });
+      expect(within(panel).getByText(/重故障（下限 \/ 上限）/)).toBeInTheDocument();
+
+      await user.click(within(panel).getByRole("button", { name: "詳細を閉じる" }));
+      expect(screen.queryByRole("complementary", { name: "洋室 CO2 の詳細" })).not.toBeInTheDocument();
+    });
   });
 });
