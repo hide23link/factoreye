@@ -201,11 +201,11 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
   const stats = trendStats(data.buckets, data.bucketSeconds, points);
   const limits = sensor ? trendLimits(sensor) : [];
   const limitValues = limits.map((limit) => limit.value);
-  const scale = stats
-    ? niceScale(Math.min(stats.min.value, ...limitValues), Math.max(stats.max.value, ...limitValues), maxIntervals)
-    : niceScale(Math.min(0, ...limitValues), Math.max(1, ...limitValues), maxIntervals);
+  // 線が無い行（この期間のデータが無い）でも、最後の値が目盛りに収まるようにする
+  const extra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
+  const scale = niceScale(Math.min(...extra, ...limitValues), Math.max(...extra, ...limitValues), maxIntervals);
   const bucketMs = data.bucketSeconds * 1000;
-  const now = nowPoint(stats?.last ?? null, latest, live, bounds);
+  const now = nowPoint(stats?.last ?? null, latest, live);
   // 直近の表示で、最後の受信が古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
   const stale = now === null || (live && bounds.to - now.time > staleAfterMs(data.bucketSeconds));
   const level = now ? levelOf(now.value, limits) : "normal";
@@ -217,8 +217,8 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
   const limitText = describeLimits(limits);
 
   let sub = limitText ? `${limitText} ${unit}` : unit || "しきい値なし";
-  if (stale && now) sub = `受信なし\u3000最終 ${formatTickTime(now.time, span)}`;
-  if (!stats) sub = "この期間のデータはありません";
+  if (stale && now) sub = `受信なし\u3000最後の値 ${formatLastSeen(now.time)}`;
+  if (!stats && !now) sub = "この期間のデータはありません";
 
   const cursorPoint = cursor === null ? null : pointNear(points, cursor, gapMs / 2);
   const rowBackground = !stale && level === "critical" ? "var(--fe-red-row)" : undefined;
@@ -268,7 +268,8 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
             className="absolute left-1.5 right-1 -translate-y-1/2 rounded-sm border-[1.5px] px-1 py-px text-right font-num text-[15px] font-bold"
             style={{ top: `${Math.min(PLOT_BOTTOM, Math.max(PLOT_TOP, yPercent(now.value, scale)))}%`, color, borderColor: color, background: "var(--fe-chrome)" }}
           >
-            {stale ? "---" : format(now.value)}
+            {/* 受信が止まっていても、最後の値は出す（橙で、止まっていると分かるように）。値そのものが無い行だけ「---」 */}
+            {format(now.value)}
           </span>
         )}
       </div>
@@ -280,11 +281,17 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
  * 今の値（右端の札・行の色に使う）。直近の表示で、最新の測定値が表示範囲の中にあればそれ、無ければ最後の区間の値。
  * 固定の期間（過去を見ている）ときは、その期間の最後の区間の値。
  */
-function nowPoint(lastBucket: TrendPoint | null, latest: Reading | undefined, live: boolean, bounds: ResolvedRange): TrendPoint | null {
+function nowPoint(lastBucket: TrendPoint | null, latest: Reading | undefined, live: boolean): TrendPoint | null {
   if (!live || !latest) return lastBucket;
-  const time = new Date(latest.recordedAt).getTime();
-  if (time < bounds.from) return lastBucket;
-  return { time, value: latest.value };
+  // 表示範囲より前の受信でも、最後に受信した値として出す（呼ぶ側が、古ければ「受信なし」にする）
+  return { time: new Date(latest.recordedAt).getTime(), value: latest.value };
+}
+
+/** 最後の値の時刻の文字（今日なら時:分、それ以外は月/日 時:分） */
+function formatLastSeen(time: number): string {
+  const date = new Date(time);
+  const hhmm = date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date().toDateString() === date.toDateString() ? hhmm : `${date.getMonth() + 1}/${date.getDate()} ${hhmm}`;
 }
 
 /** しきい値の範囲の文字（例: 「範囲 18 〜 28」「上限 1000」）。重故障を優先して出す */

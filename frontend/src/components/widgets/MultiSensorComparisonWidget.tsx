@@ -28,7 +28,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { useSensors } from "../../hooks/queries";
+import { useLatestReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
@@ -66,6 +66,7 @@ import {
   renderThresholdLines,
   type LinkGraphView,
 } from "./graph-parts";
+import { GraphValues } from "./GraphValues";
 
 /**
  * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
@@ -75,6 +76,9 @@ import {
 export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widget; linkView?: LinkGraphView }) {
   const { data: sensors } = useSensors();
   const sensorIds = graphSensorIds(widget);
+  // 右の「今の値」に使う、全センサーの最新の測定値（1 回の取得で、ほかのウィジェットと共有）
+  const { data: latest } = useLatestReadings();
+  const latestById = new Map((latest?.readings ?? []).map((reading) => [reading.sensorId, reading.value]));
   const dashboardRange = useTimeRangeStore((s) => s.range);
   // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
   const range = effectiveRange(widget, dashboardRange);
@@ -317,25 +321,39 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     <div className="flex h-full flex-col">
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
       {sensorIds.length === 1 && !linkView && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
-      <div ref={chartRef} className="min-h-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
-        <ResponsiveContainer width="100%" height="100%">
-          {graphType === "bar" ? (
-            <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
-              {parts}
-              {series}
-            </BarChart>
-          ) : graphType === "area" ? (
-            <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
-              {parts}
-              {series}
-            </AreaChart>
-          ) : (
-            <LineChart data={chartData} {...pointerHandlers}>
-              {parts}
-              {series}
-            </LineChart>
-          )}
-        </ResponsiveContainer>
+      <div className="flex min-h-0 flex-1 gap-1.5">
+        <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
+          <ResponsiveContainer width="100%" height="100%">
+            {graphType === "bar" ? (
+              <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
+                {parts}
+                {series}
+              </BarChart>
+            ) : graphType === "area" ? (
+              <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
+                {parts}
+                {series}
+              </AreaChart>
+            ) : (
+              <LineChart data={chartData} {...pointerHandlers}>
+                {parts}
+                {series}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+        {/* 右に、線ごとの今の値（リンクの画面では出さない） */}
+        {!linkView && (
+          <GraphValues
+            items={sensorIds.map((sensorId, i) => ({
+              name: nameOf(sensorId),
+              color: graphColor(widget, i),
+              unit: sensors?.find((s) => s.id === sensorId)?.unit ?? "",
+              value: latestById.get(sensorId),
+            }))}
+            decimals={widget.config.decimals}
+          />
+        )}
       </div>
     </div>
   );

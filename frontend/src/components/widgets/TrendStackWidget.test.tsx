@@ -93,7 +93,7 @@ describe("TrendStackWidget（計器グラフ）", () => {
     expect(screen.getByText("1200")).toBeInTheDocument();
   });
 
-  it("最後の受信が古ければ、今の値は「---」で、受信なしと出す", async () => {
+  it("最後の受信が古ければ、最後の値を橙で出し、受信なしと知らせる（数字は消さない）", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("t", "外気南 温度")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
       bucketSeconds: 60,
@@ -102,7 +102,8 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     renderWithQueryClient(<TrendStackWidget widget={widget(["t"])} />);
 
-    expect(await screen.findByText("---")).toBeInTheDocument();
+    const tag = await screen.findByText(/^9\.1/, { selector: "span.font-num" });
+    expect(tag).toHaveStyle({ color: "var(--fe-amb)" });
     expect(screen.getByText(/受信なし/)).toBeInTheDocument();
   });
 
