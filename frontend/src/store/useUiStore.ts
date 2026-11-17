@@ -8,8 +8,8 @@ import { create } from "zustand";
 
 import { readGraphLinkFromUrl, type GraphLink } from "../lib/graph-link";
 
-// 画面の種類: メイン（ダッシュボード）、設定、セットアップガイド
-export type AppView = "main" | "settings" | "wizard";
+// 画面の種類: メイン（ダッシュボード）、全体監視、設定、セットアップガイド
+export type AppView = "main" | "overview" | "settings" | "wizard";
 
 interface UiState {
   view: AppView;

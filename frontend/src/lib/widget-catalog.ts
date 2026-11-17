@@ -32,6 +32,15 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     defaultConfig: { graphType: "line" },
   },
   {
+    type: "TrendStack",
+    label: "計器グラフ",
+    description: "1 センサー 1 行で、目盛りの数字・しきい値・最高・最低・今の値をきちんと読む",
+    width: 12,
+    height: 10,
+    suitedSensor: "measure",
+    defaultConfig: {},
+  },
+  {
     type: "StatValue",
     label: "数値",
     description: "いまの値を大きく表示",
@@ -107,7 +116,7 @@ export function widgetLabel(type: WidgetType): string {
 export function widgetChoicesFor(kind: SensorKind): WidgetType[] {
   if (kind === "count") return ["ProductionPlan", "SensorGraph", "StatValue"];
   if (kind === "state") return ["ProductionStatus", "SensorGraph"];
-  return ["SensorGraph", "StatValue", "Gauge"];
+  return ["SensorGraph", "TrendStack", "StatValue", "Gauge"];
 }
 
 /** センサーを置いたときに作るウィジェットの種類（計測値→グラフ、生産数→生産管理、稼働→稼働ステータス） */

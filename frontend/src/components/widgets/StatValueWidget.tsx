@@ -17,9 +17,9 @@ import { ThresholdMeter } from "./ThresholdMeter";
 
 // 状態ごとの見た目（背景、文字、線の色、説明の文言）
 const SEVERITY_STYLE: Record<Severity, { bg: string; text: string; accent: string; label: string }> = {
-  critical: { bg: "bg-red-50", text: "text-red-700", accent: "#dc2626", label: "🚨 重故障しきい値超過" },
-  warning: { bg: "bg-yellow-50", text: "text-yellow-700", accent: "#ca8a04", label: "⚠️ 軽故障しきい値超過" },
-  normal: { bg: "bg-gray-50", text: "text-gray-900", accent: "#2563eb", label: "" },
+  critical: { bg: "bg-red-50", text: "text-red-700", accent: "var(--fe-red)", label: "▲ 重故障しきい値超過" },
+  warning: { bg: "bg-yellow-50", text: "text-yellow-700", accent: "var(--fe-amb)", label: "● 軽故障しきい値超過" },
+  normal: { bg: "bg-gray-50", text: "text-gray-900", accent: "rgb(var(--blue-600))", label: "" },
 };
 
 // Grafanaの「Stat」パネルを参考にした、最新値を大きく表示するウィジェット。
@@ -60,9 +60,12 @@ export function StatValueWidget({ widget }: { widget: Widget }) {
           {sensor.name}
         </span>
       </p>
-      <p className={`text-4xl font-bold tabular-nums ${style.text}`}>
-        {latest ? latest.value.toFixed(decimals) : "—"}
-        <span className="ml-1 text-base font-normal text-gray-500">{sensor.unit}</span>
+      {/* 操作室の計器と同じく、今の値は四角で囲んだ等幅の数字（枠の色は状態の色） */}
+      <p className={`flex items-baseline gap-1.5 ${style.text}`}>
+        <span className="rounded-sm border-[1.5px] border-current px-2 font-num text-4xl font-bold leading-tight">
+          {latest ? latest.value.toFixed(decimals) : "—"}
+        </span>
+        <span className="text-base font-normal text-gray-500">{sensor.unit}</span>
       </p>
       {style.label && <span className={`text-xs font-medium ${style.text}`}>{style.label}</span>}
       {latest && <ThresholdMeter sensor={sensor} value={latest.value} />}

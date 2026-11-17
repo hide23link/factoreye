@@ -75,6 +75,10 @@ export function DropSurface({
           ? e.shiftKey
             ? "このストリップと入れ替え"
             : "このストリップに追加（Shift で入れ替え）"
+          : widget.type === "TrendStack"
+            ? e.shiftKey
+              ? "この計器グラフと入れ替え"
+              : "この計器グラフに行を追加（Shift で入れ替え）"
           : "このウィジェットに切り替え";
       return {
         kind: "widget",
@@ -132,7 +136,7 @@ export function DropSurface({
   const dotStyle =
     cellWidth > 0
       ? {
-          backgroundImage: "radial-gradient(#cbd5e1 1.2px, transparent 1.4px)",
+          backgroundImage: "radial-gradient(rgb(var(--gray-300)) 1.2px, transparent 1.4px)",
           backgroundSize: `${cellWidth}px ${cellHeight}px`,
           backgroundPosition: `${GRID_MARGIN / 2}px ${GRID_MARGIN / 2}px`,
         }
@@ -165,12 +169,12 @@ export function DropSurface({
             <svg viewBox="0 0 220 80" aria-hidden="true" className="mx-auto mb-2 h-16 w-auto text-blue-500">
               <rect x="4" y="14" width="52" height="52" rx="8" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 3" />
               <path d="M14 52l10-12 8 6 14-18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M70 40h34m-8-8l8 8-8 8" fill="none" stroke="#9ca3af" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              <rect x="116" y="8" width="100" height="64" rx="8" fill="#eff6ff" stroke="#bfdbfe" strokeWidth="2" />
-              <path d="M130 58a22 22 0 0144 0" fill="none" stroke="#bbf7d0" strokeWidth="7" />
-              <path d="M152 58l12-14" stroke="#111827" strokeWidth="2.5" strokeLinecap="round" />
-              <rect x="182" y="24" width="24" height="10" rx="3" fill="#bfdbfe" />
-              <rect x="182" y="40" width="24" height="10" rx="3" fill="#bfdbfe" />
+              <path d="M70 40h34m-8-8l8 8-8 8" fill="none" stroke="rgb(var(--gray-400))" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <rect x="116" y="8" width="100" height="64" rx="8" fill="rgb(var(--blue-50))" stroke="rgb(var(--blue-200))" strokeWidth="2" />
+              <path d="M130 58a22 22 0 0144 0" fill="none" stroke="rgb(var(--green-200))" strokeWidth="7" />
+              <path d="M152 58l12-14" stroke="var(--fe-ink)" strokeWidth="2.5" strokeLinecap="round" />
+              <rect x="182" y="24" width="24" height="10" rx="3" fill="rgb(var(--blue-200))" />
+              <rect x="182" y="40" width="24" height="10" rx="3" fill="rgb(var(--blue-200))" />
             </svg>
             <b className="text-base text-gray-900">ここにセンサーをドラッグしてみましょう</b>
             <br />

@@ -23,9 +23,9 @@ import { ErrorNotice } from "../ErrorNotice";
 
 // 色の意味は StatValueWidget・ThresholdMeter と同じ（正常=緑、軽故障=橙、重故障=赤）。SVG には色の値（hex）、文字には Tailwind のクラスを使うため、別の形で持つ
 const SEVERITY_STYLE: Record<Severity, { color: string; text: string; label: string }> = {
-  normal: { color: "#16a34a", text: "text-green-700", label: "🟢 正常" },
-  warning: { color: "#d97706", text: "text-amber-700", label: "⚠️ 軽故障のしきい値を超過" },
-  critical: { color: "#dc2626", text: "text-red-700", label: "🚨 重故障のしきい値を超過" },
+  normal: { color: "var(--fe-ok)", text: "text-green-700", label: "■ 正常" },
+  warning: { color: "var(--fe-amb)", text: "text-amber-700", label: "● 軽故障のしきい値を超過" },
+  critical: { color: "var(--fe-red)", text: "text-red-700", label: "▲ 重故障のしきい値を超過" },
 };
 
 /** 目盛りの端の数字。長い小数にならないよう丸める */
@@ -76,20 +76,20 @@ export function GaugeWidget({ widget }: { widget: Widget }) {
           })}
         {fraction !== null && (
           <>
-            <line x1={GAUGE_CENTER_X} y1={GAUGE_CENTER_Y} x2={needleX} y2={needleY} stroke="#111827" strokeWidth={3} strokeLinecap="round" />
-            <circle cx={GAUGE_CENTER_X} cy={GAUGE_CENTER_Y} r={5} fill="#111827" />
+            <line x1={GAUGE_CENTER_X} y1={GAUGE_CENTER_Y} x2={needleX} y2={needleY} stroke="var(--fe-ink)" strokeWidth={3} strokeLinecap="round" />
+            <circle cx={GAUGE_CENTER_X} cy={GAUGE_CENTER_Y} r={5} fill="var(--fe-ink)" />
           </>
         )}
-        <text x={GAUGE_CENTER_X - GAUGE_RADIUS} y={116} fontSize={10} textAnchor="middle" fill="#6b7280">
+        <text x={GAUGE_CENTER_X - GAUGE_RADIUS} y={116} fontSize={10} textAnchor="middle" fill="var(--fe-mut)">
           {formatEdge(range.min)}
         </text>
-        <text x={GAUGE_CENTER_X + GAUGE_RADIUS} y={116} fontSize={10} textAnchor="middle" fill="#6b7280">
+        <text x={GAUGE_CENTER_X + GAUGE_RADIUS} y={116} fontSize={10} textAnchor="middle" fill="var(--fe-mut)">
           {formatEdge(range.max)}
         </text>
         {/* いまの値は、図の中（針の根元の下）に置く。図と一緒に拡縮するので、狭いウィジェットでも針に重ならない */}
         <text x={GAUGE_CENTER_X} y={134} fontSize={24} fontWeight={700} textAnchor="middle" className={`tabular-nums ${style.text}`} fill="currentColor">
           {latest === undefined ? "—" : latest.toFixed(decimals)}
-          <tspan fontSize={11} fontWeight={400} dx={3} fill="#6b7280">
+          <tspan fontSize={11} fontWeight={400} dx={3} fill="var(--fe-mut)">
             {sensor.unit}
           </tspan>
         </text>

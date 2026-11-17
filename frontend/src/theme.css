@@ -1,0 +1,206 @@
+/*
+ * 画面の色の 2 組（暗い＝操作室の色、明るい＝従来の色）。<html data-theme="dark|light"> で切り替える。
+ * 切り替えは lib/theme.ts（設定 › 表示）と public/theme-init.js（描く前）が行う。
+ *
+ * 1. Tailwind の色（tailwind.config.js が gray-500 → var(--gray-500) にしている）。値は「R G B」の数字。
+ *    暗いほうは、濃さの並びを逆にする（gray-50 ＝ 画面の地、gray-900 ＝ 文字）。こうすると、
+ *    各画面の bg-white（板）・text-gray-500（弱い文字）が、そのまま暗い画面でも意味どおりになる。
+ *    blue（選択・主なボタン）は、暗いほうでは水色にする（操作室で「選んだもの・設定値」に使う色）。
+ * 2. 意味の色 --fe-*（計器グラフ・計器・外枠が使う）。どちらのモードでも、色の意味は同じ:
+ *    ink ＝ 今の値、cy ＝ しきい値・選択、mag ＝ 目標・予測、amb ＝ 注意、red ＝ 警報、mut ＝ 止まっている・補足。
+ */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --white: 255 255 255;
+  --gray-50: 249 250 251;
+  --gray-100: 243 244 246;
+  --gray-200: 229 231 235;
+  --gray-300: 209 213 219;
+  --gray-400: 156 163 175;
+  --gray-500: 107 114 128;
+  --gray-600: 75 85 99;
+  --gray-700: 55 65 81;
+  --gray-800: 31 41 55;
+  --gray-900: 17 24 39;
+  --gray-950: 3 7 18;
+  --blue-50: 239 246 255;
+  --blue-100: 219 234 254;
+  --blue-200: 191 219 254;
+  --blue-300: 147 197 253;
+  --blue-400: 96 165 250;
+  --blue-500: 59 130 246;
+  --blue-600: 37 99 235;
+  --blue-700: 29 78 216;
+  --blue-800: 30 64 175;
+  --blue-900: 30 58 138;
+  --blue-950: 23 37 84;
+  --red-50: 254 242 242;
+  --red-100: 254 226 226;
+  --red-200: 254 202 202;
+  --red-300: 252 165 165;
+  --red-400: 248 113 113;
+  --red-500: 239 68 68;
+  --red-600: 220 38 38;
+  --red-700: 185 28 28;
+  --red-800: 153 27 27;
+  --red-900: 127 29 29;
+  --red-950: 69 10 10;
+  --green-50: 240 253 244;
+  --green-100: 220 252 231;
+  --green-200: 187 247 208;
+  --green-300: 134 239 172;
+  --green-400: 74 222 128;
+  --green-500: 34 197 94;
+  --green-600: 22 163 74;
+  --green-700: 21 128 61;
+  --green-800: 22 101 52;
+  --green-900: 20 83 45;
+  --green-950: 5 46 22;
+  --amber-50: 255 251 235;
+  --amber-100: 254 243 199;
+  --amber-200: 253 230 138;
+  --amber-300: 252 211 77;
+  --amber-400: 251 191 36;
+  --amber-500: 245 158 11;
+  --amber-600: 217 119 6;
+  --amber-700: 180 83 9;
+  --amber-800: 146 64 14;
+  --amber-900: 120 53 15;
+  --amber-950: 69 26 3;
+
+  --fe-bg: #eef1f4;
+  --fe-panel: #ffffff;
+  --fe-chrome: #e4e8ec;
+  --fe-line: #cbd2d9;
+  --fe-grid: #e3e7eb;
+  --fe-grid-time: #edf0f3;
+  --fe-ink: #0d1217;
+  --fe-mut: #4e5a66;
+  --fe-cy: #00778c;
+  --fe-cy-bg: #ddf2f6;
+  --fe-mag: #a21caf;
+  --fe-ok: #0e7a43;
+  --fe-amb: #9a5800;
+  --fe-amb-bg: #fdf3e1;
+  --fe-red: #c62828;
+  --fe-red-bg: #fdecec;
+  --fe-red-row: #fff4f3;
+  --fe-on-red: #ffffff;
+  --fe-cursor: #1a2129;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --white: 16 21 26;
+  --gray-50: 9 12 15;
+  --gray-100: 22 28 34;
+  --gray-200: 35 43 52;
+  --gray-300: 46 55 66;
+  --gray-400: 110 122 134;
+  --gray-500: 141 153 166;
+  --gray-600: 169 179 189;
+  --gray-700: 195 204 213;
+  --gray-800: 215 222 229;
+  --gray-900: 230 237 243;
+  --gray-950: 244 247 250;
+  --blue-50: 14 38 48;
+  --blue-100: 18 49 61;
+  --blue-200: 30 74 87;
+  --blue-300: 42 100 116;
+  --blue-400: 52 170 200;
+  --blue-500: 63 192 224;
+  --blue-600: 63 211 245;
+  --blue-700: 111 224 248;
+  --blue-800: 154 233 250;
+  --blue-900: 197 243 252;
+  --blue-950: 226 249 254;
+  --red-50: 30 12 11;
+  --red-100: 45 16 14;
+  --red-200: 90 30 26;
+  --red-300: 138 42 36;
+  --red-400: 224 72 63;
+  --red-500: 255 90 82;
+  --red-600: 255 90 82;
+  --red-700: 255 122 114;
+  --red-800: 255 156 150;
+  --red-900: 255 194 190;
+  --red-950: 255 224 222;
+  --green-50: 15 36 25;
+  --green-100: 20 48 31;
+  --green-200: 30 74 48;
+  --green-300: 42 106 68;
+  --green-400: 54 181 117;
+  --green-500: 61 214 140;
+  --green-600: 61 214 140;
+  --green-700: 111 227 169;
+  --green-800: 154 237 196;
+  --green-900: 197 246 222;
+  --green-950: 226 251 238;
+  --amber-50: 38 26 6;
+  --amber-100: 58 40 18;
+  --amber-200: 90 62 16;
+  --amber-300: 138 94 20;
+  --amber-400: 232 154 28;
+  --amber-500: 255 176 32;
+  --amber-600: 255 176 32;
+  --amber-700: 255 196 83;
+  --amber-800: 255 214 133;
+  --amber-900: 255 232 184;
+  --amber-950: 255 244 222;
+
+  --fe-bg: #090c0f;
+  --fe-panel: #10151a;
+  --fe-chrome: #0c1014;
+  --fe-line: #232b34;
+  --fe-grid: #1f2730;
+  --fe-grid-time: #1a2129;
+  --fe-ink: #e6edf3;
+  --fe-mut: #8d99a6;
+  --fe-cy: #3fd3f5;
+  --fe-cy-bg: #0e2630;
+  --fe-mag: #e879f9;
+  --fe-ok: #3dd68c;
+  --fe-amb: #ffb020;
+  --fe-amb-bg: #261a06;
+  --fe-red: #ff5a52;
+  --fe-red-bg: #1e0c0b;
+  --fe-red-row: #160b0a;
+  --fe-on-red: #1a0504;
+  --fe-cursor: #c3ccd5;
+}
+
+html,
+body {
+  background: var(--fe-bg);
+  color: var(--fe-ink);
+}
+
+/* 桁をそろえて表示している数字（tabular-nums）は、数字の字体（B612 Mono）にそろえる */
+.tabular-nums {
+  font-family: "B612 Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* recharts（グラフの部品）の既定の色は明るい画面向けの灰色なので、目盛りの文字・格子・吹き出しを変数に合わせる */
+.recharts-cartesian-axis-tick-value {
+  fill: var(--fe-mut);
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: var(--fe-line);
+}
+.recharts-cartesian-grid line {
+  stroke: var(--fe-grid);
+}
+.recharts-legend-item-text {
+  color: var(--fe-ink) !important;
+}
+.recharts-default-tooltip {
+  background: var(--fe-panel) !important;
+  border-color: var(--fe-line) !important;
+  color: var(--fe-ink);
+}
+.recharts-tooltip-cursor {
+  stroke: var(--fe-cursor);
+}

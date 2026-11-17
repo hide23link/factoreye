@@ -16,6 +16,7 @@ import {
   fetchDashboard,
   fetchDashboards,
   fetchDevices,
+  fetchLatestReadings,
   fetchMigrationStatus,
   fetchNotificationSettings,
   fetchRuntimeSettings,
@@ -178,3 +179,7 @@ export const useDownsampledReadings = (
     // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（グラフが消えて描き直されるのを防ぐ）
     placeholderData: keepPreviousData,
   });
+
+/** 全センサーの最新の測定値（全体監視の画面）。数が多くても 1 回の取得で済む。15 秒ごとに取り直す */
+export const useLatestReadings = () =>
+  useQuery({ queryKey: ["latest-readings"], queryFn: fetchLatestReadings, refetchInterval: 15000 });
