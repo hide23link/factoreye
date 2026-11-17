@@ -5,6 +5,7 @@ SaaS（multi_tenant）では、各 API が「自分のワークスペースの�
 
 【呼ばれ方】画面が呼ぶ（/api/sensors）。
 - GET/POST /api/sensors、GET/PUT/DELETE /api/sensors/{sensor_id}
+- GET /api/sensors/latest                            → 全センサーの最新の測定値（1 件ずつ）
 - GET /api/sensors/{sensor_id}/readings              → 測定値の履歴
 - GET /api/sensors/{sensor_id}/readings/aggregate     → 期間の合計と件数
 - GET /api/sensors/{sensor_id}/readings/downsampled   → グラフ用に間引いた値（downsample ＝ 間引き）
@@ -20,7 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import AwareDatetime
-from sqlalchemy import and_, func, null, or_
+from sqlalchemy import and_, func, null, or_, true
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -222,6 +223,45 @@ async def _to_read(
         read.device_name = device.name if device else None
         read.device_line = device.line if device else None
     return read
+
+
+@router.get("/latest", response_model=ReadingListResponse)
+async def list_latest_readings(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+) -> Response:
+    """全センサーの最新の測定値を 1 件ずつ返す（まだ受信の無いセンサーは含めない）。
+
+    全体監視の画面が、センサーの数だけ取りに行かずに済むようにする（数百あっても 1 回）。
+    【呼ばれ方】GET /api/sensors/latest → 返事の例:
+      {"readings": [{"sensorId": "...", "value": 22.4, "recordedAt": "2026-11-18T00:42:00Z"}],
+       "total": 1}
+    センサーごとに、主キー（sensor_id, recorded_at）の索引を後ろから 1 件だけ読む（LATERAL）ので、
+    測定値が何百万件あっても、センサーの数に比例する時間で済む。
+    """
+    # 「このセンサーの、いちばん新しい 1 件」。外側のセンサーの行ごとに実行される（LATERAL）
+    newest = (
+        select(Reading.value, Reading.recorded_at)
+        .where(Reading.sensor_id == Sensor.id)
+        .order_by(Reading.recorded_at.desc())  # type: ignore[attr-defined]
+        .limit(1)
+        .lateral("newest")
+    )
+    # SaaS は自分のワークスペースのセンサーだけ（self-hosted は全部）
+    in_workspace = [] if workspace_id is None else [Sensor.workspace_id == workspace_id]
+    query = (
+        select(col(Sensor.id), newest.c.value, newest.c.recorded_at)
+        .select_from(Sensor)
+        .join(newest, true())
+        .where(*in_workspace)
+    )
+
+    result = await session.exec(query)
+    readings = [
+        ReadingRead(sensor_id=sensor_id, value=value, recorded_at=recorded_at)
+        for sensor_id, value, recorded_at in result.all()
+    ]
+    return json_response(ReadingListResponse(readings=readings, total=len(readings)))
 
 
 @router.get("/{sensor_id}", response_model=SensorRead)
