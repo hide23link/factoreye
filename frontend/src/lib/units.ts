@@ -12,6 +12,8 @@ export interface UnitPreset {
 
 export const UNIT_PRESETS: readonly UnitPreset[] = [
   { value: "°C", hint: "温度" },
+  { value: "hPa", hint: "気圧・ヘクトパスカル" },
+  { value: "dBm", hint: "電波の強さ" },
   { value: "%", hint: "湿度・割合" },
   { value: "MPa", hint: "圧力" },
   { value: "kPa", hint: "圧力" },
@@ -49,4 +51,37 @@ export const OTHER_UNIT = "__other__";
 
 export function isPresetUnit(unit: string): boolean {
   return UNIT_PRESETS.some((p) => p.value === unit);
+}
+
+/** サーバーが「単位なし」を表すのに使う仮の単位（単位は 1 文字以上が必須。機器が自動登録したセンサーはこれになる） */
+export const PLACEHOLDER_UNIT = "-";
+
+/** 名前・キーに含まれる言葉から、単位を決める規則（上から順に最初に合ったもの）。小文字にして比べる */
+const UNIT_RULES: ReadonlyArray<{ pattern: RegExp; unit: string }> = [
+  { pattern: /rssi|電波/, unit: "dBm" },
+  { pattern: /uptime|稼働時間/, unit: "s" },
+  { pattern: /humi|humidity|湿度/, unit: "%" },
+  { pattern: /press|気圧/, unit: "hPa" },
+  { pattern: /temp|温度/, unit: "°C" },
+  { pattern: /co2/, unit: "ppm" },
+  { pattern: /sendfail|wifidc|reset|送信失敗/, unit: "回" },
+  { pattern: /batt|電池|電圧|volt/, unit: "V" },
+];
+
+/**
+ * センサーの単位を、画面に出す形にそろえる。
+ * 単位が「-」か空なら、名前とキーから決める（例: "atom01-humi" → "%"）。決められなければ空（数字だけ出す）。
+ * 例: normalizeUnit("-", "atom01-temp", "atom01-temp") → "°C"、normalizeUnit("-", "atom01-heartbeat", "") → ""、normalizeUnit("ppm", …) → "ppm"
+ */
+export function normalizeUnit(unit: string, name: string, ingestKey: string): string {
+  const trimmed = unit.trim();
+  if (trimmed !== "" && trimmed !== PLACEHOLDER_UNIT) return unit;
+  const text = `${name} ${ingestKey}`.toLowerCase();
+  return UNIT_RULES.find((rule) => rule.pattern.test(text))?.unit ?? "";
+}
+
+/** サーバーへ送る単位。空は「-」にする（サーバーは 1 文字以上が必須） */
+export function unitForServer(unit: string): string {
+  const trimmed = unit.trim();
+  return trimmed === "" ? PLACEHOLDER_UNIT : trimmed;
 }

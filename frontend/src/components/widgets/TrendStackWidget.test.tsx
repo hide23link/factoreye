@@ -139,6 +139,15 @@ describe("TrendStackWidget（計器グラフ）", () => {
     expect(useTrendCursorStore.getState().widgets.w1?.spanMs).toBe(60 * 60_000);
   });
 
+  it("縦軸の左上に、センサーの単位を出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("co2", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(5, 600)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["co2"])} />);
+
+    expect(await screen.findByTestId("trend-y-unit")).toHaveTextContent("ppm");
+  });
+
   it("センサーごとに 1 行ずつ並べる", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });

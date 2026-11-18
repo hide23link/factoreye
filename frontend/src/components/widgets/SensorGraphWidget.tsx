@@ -144,6 +144,10 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   }));
 
   const color = graphColor(widget, 0);
+  // 縦軸の上に出す単位（単位が無いセンサーは出さない）
+  const yAxisLabel = sensor?.unit ? { value: sensor.unit, position: "top" as const, fontSize: 10 } : undefined;
+  // 単位の文字が上端で切れないよう、単位を出すときは上に余白をとる
+  const chartMargin = yAxisLabel ? { top: 18, right: 5, left: 0, bottom: 5 } : undefined;
   // 今の値の札。高さは最新の測定値、まだ無ければグラフの最後の点
   const latestValue = latest?.readings.find((reading) => reading.sensorId === widget.sensorId)?.value;
   const lastPlotted = [...chartData].reverse().find((point) => typeof point.value === "number")?.value;
@@ -203,10 +207,10 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
       <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
-            <BarChart data={chartData} {...pointerHandlers}>
+            <BarChart data={chartData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Bar dataKey="value" name={seriesName} fill={color} isAnimationActive={false} />
               {renderThresholdBands(bands, ends)}
@@ -216,10 +220,10 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} {...pointerHandlers}>
+            <AreaChart data={chartData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Area
                 dataKey="value"
@@ -239,10 +243,10 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} {...pointerHandlers}>
+            <LineChart data={chartData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
-              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} />
+              <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Line
                 type={style.curveType}
