@@ -14,7 +14,8 @@ export default defineConfig({
     ? [["github"], ["html", { open: "never" }]]
     : "list",
   use: {
-    baseURL: "http://localhost:3001",
+    // 既定は docker-compose の frontend。別のポートで動かすとき（手元の確認）は環境変数 E2E_BASE_URL で変える
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3001",
     trace: "retain-on-failure",
   },
   // chromium は必須（CI で失敗するとマージ不可）。それ以外は互換性の確認用で、CI では失敗しても

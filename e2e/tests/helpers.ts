@@ -1,6 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // 既定は docker-compose の backend。別のポートで動かすとき（手元の確認）は環境変数 BACKEND_URL で変える
 export const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -24,7 +25,7 @@ export async function sendReading(request: APIRequestContext, ingestKey: string,
  * 版を足すたびにテストの直書きを直さなくて済むよう、ファイルから読む（head が 1 つでなければエラー）。
  */
 export function currentAlembicHead(): string {
-  const dir = join(__dirname, "..", "..", "backend", "alembic", "versions");
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "backend", "alembic", "versions");
   const revisions: string[] = [];
   const downs = new Set<string>();
   for (const file of readdirSync(dir).filter((name) => name.endsWith(".py"))) {
