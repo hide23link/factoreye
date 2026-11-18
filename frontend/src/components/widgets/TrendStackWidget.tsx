@@ -268,6 +268,13 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
             className="absolute left-1.5 right-1 -translate-y-1/2 rounded-sm border-[1.5px] px-1 py-px text-right font-num text-[15px] font-bold"
             style={{ top: `${Math.min(PLOT_BOTTOM, Math.max(PLOT_TOP, yPercent(now.value, scale)))}%`, color, borderColor: color, background: "var(--fe-chrome)" }}
           >
+            {/* 札の左に、グラフの最後の点を指す小さな左向きの矢印（札と同じ色）。飾りなので読み上げない */}
+            <span
+              data-testid="now-tag-arrow"
+              aria-hidden="true"
+              className="absolute -left-2 top-1/2 -mt-[5px] h-0 w-0 border-y-[5px] border-r-[7px] border-y-transparent"
+              style={{ borderRightColor: color }}
+            />
             {/* 受信が止まっていても、最後の値は出す（橙で、止まっていると分かるように）。値そのものが無い行だけ「---」 */}
             {format(now.value)}
           </span>
