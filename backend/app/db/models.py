@@ -336,6 +336,33 @@ class WebhookSubscription(SQLModel, table=True):
 
 
 # ──────────────────────────────────────────────────────────────
+# DisplaySettings（画面の明るさの全員の初期値。self-hosted は id=1 の 1 行、SaaS は 1 つに 1 行）
+# ──────────────────────────────────────────────────────────────
+class DisplaySettings(SQLModel, table=True):
+    """画面の明るさの、全員の初期値（設定 › 画面の明るさ で「全員の初期値にする」を選んだとき）。
+
+    各利用者の端末に自分の選択があれば、それが優先される。無い端末だけ、この値で始まる。
+    """
+
+    __tablename__ = "display_settings"
+    # ワークスペースごとに1行まで（NULL = self-hosted の行は id=1 の1行）
+    __table_args__ = (
+        Index(
+            "uq_display_settings_workspace",
+            "workspace_id",
+            unique=True,
+            postgresql_where=text("workspace_id IS NOT NULL"),
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: UUID | None = Field(default=None, index=True)
+    # "dark"（暗い）・"light"（明るい）・"system"（端末の設定に合わせる）。初期値は暗い
+    default_theme: str = Field(default="dark", max_length=10)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ──────────────────────────────────────────────────────────────
 # NotificationSettings（self-hosted は id=1 の1行、SaaS はワークスペースごとに1行）
 # ──────────────────────────────────────────────────────────────
 class NotificationSettings(SQLModel, table=True):

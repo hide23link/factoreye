@@ -11,21 +11,24 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   await page.goto("/");
   await page.getByRole("button", { name: "設定" }).click();
 
+  // 追加のフォームは「＋センサーを追加」で開く（センサーが 0 件のときは最初から開いている）
+  await page.getByRole("button", { name: "＋センサーを追加" }).click();
   await page.getByLabel("名前").fill(sensorName);
   await page.getByLabel("Ingest Key").fill(ingestKey);
-  await page.getByRole("button", { name: "追加" }).click();
+  await page.getByRole("button", { name: "追加", exact: true }).click();
 
-  // ingestKey列は編集モードでも常にプレーンテキストのtdのまま
-  // （name列は編集モードでinputに置き換わりhasTextで拾えなくなるため、ここでは使わない）
-  const row = page.locator("tr", { hasText: ingestKey });
+  // 一覧は一度に 50 件まで。ほかのテストで増えたセンサーに埋もれないよう、名前で絞り込む
+  await page.getByRole("searchbox", { name: "センサーを絞り込む" }).fill(sensorName);
+  const row = page.locator("tr", { hasText: sensorName });
   await expect(row).toBeVisible();
 
-  await row.getByText("編集").click();
-  // td順: 名前/IngestKey/単位/軽故障(下限/上限)/重故障(下限/上限)/不感帯/状態/操作。
-  // 重故障の上限（nth(4)列内の2番目の入力）を設定する
-  await row.locator("td").nth(4).locator("input").nth(1).fill("50");
-  await row.getByRole("button", { name: "保存" }).click();
-  await expect(row.locator("td").nth(4)).toHaveText("— / 50");
+  // 名前を押すと右に詳細の欄が開く。重故障の上限を設定して保存する
+  await row.getByRole("button", { name: `${sensorName} の詳細` }).click();
+  const detail = page.getByRole("complementary", { name: `${sensorName} の詳細` });
+  await detail.getByRole("spinbutton", { name: "重故障の上限" }).fill("50");
+  await detail.getByRole("button", { name: "保存" }).click();
+  // 一覧の「しきい値」の列は、上限だけのとき「≤ 50」と出る
+  await expect(row).toContainText("≤ 50");
 
   await sendReading(request, ingestKey, 55);
 

@@ -2,6 +2,7 @@
  * 画面の明るさ（暗い・明るい・端末に合わせる）の読み書き。設定 › 表示 で選ぶ。
  *
  * - 選んだ値は、この端末のブラウザ（localStorage の factoreye.theme）にだけ保存する。ほかの人の画面は変わらない
+ * - 端末に選択が無いときだけ、サーバーの「全員の初期値」（GET /api/settings/display）で始まる（store/useThemeStore.ts）
  * - 色そのものは theme.css が持つ。ここは <html data-theme="dark|light"> を付け替えるだけ
  * - 画面を描く前の 1 回目は public/theme-init.js が付ける（同じ読み方。変えるときは両方を直す）
  *
@@ -13,16 +14,53 @@ export type AppliedTheme = "dark" | "light";
 
 // 保存の名前。public/theme-init.js と同じ名前にする
 export const THEME_STORAGE_KEY = "factoreye.theme";
+// サーバーの「全員の初期値」の控え。次に開くとき、取得を待たずに初めの 1 回から正しい明るさで描くため（ちらつき防止）。
+// 端末の選択（上の factoreye.theme）があれば、そちらが優先。public/theme-init.js も同じ名前で読む
+export const SERVER_DEFAULT_STORAGE_KEY = "factoreye.theme.default";
 const MODES: readonly ThemeMode[] = ["dark", "light", "system"];
 const LIGHT_QUERY = "(prefers-color-scheme: light)";
 
-/** 保存してある明るさ。保存が無い・読めない・知らない値のときは「暗い」（初期値） */
+/**
+ * 保存してある明るさ。順に、この端末の選択 → サーバーの全員の初期値の控え → 暗い（初期値）。
+ * 保存が読めない・知らない値のときは次の候補へ。
+ */
 export function readThemeMode(): ThemeMode {
   try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return MODES.find((mode) => mode === saved) ?? "dark";
+    for (const key of [THEME_STORAGE_KEY, SERVER_DEFAULT_STORAGE_KEY]) {
+      const saved = localStorage.getItem(key);
+      const mode = MODES.find((m) => m === saved);
+      if (mode) return mode;
+    }
+    return "dark";
   } catch {
     return "dark";
+  }
+}
+
+/** サーバーの全員の初期値を、控えとして保存する（端末の選択とは別のキー）。保存できなくても続ける */
+export function saveServerDefaultTheme(mode: ThemeMode): void {
+  try {
+    localStorage.setItem(SERVER_DEFAULT_STORAGE_KEY, mode);
+  } catch {
+    // 控えが取れなくても、次に開いたときに少しちらつくだけ
+  }
+}
+
+/** この端末で明るさを選んだことがあるか（保存がある・読める値のとき true） */
+export function hasSavedThemeMode(): boolean {
+  try {
+    return MODES.some((mode) => mode === localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
+/** この端末の選択を消す（「全員の初期値」に従う状態に戻す）。消せなくても、画面の切り替えは続ける */
+export function clearThemeMode(): void {
+  try {
+    localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // 消せなくても続ける
   }
 }
 

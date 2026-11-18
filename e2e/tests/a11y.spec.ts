@@ -13,7 +13,7 @@ const pages = [
     name: "設定",
     open: async (page: import("@playwright/test").Page) => {
       await page.getByRole("button", { name: "設定" }).click();
-      await expect(page.getByRole("button", { name: "追加" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "＋センサーを追加" })).toBeVisible();
     },
   },
   {

@@ -114,6 +114,17 @@ describe("toPoints と trendStats", () => {
   it("データが無ければ null", () => {
     expect(trendStats([], 600, [])).toBeNull();
   });
+
+  it("最後の区間がまだ終わっていないとき、点・最高・最低の時刻は、今（endTime）より後にしない", () => {
+    // 最後の区間は 00:20〜00:30。中央は 00:25 だが、今は 00:23
+    const now = new Date("2026-11-18T00:23:00Z").getTime();
+    const capped = toPoints(buckets, 600, "avg", now);
+    expect(capped[2].time).toBe(now);
+    // 終わっている区間は、これまでどおり中央
+    expect(capped[0].time).toBe(new Date("2026-11-18T00:05:00Z").getTime());
+    // 最後の区間に最低（18）があるので、最低の時刻も今で切られる
+    expect(trendStats(buckets, 600, capped, now)?.min.time).toBe(now);
+  });
 });
 
 describe("しきい値", () => {

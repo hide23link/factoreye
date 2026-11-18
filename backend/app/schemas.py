@@ -15,7 +15,7 @@ Python/DB側はsnake_case（PEP 8）のまま、alias_generatorで変換する�
 DB のテーブルの設計図は、db/models.py（ここは API の入出力の形だけ）。
 """
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -461,6 +461,26 @@ class NotificationSettingsUpdate(CamelModel):
     enabled: bool | None = None
     critical_repeat_enabled: bool | None = None
     critical_repeat_interval_minutes: int | None = Field(default=None, ge=1)
+
+
+# ──────────────────────────────────────────────────────────────
+# DisplaySettings（画面の明るさの、全員の初期値）
+# ──────────────────────────────────────────────────────────────
+
+# 選べる明るさ。暗い・明るい・端末の設定に合わせる（frontend の ThemeMode と同じ）
+DisplayTheme = Literal["dark", "light", "system"]
+
+
+class DisplaySettingsRead(CamelModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+    default_theme: DisplayTheme
+
+
+class DisplaySettingsUpdate(CamelModel):
+    """全員の初期値の更新の入力。"""
+
+    default_theme: DisplayTheme
 
 
 # ──────────────────────────────────────────────────────────────

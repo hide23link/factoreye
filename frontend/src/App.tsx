@@ -18,7 +18,7 @@ import { Suspense, useEffect } from "react";
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardTabs } from "./components/DashboardTabs";
-import { useAlarms, useSensors } from "./hooks/queries";
+import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
@@ -26,7 +26,7 @@ import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { countDevicesAndSensors } from "./lib/overview";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
-import { startThemeWatch } from "./store/useThemeStore";
+import { startThemeWatch, useThemeStore } from "./store/useThemeStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
 import type { LegalKind } from "./components/LegalPage";
@@ -282,12 +282,40 @@ function BottomNav() {
   );
 }
 
+/**
+ * 画面の明るさの「全員の初期値」を反映する（何も描かない）。
+ * この端末で明るさを選んでいれば、その選択を優先する（ストア側で判断）。ログイン後に呼ばれるので、SaaS でも取れる。
+ */
+function ServerThemeDefault() {
+  const { data } = useDisplaySettings();
+  const applyServerDefault = useThemeStore((s) => s.applyServerDefault);
+  useEffect(() => {
+    if (data) applyServerDefault(data.defaultTheme);
+  }, [data, applyServerDefault]);
+  return null;
+}
+
+/**
+ * 画面表示モード（壁掛けモニター）の間、画面を常に暗くする（何も描かない）。
+ * 選んだ明るさ（端末の選択・全員の初期値）は変えず、モードを抜けると元の明るさに戻る。
+ */
+function KioskThemeLock({ kiosk }: { kiosk: boolean }) {
+  const setKioskLock = useThemeStore((s) => s.setKioskLock);
+  useEffect(() => {
+    setKioskLock(kiosk);
+    return () => setKioskLock(false);
+  }, [kiosk, setKioskLock]);
+  return null;
+}
+
 /** ログイン後（または self-hosted）の画面。リンクで開いたときはグラフ 1 つの画面、それ以外はふだんの枠（MainShell）。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
   const graphLink = useUiStore((s) => s.graphLink);
   const linkNotFound = useUiStore((s) => s.linkNotFound);
+  // 画面表示モードに入っている間（ダッシュボードを選んでいるときだけ）は、常に暗くする
+  const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 
   // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（一覧に黄色の帯が出る）
   useEffect(() => {
@@ -297,13 +325,20 @@ function AppShell() {
   if (graphLink) {
     return (
       <ChunkErrorBoundary>
+        <ServerThemeDefault />
         <Suspense fallback={<PageFallback />}>
           <GraphLinkView link={graphLink} />
         </Suspense>
       </ChunkErrorBoundary>
     );
   }
-  return <MainShell view={view} selectedDashboardId={selectedDashboardId} />;
+  return (
+    <>
+      <ServerThemeDefault />
+      <KioskThemeLock kiosk={kiosk} />
+      <MainShell view={view} selectedDashboardId={selectedDashboardId} />
+    </>
+  );
 }
 
 /** 画面の名前（上の帯に出す） */

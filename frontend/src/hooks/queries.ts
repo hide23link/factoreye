@@ -18,6 +18,7 @@ import {
   fetchDevices,
   fetchLatestReadings,
   fetchMigrationStatus,
+  fetchDisplaySettings,
   fetchNotificationSettings,
   fetchRuntimeSettings,
   fetchSensorReadings,
@@ -71,6 +72,13 @@ export const useAlarms = (status?: string, limit?: number) =>
 /** 通知設定。 */
 export const useNotificationSettings = () =>
   useQuery({ queryKey: ["notification-settings"], queryFn: fetchNotificationSettings });
+
+/**
+ * 画面の明るさの、全員の初期値。ログインの前（SaaS）など取れないときは、そのまま端末の選択か「暗い」で動く。
+ * 取得の関数は呼ぶときに読む（読み込みの失敗が、画面の描画を止めないように）。
+ */
+export const useDisplaySettings = () =>
+  useQuery({ queryKey: ["display-settings"], queryFn: () => fetchDisplaySettings(), staleTime: 5 * 60_000, retry: false });
 
 /** 配布版の「API・取り込み」設定。.env を直接編集したことに気づけるよう、15 秒ごとに取り直す。 */
 export const useRuntimeSettings = () =>

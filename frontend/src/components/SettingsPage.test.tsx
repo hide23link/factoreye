@@ -24,7 +24,7 @@ describe("SettingsPage", () => {
     renderWithQueryClient(<SettingsPage />);
 
     expect(screen.getByRole("button", { name: "センサー" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "アラーム" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "アラームのしきい値" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Webhook連携" })).toBeInTheDocument();
   });
@@ -44,7 +44,7 @@ describe("SettingsPage", () => {
 
     renderWithQueryClient(<SettingsPage />);
 
-    await user.click(screen.getByRole("button", { name: "アラーム" }));
+    await user.click(screen.getByRole("button", { name: "アラームのしきい値" }));
 
     expect(await screen.findByText(/該当するアラームはありません/)).toBeInTheDocument();
   });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Reading, Sensor } from "../types";
 import { STALE_MS } from "./overview";
-import { filterCounts, groupByDevice, hasLimits, matchesFilter, matchesQuery, sensorLive } from "./sensor-list";
+import { filterCounts, groupByDevice, hasLimits, formatLiveValue, hourRange, matchesFilter, matchesQuery, sensorLive, sensorStatus, sparkSegments, thresholdSummary } from "./sensor-list";
 
 const NOW = new Date("2026-11-18T00:00:00Z").getTime();
 
@@ -59,8 +59,67 @@ describe("検索と絞り込み", () => {
   it("ボタンごとの件数は、検索の文字を反映する", () => {
     const sensors = [sensor("a", "洋室 温度"), sensor("b", "洋室 CO2", { thresholdMaxCritical: 1000 }), sensor("c", "寝室 温度")];
     const lives = new Map(sensors.map((x, i) => [x.id, sensorLive(x, i === 2 ? undefined : reading(x.id, 1, 1000), NOW)]));
-    expect(filterCounts(sensors, lives, "")).toEqual({ all: 3, receiving: 2, stopped: 1, limits: 1 });
-    expect(filterCounts(sensors, lives, "洋室")).toEqual({ all: 2, receiving: 2, stopped: 0, limits: 1 });
+    expect(filterCounts(sensors, lives, "")).toEqual({ all: 3, receiving: 2, stopped: 1, outside: 0 });
+    expect(filterCounts(sensors, lives, "洋室")).toEqual({ all: 2, receiving: 2, stopped: 0, outside: 0 });
+  });
+  it("「しきい値の外」は、受信中で今の値がしきい値の外のもの（止まっているものは数えない）", () => {
+    const s2 = sensor("a", "洋室 CO2", { thresholdMaxCritical: 1000 });
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 1052, 1000), NOW))).toBe(true);
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 900, 1000), NOW))).toBe(false);
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 1052, STALE_MS + 1000), NOW))).toBe(false);
+  });
+});
+
+describe("一覧の状態・しきい値・直近 1 時間", () => {
+  it("状態: 無効 > 未受信 > 止まっている > しきい値の外 > 正常の順に決める", () => {
+    const s = sensor("a", "A", { thresholdMaxCritical: 10 });
+    expect(sensorStatus(s, sensorLive(s, reading("a", 5, 1000), NOW))).toBe("normal");
+    expect(sensorStatus(s, sensorLive(s, reading("a", 12, 1000), NOW))).toBe("outside");
+    expect(sensorStatus(s, sensorLive(s, reading("a", 12, STALE_MS + 1000), NOW))).toBe("stopped");
+    expect(sensorStatus(s, sensorLive(s, undefined, NOW))).toBe("never");
+    const off = { ...s, enabled: false };
+    expect(sensorStatus(off, sensorLive(off, reading("a", 5, 1000), NOW))).toBe("disabled");
+  });
+  it("しきい値の文字: 上限だけ「≤」、下限だけ「≥」、両方「—」でつなぐ、無ければ「—」。軽故障を優先し、無ければ重故障", () => {
+    expect(thresholdSummary(sensor("a", "A", { thresholdMaxCritical: 1000 }))).toBe("≤ 1000");
+    expect(thresholdSummary(sensor("a", "A", { thresholdMinCritical: 18 }))).toBe("≥ 18");
+    expect(thresholdSummary(sensor("a", "A", { thresholdMinWarning: 18, thresholdMaxWarning: 28, thresholdMaxCritical: 35 }))).toBe("18 — 28");
+    expect(thresholdSummary(sensor("a", "A"))).toBe("—");
+  });
+  it("直近 1 時間の最低〜最高は、区間の min・max から。データが無ければ null", () => {
+    expect(hourRange([])).toBeNull();
+    expect(hourRange([{ avg: 5, max: 6, min: 4 }, { avg: 7, max: 9, min: 6 }])).toEqual({ min: 4, max: 9 });
+  });
+  it("今の値の文字: 100 以上は整数、それ未満は小数 2 桁まで", () => {
+    expect(formatLiveValue(1092.4)).toBe("1092");
+    expect(formatLiveValue(22.1)).toBe("22.1");
+    expect(formatLiveValue(22.456)).toBe("22.46");
+    expect(formatLiveValue(-62)).toBe("-62");
+  });
+  describe("小さな折れ線（sparkSegments）", () => {
+    // 1 時間 = 0〜100。区間は 120 秒（中央は始まりの 1 分後）
+    const FROM = new Date("2026-11-18T00:00:00Z").getTime();
+    const TO = FROM + 3_600_000;
+    // 区間の中央が「minutes 分」になる区間（幅 bucketSeconds）
+    const at = (minutes: number, avg: number, bucketSeconds = 120) => ({
+      start: new Date(FROM + minutes * 60_000 - bucketSeconds * 500).toISOString(),
+      avg,
+    });
+
+    it("x は区間の時刻（1 時間を 0〜100 に）、y は最低〜最高を高さいっぱいに", () => {
+      expect(sparkSegments([at(15, 1, 900), at(30, 3, 900), at(45, 2, 900)], 900, FROM, TO, 100, 20)).toEqual(["25.0,20.0 50.0,0.0 75.0,10.0"]);
+    });
+    it("受信が途切れた所（区間の幅の 1.5 倍より空く）は、線を切って空ける", () => {
+      expect(sparkSegments([at(10, 1), at(12, 2), at(40, 3), at(42, 1)], 120, FROM, TO, 100, 20)).toEqual([
+        "16.7,20.0 20.0,10.0",
+        "66.7,0.0 70.0,20.0",
+      ]);
+    });
+    it("点が 1 つの線分は短い横線、値がすべて同じなら真ん中、データが無ければ空", () => {
+      expect(sparkSegments([at(30, 5)], 120, FROM, TO, 100, 20)).toEqual(["49.0,10.0 51.0,10.0"]);
+      expect(sparkSegments([at(10, 5), at(12, 5)], 120, FROM, TO, 100, 20)).toEqual(["16.7,10.0 20.0,10.0"]);
+      expect(sparkSegments([], 120, FROM, TO, 100, 20)).toEqual([]);
+    });
   });
 });
 
