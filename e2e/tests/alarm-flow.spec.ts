@@ -17,6 +17,8 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   await page.getByLabel("Ingest Key").fill(ingestKey);
   await page.getByRole("button", { name: "追加", exact: true }).click();
 
+  // 一覧は一度に 50 件まで。ほかのテストで増えたセンサーに埋もれないよう、名前で絞り込む
+  await page.getByRole("searchbox", { name: "センサーを絞り込む" }).fill(sensorName);
   const row = page.locator("tr", { hasText: sensorName });
   await expect(row).toBeVisible();
 
