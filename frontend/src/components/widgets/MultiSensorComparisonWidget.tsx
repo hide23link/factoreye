@@ -66,7 +66,8 @@ import {
   renderThresholdLines,
   type LinkGraphView,
 } from "./graph-parts";
-import { GraphValues } from "./GraphValues";
+import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
+import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
 
 /**
  * 複数センサーの比較グラフ。比較するセンサーは graphSensorIds（config.sensorIds）で決まる。
@@ -128,6 +129,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
       placeholderData: keepPreviousData,
     })),
   });
+  // 右の今の値の札を置く高さ（グラフの中で測る）
+  const [valueMeasure, setValueMeasure] = useGraphValueMeasure();
 
   if (sensorIds.length === 0) {
     return <p className="text-sm text-gray-500">比較対象のセンサーが設定されていません</p>;
@@ -186,6 +189,29 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   const stackId = options.stack === "none" ? undefined : "stack";
 
   const graphType = widget.config.graphType ?? "line";
+
+  // 凡例に出す名前: 利用者が付けた名前（空欄なら、センサーの名前）
+  const nameOf = (sensorId: string) =>
+    widget.config.seriesNames?.[sensorId]?.trim() || sensors?.find((s) => s.id === sensorId)?.name || sensorId;
+  // 右の今の値の札。高さは、その線の最後の点（実際の値のグラフでは最新の測定値、まだ無ければグラフの最後の点）。
+  // 0〜100% にそろえたグラフは、換算後の最後の点。積み上げは線の高さが値と違うので、高さに合わせず縦に並べる
+  const lastPlotted = (sensorId: string) => {
+    const row = [...chartData].reverse().find((r) => typeof r[sensorId] === "number");
+    return row ? (row[sensorId] as number) : undefined;
+  };
+  const valueItems: GraphValueItem[] = sensorIds.map((sensorId, i) => {
+    const value = latestById.get(sensorId);
+    const position =
+      options.stack !== "none" ? undefined : options.axisMode === "normalized" ? lastPlotted(sensorId) : (value ?? lastPlotted(sensorId));
+    return {
+      name: nameOf(sensorId),
+      color: graphColor(widget, i),
+      unit: sensors?.find((s) => s.id === sensorId)?.unit ?? "",
+      value,
+      position,
+      yAxisId: dualAxis ? axis.sides[sensorId] : undefined,
+    };
+  });
 
   // 3種類のグラフで共通の部品（軸・目盛り・凡例・ドラッグ選択・しきい値の線）
   const parts = [
@@ -259,10 +285,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     ...renderThresholdLines(lines),
     drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
     renderCursorLine(linkView?.cursorTime ?? null, dualAxis ? "left" : undefined),
+    linkView ? null : <GraphValueProbe key="value-probe" items={valueItems} onMeasure={setValueMeasure} />,
   ];
-  // 凡例に出す名前: 利用者が付けた名前（空欄なら、センサーの名前）
-  const nameOf = (sensorId: string) =>
-    widget.config.seriesNames?.[sensorId]?.trim() || sensors?.find((s) => s.id === sensorId)?.name || sensorId;
   // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
   // 線は connectNulls で自分の点だけを繋ぐ。5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
   const series = sensorIds.map((sensorId, i) => {
@@ -344,15 +368,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         </div>
         {/* 右に、線ごとの今の値（リンクの画面では出さない） */}
         {!linkView && (
-          <GraphValues
-            items={sensorIds.map((sensorId, i) => ({
-              name: nameOf(sensorId),
-              color: graphColor(widget, i),
-              unit: sensors?.find((s) => s.id === sensorId)?.unit ?? "",
-              value: latestById.get(sensorId),
-            }))}
-            decimals={widget.config.decimals}
-          />
+          <GraphValues items={valueItems} decimals={widget.config.decimals} measure={valueMeasure} />
         )}
       </div>
     </div>

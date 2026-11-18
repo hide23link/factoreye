@@ -62,7 +62,8 @@ import {
   renderThresholdLines,
   type LinkGraphView,
 } from "./graph-parts";
-import { GraphValues } from "./GraphValues";
+import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
+import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
 export { GRAPH_BUCKETS };
@@ -118,6 +119,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
   });
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
+  // 右の今の値の札を置く高さ（グラフの中で測る）
+  const [valueMeasure, setValueMeasure] = useGraphValueMeasure();
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
@@ -141,6 +144,13 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   }));
 
   const color = graphColor(widget, 0);
+  // 今の値の札。高さは最新の測定値、まだ無ければグラフの最後の点
+  const latestValue = latest?.readings.find((reading) => reading.sensorId === widget.sensorId)?.value;
+  const lastPlotted = [...chartData].reverse().find((point) => typeof point.value === "number")?.value;
+  const valueItems: GraphValueItem[] = [
+    { name: sensor?.name ?? "値", color, unit: sensor?.unit ?? "", value: latestValue, position: latestValue ?? lastPlotted ?? undefined },
+  ];
+  const valueProbe = linkView ? null : <GraphValueProbe items={valueItems} onMeasure={setValueMeasure} />;
   const graphType = widget.config.graphType ?? "line";
   const style = graphStyle(widget.config);
   const overlay = thresholdOverlay(widget.config, sensor);
@@ -196,6 +206,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
               {renderCursorLine(linkView?.cursorTime ?? null)}
+              {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
             <AreaChart data={chartData} {...pointerHandlers}>
@@ -218,6 +229,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
               {renderCursorLine(linkView?.cursorTime ?? null)}
+              {valueProbe}
             </AreaChart>
           ) : (
             <LineChart data={chartData} {...pointerHandlers}>
@@ -238,16 +250,14 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
               {renderCursorLine(linkView?.cursorTime ?? null)}
+              {valueProbe}
             </LineChart>
           )}
         </ResponsiveContainer>
       </div>
       {/* 右に、今の値（リンクの画面では出さない） */}
       {!linkView && (
-        <GraphValues
-          items={[{ name: seriesName, color, unit: sensor?.unit ?? "", value: latest?.readings.find((reading) => reading.sensorId === widget.sensorId)?.value }]}
-          decimals={widget.config.decimals}
-        />
+        <GraphValues items={valueItems} decimals={widget.config.decimals} measure={valueMeasure} />
       )}
       </div>
     </div>
