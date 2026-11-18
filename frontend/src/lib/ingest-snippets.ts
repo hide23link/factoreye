@@ -3,7 +3,7 @@
  * ingestKey とセンサーの値（42.0）を埋め込んで、そのまま実行できる形にする。
  * API キーは、利用者が自分の .env の値に置き換える（ここには書かない）。
  *
- * 【誰が使うか】SetupWizard（セットアップガイド）、SensorConnectGuide（センサー登録のあとの「つなぎ方」）。
+ * 【誰が使うか】SendDataPanel（セットアップガイドの段階 2）、SensorConnectGuide（センサー登録のあとの「つなぎ方」）。
  */
 import { API_BASE_URL } from "./api";
 

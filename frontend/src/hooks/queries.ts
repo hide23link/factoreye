@@ -93,6 +93,7 @@ export const useSensorReadings = (
   sensorId: string | null,
   hours = 1,
   limit = DEFAULT_READINGS_LIMIT,
+  refetchMs = POLL_INTERVAL_MS, // 取り直す間隔（セットアップガイドは、届くのを待つので 3 秒）
 ) =>
   useQuery({
     // limit が違う取得（最新 1 件だけ／グラフ用）のキャッシュが混ざらないよう、キーに含める
@@ -102,7 +103,7 @@ export const useSensorReadings = (
       return fetchSensorReadings(sensorId as string, from, limit);
     },
     enabled: sensorId !== null,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: refetchMs,
   });
 
 /**
