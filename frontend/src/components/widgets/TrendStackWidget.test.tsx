@@ -104,6 +104,8 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     const tag = await screen.findByText(/^9\.1/, { selector: "span.font-num" });
     expect(tag).toHaveStyle({ color: "var(--fe-amb)" });
+    // 札の左の矢印も、札と同じ色
+    expect(screen.getByTestId("now-tag-arrow")).toHaveStyle({ borderRightColor: "var(--fe-amb)" });
     expect(screen.getByText(/受信なし/)).toBeInTheDocument();
   });
 
