@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RAW_SUFFIX, bucketValue, buildRows, nearestValue, normalizeRows, rawValueOf, summarizeValues, type GraphRow } from "./graph-series";
+import { RAW_SUFFIX, bucketValue, buildRows, nearestValue, normalizeRows, rawValueOf, summarizeBuckets, type GraphRow } from "./graph-series";
 
 const bucket = (start: string, min: number, avg: number, max: number) => ({ start, min, avg, max });
 
@@ -134,12 +134,23 @@ describe("nearestValue", () => {
   });
 });
 
-describe("summarizeValues（最高・最低・平均）", () => {
-  it("値の列から、最高・最低・平均を出す（無い値は数えない）", () => {
-    expect(summarizeValues([3, 1, undefined, null, 2])).toEqual({ max: 3, min: 1, average: 2 });
+describe("summarizeBuckets（最高・最低・平均）", () => {
+  it("最高＝区間 max の最大、最低＝区間 min の最小、平均＝avg を count で重みづけ", () => {
+    // 平均の単純な平均（(2 + 8) / 2 = 5）ではなく、件数で重みづけした (2×3 + 8×1) / 4 = 3.5
+    expect(
+      summarizeBuckets([
+        { min: 1, max: 5, avg: 2, count: 3 },
+        { min: 0, max: 9, avg: 8, count: 1 },
+      ]),
+    ).toEqual({ max: 9, min: 0, average: 3.5 });
   });
-  it("値が 1 つも無ければ undefined", () => {
-    expect(summarizeValues([])).toBeUndefined();
-    expect(summarizeValues([undefined, null])).toBeUndefined();
+  it("区間の平均だけを見ると隠れる、区間の中の最高・最低を拾う", () => {
+    expect(summarizeBuckets([{ min: 10, max: 30, avg: 20, count: 5 }])).toEqual({ max: 30, min: 10, average: 20 });
+  });
+  it("件数が 0 の区間は、重み 1 で数える", () => {
+    expect(summarizeBuckets([{ min: 4, max: 4, avg: 4, count: 0 }])?.average).toBe(4);
+  });
+  it("区間が 1 つも無ければ undefined", () => {
+    expect(summarizeBuckets([])).toBeUndefined();
   });
 });

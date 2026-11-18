@@ -88,59 +88,59 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
   return (
     <div role="group" aria-label="表示時間の操作" className={`flex flex-wrap items-center gap-2 text-sm ${className}`}>
       <span className={`${moreOpen ? "contents" : "hidden"} sm:contents`}>
-      <button
-        type="button"
-        aria-label="前へ"
-        onClick={() => setRange(panRange(range, -1, now, maxMs))}
-        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
-      >
-        ◀
-      </button>
-      <button
-        type="button"
-        aria-label="今に戻る"
-        onClick={() => setRange(nowRange(range, now))}
-        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
-      >
-        今
-      </button>
-      {range.mode === "relative" && (
         <button
           type="button"
-          aria-label="一時停止"
-          // 今の表示範囲を固定して、動きを止める（再開は「今」で、直近モードに戻す）
-          onClick={() => setRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
+          aria-label="前へ"
+          onClick={() => setRange(panRange(range, -1, now, maxMs))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
-          一時停止
+          ◀
         </button>
-      )}
-      <button
-        type="button"
-        aria-label="後ろへ"
-        onClick={() => setRange(panRange(range, 1, now, maxMs))}
-        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
-      >
-        ▶
-      </button>
-      <span className="flex gap-2">
-      <button
-        type="button"
-        aria-label="縮小"
-        onClick={() => setRange(zoomRange(range, 2, now, maxMs))}
-        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
-      >
-        －
-      </button>
-      <button
-        type="button"
-        aria-label="拡大"
-        onClick={() => setRange(zoomRange(range, 0.5, now, maxMs))}
-        className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
-      >
-        ＋
-      </button>
-      </span>
+        <button
+          type="button"
+          aria-label="今に戻る"
+          onClick={() => setRange(nowRange(range, now))}
+          className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
+        >
+          今
+        </button>
+        {range.mode === "relative" && (
+          <button
+            type="button"
+            aria-label="一時停止"
+            // 今の表示範囲を固定して、動きを止める（再開は「今」で、直近モードに戻す）
+            onClick={() => setRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
+            className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
+          >
+            一時停止
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label="後ろへ"
+          onClick={() => setRange(panRange(range, 1, now, maxMs))}
+          className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
+        >
+          ▶
+        </button>
+        <span className="flex gap-2">
+          <button
+            type="button"
+            aria-label="縮小"
+            onClick={() => setRange(zoomRange(range, 2, now, maxMs))}
+            className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
+          >
+            －
+          </button>
+          <button
+            type="button"
+            aria-label="拡大"
+            onClick={() => setRange(zoomRange(range, 0.5, now, maxMs))}
+            className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
+          >
+            ＋
+          </button>
+        </span>
       </span>
 
       {/* よく使う期間は、ボタンで 1 回で選べる（操作室の期間切り替えと同じ）。ほかの期間は、右の選択で */}
@@ -177,22 +177,22 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
       </button>
 
       <span className={moreOpen ? "inline-block" : "hidden sm:inline-block"}>
-      <select
-        aria-label="表示期間"
-        value={visiblePresetKey ?? "custom"}
-        onChange={(event) => {
-          const preset = PRESETS.find((p) => p.key === event.target.value);
-          if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
-        }}
-        className="rounded border border-gray-300 px-2 py-1"
-      >
-        {PRESETS.filter((p) => p.durationMs <= maxMs).map((p) => (
-          <option key={p.key} value={p.key}>
-            {p.label}
-          </option>
-        ))}
-        {visiblePresetKey === null && <option value="custom">{describeRange(range)}</option>}
-      </select>
+        <select
+          aria-label="表示期間"
+          value={visiblePresetKey ?? "custom"}
+          onChange={(event) => {
+            const preset = PRESETS.find((p) => p.key === event.target.value);
+            if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
+          }}
+          className="rounded border border-gray-300 px-2 py-1"
+        >
+          {PRESETS.filter((p) => p.durationMs <= maxMs).map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+          {visiblePresetKey === null && <option value="custom">{describeRange(range)}</option>}
+        </select>
       </span>
 
       <span className={`text-xs text-gray-500 ${moreOpen ? "" : "hidden sm:inline"}`} data-testid="time-range-label">

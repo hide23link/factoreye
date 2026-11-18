@@ -301,3 +301,113 @@ export function formatRangeJst(from: number, to: number): string {
     new Date(ms).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   return `${fmt(from)} — ${fmt(to)} JST`;
 }
+
+// ---- グラフの上の札（最高・最低・カーソルの値）の置き場所 ----
+// 札の大きさは、文字数から見積もる（描いてから測ると、置き直しで札が一瞬ずれるため）。位置はすべて、グラフの枠の左上からの px。
+
+/** 札の四角（枠の左上から。px） */
+export interface LabelBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 文字の幅の見積もり（px）。全角（日本語）は文字の大きさ、半角は 0.62 倍。例: estimateTextWidth("最高 1103", 10) → 約 46 */
+export function estimateTextWidth(text: string, fontPx: number): number {
+  let width = 0;
+  for (const ch of text) width += (ch.codePointAt(0) ?? 0) > 0x2e80 ? fontPx : fontPx * 0.62;
+  return Math.ceil(width);
+}
+
+/** 最高・最低の札の高さ（10px の文字）と、カーソルの値の札の高さ（12px の文字） */
+export const EXTREME_LABEL_HEIGHT = 14;
+export const CURSOR_LABEL_HEIGHT = 18;
+// 点と札のすきま
+const LABEL_GAP = 5;
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(Math.max(value, low), Math.max(low, high));
+}
+
+/** 札が重なっているか（接しているだけは重なりとしない） */
+export function boxesOverlap(a: LabelBox, b: LabelBox): boolean {
+  return a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
+}
+
+/**
+ * 点（x, y）の上か下に、札を置く。左右は点を中心に置き、枠の外へ出ないよう内側へ寄せる（左 15% 付近でも切れない）。
+ * 上下は、枠の外へ出ないよう収める。
+ * 例: placeLabelAround({ x: 10, y: 60 }, { width: 80, height: 14 }, "above", { width: 400, height: 100 }) → { left: 0, top: 41, … }
+ */
+export function placeLabelAround(
+  anchor: { x: number; y: number },
+  size: { width: number; height: number },
+  side: "above" | "below",
+  plot: { width: number; height: number },
+): LabelBox {
+  const top = side === "above" ? anchor.y - size.height - LABEL_GAP : anchor.y + LABEL_GAP + 1;
+  return {
+    left: clamp(anchor.x - size.width / 2, 0, plot.width - size.width),
+    top: clamp(top, 0, plot.height - size.height),
+    width: size.width,
+    height: size.height,
+  };
+}
+
+/**
+ * カーソルの値の札の置き場所。右寄り（70% より右）なら点の左、それ以外は右に置き、上寄りなら点の下、それ以外は上に置く
+ * （枠の外へ出ないよう収める）。
+ */
+export function placeCursorLabel(
+  anchor: { x: number; y: number },
+  size: { width: number; height: number },
+  plot: { width: number; height: number },
+): LabelBox {
+  const left = anchor.x > plot.width * 0.7 ? anchor.x - size.width - 8 : anchor.x + 8;
+  const top = anchor.y < plot.height * 0.3 ? anchor.y + 4 : anchor.y - size.height - 4;
+  return { left: clamp(left, 0, plot.width - size.width), top: clamp(top, 0, plot.height - size.height), width: size.width, height: size.height };
+}
+
+/** 置いた最高・最低の札。faded が true のときは、どこに置いても重なるので薄くする */
+export interface PlacedLabel {
+  box: LabelBox;
+  faded: boolean;
+}
+
+/**
+ * 最高・最低の札を置く。優先は、最高＝点の上・最低＝点の下。
+ * カーソルの札（cursor。優先する）と、先に置いた札に重なるときは、反対側（最高なら下、最低なら上）へ逃がす。
+ * 反対側でも重なるときは、元の側に置いて faded にする（薄くして、カーソルの値を読みやすくする）。
+ * 例: 最高が行の上端なら、上には収まらないので、点の下に置く。
+ */
+export function placeExtremeLabels(input: {
+  max: { x: number; y: number; width: number };
+  min: { x: number; y: number; width: number };
+  cursor: LabelBox | null;
+  plot: { width: number; height: number };
+}): { max: PlacedLabel; min: PlacedLabel } {
+  const { plot, cursor } = input;
+  const obstacles: LabelBox[] = cursor ? [cursor] : [];
+  const place = (anchor: { x: number; y: number; width: number }, preferred: "above" | "below"): PlacedLabel => {
+    const size = { width: anchor.width, height: EXTREME_LABEL_HEIGHT };
+    const opposite = preferred === "above" ? "below" : "above";
+    // 優先の側が枠に収まらないとき（行の端）は、最初から反対側を優先する
+    const fitsPreferred = preferred === "above" ? anchor.y - size.height - LABEL_GAP >= 0 : anchor.y + LABEL_GAP + 1 + size.height <= plot.height;
+    const order: Array<"above" | "below"> = fitsPreferred ? [preferred, opposite] : [opposite, preferred];
+    for (const side of order) {
+      const box = placeLabelAround(anchor, size, side, plot);
+      if (!obstacles.some((other) => boxesOverlap(box, other))) {
+        obstacles.push(box);
+        return { box, faded: false };
+      }
+    }
+    const box = placeLabelAround(anchor, size, order[0], plot);
+    obstacles.push(box);
+    return { box, faded: true };
+  };
+  // 最高を先に置き、最低は最高の札も避ける
+  const max = place(input.max, "above");
+  const min = place(input.min, "below");
+  return { max, min };
+}

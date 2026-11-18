@@ -56,7 +56,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
-  useTrendCursorStore.getState().clear();
+  useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
   vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [], total: 0 });
 });
@@ -133,10 +133,10 @@ describe("TrendStackWidget（計器グラフ）", () => {
     // 見出しに、期間と、カーソルの時刻
     expect(screen.getByText("推移 1H")).toBeInTheDocument();
     expect(screen.getByText(/^カーソル \d{2}:\d{2}$/)).toBeInTheDocument();
-    // 時刻と、行ごとの値（カーソルの位置にデータが無いので「---」）を、store に出している
-    await vi.waitFor(() => expect(useTrendCursorStore.getState().rows.map((row) => row.name)).toEqual(["センサーA", "センサーB"]));
-    expect(useTrendCursorStore.getState().time).not.toBeNull();
-    expect(useTrendCursorStore.getState().spanMs).toBe(60 * 60_000);
+    // 時刻と、行ごとの値（カーソルの位置にデータが無いので「---」）を、この計器グラフ（w1）の分として store に出している
+    await vi.waitFor(() => expect(useTrendCursorStore.getState().widgets.w1?.rows.map((row) => row.name)).toEqual(["センサーA", "センサーB"]));
+    expect(useTrendCursorStore.getState().widgets.w1?.time).toBeDefined();
+    expect(useTrendCursorStore.getState().widgets.w1?.spanMs).toBe(60 * 60_000);
   });
 
   it("センサーごとに 1 行ずつ並べる", async () => {
@@ -165,5 +165,45 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     const tag = await screen.findByText("1080", { selector: "span.font-num" });
     expect(tag).toHaveStyle({ color: "var(--fe-red)" });
+  });
+
+  it("計器グラフを 2 つ置いても、カーソルの値は混ざらない。片方が消えても、もう片方の分は残る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+    const first = { ...widget(["a"]), id: "w1" };
+    const second = { ...widget(["b"]), id: "w2" };
+
+    const { rerender } = renderWithQueryClient(
+      <>{[<TrendStackWidget key="w1" widget={first} />, <TrendStackWidget key="w2" widget={second} />]}</>,
+    );
+
+    await vi.waitFor(() => {
+      const widgets = useTrendCursorStore.getState().widgets;
+      expect(widgets.w1?.rows.map((row) => row.name)).toEqual(["センサーA"]);
+      expect(widgets.w2?.rows.map((row) => row.name)).toEqual(["センサーB"]);
+    });
+
+    // 片方（w1）を消す: w2 の分は残る
+    // key をそろえて、w2 を作り直さずに w1 だけ外す
+    rerender(<>{[<TrendStackWidget key="w2" widget={second} />]}</>);
+    await vi.waitFor(() => expect(useTrendCursorStore.getState().widgets.w1).toBeUndefined());
+    expect(useTrendCursorStore.getState().widgets.w2?.rows.map((row) => row.name)).toEqual(["センサーB"]);
+  });
+
+  it("最高・最低の札とカーソルの札は重ならない（カーソルを優先し、最高・最低を逃がす）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(50, 600, 700, 500), bucketAgo(30, 650, 700, 600), bucketAgo(5, 900, 1000, 800)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+    // 札はどれも px の位置で置かれる（左上の角が、枠の外に出ない）
+    const labels = screen.getAllByText(/^最(高|低) \d/, { selector: "span.font-num" }).filter((el) => el.style.left !== "");
+    expect(labels.length).toBe(2);
+    for (const label of labels) {
+      expect(parseFloat(label.style.left)).toBeGreaterThanOrEqual(0);
+      expect(parseFloat(label.style.top)).toBeGreaterThanOrEqual(0);
+    }
   });
 });

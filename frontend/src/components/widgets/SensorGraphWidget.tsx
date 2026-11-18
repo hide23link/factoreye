@@ -30,7 +30,7 @@ import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hoo
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
-import { bucketValue, summarizeValues } from "../../lib/graph-series";
+import { bucketValue, summarizeBuckets } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
 import {
   effectiveRange,
@@ -154,7 +154,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
       unit: sensor?.unit ?? "",
       value: latestValue,
       position: latestValue ?? lastPlotted ?? undefined,
-      stats: summarizeValues(chartData.map((point) => point.value)),
+      stats: summarizeBuckets(data.buckets),
     },
   ];
   const valueProbe = linkView ? null : <GraphValueProbe items={valueItems} onMeasure={setValueMeasure} />;

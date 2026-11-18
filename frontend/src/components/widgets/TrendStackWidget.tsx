@@ -23,7 +23,9 @@ import { useNow } from "../../hooks/useNow";
 import { effectiveRange, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
 import { resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
+  CURSOR_LABEL_HEIGHT,
   describeInterval,
+  estimateTextWidth,
   describeSpanShort,
   formatRangeJst,
   formatTick,
@@ -33,6 +35,10 @@ import {
   levelOf,
   linePath,
   maxTimeTicks,
+  placeCursorLabel,
+  placeExtremeLabels,
+  type LabelBox,
+  type PlacedLabel,
   niceScale,
   overPath,
   pointNear,
@@ -56,9 +62,6 @@ import { GRAPH_BUCKETS } from "./graph-parts";
 
 // カーソルの最初の位置（表示範囲の左端から右端までの割合）。右寄りに置いて、今の値の近くの様子が分かるように
 const DEFAULT_CURSOR_RATIO = 0.8;
-
-// 最高・最低の札を出す向きを切り替える、行の上下の端からの距離（%）。端に近いと、札が行の外に出て切れる
-const EXTREME_EDGE_PERCENT = 22;
 
 // 色はすべて theme.css の意味の色（暗い・明るいで切り替わる）
 const INK = "var(--fe-ink)";
@@ -96,9 +99,10 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   // カーソルの時刻を、警報の欄の下の「カーソルの時刻の値」に渡す。この計器グラフが消えたら取り下げる
   const publishCursor = useTrendCursorStore((s) => s.setCursor);
   useEffect(() => {
-    publishCursor(shownCursor, span);
-  }, [shownCursor, span, publishCursor]);
-  useEffect(() => () => useTrendCursorStore.getState().clear(), []);
+    publishCursor(widget.id, shownCursor, span);
+  }, [widget.id, shownCursor, span, publishCursor]);
+  // この計器グラフが消えたら、この計器グラフの分だけ取り下げる（ほかの計器グラフの分は残す）
+  useEffect(() => () => useTrendCursorStore.getState().clear(widget.id), [widget.id]);
 
   if (ids.length === 0) {
     return <p className="text-sm text-gray-500">センサーが設定されていません（編集で、センサーをこのウィジェットに入れてください）</p>;
@@ -156,6 +160,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
             aggregation={options.aggregation}
             decimals={widget.config.decimals}
             cursor={shownCursor}
+            widgetId={widget.id}
             order={index}
             ticks={ticks}
             pointer={pointer}
@@ -192,6 +197,8 @@ interface RowProps {
   decimals: number | undefined;
   /** カーソルの時刻（ミリ秒） */
   cursor: number;
+  /** この行がある計器グラフ（ウィジェット）の ID（カーソルの値の置き場のキー） */
+  widgetId: string;
   /** 計器グラフの中の行の順（カーソルの時刻の値の並び順に使う） */
   order: number;
   ticks: number[];
@@ -202,7 +209,7 @@ interface RowProps {
 }
 
 /** 1 センサー分の行。データの取得（間引き）は行ごとに行う */
-function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, order, ticks, pointer }: RowProps) {
+function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, ticks, pointer }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   const rowRef = useRef<HTMLDivElement>(null);
@@ -262,7 +269,7 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
 
   return (
     <div ref={rowRef} className="trend-cell flex min-h-[88px] flex-1 flex-col border-b" style={{ borderColor: "var(--fe-line)", background: rowBackground }}>
-      <CursorValuePublisher id={sensorId} order={order} name={name} unit={unit} value={cursorText} color={nameColor} />
+      <CursorValuePublisher widgetId={widgetId} id={sensorId} order={order} name={name} unit={unit} value={cursorText} color={nameColor} />
       {/* 狭い枠（スマホ）では、左の欄が無いので、行の上に名前・範囲・最高・最低を 1 行で出す（グラフの文字と重ならないように） */}
       <div className="trend-headline items-baseline gap-2 px-1.5 pt-1 text-[11px]">
         <span className="min-w-0 truncate font-bold" style={{ color: nameColor }} title={name}>
@@ -294,24 +301,61 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
           )}
         </RowSide>
         <YAxis scale={scale} />
-        <div className="relative min-h-[64px] cursor-crosshair overflow-hidden" style={{ touchAction: "pan-y" }} {...pointer}>
-          <Grid scale={scale} ticks={ticks} bounds={bounds} />
-          <LimitLines limits={limits} scale={scale} />
-          <svg
-            viewBox="0 0 1000 100"
-            preserveAspectRatio="none"
-            className="absolute inset-0 h-full w-full"
-            role="img"
-            aria-label={describeRow(name, unit, stats, format)}
-          >
-            <path d={linePath(points, scale, bounds.from, bounds.to, gapMs)} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-            <path d={overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
-            <path d={overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
-          </svg>
-          {stats && <Extreme point={stats.max} kind="max" scale={scale} bounds={bounds} text={`最高 ${format(stats.max.value)}  ${formatTickTime(stats.max.time, span)}`} />}
-          {stats && <Extreme point={stats.min} kind="min" scale={scale} bounds={bounds} text={`最低 ${format(stats.min.value)}  ${formatTickTime(stats.min.time, span)}`} />}
-          <Cursor time={cursor} point={cursorPoint} scale={scale} bounds={bounds} text={cursorPoint ? `${format(cursorPoint.value)} ${unit}` : "データなし"} />
-        </div>
+        <PlotBox pointer={pointer}>
+          {(plot) => {
+            // 札の位置（px）。カーソルの札を先に決め、最高・最低の札はそれと重ならないよう置く
+            const cursorText = cursorPoint ? `${format(cursorPoint.value)} ${unit}` : "データなし";
+            const cursorX = (xPercent(cursor, bounds.from, bounds.to) / 100) * plot.width;
+            const cursorY = cursorPoint ? (yPercent(cursorPoint.value, scale) / 100) * plot.height : plot.height / 2;
+            const cursorBox = placeCursorLabel(
+              { x: cursorX, y: cursorY },
+              { width: estimateTextWidth(cursorText, 12) + 12, height: CURSOR_LABEL_HEIGHT },
+              plot,
+            );
+            const maxText = stats ? `最高 ${format(stats.max.value)}  ${formatTickTime(stats.max.time, span)}` : "";
+            const minText = stats ? `最低 ${format(stats.min.value)}  ${formatTickTime(stats.min.time, span)}` : "";
+            const extremes = stats
+              ? placeExtremeLabels({
+                  max: {
+                    x: (xPercent(stats.max.time, bounds.from, bounds.to) / 100) * plot.width,
+                    y: (yPercent(stats.max.value, scale) / 100) * plot.height,
+                    width: estimateTextWidth(maxText, 10) + 8,
+                  },
+                  min: {
+                    x: (xPercent(stats.min.time, bounds.from, bounds.to) / 100) * plot.width,
+                    y: (yPercent(stats.min.value, scale) / 100) * plot.height,
+                    width: estimateTextWidth(minText, 10) + 8,
+                  },
+                  cursor: cursorBox,
+                  plot,
+                })
+              : null;
+            return (
+              <>
+                <Grid scale={scale} ticks={ticks} bounds={bounds} />
+                <LimitLines limits={limits} scale={scale} />
+                <svg
+                  viewBox="0 0 1000 100"
+                  preserveAspectRatio="none"
+                  className="absolute inset-0 h-full w-full"
+                  role="img"
+                  aria-label={describeRow(name, unit, stats, format)}
+                >
+                  <path d={linePath(points, scale, bounds.from, bounds.to, gapMs)} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+                  <path d={overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+                  <path d={overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
+                </svg>
+                {stats && extremes && (
+                  <>
+                    <Extreme point={stats.max} scale={scale} bounds={bounds} placed={extremes.max} text={maxText} />
+                    <Extreme point={stats.min} scale={scale} bounds={bounds} placed={extremes.min} text={minText} />
+                  </>
+                )}
+                <Cursor time={cursor} point={cursorPoint} scale={scale} bounds={bounds} box={cursorBox} text={cursorText} />
+              </>
+            );
+          }}
+        </PlotBox>
         <div className="relative min-h-[64px] border-l" style={{ borderColor: "var(--fe-line)" }}>
           {now && (
             <span
@@ -336,12 +380,28 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
 }
 
 /** カーソルの時刻の、この行の値を、警報の欄の下の一覧に渡す（何も描かない）。行が消えたら取り下げる */
-function CursorValuePublisher({ id, order, name, unit, value, color }: { id: string; order: number; name: string; unit: string; value: string; color: string }) {
+function CursorValuePublisher({
+  widgetId,
+  id,
+  order,
+  name,
+  unit,
+  value,
+  color,
+}: {
+  widgetId: string;
+  id: string;
+  order: number;
+  name: string;
+  unit: string;
+  value: string;
+  color: string;
+}) {
   const setRow = useTrendCursorStore((s) => s.setRow);
   useEffect(() => {
-    setRow({ id, order, name, unit, value, color });
-  }, [id, order, name, unit, value, color, setRow]);
-  useEffect(() => () => useTrendCursorStore.getState().removeRow(id), [id]);
+    setRow(widgetId, { id, order, name, unit, value, color });
+  }, [widgetId, id, order, name, unit, value, color, setRow]);
+  useEffect(() => () => useTrendCursorStore.getState().removeRow(widgetId, id), [widgetId, id]);
   return null;
 }
 
@@ -464,14 +524,13 @@ function LimitLines({ limits, scale }: { limits: ReadonlyArray<TrendLimit>; scal
   );
 }
 
-/** 最高・最低の点と、その値・時刻。端では文字を内側に寄せる */
-function Extreme({ point, kind, scale, bounds, text }: { point: TrendPoint; kind: "max" | "min"; scale: AxisScale; bounds: ResolvedRange; text: string }) {
+/**
+ * 最高・最低の点と、その値・時刻の札。札の位置（box）は呼ぶ側が決める（枠の端で切れない・カーソルの札に重ならない）。
+ * どこに置いても重なるとき（placed.faded）は、札を薄くする。
+ */
+function Extreme({ point, scale, bounds, placed, text }: { point: TrendPoint; scale: AxisScale; bounds: ResolvedRange; placed: PlacedLabel; text: string }) {
   const left = xPercent(point.time, bounds.from, bounds.to);
   const top = yPercent(point.value, scale);
-  // 文字は、左右の端では内側へ寄せ（切れないように）、上端の最高は点の下、下端の最低は点の上へ出す（行の外に出ないように）
-  const shiftX = left > 75 ? "-100%" : left < 15 ? "0%" : "-50%";
-  const above = kind === "max" ? top >= EXTREME_EDGE_PERCENT : top > 100 - EXTREME_EDGE_PERCENT;
-  const shiftY = above ? "calc(-100% - 5px)" : "6px";
   return (
     <>
       <span
@@ -480,8 +539,8 @@ function Extreme({ point, kind, scale, bounds, text }: { point: TrendPoint; kind
         aria-hidden="true"
       />
       <span
-        className="pointer-events-none absolute whitespace-nowrap px-1 font-num text-[10px]"
-        style={{ left: `${left}%`, top: `${top}%`, transform: `translate(${shiftX}, ${shiftY})`, background: "var(--fe-panel)", color: INK }}
+        className="pointer-events-none absolute whitespace-nowrap px-1 font-num text-[10px] leading-[14px]"
+        style={{ left: placed.box.left, top: placed.box.top, background: "var(--fe-panel)", color: INK, opacity: placed.faded ? 0.25 : 1 }}
         aria-hidden="true"
       >
         {text}
@@ -490,12 +549,10 @@ function Extreme({ point, kind, scale, bounds, text }: { point: TrendPoint; kind
   );
 }
 
-/** カーソル（縦線・点・値）。文字は、右端・上端では内側に寄せる */
-function Cursor({ time, point, scale, bounds, text }: { time: number; point: TrendPoint | null; scale: AxisScale; bounds: ResolvedRange; text: string }) {
+/** カーソル（縦線・点・値）。値の札の位置（box）は呼ぶ側が決める（右端・上端で内側に寄る） */
+function Cursor({ time, point, scale, bounds, box, text }: { time: number; point: TrendPoint | null; scale: AxisScale; bounds: ResolvedRange; box: LabelBox; text: string }) {
   const left = xPercent(time, bounds.from, bounds.to);
   const top = point ? yPercent(point.value, scale) : 50;
-  const shiftX = left > 70 ? "calc(-100% - 8px)" : "8px";
-  const shiftY = top < 30 ? "4px" : "calc(-100% - 4px)";
   return (
     <>
       <span className="pointer-events-none absolute inset-y-0 w-px" style={{ left: `${left}%`, background: "var(--fe-cursor)" }} aria-hidden="true" />
@@ -507,11 +564,33 @@ function Cursor({ time, point, scale, bounds, text }: { time: number; point: Tre
         />
       )}
       <span
-        className="pointer-events-none absolute whitespace-nowrap rounded-sm px-1.5 font-num text-xs font-bold"
-        style={{ left: `${left}%`, top: `${top}%`, transform: `translate(${shiftX}, ${shiftY})`, background: INK, color: "var(--fe-panel)" }}
+        className="pointer-events-none absolute whitespace-nowrap rounded-sm px-1.5 font-num text-xs font-bold leading-[18px]"
+        style={{ left: box.left, top: box.top, background: INK, color: "var(--fe-panel)" }}
       >
         {text}
       </span>
     </>
+  );
+}
+
+/**
+ * グラフの枠（マウス・指の操作を受ける）。枠の大きさ（px）を測って、中身（札の置き場所の計算）に渡す。
+ * 測れない間（描く前・試験の環境）は、標準の大きさ（600×80）で計算する。
+ * 枠の要素は最初から出し続ける（測るのは要素ごとに 1 回なので、あとから現れる要素は測れないため）。
+ */
+function PlotBox({
+  pointer,
+  children,
+}: {
+  pointer: { onPointerMove: (event: PointerEvent<HTMLDivElement>) => void; onPointerLeave: (event: PointerEvent<HTMLDivElement>) => void };
+  children: (plot: { width: number; height: number }) => ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const size = useElementSize(ref);
+  const plot = size.width > 0 && size.height > 0 ? size : { width: 600, height: 80 };
+  return (
+    <div ref={ref} className="relative min-h-[64px] cursor-crosshair overflow-hidden" style={{ touchAction: "pan-y" }} {...pointer}>
+      {children(plot)}
+    </div>
   );
 }

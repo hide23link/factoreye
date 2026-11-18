@@ -57,7 +57,7 @@ const warningAlarm: Alarm = {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useTrendCursorStore.getState().clear();
+  useTrendCursorStore.getState().clearAll();
 });
 
 describe("AlarmAlertWidget", () => {
@@ -188,8 +188,8 @@ describe("AlarmAlertWidget", () => {
     vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     const cursor = useTrendCursorStore.getState();
-    cursor.setCursor(new Date(2026, 10, 18, 7, 2).getTime(), 3_600_000);
-    cursor.setRow({ id: "s1", order: 0, name: "洋室 CO2", unit: "ppm", value: "561", color: "var(--fe-red)" });
+    cursor.setCursor("w1", new Date(2026, 10, 18, 7, 2).getTime(), 3_600_000);
+    cursor.setRow("w1", { id: "s1", order: 0, name: "洋室 CO2", unit: "ppm", value: "561", color: "var(--fe-red)" });
 
     renderWithQueryClient(<AlarmAlertWidget />);
 
@@ -198,5 +198,20 @@ describe("AlarmAlertWidget", () => {
     expect(screen.getByText("07:02")).toBeInTheDocument();
     expect(screen.getByText("色の意味")).toBeInTheDocument();
     expect(screen.getByText(/水色\s*しきい値/)).toBeInTheDocument();
+  });
+
+  it("計器グラフが 2 つあるときは、先に表示された方のカーソルの値を出す", async () => {
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    const cursor = useTrendCursorStore.getState();
+    cursor.setCursor("w1", new Date(2026, 10, 18, 7, 2).getTime(), 3_600_000);
+    cursor.setRow("w1", { id: "s1", order: 0, name: "先のセンサー", unit: "ppm", value: "1", color: "var(--fe-ink)" });
+    cursor.setCursor("w2", new Date(2026, 10, 18, 8, 0).getTime(), 3_600_000);
+    cursor.setRow("w2", { id: "s2", order: 0, name: "後のセンサー", unit: "ppm", value: "2", color: "var(--fe-ink)" });
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+
+    expect(await screen.findByText("先のセンサー")).toBeInTheDocument();
+    expect(screen.queryByText("後のセンサー")).not.toBeInTheDocument();
   });
 });
