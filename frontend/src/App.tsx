@@ -293,12 +293,27 @@ function ServerThemeDefault() {
   return null;
 }
 
+/**
+ * 画面表示モード（壁掛けモニター）の間、画面を常に暗くする（何も描かない）。
+ * 選んだ明るさ（端末の選択・全員の初期値）は変えず、モードを抜けると元の明るさに戻る。
+ */
+function KioskThemeLock({ kiosk }: { kiosk: boolean }) {
+  const setKioskLock = useThemeStore((s) => s.setKioskLock);
+  useEffect(() => {
+    setKioskLock(kiosk);
+    return () => setKioskLock(false);
+  }, [kiosk, setKioskLock]);
+  return null;
+}
+
 /** ログイン後（または self-hosted）の画面。リンクで開いたときはグラフ 1 つの画面、それ以外はふだんの枠（MainShell）。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
   const selectedDashboardId = useUiStore((s) => s.selectedDashboardId);
   const graphLink = useUiStore((s) => s.graphLink);
   const linkNotFound = useUiStore((s) => s.linkNotFound);
+  // 画面表示モードに入っている間（ダッシュボードを選んでいるときだけ）は、常に暗くする
+  const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 
   // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（一覧に黄色の帯が出る）
   useEffect(() => {
@@ -318,6 +333,7 @@ function AppShell() {
   return (
     <>
       <ServerThemeDefault />
+      <KioskThemeLock kiosk={kiosk} />
       <MainShell view={view} selectedDashboardId={selectedDashboardId} />
     </>
   );

@@ -6,6 +6,7 @@
  * 「＋センサーを追加」で、新規登録のフォーム（種類のカード・名前・Ingest Key・単位）を開く（センサーが 0 件のときは最初から開く）。
  * Free Tier の上限に達すると、案内を出す。登録に成功すると「つなぎ方」の案内（SensorConnectGuide）を出す。
  * 機器が多いときは、最初の 3 機器だけ開き、「ほかの N 機器を開く」で残りを出す（検索・絞り込み中と、選んだセンサーの機器は常に出す）。
+ * 行は一度に 50 件まで（「もっと見る」で 50 件ずつ）。詳細の欄を開いている間は、表が狭いので、種類・直近 1 時間・最終受信の列を隠す。
  *
  * 【誰が使うか】SettingsPage.tsx が、選んだタブのときだけ出す。引数（props）はない。
  */
@@ -28,7 +29,7 @@ import {
   matchesQuery,
   sensorLive,
   sensorStatus,
-  sparkPoints,
+  sparkSegments,
   thresholdSummary,
   type ListFilter,
   type SensorGroup,
@@ -68,6 +69,9 @@ const FILTERS: ReadonlyArray<{ value: ListFilter; label: string; tone?: string }
 // 最初に開く機器の数（これより多いときは「ほかの N 機器を開く」）
 const OPEN_DEVICE_COUNT = 3;
 
+// 表の見出しの文字の形（折り返さない）
+const HEAD = "whitespace-nowrap px-2 py-1.5";
+
 // 状態の列の文字と色（操作室の計器と同じ色づかい）
 const STATUS_VIEW: Record<SensorStatus, { text: string; mark: string; color: string }> = {
   normal: { text: "正常", mark: "■", color: "var(--fe-ok)" },
@@ -77,43 +81,54 @@ const STATUS_VIEW: Record<SensorStatus, { text: string; mark: string; color: str
   disabled: { text: "無効", mark: "—", color: "var(--fe-mut)" },
 };
 
-/** 直近 1 時間の小さな折れ線（飾り。数字は隣の列に出ている）。線が引けない（点が 1 つ以下）ときは空 */
-function Sparkline({ values, color }: { values: ReadonlyArray<number>; color: string }) {
-  const points = sparkPoints(values, 100, 24);
+// 一度に出す行の数の上限（これを超えるときは「もっと見る」）。行ごとに 1 時間分のデータを取るので、取得の数を抑える
+const ROW_LIMIT = 50;
+
+/** 直近 1 時間の小さな折れ線（飾り。数字は隣の列に出ている）。受信が途切れた所は線を切って空ける */
+function Sparkline({ segments, color }: { segments: ReadonlyArray<string>; color: string }) {
   return (
     <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="h-6 w-24" aria-hidden="true">
-      {points && <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+      {segments.map((points) => (
+        <polyline key={points} points={points} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      ))}
     </svg>
   );
 }
 
 /**
  * センサー 1 件の行。今の値・直近 1 時間の折れ線・最低〜最高は、行ごとに 1 時間分の区間データを取って出す
- * （1 分ごとに取り直す。表示している行だけ取る）。
+ * （1 分ごとに取り直す。表示している行だけ取る。無効のセンサーと、まだ受信が無いセンサーは取らない）。
+ * compact = 右に詳細の欄を開いていて、表が狭いとき。種類・直近 1 時間・最終受信の列を隠す。
  */
 function SensorListRow({
   sensor,
   live,
   now,
   selected,
+  compact,
   onSelect,
 }: {
   sensor: Sensor;
   live: SensorLive;
   now: number;
   selected: boolean;
+  compact: boolean;
   onSelect: (sensorId: string) => void;
 }) {
   // 取得の範囲は分の区切りにそろえる（10 秒ごとに時刻が動いても、取り直すのは 1 分に 1 回）
   const minute = Math.floor(now / 60_000) * 60_000;
-  const { data } = useDownsampledReadings(sensor.id, { from: minute - 3_600_000, to: minute }, 30, false);
+  const from = minute - 3_600_000;
+  // 無効のセンサーと、まだ受信が無いセンサー（折れ線も最低〜最高も出ない）は、取りに行かない
+  const fetchId = sensor.enabled && live.state !== "never" ? sensor.id : null;
+  const { data } = useDownsampledReadings(fetchId, { from, to: minute }, 30, false);
   const buckets = data?.buckets ?? [];
   const range = hourRange(buckets);
   const status = sensorStatus(sensor, live);
   const view = STATUS_VIEW[status];
   const stopped = live.state !== "receiving";
-  const valueColor = stopped ? "var(--fe-amb)" : live.level === "critical" ? "var(--fe-red)" : live.level === "warning" ? "var(--fe-amb)" : undefined;
-  const cell = "px-2 py-2 align-middle";
+  // 今の値の色: 無効は灰、受信が止まっていれば橙、しきい値の外は赤・橙
+  const valueColor = !sensor.enabled ? "var(--fe-mut)" : stopped ? "var(--fe-amb)" : live.level === "critical" ? "var(--fe-red)" : live.level === "warning" ? "var(--fe-amb)" : undefined;
+  const cell = "whitespace-nowrap px-2 py-2 align-middle";
 
   return (
     <tr
@@ -130,23 +145,28 @@ function SensorListRow({
           aria-pressed={selected}
           aria-label={`${sensor.name} の詳細`}
           title="右に詳細を開く"
-          className="text-left hover:underline"
+          className="block max-w-[16rem] truncate text-left hover:underline"
         >
           {sensor.name}
         </button>
       </td>
-      <td className={`${cell} text-xs text-gray-500`}>{SENSOR_KIND_LABEL[guessSensorKind(sensor)]}</td>
+      {!compact && <td className={`${cell} text-xs text-gray-500`}>{SENSOR_KIND_LABEL[guessSensorKind(sensor)]}</td>}
       <td className={`${cell} text-right font-num text-sm font-bold`} style={{ color: valueColor }}>
         {live.latest && !stopped ? formatLiveValue(live.latest.value) : "---"} <span className="text-xs font-normal text-gray-500">{sensor.unit}</span>
       </td>
-      <td className={cell}>
-        <Sparkline values={buckets.map((bucket) => bucket.avg)} color={view.color === "var(--fe-mut)" ? "var(--fe-mut)" : stopped || status === "outside" ? view.color : "var(--fe-ink)"} />
-      </td>
+      {!compact && (
+        <td className={cell}>
+          <Sparkline
+            segments={data ? sparkSegments(buckets, data.bucketSeconds, from, minute, 100, 24) : []}
+            color={view.color === "var(--fe-mut)" ? "var(--fe-mut)" : stopped || status === "outside" ? view.color : "var(--fe-ink)"}
+          />
+        </td>
+      )}
       <td className={`${cell} font-num text-xs text-gray-700`}>{range ? `${formatLiveValue(range.min)} — ${formatLiveValue(range.max)}` : "—"}</td>
       <td className={`${cell} font-num text-xs`} style={{ color: "var(--fe-cy)" }}>
         {thresholdSummary(sensor)}
       </td>
-      <td className={`${cell} font-num text-xs text-gray-700`}>{live.ageMs === null ? "—" : formatAge(live.ageMs)}</td>
+      {!compact && <td className={`${cell} font-num text-xs text-gray-700`}>{live.ageMs === null ? "—" : formatAge(live.ageMs)}</td>}
       <td className={`${cell} text-xs font-bold`} style={{ color: view.color }}>
         {view.mark} {view.text}
       </td>
@@ -161,6 +181,7 @@ function SensorGroupRows({
   lives,
   now,
   selectedId,
+  compact,
   onSelect,
 }: {
   group: SensorGroup;
@@ -168,13 +189,14 @@ function SensorGroupRows({
   lives: ReadonlyMap<string, SensorLive>;
   now: number;
   selectedId: string | null;
+  compact: boolean;
   onSelect: (sensorId: string) => void;
 }) {
   return (
     <Fragment>
       {showTitle && (
         <tr className="bg-gray-100">
-          <td colSpan={8} className="px-2 py-1 text-[11px] font-bold tracking-wide text-gray-600">
+          <td colSpan={compact ? 5 : 8} className="px-2 py-1 text-[11px] font-bold tracking-wide text-gray-600">
             {group.title}
             {group.line ? ` · ${group.line}` : ""}
             <span className="ml-2 font-num font-normal">{group.sensors.length} センサー</span>
@@ -183,7 +205,7 @@ function SensorGroupRows({
       )}
       {group.sensors.map((sensor) => {
         const live = lives.get(sensor.id);
-        return live ? <SensorListRow key={sensor.id} sensor={sensor} live={live} now={now} selected={sensor.id === selectedId} onSelect={onSelect} /> : null;
+        return live ? <SensorListRow key={sensor.id} sensor={sensor} live={live} now={now} selected={sensor.id === selectedId} compact={compact} onSelect={onSelect} /> : null;
       })}
     </Fragment>
   );
@@ -202,6 +224,8 @@ export function SensorSettingsPanel() {
   const [filter, setFilter] = useState<ListFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAllDevices, setShowAllDevices] = useState(false);
+  // 出す行の数の上限（「もっと見る」で 50 ずつ増やす。検索・絞り込みを変えたら戻す）
+  const [rowLimit, setRowLimit] = useState(ROW_LIMIT);
   const [showAdd, setShowAdd] = useState(false);
 
   // 新規登録フォームの入力値（登録に成功すると、次の入力のために初期値へ戻す）
@@ -248,6 +272,16 @@ export function SensorSettingsPanel() {
       ? groups
       : groups.filter((group, index) => index < OPEN_DEVICE_COUNT || group.sensors.some((sensor) => sensor.id === selectedId));
   const hiddenDevices = groups.length - shownGroups.length;
+  // 行は、上から rowLimit 件まで（行ごとに 1 時間分のデータを取るので、数を抑える）
+  let remaining = rowLimit;
+  const limitedGroups = shownGroups
+    .map((group) => {
+      const sensorsInGroup = group.sensors.slice(0, Math.max(0, remaining));
+      remaining -= sensorsInGroup.length;
+      return { ...group, sensors: sensorsInGroup };
+    })
+    .filter((group) => group.sensors.length > 0);
+  const hiddenRows = shownGroups.reduce((sum, group) => sum + group.sensors.length, 0) - limitedGroups.reduce((sum, group) => sum + group.sensors.length, 0);
   const selected = (sensors ?? []).find((sensor) => sensor.id === selectedId);
   // 追加フォームは、「＋センサーを追加」で開く。センサーが 1 つも無いときは、最初から開く
   const addOpen = showAdd || sensors?.length === 0;
@@ -266,7 +300,10 @@ export function SensorSettingsPanel() {
             aria-label="センサーを絞り込む"
             placeholder="名前・キー・機器で絞り込む"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setRowLimit(ROW_LIMIT);
+            }}
             className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 outline-none"
           />
         </label>
@@ -275,7 +312,10 @@ export function SensorSettingsPanel() {
             key={item.value}
             type="button"
             aria-pressed={filter === item.value}
-            onClick={() => setFilter(item.value)}
+            onClick={() => {
+              setFilter(item.value);
+              setRowLimit(ROW_LIMIT);
+            }}
             className={`h-8 rounded border px-2.5 text-xs ${
               filter === item.value ? "border-blue-600 bg-blue-50 font-bold text-blue-700" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-100"
             }`}
@@ -389,28 +429,34 @@ export function SensorSettingsPanel() {
       {!isLoading && sensors && sensors.length > 0 && (
         <div className={selected ? "grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_340px]" : ""}>
           <div className="min-w-0 overflow-x-auto">
-            <table className="w-full border-collapse text-left">
+            {/* 狭いときは、表の最小幅を決めて横にスクロールする（列が詰まって文字が縦に折れないように） */}
+            <table className={`w-full border-collapse text-left ${selected ? "min-w-[520px]" : "min-w-[760px]"}`}>
               <thead>
                 <tr className="border-b border-gray-200 text-xs text-gray-500">
-                  <th className="px-2 py-1.5">名前</th>
-                  <th className="px-2 py-1.5">種類</th>
-                  <th className="px-2 py-1.5 text-right">今の値</th>
-                  <th className="px-2 py-1.5">直近 1 時間</th>
-                  <th className="px-2 py-1.5">1h 最低 — 最高</th>
-                  <th className="px-2 py-1.5">しきい値</th>
-                  <th className="px-2 py-1.5">最終受信</th>
-                  <th className="px-2 py-1.5">状態</th>
+                  <th className={HEAD}>名前</th>
+                  {!selected && <th className={HEAD}>種類</th>}
+                  <th className={`${HEAD} text-right`}>今の値</th>
+                  {!selected && <th className={HEAD}>直近 1 時間</th>}
+                  <th className={HEAD}>1h 最低 — 最高</th>
+                  <th className={HEAD}>しきい値</th>
+                  {!selected && <th className={HEAD}>最終受信</th>}
+                  <th className={HEAD}>状態</th>
                 </tr>
               </thead>
               <tbody>
-                {shownGroups.map((group) => (
-                  <SensorGroupRows key={group.key} group={group} showTitle={showGroups} lives={lives} now={now} selectedId={selectedId} onSelect={(id) => setSelectedId((current) => (current === id ? null : id))} />
+                {limitedGroups.map((group) => (
+                  <SensorGroupRows key={group.key} group={group} showTitle={showGroups} lives={lives} now={now} selectedId={selectedId} compact={Boolean(selected)} onSelect={(id) => setSelectedId((current) => (current === id ? null : id))} />
                 ))}
               </tbody>
             </table>
             {visible.length === 0 && <p className="py-3 text-sm text-gray-500">該当するセンサーはありません。</p>}
             <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
               <span>名前を押すと、右に詳細</span>
+              {hiddenRows > 0 && (
+                <button type="button" onClick={() => setRowLimit((limit) => limit + ROW_LIMIT)} className="text-blue-600 hover:underline">
+                  もっと見る（残り {hiddenRows} 件）
+                </button>
+              )}
               {hiddenDevices > 0 && (
                 <button type="button" onClick={() => setShowAllDevices(true)} className="text-blue-600 hover:underline">
                   ほかの {hiddenDevices} 機器を開く

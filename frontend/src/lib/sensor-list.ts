@@ -125,22 +125,51 @@ export function hourRange(buckets: ReadonlyArray<HourBucket>): { min: number; ma
   return { min: Math.min(...buckets.map((b) => b.min)), max: Math.max(...buckets.map((b) => b.max)) };
 }
 
+/** 小さな折れ線に使う区間（始まりの時刻と、区間の平均） */
+export interface SparkBucket {
+  start: string;
+  avg: number;
+}
+
 /**
- * 小さな折れ線（sparkline）の点の並び（SVG の polyline の points）。値の最低〜最高を、高さいっぱいに広げる。
- * 値がすべて同じなら、真ん中に水平な線。点が 1 つなら空文字（線にならない）。
- * 例: sparkPoints([1, 3, 2], 100, 20) → "0.0,20.0 50.0,0.0 100.0,10.0"
+ * 小さな折れ線（sparkline）の線分の並び（それぞれ SVG の polyline の points）。
+ * x は区間の中央の時刻（from〜to を 0〜width に置く。範囲の外は端に寄せる）、y は平均の最低〜最高を高さいっぱいに広げる
+ * （値がすべて同じなら真ん中）。受信が途切れた所（隣り合う区間の間が、区間の幅の 1.5 倍を超える）では線を切って、空ける。
+ * 点が 1 つだけの線分は、短い横線（±1）にして見えるようにする。
+ * 例: 1 時間 = 0〜100 のとき、区間（120 秒）が 0 分と 2 分にあって、30 分の次が 40 分 → 線分は 2 本
  */
-export function sparkPoints(values: ReadonlyArray<number>, width: number, height: number): string {
-  if (values.length < 2) return "";
+export function sparkSegments(
+  buckets: ReadonlyArray<SparkBucket>,
+  bucketSeconds: number,
+  from: number,
+  to: number,
+  width: number,
+  height: number,
+): string[] {
+  if (buckets.length === 0 || to <= from) return [];
+  const values = buckets.map((bucket) => bucket.avg);
   const low = Math.min(...values);
   const span = Math.max(...values) - low;
-  return values
-    .map((value, i) => {
-      const x = (i / (values.length - 1)) * width;
-      const y = span === 0 ? height / 2 : height - ((value - low) / span) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const half = (bucketSeconds * 1000) / 2;
+  const points = buckets.map((bucket) => {
+    const time = new Date(bucket.start).getTime() + half;
+    const x = Math.min(width, Math.max(0, ((time - from) / (to - from)) * width));
+    const y = span === 0 ? height / 2 : height - ((bucket.avg - low) / span) * height;
+    return { time, x, y };
+  });
+  const fmt = (p: { x: number; y: number }) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+  const segments: Array<typeof points> = [];
+  for (const point of points) {
+    const last = segments[segments.length - 1];
+    const previous = last?.[last.length - 1];
+    if (last && previous && point.time - previous.time <= bucketSeconds * 1000 * 1.5) last.push(point);
+    else segments.push([point]);
+  }
+  return segments.map((segment) => {
+    if (segment.length > 1) return segment.map(fmt).join(" ");
+    const [only] = segment;
+    return `${fmt({ x: Math.max(0, only.x - 1), y: only.y })} ${fmt({ x: Math.min(width, only.x + 1), y: only.y })}`;
+  });
 }
 
 /** 一覧・詳細の「今の値」の文字。100 以上は整数、それ未満は小数 2 桁まで（末尾の 0 は付けない）。例: 1092.4 → 1092、22.1 → 22.1、0.5 → 0.5 */

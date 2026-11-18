@@ -1,3 +1,4 @@
+import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -135,5 +136,17 @@ describe("App の画面の分け方", () => {
     useThemeStore.setState({ mode: "dark", applied: "dark", saved: true });
     useThemeStore.getState().applyServerDefault("light");
     expect(useThemeStore.getState().mode).toBe("dark");
+  });
+
+  it("画面表示モード（壁掛け）の間は、全員の初期値が明るくても常に暗い。抜けると明るさに戻る", async () => {
+    vi.mocked(api.fetchDisplaySettings).mockResolvedValue({ defaultTheme: "light" });
+    useUiStore.setState({ view: "main", selectedDashboardId: "d1", kiosk: true });
+    renderWithQueryClient(<App />);
+
+    await vi.waitFor(() => expect(useThemeStore.getState().mode).toBe("light"));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+
+    act(() => useUiStore.setState({ kiosk: false }));
+    await vi.waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
   });
 });

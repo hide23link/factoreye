@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Reading, Sensor } from "../types";
 import { STALE_MS } from "./overview";
-import { filterCounts, groupByDevice, hasLimits, formatLiveValue, hourRange, matchesFilter, matchesQuery, sensorLive, sensorStatus, sparkPoints, thresholdSummary } from "./sensor-list";
+import { filterCounts, groupByDevice, hasLimits, formatLiveValue, hourRange, matchesFilter, matchesQuery, sensorLive, sensorStatus, sparkSegments, thresholdSummary } from "./sensor-list";
 
 const NOW = new Date("2026-11-18T00:00:00Z").getTime();
 
@@ -96,10 +96,30 @@ describe("一覧の状態・しきい値・直近 1 時間", () => {
     expect(formatLiveValue(22.456)).toBe("22.46");
     expect(formatLiveValue(-62)).toBe("-62");
   });
-  it("小さな折れ線: 最低〜最高を高さいっぱいに。同じ値は真ん中、点が 1 つなら空", () => {
-    expect(sparkPoints([1, 3, 2], 100, 20)).toBe("0.0,20.0 50.0,0.0 100.0,10.0");
-    expect(sparkPoints([5, 5], 100, 20)).toBe("0.0,10.0 100.0,10.0");
-    expect(sparkPoints([5], 100, 20)).toBe("");
+  describe("小さな折れ線（sparkSegments）", () => {
+    // 1 時間 = 0〜100。区間は 120 秒（中央は始まりの 1 分後）
+    const FROM = new Date("2026-11-18T00:00:00Z").getTime();
+    const TO = FROM + 3_600_000;
+    // 区間の中央が「minutes 分」になる区間（幅 bucketSeconds）
+    const at = (minutes: number, avg: number, bucketSeconds = 120) => ({
+      start: new Date(FROM + minutes * 60_000 - bucketSeconds * 500).toISOString(),
+      avg,
+    });
+
+    it("x は区間の時刻（1 時間を 0〜100 に）、y は最低〜最高を高さいっぱいに", () => {
+      expect(sparkSegments([at(15, 1, 900), at(30, 3, 900), at(45, 2, 900)], 900, FROM, TO, 100, 20)).toEqual(["25.0,20.0 50.0,0.0 75.0,10.0"]);
+    });
+    it("受信が途切れた所（区間の幅の 1.5 倍より空く）は、線を切って空ける", () => {
+      expect(sparkSegments([at(10, 1), at(12, 2), at(40, 3), at(42, 1)], 120, FROM, TO, 100, 20)).toEqual([
+        "16.7,20.0 20.0,10.0",
+        "66.7,0.0 70.0,20.0",
+      ]);
+    });
+    it("点が 1 つの線分は短い横線、値がすべて同じなら真ん中、データが無ければ空", () => {
+      expect(sparkSegments([at(30, 5)], 120, FROM, TO, 100, 20)).toEqual(["49.0,10.0 51.0,10.0"]);
+      expect(sparkSegments([at(10, 5), at(12, 5)], 120, FROM, TO, 100, 20)).toEqual(["16.7,10.0 20.0,10.0"]);
+      expect(sparkSegments([], 120, FROM, TO, 100, 20)).toEqual([]);
+    });
   });
 });
 

@@ -77,8 +77,11 @@ describe("SensorSettingsPanel", () => {
     expect(headers).toEqual(["名前", "種類", "今の値", "直近 1 時間", "1h 最低 — 最高", "しきい値", "最終受信", "状態"]);
   });
 
-  it("直近 1 時間の区間データから、最低 — 最高を出す。まだ受信が無いセンサーの今の値は「---」", async () => {
-    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+  const fresh = (id: string, value: number) => ({ sensorId: id, value, recordedAt: new Date(Date.now() - 10_000).toISOString() });
+
+  it("直近 1 時間の区間データから、最低 — 最高を出す。まだ受信が無いセンサーの今の値は「---」（データも取りに行かない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s9", name: "未使用センサー", ingestKey: "k9" }]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [fresh("s1", 5)], total: 1 });
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
       bucketSeconds: 120,
       buckets: [
@@ -89,9 +92,77 @@ describe("SensorSettingsPanel", () => {
     renderWithQueryClient(<SensorSettingsPanel />);
 
     expect(await screen.findByText("4 — 9")).toBeInTheDocument();
-    const row = screen.getByText("圧力計A-1").closest("tr") as HTMLElement;
+    const row = screen.getByText("未使用センサー").closest("tr") as HTMLElement;
     expect(within(row).getByText("---")).toBeInTheDocument();
-    expect(within(row).getByText(/未受信/)).toBeInTheDocument();
+    expect(within(row).getByText(/○ 未受信/)).toBeInTheDocument();
+    // 取りに行ったのは、受信のある s1 だけ
+    const asked = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((call) => call[0]);
+    expect(new Set(asked)).toEqual(new Set(["s1"]));
+  });
+
+  it("休止センサーは、データを取りに行かず、今の値は灰色（橙にしない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s8", name: "休止センサー", ingestKey: "k8", enabled: false }]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [fresh("s1", 5), fresh("s8", 6)], total: 2 });
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 120, buckets: [] });
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("休止センサー")).closest("tr") as HTMLElement;
+    await waitFor(() => expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalled());
+    const asked = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((call) => call[0]);
+    expect(asked).toContain("s1");
+    expect(asked).not.toContain("s8");
+    expect(within(row).getByText("6")).toHaveStyle({ color: "var(--fe-mut)" });
+    expect(within(row).getByText(/— 無効/)).toBeInTheDocument();
+  });
+
+  it("直近 1 時間の折れ線は、区間の時刻に置き、受信が途切れた所は線を切って空ける", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [fresh("s1", 5)], total: 1 });
+    const t = (minutes: number) => new Date(Math.floor(Date.now() / 60_000) * 60_000 - minutes * 60_000).toISOString();
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 120,
+      buckets: [
+        { start: t(50), avg: 1, min: 1, max: 1, count: 1 },
+        { start: t(48), avg: 2, min: 2, max: 2, count: 1 },
+        { start: t(10), avg: 3, min: 3, max: 3, count: 1 },
+        { start: t(8), avg: 1, min: 1, max: 1, count: 1 },
+      ],
+    });
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
+    await waitFor(() => expect(row.querySelectorAll("polyline")).toHaveLength(2));
+  });
+
+  it("行は一度に 50 件まで。「もっと見る」で 50 件ずつ増やす。検索を変えると 50 件に戻る", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 120 }, (_, i) => ({ ...sensor, id: `m${i}`, name: `センサー${String(i).padStart(3, "0")}`, ingestKey: `key-${i}`, thresholdMaxCritical: null }));
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("センサー000");
+    expect(screen.getAllByRole("row")).toHaveLength(1 + 50);
+    await user.click(screen.getByRole("button", { name: "もっと見る（残り 70 件）" }));
+    expect(screen.getAllByRole("row")).toHaveLength(1 + 100);
+    await user.click(screen.getByRole("button", { name: "もっと見る（残り 20 件）" }));
+    expect(screen.getAllByRole("row")).toHaveLength(1 + 120);
+    expect(screen.queryByRole("button", { name: /もっと見る/ })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "センサーを絞り込む" }), "センサー");
+    expect(screen.getAllByRole("row")).toHaveLength(1 + 50);
+  });
+
+  it("詳細の欄を開くと、表は狭くなるので、種類・直近 1 時間・最終受信の列を隠す（閉じると戻る）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("圧力計A-1");
+    expect(screen.getAllByRole("columnheader")).toHaveLength(8);
+    await user.click(screen.getByRole("button", { name: "圧力計A-1 の詳細" }));
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["名前", "今の値", "1h 最低 — 最高", "しきい値", "状態"]);
+    await user.click(screen.getByRole("button", { name: "詳細を閉じる" }));
+    expect(screen.getAllByRole("columnheader")).toHaveLength(8);
   });
 
   it("「＋センサーを追加」を押すと、追加のフォームが開く（センサーがあるときは、最初は閉じている）", async () => {

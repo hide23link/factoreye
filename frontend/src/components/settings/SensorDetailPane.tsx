@@ -250,9 +250,10 @@ export function SensorDetailPane({
               className="mt-0.5 block w-full rounded border border-gray-300 bg-white px-1.5 py-1 font-num text-sm text-gray-900"
             />
           </label>
-          <div>
+          <div className="min-w-0">
             単位
-            <UnitSelect value={unit} onChange={setUnit} className="mt-0.5 flex" />
+            {/* 欄の幅に収める（自由入力の欄が、右にはみ出さないように） */}
+            <UnitSelect value={unit} onChange={setUnit} className="mt-0.5 flex w-full min-w-0 [&>*]:min-w-0 [&>*]:max-w-full" />
           </div>
         </div>
         <div>

@@ -14,16 +14,35 @@ export type AppliedTheme = "dark" | "light";
 
 // 保存の名前。public/theme-init.js と同じ名前にする
 export const THEME_STORAGE_KEY = "factoreye.theme";
+// サーバーの「全員の初期値」の控え。次に開くとき、取得を待たずに初めの 1 回から正しい明るさで描くため（ちらつき防止）。
+// 端末の選択（上の factoreye.theme）があれば、そちらが優先。public/theme-init.js も同じ名前で読む
+export const SERVER_DEFAULT_STORAGE_KEY = "factoreye.theme.default";
 const MODES: readonly ThemeMode[] = ["dark", "light", "system"];
 const LIGHT_QUERY = "(prefers-color-scheme: light)";
 
-/** 保存してある明るさ。保存が無い・読めない・知らない値のときは「暗い」（初期値） */
+/**
+ * 保存してある明るさ。順に、この端末の選択 → サーバーの全員の初期値の控え → 暗い（初期値）。
+ * 保存が読めない・知らない値のときは次の候補へ。
+ */
 export function readThemeMode(): ThemeMode {
   try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return MODES.find((mode) => mode === saved) ?? "dark";
+    for (const key of [THEME_STORAGE_KEY, SERVER_DEFAULT_STORAGE_KEY]) {
+      const saved = localStorage.getItem(key);
+      const mode = MODES.find((m) => m === saved);
+      if (mode) return mode;
+    }
+    return "dark";
   } catch {
     return "dark";
+  }
+}
+
+/** サーバーの全員の初期値を、控えとして保存する（端末の選択とは別のキー）。保存できなくても続ける */
+export function saveServerDefaultTheme(mode: ThemeMode): void {
+  try {
+    localStorage.setItem(SERVER_DEFAULT_STORAGE_KEY, mode);
+  } catch {
+    // 控えが取れなくても、次に開いたときに少しちらつくだけ
   }
 }
 

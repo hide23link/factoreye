@@ -11,10 +11,11 @@ multi-tenant: ワークスペースごとの行を自動作成
 【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
 self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,12 +26,16 @@ from app.db.session import get_session
 from app.schemas import (
     DisplaySettingsRead,
     DisplaySettingsUpdate,
+    DisplayTheme,
     NotificationSettingsRead,
     NotificationSettingsUpdate,
 )
 from app.webhooks import UnsafeWebhookUrl, assert_webhook_url_allowed
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+# 画面の明るさの、全員の初期値の既定（まだ誰も変えていないとき）
+DEFAULT_DISPLAY_THEME: DisplayTheme = "dark"
 
 
 async def _get_notification_settings(
@@ -110,40 +115,35 @@ async def update_notification_settings(
     return settings_row
 
 
-async def _get_display_settings(
+async def _find_display_settings(
     session: AsyncSession, workspace_id: UUID | None
-) -> DisplaySettings:
-    """画面の明るさの初期値を取り出す。無ければ、既定（暗い）の行を作ってから返す。
+) -> DisplaySettings | None:
+    """画面の明るさの初期値の行を探す。無ければ None（読むだけでは行を作らない）。
 
     self-hosted は workspace_id IS NULL の行（id=1）、SaaS はワークスペースごとに 1 行。
     """
     if workspace_id is None:
-        row = await session.get(DisplaySettings, 1)
-        if row is None:
-            row = DisplaySettings(id=1, workspace_id=None)
-            session.add(row)
-            await session.commit()
-            await session.refresh(row)
-        return row
+        return await session.get(DisplaySettings, 1)
     result = await session.exec(
         select(DisplaySettings).where(DisplaySettings.workspace_id == workspace_id)
     )
-    row = result.first()
-    if row is None:
-        row = DisplaySettings(workspace_id=workspace_id)
-        session.add(row)
-        await session.commit()
-        await session.refresh(row)
-    return row
+    return result.first()
 
 
 @router.get("/display", response_model=DisplaySettingsRead)
 async def get_display_settings(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-) -> DisplaySettings:
-    """画面の明るさの、全員の初期値。自分で選んだ端末は、その選択が優先される（画面側で決める）。"""
-    return await _get_display_settings(session, workspace_id)
+) -> DisplaySettingsRead:
+    """画面の明るさの、全員の初期値。自分で選んだ端末は、その選択が優先される（画面側で決める）。
+
+    行がまだ無い（一度も変えていない）ときは、既定（暗い）を返すだけで、行は作らない
+    （画面を開くたびの読み取りが書き込みにならず、同時に開いても競合しない）。
+    """
+    row = await _find_display_settings(session, workspace_id)
+    if row is None:
+        return DisplaySettingsRead(default_theme=DEFAULT_DISPLAY_THEME)
+    return DisplaySettingsRead(default_theme=cast(DisplayTheme, row.default_theme))
 
 
 @router.put("/display", response_model=DisplaySettingsRead)
@@ -152,11 +152,29 @@ async def update_display_settings(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
 ) -> DisplaySettings:
-    """画面の明るさの、全員の初期値を変える。
+    """画面の明るさの、全員の初期値を変える（行が無ければ、ここで初めて作る）。
 
     通知などほかの設定と同じ権限（SaaS はログイン中の利用者のワークスペースだけ）。
+    同時に最初の保存が来て、行の作成がぶつかったら（一意制約）、作り直さず、先にできた行を更新する。
     """
-    row = await _get_display_settings(session, workspace_id)
+    row = await _find_display_settings(session, workspace_id)
+    if row is None:
+        row = DisplaySettings(
+            id=1 if workspace_id is None else None,
+            workspace_id=workspace_id,
+            default_theme=payload.default_theme,
+        )
+        session.add(row)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            row = await _find_display_settings(session, workspace_id)
+            if row is None:  # 一意制約以外の失敗（ふつうは起きない）
+                raise
+        else:
+            await session.refresh(row)
+            return row
     apply_update(row, payload, non_nullable=frozenset({"default_theme"}))
     session.add(row)
     await session.commit()
