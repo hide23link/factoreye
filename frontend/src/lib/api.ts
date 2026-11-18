@@ -19,6 +19,7 @@ import type {
   MeResponse,
   MigrationImportResult,
   MigrationStatus,
+  DisplaySettings,
   NotificationSettings,
   Reading,
   RuntimeSettings,
@@ -366,6 +367,16 @@ export const fetchNotificationSettings = () =>
 
 export const updateNotificationSettings = (data: Partial<NotificationSettings>) =>
   request<NotificationSettings>("/api/settings/notifications", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+// 画面の明るさの、全員の初期値（自分で選んでいない端末は、この値で始まる）
+
+export const fetchDisplaySettings = () => request<DisplaySettings>("/api/settings/display");
+
+export const updateDisplaySettings = (data: DisplaySettings) =>
+  request<DisplaySettings>("/api/settings/display", {
     method: "PUT",
     body: JSON.stringify(data),
   });

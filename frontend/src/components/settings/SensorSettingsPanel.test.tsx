@@ -1,9 +1,10 @@
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fireEvent, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import { ApiError } from "../../lib/errors";
 import type { Sensor } from "../../types";
+import { useUiStore } from "../../store/useUiStore";
 import { SensorSettingsPanel } from "./SensorSettingsPanel";
 
 vi.mock("../../lib/api", () => ({
@@ -34,11 +35,27 @@ const sensor: Sensor = {
   updatedAt: "2024-01-01T00:00:00.000Z",
 };
 
+// 一覧の各行が 1 時間分の区間データを取る。既定は「データなし」
+beforeEach(() => {
+  vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 120, buckets: [] });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 const NO_READINGS = { readings: [], total: 0 };
+
+/** 一覧のセンサーの名前を押して、右の詳細の欄を開く。戻り値は詳細の欄 */
+async function openDetail(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole("button", { name: `${name} の詳細` }));
+  return screen.getByRole("complementary", { name: `${name} の詳細` });
+}
+
+/** 詳細の欄の「詳しい設定」（Ingest Key・有効/無効・削除）を開く */
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>, detail: HTMLElement) {
+  await user.click(within(detail).getByText("詳しい設定"));
+}
 
 describe("SensorSettingsPanel", () => {
   it("センサー一覧を表示する", async () => {
@@ -46,7 +63,57 @@ describe("SensorSettingsPanel", () => {
     renderWithQueryClient(<SensorSettingsPanel />);
 
     expect(await screen.findByText("圧力計A-1")).toBeInTheDocument();
-    expect(screen.getByText("sensor-abc")).toBeInTheDocument();
+    // 重故障の上限 10 だけ → 正常な範囲は「≤ 10」。Ingest Key は一覧に出さず、詳細の「詳しい設定」に出す
+    expect(screen.getByText("≤ 10")).toBeInTheDocument();
+    expect(screen.queryByText("sensor-abc")).not.toBeInTheDocument();
+  });
+
+  it("表の列は、名前・種類・今の値・直近 1 時間・1h 最低 — 最高・しきい値・最終受信・状態", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("圧力計A-1");
+    const headers = screen.getAllByRole("columnheader").map((th) => th.textContent);
+    expect(headers).toEqual(["名前", "種類", "今の値", "直近 1 時間", "1h 最低 — 最高", "しきい値", "最終受信", "状態"]);
+  });
+
+  it("直近 1 時間の区間データから、最低 — 最高を出す。まだ受信が無いセンサーの今の値は「---」", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 120,
+      buckets: [
+        { start: "2026-11-18T00:00:00Z", avg: 5, min: 4, max: 6, count: 3 },
+        { start: "2026-11-18T00:02:00Z", avg: 7, min: 6, max: 9, count: 3 },
+      ],
+    });
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    expect(await screen.findByText("4 — 9")).toBeInTheDocument();
+    const row = screen.getByText("圧力計A-1").closest("tr") as HTMLElement;
+    expect(within(row).getByText("---")).toBeInTheDocument();
+    expect(within(row).getByText(/未受信/)).toBeInTheDocument();
+  });
+
+  it("「＋センサーを追加」を押すと、追加のフォームが開く（センサーがあるときは、最初は閉じている）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("圧力計A-1");
+    expect(screen.queryByLabelText("Ingest Key")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "＋センサーを追加" }));
+    expect(screen.getByLabelText("Ingest Key")).toBeInTheDocument();
+  });
+
+  it("「つなぎ方」を押すと、セットアップガイドの画面へ移る", async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ view: "settings" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await screen.findByText("圧力計A-1");
+    await user.click(screen.getByRole("button", { name: "つなぎ方" }));
+    expect(useUiStore.getState().view).toBe("wizard");
   });
 
   it("センサーが0件の場合は案内文を表示する", async () => {
@@ -210,24 +277,29 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.deleteSensor).mockResolvedValue(undefined);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    await screen.findByText("sensor-abc");
+    await screen.findByText("圧力計A-1");
+    await user.click(screen.getByRole("button", { name: "＋センサーを追加" }));
     await registerSensor(user, "圧力計A-1");
     await screen.findByRole("region", { name: "センサーのつなぎ方" });
 
-    const row = (await screen.findByText("圧力計A-1", { selector: "td" })).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("削除"));
+    const detail = await openDetail(user, "圧力計A-1");
+    await openAdvanced(user, detail);
+    await user.click(within(detail).getByRole("button", { name: "削除" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "削除" }));
 
     await waitFor(() => expect(api.deleteSensor).toHaveBeenCalledWith("s1"));
     await waitFor(() => expect(screen.queryByRole("region", { name: "センサーのつなぎ方" })).not.toBeInTheDocument());
   });
 
-  it("一覧の各センサーに、しきい値バーが出る（しきい値が無ければ「しきい値なし」）", async () => {
+  it("詳細の欄に、しきい値バーが出る（しきい値が無ければ「しきい値なし」）", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor, { ...sensor, id: "s2", name: "流量", thresholdMaxCritical: null }]);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    expect(await screen.findByRole("img", { name: /しきい値: .*重故障/ })).toBeInTheDocument();
-    expect(screen.getByText("しきい値なし")).toBeInTheDocument();
+    const detail = await openDetail(user, "圧力計A-1");
+    expect(within(detail).getByRole("img", { name: /しきい値: .*重故障/ })).toBeInTheDocument();
+    const other = await openDetail(user, "流量");
+    expect(within(other).getByText("しきい値なし")).toBeInTheDocument();
   });
 
   it("Free Tier 上限（402）に達すると上限の案内を表示する", async () => {
@@ -251,8 +323,9 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.updateSensor).mockResolvedValue({ ...sensor, enabled: false });
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const toggle = await screen.findByRole("button", { name: "有効" });
-    await user.click(toggle);
+    const detail = await openDetail(user, "圧力計A-1");
+    await openAdvanced(user, detail);
+    await user.click(within(detail).getByRole("button", { name: "有効" }));
 
     expect(api.updateSensor).toHaveBeenCalledWith("s1", { enabled: false });
   });
@@ -263,15 +336,16 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.deleteSensor).mockResolvedValue(undefined);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("削除"));
+    const detail = await openDetail(user, "圧力計A-1");
+    await openAdvanced(user, detail);
+    await user.click(within(detail).getByRole("button", { name: "削除" }));
     expect(api.deleteSensor).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toHaveTextContent("元に戻せません");
 
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "キャンセル" }));
     expect(api.deleteSensor).not.toHaveBeenCalled();
 
-    await user.click(within(row).getByText("削除"));
+    await user.click(within(detail).getByRole("button", { name: "削除" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "削除" }));
     expect(api.deleteSensor).toHaveBeenCalledWith("s1");
   });
@@ -294,8 +368,7 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.updateSensor).mockResolvedValue(sensor);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     const name = screen.getByRole("textbox", { name: "センサー名" });
     await user.clear(name);
     await user.keyboard("{Enter}");
@@ -312,8 +385,7 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     await user.type(screen.getByRole("spinbutton", { name: "軽故障の上限" }), "20"); // 重故障の上限は 10
     await user.click(screen.getByRole("button", { name: "保存" }));
 
@@ -327,8 +399,7 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.updateSensor).mockRejectedValue(new ApiError(500, "PUT /api/sensors/s1 failed: 500 Traceback"));
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     await user.click(screen.getByRole("button", { name: "保存" }));
 
     const alert = await screen.findByRole("alert");
@@ -359,8 +430,7 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.updateSensor).mockResolvedValue(odd);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     expect(screen.getByRole("textbox", { name: "単位（自由入力）" })).toHaveValue("psi");
     await user.click(screen.getByRole("button", { name: "保存" }));
 
@@ -388,8 +458,7 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.updateSensor).mockResolvedValue(sensor);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     const name = screen.getByRole("textbox", { name: "センサー名" });
 
     fireEvent.keyDown(name, { key: "Enter", isComposing: true });
@@ -405,16 +474,42 @@ describe("SensorSettingsPanel", () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     renderWithQueryClient(<SensorSettingsPanel />);
 
-    const row = (await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement;
-    await user.click(within(row).getByText("編集"));
+    await openDetail(user, "圧力計A-1");
     const name = screen.getByRole("textbox", { name: "センサー名" });
     await user.clear(name);
     await user.type(name, "途中の名前");
+    expect(name).toHaveValue("途中の名前");
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("textbox", { name: "センサー名" })).not.toBeInTheDocument();
-
-    await user.click(within((await screen.findByText("圧力計A-1")).closest("tr") as HTMLElement).getByText("編集"));
     expect(screen.getByRole("textbox", { name: "センサー名" })).toHaveValue("圧力計A-1");
+  });
+
+  it("詳細: 「取り消す」で、入力途中の値を保存してある値に戻す", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const detail = await openDetail(user, "圧力計A-1");
+    await user.type(within(detail).getByRole("spinbutton", { name: "軽故障の上限" }), "7");
+    await user.click(within(detail).getByRole("button", { name: "取り消す" }));
+    expect(within(detail).getByRole("spinbutton", { name: "軽故障の上限" })).toHaveValue(null);
+    expect(api.updateSensor).not.toHaveBeenCalled();
+  });
+
+  it("詳細: しきい値を入れて保存すると、updateSensor に 4 つのしきい値と不感帯を送る", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.updateSensor).mockResolvedValue(sensor);
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    const detail = await openDetail(user, "圧力計A-1");
+    await user.type(within(detail).getByRole("spinbutton", { name: "軽故障の上限" }), "8");
+    await user.click(within(detail).getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(api.updateSensor).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ thresholdMaxWarning: 8, thresholdMaxCritical: 10, thresholdMinWarning: null, thresholdMinCritical: null }),
+      ),
+    );
   });
 
   describe("検索・絞り込み・機器ごとのグループ・詳細", () => {
@@ -440,10 +535,40 @@ describe("SensorSettingsPanel", () => {
 
       expect(await screen.findByText("env-youshitsu")).toBeInTheDocument();
       expect(screen.getByText("機器なし")).toBeInTheDocument();
-      expect(await screen.findByText(/受信中/, { selector: "span.font-bold" })).toBeInTheDocument();
-      expect(screen.getByText(/止まっている/, { selector: "span.font-bold" })).toBeInTheDocument();
-      expect(screen.getByText(/未受信/, { selector: "span.font-bold" })).toBeInTheDocument();
-      expect(screen.getByText("1050 ppm")).toBeInTheDocument();
+      // 状態の列: 洋室 CO2 は受信中でしきい値の外、洋室 温度 は 1 時間前で受信なし、単独は未受信
+      const rowOf = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
+      expect(await within(rowOf("洋室 CO2")).findByText(/しきい値の外/)).toBeInTheDocument();
+      expect(within(rowOf("洋室 温度")).getByText(/受信なし/)).toBeInTheDocument();
+      expect(within(rowOf("単独センサー")).getByText(/未受信/)).toBeInTheDocument();
+      // 今の値。受信が止まっているセンサーは「---」（最後の値は出さない）
+      expect(within(rowOf("洋室 CO2")).getByText("1050")).toBeInTheDocument();
+      expect(within(rowOf("洋室 温度")).getByText("---")).toBeInTheDocument();
+    });
+
+    it("絞り込みに「しきい値の外」がある。受信中で今の値がしきい値の外のものだけ出す", async () => {
+      const user = userEvent.setup();
+      setup();
+      renderWithQueryClient(<SensorSettingsPanel />);
+      await screen.findByText("洋室 CO2");
+
+      await user.click(await screen.findByRole("button", { name: /^しきい値の外 1$/ }));
+      expect(screen.getByText("洋室 CO2")).toBeInTheDocument();
+      expect(screen.queryByText("洋室 温度")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /しきい値あり/ })).not.toBeInTheDocument();
+    });
+
+    it("機器が 4 つ以上あると、最初の 3 機器だけ開き、「ほかの N 機器を開く」で残りを出す", async () => {
+      const user = userEvent.setup();
+      const many = ["a", "b", "c", "d", "e"].map((x) => ({ ...sensor, id: `m-${x}`, name: `セ-${x}`, ingestKey: `k-${x}`, deviceId: `dev-${x}`, deviceName: `env-${x}` }));
+      vi.mocked(api.fetchSensors).mockResolvedValue(many);
+      renderWithQueryClient(<SensorSettingsPanel />);
+
+      expect(await screen.findByText("セ-a")).toBeInTheDocument();
+      expect(screen.getByText("セ-c")).toBeInTheDocument();
+      expect(screen.queryByText("セ-d")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "ほかの 2 機器を開く" }));
+      expect(screen.getByText("セ-e")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /ほかの/ })).not.toBeInTheDocument();
     });
 
     it("絞り込みのボタンは件数つき。押すと、条件に合うものだけにする", async () => {
@@ -476,14 +601,14 @@ describe("SensorSettingsPanel", () => {
       expect(screen.getByText("該当するセンサーはありません。")).toBeInTheDocument();
     });
 
-    it("「詳細」を押すと、その行の下に詳細パネル（しきい値の要約）が出る。もう一度押すか「閉じる」で閉じる", async () => {
+    it("名前を押すと、右に詳細の欄（保存してあるしきい値入り）が出る。「閉じる」で閉じる", async () => {
       const user = userEvent.setup();
       setup();
       renderWithQueryClient(<SensorSettingsPanel />);
 
       await user.click(await screen.findByRole("button", { name: "洋室 CO2 の詳細" }));
       const panel = screen.getByRole("complementary", { name: "洋室 CO2 の詳細" });
-      expect(within(panel).getByText(/重故障（下限 \/ 上限）/)).toBeInTheDocument();
+      expect(within(panel).getByRole("spinbutton", { name: "重故障の上限" })).toHaveValue(1000);
 
       await user.click(within(panel).getByRole("button", { name: "詳細を閉じる" }));
       expect(screen.queryByRole("complementary", { name: "洋室 CO2 の詳細" })).not.toBeInTheDocument();

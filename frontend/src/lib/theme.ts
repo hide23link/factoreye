@@ -2,6 +2,7 @@
  * 画面の明るさ（暗い・明るい・端末に合わせる）の読み書き。設定 › 表示 で選ぶ。
  *
  * - 選んだ値は、この端末のブラウザ（localStorage の factoreye.theme）にだけ保存する。ほかの人の画面は変わらない
+ * - 端末に選択が無いときだけ、サーバーの「全員の初期値」（GET /api/settings/display）で始まる（store/useThemeStore.ts）
  * - 色そのものは theme.css が持つ。ここは <html data-theme="dark|light"> を付け替えるだけ
  * - 画面を描く前の 1 回目は public/theme-init.js が付ける（同じ読み方。変えるときは両方を直す）
  *
@@ -23,6 +24,24 @@ export function readThemeMode(): ThemeMode {
     return MODES.find((mode) => mode === saved) ?? "dark";
   } catch {
     return "dark";
+  }
+}
+
+/** この端末で明るさを選んだことがあるか（保存がある・読める値のとき true） */
+export function hasSavedThemeMode(): boolean {
+  try {
+    return MODES.some((mode) => mode === localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
+/** この端末の選択を消す（「全員の初期値」に従う状態に戻す）。消せなくても、画面の切り替えは続ける */
+export function clearThemeMode(): void {
+  try {
+    localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // 消せなくても続ける
   }
 }
 

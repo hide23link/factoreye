@@ -2,6 +2,7 @@
  * 設定画面。左のメニュー（項目をまとまりごとに並べる）で、センサー・アラーム・通知・Webhook・データ移行・表示
  * （OSS 版は機器・バックアップ・API・取り込みも）の各パネルを切り替える。スマホでは、メニューが上に並ぶ。
  * 選んでいる項目のパネルだけを描画する（ほかのパネルは作らない＝不要な通信をしない）。
+ * 横幅いっぱいに広げ、左の項目の欄だけ固定幅にする（画面刷新モックと同じ）。
  *
  * 【誰が使うか】App.tsx が、メニューで「設定」を選んだときに出す。引数（props）はない。
  */
@@ -45,8 +46,8 @@ const GROUPS: { title: string; items: TabItem[] }[] = [
     title: "計測",
     items: [
       { value: "sensors", label: "センサー" },
-      { value: "devices", label: "機器", ossOnly: true },
-      { value: "alarms", label: "アラーム" },
+      { value: "devices", label: "機器・送信キー", ossOnly: true },
+      { value: "alarms", label: "アラームのしきい値" },
     ],
   },
   {
@@ -77,8 +78,8 @@ export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("sensors");
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4 md:flex-row md:items-start">
-      <nav aria-label="設定の項目" className="flex flex-col gap-3 md:w-48 md:shrink-0">
+    <div className="flex w-full flex-col gap-4 p-4 md:flex-row md:items-start">
+      <nav aria-label="設定の項目" className="flex flex-col gap-3 md:w-52 md:shrink-0">
         <h1 className="px-2 text-lg font-bold tracking-wide text-gray-900">設定</h1>
         {VISIBLE_GROUPS.map((group) => (
           <div key={group.title} className="flex flex-col gap-0.5">

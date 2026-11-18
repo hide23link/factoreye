@@ -47,14 +47,27 @@ export interface TrendLimit {
 // 目盛りの間隔の候補（1・2・2.5・5 の 10 倍ずつ）。読みやすい切りのよい数にするため
 const NICE_STEPS = [1, 2, 2.5, 5, 10];
 
-/** 区間のデータを、線の点にする（区間の中央の時刻に、区間の値を置く） */
+/**
+ * 区間の中央の時刻。ただし endTime（表示の右端＝今）より後にはしない。
+ * いちばん新しい区間は、まだ終わっていない（中央が今より先になる）ことがあり、そのまま使うと「最低 21:35」のように今より後の時刻が出るため。
+ * 例: 区間 21:30〜21:40・今 21:33 → 21:33（中央の 21:35 ではなく）
+ */
+export function bucketMidTime(startMs: number, bucketSeconds: number, endTime?: number): number {
+  const mid = startMs + (bucketSeconds * 1000) / 2;
+  return endTime === undefined ? mid : Math.min(mid, endTime);
+}
+
+/** 区間のデータを、線の点にする（区間の中央の時刻に、区間の値を置く。endTime より後にはしない） */
 export function toPoints(
   buckets: ReadonlyArray<Pick<DownsampledBucket, "start" | "avg" | "max" | "min">>,
   bucketSeconds: number,
   aggregation: Aggregation,
+  endTime?: number,
 ): TrendPoint[] {
-  const half = (bucketSeconds * 1000) / 2;
-  return buckets.map((bucket) => ({ time: new Date(bucket.start).getTime() + half, value: bucketValue(bucket, aggregation) }));
+  return buckets.map((bucket) => ({
+    time: bucketMidTime(new Date(bucket.start).getTime(), bucketSeconds, endTime),
+    value: bucketValue(bucket, aggregation),
+  }));
 }
 
 /**
@@ -65,15 +78,15 @@ export function trendStats(
   buckets: ReadonlyArray<Pick<DownsampledBucket, "start" | "avg" | "max" | "min" | "count">>,
   bucketSeconds: number,
   points: ReadonlyArray<TrendPoint>,
+  endTime?: number,
 ): TrendStats | null {
   if (buckets.length === 0 || points.length === 0) return null;
-  const half = (bucketSeconds * 1000) / 2;
   let max: TrendPoint = { time: 0, value: -Infinity };
   let min: TrendPoint = { time: 0, value: Infinity };
   let sum = 0;
   let count = 0;
   for (const bucket of buckets) {
-    const time = new Date(bucket.start).getTime() + half;
+    const time = bucketMidTime(new Date(bucket.start).getTime(), bucketSeconds, endTime);
     if (bucket.max > max.value) max = { time, value: bucket.max };
     if (bucket.min < min.value) min = { time, value: bucket.min };
     const weight = bucket.count > 0 ? bucket.count : 1;

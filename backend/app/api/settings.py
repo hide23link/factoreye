@@ -6,6 +6,8 @@ multi-tenant: ワークスペースごとの行を自動作成
 【呼ばれ方】画面の「設定」が呼ぶ。
 - GET /api/settings/notifications  → 今の通知設定
 - PUT /api/settings/notifications  本文: 変えたい項目だけ（例: {"enabled": false}）
+- GET /api/settings/display        → 画面の明るさの、全員の初期値（{"defaultTheme": "dark"}）
+- PUT /api/settings/display        本文: {"defaultTheme": "light"}（dark / light / system）
 【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
 self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
@@ -18,9 +20,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_workspace_id
 from app.api.updates import apply_update
-from app.db.models import NotificationSettings
+from app.db.models import DisplaySettings, NotificationSettings
 from app.db.session import get_session
-from app.schemas import NotificationSettingsRead, NotificationSettingsUpdate
+from app.schemas import (
+    DisplaySettingsRead,
+    DisplaySettingsUpdate,
+    NotificationSettingsRead,
+    NotificationSettingsUpdate,
+)
 from app.webhooks import UnsafeWebhookUrl, assert_webhook_url_allowed
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -101,3 +108,57 @@ async def update_notification_settings(
     await session.commit()
     await session.refresh(settings_row)
     return settings_row
+
+
+async def _get_display_settings(
+    session: AsyncSession, workspace_id: UUID | None
+) -> DisplaySettings:
+    """画面の明るさの初期値を取り出す。無ければ、既定（暗い）の行を作ってから返す。
+
+    self-hosted は workspace_id IS NULL の行（id=1）、SaaS はワークスペースごとに 1 行。
+    """
+    if workspace_id is None:
+        row = await session.get(DisplaySettings, 1)
+        if row is None:
+            row = DisplaySettings(id=1, workspace_id=None)
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+        return row
+    result = await session.exec(
+        select(DisplaySettings).where(DisplaySettings.workspace_id == workspace_id)
+    )
+    row = result.first()
+    if row is None:
+        row = DisplaySettings(workspace_id=workspace_id)
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+    return row
+
+
+@router.get("/display", response_model=DisplaySettingsRead)
+async def get_display_settings(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+) -> DisplaySettings:
+    """画面の明るさの、全員の初期値。自分で選んだ端末は、その選択が優先される（画面側で決める）。"""
+    return await _get_display_settings(session, workspace_id)
+
+
+@router.put("/display", response_model=DisplaySettingsRead)
+async def update_display_settings(
+    payload: DisplaySettingsUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+) -> DisplaySettings:
+    """画面の明るさの、全員の初期値を変える。
+
+    通知などほかの設定と同じ権限（SaaS はログイン中の利用者のワークスペースだけ）。
+    """
+    row = await _get_display_settings(session, workspace_id)
+    apply_update(row, payload, non_nullable=frozenset({"default_theme"}))
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row

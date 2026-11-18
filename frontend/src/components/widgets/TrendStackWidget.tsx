@@ -197,8 +197,9 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
     );
   }
 
-  const points = toPoints(data.buckets, data.bucketSeconds, aggregation);
-  const stats = trendStats(data.buckets, data.bucketSeconds, points);
+  // 区間の中央の時刻は、表示の右端（今）より後にしない（最後の区間は、まだ終わっていないため）
+  const points = toPoints(data.buckets, data.bucketSeconds, aggregation, bounds.to);
+  const stats = trendStats(data.buckets, data.bucketSeconds, points, bounds.to);
   const limits = sensor ? trendLimits(sensor) : [];
   const limitValues = limits.map((limit) => limit.value);
   // 線が無い行（この期間のデータが無い）でも、最後の値が目盛りに収まるようにする

@@ -67,6 +67,12 @@ export interface Sensor {
   deviceLine?: string | null;
 }
 
+/** 画面の明るさの、全員の初期値（設定 › 画面の明るさ で「全員の初期値にする」を選んだときの保存内容）。 */
+export interface DisplaySettings {
+  // dark=暗い、light=明るい、system=端末の設定に合わせる
+  defaultTheme: "dark" | "light" | "system";
+}
+
 /** 測定値1件（時刻と値）。 */
 export interface Reading {
   sensorId: string;

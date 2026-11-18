@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Reading, Sensor } from "../types";
 import { STALE_MS } from "./overview";
-import { filterCounts, groupByDevice, hasLimits, matchesFilter, matchesQuery, sensorLive } from "./sensor-list";
+import { filterCounts, groupByDevice, hasLimits, formatLiveValue, hourRange, matchesFilter, matchesQuery, sensorLive, sensorStatus, sparkPoints, thresholdSummary } from "./sensor-list";
 
 const NOW = new Date("2026-11-18T00:00:00Z").getTime();
 
@@ -59,8 +59,47 @@ describe("検索と絞り込み", () => {
   it("ボタンごとの件数は、検索の文字を反映する", () => {
     const sensors = [sensor("a", "洋室 温度"), sensor("b", "洋室 CO2", { thresholdMaxCritical: 1000 }), sensor("c", "寝室 温度")];
     const lives = new Map(sensors.map((x, i) => [x.id, sensorLive(x, i === 2 ? undefined : reading(x.id, 1, 1000), NOW)]));
-    expect(filterCounts(sensors, lives, "")).toEqual({ all: 3, receiving: 2, stopped: 1, limits: 1 });
-    expect(filterCounts(sensors, lives, "洋室")).toEqual({ all: 2, receiving: 2, stopped: 0, limits: 1 });
+    expect(filterCounts(sensors, lives, "")).toEqual({ all: 3, receiving: 2, stopped: 1, outside: 0 });
+    expect(filterCounts(sensors, lives, "洋室")).toEqual({ all: 2, receiving: 2, stopped: 0, outside: 0 });
+  });
+  it("「しきい値の外」は、受信中で今の値がしきい値の外のもの（止まっているものは数えない）", () => {
+    const s2 = sensor("a", "洋室 CO2", { thresholdMaxCritical: 1000 });
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 1052, 1000), NOW))).toBe(true);
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 900, 1000), NOW))).toBe(false);
+    expect(matchesFilter("outside", s2, sensorLive(s2, reading("a", 1052, STALE_MS + 1000), NOW))).toBe(false);
+  });
+});
+
+describe("一覧の状態・しきい値・直近 1 時間", () => {
+  it("状態: 無効 > 未受信 > 止まっている > しきい値の外 > 正常の順に決める", () => {
+    const s = sensor("a", "A", { thresholdMaxCritical: 10 });
+    expect(sensorStatus(s, sensorLive(s, reading("a", 5, 1000), NOW))).toBe("normal");
+    expect(sensorStatus(s, sensorLive(s, reading("a", 12, 1000), NOW))).toBe("outside");
+    expect(sensorStatus(s, sensorLive(s, reading("a", 12, STALE_MS + 1000), NOW))).toBe("stopped");
+    expect(sensorStatus(s, sensorLive(s, undefined, NOW))).toBe("never");
+    const off = { ...s, enabled: false };
+    expect(sensorStatus(off, sensorLive(off, reading("a", 5, 1000), NOW))).toBe("disabled");
+  });
+  it("しきい値の文字: 上限だけ「≤」、下限だけ「≥」、両方「—」でつなぐ、無ければ「—」。軽故障を優先し、無ければ重故障", () => {
+    expect(thresholdSummary(sensor("a", "A", { thresholdMaxCritical: 1000 }))).toBe("≤ 1000");
+    expect(thresholdSummary(sensor("a", "A", { thresholdMinCritical: 18 }))).toBe("≥ 18");
+    expect(thresholdSummary(sensor("a", "A", { thresholdMinWarning: 18, thresholdMaxWarning: 28, thresholdMaxCritical: 35 }))).toBe("18 — 28");
+    expect(thresholdSummary(sensor("a", "A"))).toBe("—");
+  });
+  it("直近 1 時間の最低〜最高は、区間の min・max から。データが無ければ null", () => {
+    expect(hourRange([])).toBeNull();
+    expect(hourRange([{ avg: 5, max: 6, min: 4 }, { avg: 7, max: 9, min: 6 }])).toEqual({ min: 4, max: 9 });
+  });
+  it("今の値の文字: 100 以上は整数、それ未満は小数 2 桁まで", () => {
+    expect(formatLiveValue(1092.4)).toBe("1092");
+    expect(formatLiveValue(22.1)).toBe("22.1");
+    expect(formatLiveValue(22.456)).toBe("22.46");
+    expect(formatLiveValue(-62)).toBe("-62");
+  });
+  it("小さな折れ線: 最低〜最高を高さいっぱいに。同じ値は真ん中、点が 1 つなら空", () => {
+    expect(sparkPoints([1, 3, 2], 100, 20)).toBe("0.0,20.0 50.0,0.0 100.0,10.0");
+    expect(sparkPoints([5, 5], 100, 20)).toBe("0.0,10.0 100.0,10.0");
+    expect(sparkPoints([5], 100, 20)).toBe("");
   });
 });
 

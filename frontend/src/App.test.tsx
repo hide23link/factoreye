@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { useThemeStore } from "./store/useThemeStore";
 import { useUiStore } from "./store/useUiStore";
 import { renderWithQueryClient, screen, within } from "./test/test-utils";
 import type { DashboardDetail, Widget } from "./types";
@@ -14,6 +15,7 @@ vi.mock("./lib/api", () => ({
   createDashboard: vi.fn(),
   fetchMe: vi.fn(),
   fetchAlarms: vi.fn(),
+  fetchDisplaySettings: vi.fn(),
   logout: vi.fn(),
   refreshTokens: vi.fn(),
 }));
@@ -56,6 +58,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   useUiStore.setState(initialUi, true);
+  useThemeStore.setState({ mode: "dark", applied: "dark", saved: false });
+  document.documentElement.removeAttribute("data-theme");
 });
 
 describe("App の画面の分け方", () => {
@@ -115,5 +119,21 @@ describe("App の画面の分け方", () => {
     expect(await screen.findByText("炉の温度")).toBeInTheDocument();
     expect(screen.queryByText("FactorEye")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "画面の切り替え" })).not.toBeInTheDocument();
+  });
+
+  it("画面の明るさ: この端末で選んでいなければ、サーバーの「全員の初期値」で始まる。選んでいれば、その選択が優先", async () => {
+    vi.mocked(api.fetchDisplaySettings).mockResolvedValue({ defaultTheme: "light" });
+    useThemeStore.setState({ mode: "dark", applied: "dark", saved: false });
+    renderWithQueryClient(<App />);
+
+    await vi.waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
+    expect(useThemeStore.getState().mode).toBe("light");
+    // 端末の選択が無いままなので、保存はしていない
+    expect(localStorage.getItem("factoreye.theme")).toBeNull();
+
+    // この端末で「暗い」を選んでいる場合は、全員の初期値より優先する
+    useThemeStore.setState({ mode: "dark", applied: "dark", saved: true });
+    useThemeStore.getState().applyServerDefault("light");
+    expect(useThemeStore.getState().mode).toBe("dark");
   });
 });

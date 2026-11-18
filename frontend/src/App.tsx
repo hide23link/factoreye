@@ -18,14 +18,14 @@ import { Suspense, useEffect } from "react";
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardTabs } from "./components/DashboardTabs";
-import { useAlarms } from "./hooks/queries";
+import { useAlarms, useDisplaySettings } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
-import { startThemeWatch } from "./store/useThemeStore";
+import { startThemeWatch, useThemeStore } from "./store/useThemeStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
 import type { LegalKind } from "./components/LegalPage";
@@ -280,6 +280,19 @@ function BottomNav() {
   );
 }
 
+/**
+ * 画面の明るさの「全員の初期値」を反映する（何も描かない）。
+ * この端末で明るさを選んでいれば、その選択を優先する（ストア側で判断）。ログイン後に呼ばれるので、SaaS でも取れる。
+ */
+function ServerThemeDefault() {
+  const { data } = useDisplaySettings();
+  const applyServerDefault = useThemeStore((s) => s.applyServerDefault);
+  useEffect(() => {
+    if (data) applyServerDefault(data.defaultTheme);
+  }, [data, applyServerDefault]);
+  return null;
+}
+
 /** ログイン後（または self-hosted）の画面。リンクで開いたときはグラフ 1 つの画面、それ以外はふだんの枠（MainShell）。 */
 function AppShell() {
   const view = useUiStore((s) => s.view);
@@ -295,13 +308,19 @@ function AppShell() {
   if (graphLink) {
     return (
       <ChunkErrorBoundary>
+        <ServerThemeDefault />
         <Suspense fallback={<PageFallback />}>
           <GraphLinkView link={graphLink} />
         </Suspense>
       </ChunkErrorBoundary>
     );
   }
-  return <MainShell view={view} selectedDashboardId={selectedDashboardId} />;
+  return (
+    <>
+      <ServerThemeDefault />
+      <MainShell view={view} selectedDashboardId={selectedDashboardId} />
+    </>
+  );
 }
 
 /** 画面の名前（上の帯に出す） */
