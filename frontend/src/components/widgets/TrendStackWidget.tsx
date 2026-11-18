@@ -301,7 +301,7 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
             </dl>
           )}
         </RowSide>
-        <YAxis scale={scale} />
+        <YAxis scale={scale} unit={unit} />
         <PlotBox pointer={pointer}>
           {(plot) => {
             // 札の位置（px）。カーソルの札を先に決め、最高・最低の札はそれと重ならないよう置く
@@ -469,9 +469,15 @@ function RowSide({
 }
 
 /** 縦軸の目盛りの数字 */
-function YAxis({ scale }: { scale: AxisScale }) {
+function YAxis({ scale, unit }: { scale: AxisScale; unit: string }) {
   return (
     <div className="relative min-h-[64px] font-num text-[11px]" style={{ color: MUTED }} aria-hidden="true">
+      {/* 縦軸の単位。いちばん上の目盛りの数字と重ならないよう、軸の左上の隅に小さく出す */}
+      {unit && (
+        <span className="absolute left-1 top-0 text-[9px] leading-none" data-testid="trend-y-unit">
+          {unit}
+        </span>
+      )}
       {scale.ticks.map((tick) => (
         <span key={tick} className="absolute right-1.5 -translate-y-1/2" style={{ top: `${yPercent(tick, scale)}%` }}>
           {formatTick(tick, scale)}

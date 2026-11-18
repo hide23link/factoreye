@@ -175,6 +175,11 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         ),
       )
     : undefined;
+  // 縦軸（1 つのとき）の上に出す単位。0〜100% にそろえた・百分率で積み上げたグラフは「%」、実際の値は左の軸の単位
+  const yAxisUnit =
+    options.axisMode === "normalized" || options.stack === "percent" ? "%" : axis.leftUnit;
+  // 単位の文字が上端で切れないよう、単位を出すときは上に余白をとる
+  const chartMargin = yAxisUnit || (dualAxis && (axis.leftUnit || axis.rightUnit)) ? { top: 18, right: 5, left: 0, bottom: 5 } : undefined;
   const formatYAxis = {
     values: formatYTick,
     percent: (v: number) => `${Math.round(v)}%`,
@@ -258,11 +263,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
             width={44}
             tick={{ fontSize: 10 }}
             tickFormatter={formatYAxis}
-            label={
-              options.axisMode === "shared" && options.stack === "none" && axis.leftUnit
-                ? { value: axis.leftUnit, position: "top", fontSize: 10 }
-                : undefined
-            }
+            label={yAxisUnit ? { value: yAxisUnit, position: "top", fontSize: 10 } : undefined}
           />,
         ]),
     style.showTooltip && !linkView ? (
@@ -351,17 +352,17 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
           <ResponsiveContainer width="100%" height="100%">
             {graphType === "bar" ? (
-              <BarChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
+              <BarChart data={chartData} margin={chartMargin} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
                 {parts}
                 {series}
               </BarChart>
             ) : graphType === "area" ? (
-              <AreaChart data={chartData} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
+              <AreaChart data={chartData} margin={chartMargin} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>
                 {parts}
                 {series}
               </AreaChart>
             ) : (
-              <LineChart data={chartData} {...pointerHandlers}>
+              <LineChart data={chartData} margin={chartMargin} {...pointerHandlers}>
                 {parts}
                 {series}
               </LineChart>

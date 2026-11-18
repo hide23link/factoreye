@@ -33,6 +33,7 @@ import type {
 } from "../types";
 import { getStoredRefreshToken, useAuthStore } from "../store/useAuthStore";
 import { ApiError } from "./errors";
+import { normalizeUnit, unitForServer } from "./units";
 
 // バックエンドのアドレス。ビルド時に決まる（.env の VITE_API_URL。既定は localhost:8000）
 export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -201,7 +202,15 @@ export const fetchHealth = () => request<HealthResponse>("/health");
 // ── Sensors ───────────────────────────────────────────────────
 // センサーの一覧・作成・更新・削除
 
-export const fetchSensors = () => request<Sensor[]>("/api/sensors");
+/** センサーの一覧。単位が「-」（自動登録の仮の値）のものは、名前から単位を補う（lib/units.ts） */
+export const fetchSensors = () =>
+  request<Sensor[]>("/api/sensors").then((sensors) =>
+    sensors.map((sensor) =>
+      typeof sensor.unit === "string"
+        ? { ...sensor, unit: normalizeUnit(sensor.unit, sensor.name ?? "", sensor.ingestKey ?? "") }
+        : sensor,
+    ),
+  );
 
 export const createSensor = (data: {
   name: string;
@@ -212,7 +221,8 @@ export const createSensor = (data: {
   thresholdMaxWarning?: number | null;
   thresholdMaxCritical?: number | null;
   thresholdDeadBand?: number;
-}) => request<Sensor>("/api/sensors", { method: "POST", body: JSON.stringify(data) });
+}) =>
+  request<Sensor>("/api/sensors", { method: "POST", body: JSON.stringify({ ...data, unit: unitForServer(data.unit) }) });
 
 export const updateSensor = (
   id: string,
@@ -226,7 +236,12 @@ export const updateSensor = (
     thresholdDeadBand: number;
     enabled: boolean;
   }>,
-) => request<Sensor>(`/api/sensors/${id}`, { method: "PUT", body: JSON.stringify(data) });
+) =>
+  request<Sensor>(`/api/sensors/${id}`, {
+    method: "PUT",
+    // 単位を空にした（画面では「単位なし」）ときは、サーバーが受け付ける仮の単位「-」で送る
+    body: JSON.stringify(data.unit === undefined ? data : { ...data, unit: unitForServer(data.unit) }),
+  });
 
 export const deleteSensor = (id: string) =>
   request<void>(`/api/sensors/${id}`, { method: "DELETE" });
