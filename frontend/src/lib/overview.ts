@@ -145,10 +145,12 @@ function decimalsOfUnit(unit: string): number | null {
   return null;
 }
 
-/** 値の文字（例: 22.4、49、1012.4）。桁は単位で決め、決められない単位は有効数字 4 桁 */
+/** 値の文字（例: 22.4、49、1012.4）。桁は単位で決め、決められない単位は有効数字 4 桁。丸めて 0 になる負の値は「-0」でなく「0」 */
 export function formatSensorNumber(value: number, unit: string): string {
   const decimals = decimalsOfUnit(unit);
-  return decimals === null ? String(Number(value.toPrecision(4))) : value.toFixed(decimals);
+  if (decimals === null) return String(Number(value.toPrecision(4)));
+  const text = value.toFixed(decimals);
+  return Number(text) === 0 ? (0).toFixed(decimals) : text;
 }
 
 /** 値に単位をつけた文字（例: 22.4℃、49%、1050ppm） */
@@ -163,13 +165,18 @@ export function formatChange(delta: number, unit: string): string {
   return `${delta > 0 ? "↑" : "↓"}${text}`;
 }
 
-/** 種類の切り替えに出す名前。単位から決める（例: ℃ → 温度、ppm → CO2）。知らない単位は、その単位そのもの */
+/**
+ * 種類の切り替えに出す名前。単位から決める（例: ℃ → 温度、ppm → CO2）。知らない単位は、その単位そのもの。
+ * 全角・半角の違い、%RH・°C などの書き方の違いは同じ種類にする（同じ名前のボタンが 2 つ並ばないように）。
+ */
 export function kindOfUnit(unit: string): string {
-  if (unit === "℃" || unit === "°C") return "温度";
-  if (unit === "%") return "湿度";
-  if (unit === "ppm") return "CO2";
-  if (unit === "hPa") return "気圧";
-  return unit || "その他";
+  // 全角を半角に、大文字小文字・前後の空白をそろえる（例: ％ → %、PPM → ppm）
+  const normalized = unit.normalize("NFKC").trim().toLowerCase();
+  if (["°c", "℃", "degc", "度"].includes(normalized)) return "温度";
+  if (["%", "%rh", "rh"].includes(normalized)) return "湿度";
+  if (normalized === "ppm") return "CO2";
+  if (["hpa", "mbar"].includes(normalized)) return "気圧";
+  return unit.trim() || "その他";
 }
 
 /** センサーに今ある種類を、決まった順（温度・湿度・CO2・気圧、ほかは名前順）に並べる */

@@ -142,6 +142,12 @@ describe("値の桁（単位で決める）", () => {
     expect(formatSensorValue(1012.44, "hPa")).toBe("1012.4hPa");
     expect(formatSensorNumber(3.14159265, "mm/s")).toBe("3.142");
   });
+  it("丸めて 0 になる小さな負の値は、「-0」「-0.0」でなく「0」「0.0」", () => {
+    expect(formatSensorNumber(-0.04, "℃")).toBe("0.0");
+    expect(formatSensorNumber(-0.4, "%")).toBe("0");
+    expect(formatSensorValue(-0.04, "℃")).toBe("0.0℃");
+    expect(formatSensorNumber(-0.06, "℃")).toBe("-0.1");
+  });
   it("1 時間の変化は、増えれば ↑、減れば ↓。丸めて 0 なら矢印なし", () => {
     expect(formatChange(0.64, "℃")).toBe("↑0.6");
     expect(formatChange(-0.24, "℃")).toBe("↓0.2");
@@ -160,6 +166,21 @@ describe("種類の切り替え", () => {
       sensor("d", "D", { unit: "%", enabled: false }),
     ];
     expect(kindsOf(sensors)).toEqual(["温度", "CO2", "個"]);
+  });
+  it("書き方の違い（％・%RH・PPM・°C）は同じ種類にまとめ、同じ名前のボタンを 2 つ出さない", () => {
+    expect(kindOfUnit("％")).toBe("湿度");
+    expect(kindOfUnit("%RH")).toBe("湿度");
+    expect(kindOfUnit("PPM")).toBe("CO2");
+    expect(kindOfUnit("°C")).toBe("温度");
+    const sensors = [
+      sensor("a", "A", { unit: "%" }),
+      sensor("b", "B", { unit: "％" }),
+      sensor("c", "C", { unit: "%RH" }),
+      sensor("d", "D", { unit: "湿度" }),
+      sensor("e", "E", { unit: "℃" }),
+      sensor("f", "F", { unit: "°C" }),
+    ];
+    expect(kindsOf(sensors)).toEqual(["温度", "湿度"]);
   });
   it("札の中の選んだ種類の値と、1 時間前からの変化を取り出す。無ければ null", () => {
     const sensors = [sensor("t", "温度", { unit: "℃", deviceId: "d", deviceName: "env" }), sensor("c", "CO2", { unit: "ppm", deviceId: "d", deviceName: "env" })];

@@ -91,6 +91,31 @@ async def test_latest_before_returns_newest_reading_at_or_before_the_time(
     assert str(only_new) not in by_sensor
 
 
+async def test_latest_before_includes_a_reading_at_exactly_the_same_time(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    """before とちょうど同じ時刻の測定値は含める（<=）。1 マイクロ秒後のものは含めない。"""
+    sensor_id = await _make_sensor(session, None, "温度")
+    boundary = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    await buffer.add(PendingReading(sensor_id=sensor_id, value=20.0, recorded_at=boundary))
+    just_after = boundary + timedelta(microseconds=1)
+    await buffer.add(PendingReading(sensor_id=sensor_id, value=99.0, recorded_at=just_after))
+    await flush_once()
+
+    resp = await client.get("/api/sensors/latest", params={"before": boundary.isoformat()})
+
+    assert resp.status_code == 200
+    readings = resp.json()["readings"]
+    assert [item["value"] for item in readings] == [20.0]
+
+
+async def test_latest_before_without_timezone_is_rejected(client: httpx.AsyncClient) -> None:
+    """before は時刻帯つきだけ受ける（時刻帯が無いと、どの時刻か決まらないので 422）。"""
+    resp = await client.get("/api/sensors/latest", params={"before": "2026-11-18T00:42:00"})
+
+    assert resp.status_code == 422
+
+
 async def test_latest_is_limited_to_own_workspace(
     client: httpx.AsyncClient, session: AsyncSession
 ) -> None:

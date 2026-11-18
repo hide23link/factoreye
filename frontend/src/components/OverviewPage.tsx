@@ -11,7 +11,7 @@ import { useState } from "react";
 import { useAlarms, useDashboards, useLatestReadings, useSensors } from "../hooks/queries";
 import { fetchDashboard } from "../lib/api";
 import { useNow } from "../hooks/useNow";
-import { buildStrips, countStates, formatSensorValue, formatShortAge, type Strip, type StripState } from "../lib/overview";
+import { buildStrips, countDevicesAndSensors, countStates, formatSensorValue, formatShortAge, type Strip, type StripState } from "../lib/overview";
 import type { Alarm, Sensor, Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
 import { FloorPlanWidget } from "./widgets/FloorPlanWidget";
@@ -82,12 +82,18 @@ export function OverviewPage() {
   const unresolved = [...(active.data?.alarms ?? []), ...(acknowledged.data?.alarms ?? [])];
   const strips = buildStrips(sensors.data, latest.data.readings, unresolved, now);
   const counts = countStates(strips);
+  const sizes = countDevicesAndSensors(sensors.data);
   const sensorById = new Map(sensors.data.map((sensor) => [sensor.id, sensor]));
 
   return (
     <div className="flex flex-col gap-3 p-3 md:p-4">
-      {/* 画面の名前と「機器 N · センサー M」は、上の帯（App.tsx）に出す。ここは読み上げ用の見出しだけ */}
-      <h1 className="sr-only">全体監視</h1>
+      {/* 画面の名前と「機器 N · センサー M」は、広い幅では上の帯（App.tsx）に出す。上の帯に出ない狭い幅（sm 未満）では、ここに出す */}
+      <h1 className="flex flex-wrap items-baseline gap-x-3 text-sm font-bold text-gray-900 sm:sr-only">
+        全体監視
+        <span className="font-num text-xs font-normal text-gray-500">
+          機器 {sizes.devices} · センサー {sizes.sensors}
+        </span>
+      </h1>
       {!floorPlan && !floorPlanLoading && strips.length > 0 && (
         <p className="text-xs text-gray-500">
           ダッシュボードの編集で「配置図」のウィジェットを置くと、ここに配置図が出ます（部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見られます）。

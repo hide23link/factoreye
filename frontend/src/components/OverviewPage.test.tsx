@@ -92,6 +92,8 @@ describe("OverviewPage（全体監視）", () => {
 
     renderWithQueryClient(<OverviewPage />);
 
+    // 狭い幅（上の帯に出ない）でも、画面の名前と「機器 N · センサー M」が本文に出る
+    expect(await screen.findByRole("heading", { level: 1, name: /全体監視\s*機器 6 · センサー 6/ })).toBeInTheDocument();
     expect((await screen.findAllByText("50%")).length).toBe(4);
     expect(screen.queryByText("49.84%")).not.toBeInTheDocument();
     expect(screen.getAllByText("12s").length).toBe(4);
