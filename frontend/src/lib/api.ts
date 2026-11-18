@@ -259,8 +259,11 @@ export const fetchSensorReadingsAggregate = (sensorId: string, from: string, to?
 
 // グラフ用の間引き（from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数）
 /** 全センサーの最新の測定値（1 件ずつ。受信の無いセンサーは含まない）。全体監視の画面が使う */
-export const fetchLatestReadings = () =>
-  request<{ readings: Reading[]; total: number }>("/api/sensors/latest");
+/** 全センサーの最新の測定値。before（ISO 時刻）を付けると、その時刻以前でいちばん新しい値（1 時間前の値など） */
+export const fetchLatestReadings = (before?: string) =>
+  request<{ readings: Reading[]; total: number }>(
+    before === undefined ? "/api/sensors/latest" : `/api/sensors/latest?${new URLSearchParams({ before }).toString()}`,
+  );
 
 export interface DownsampledBucket {
   start: string;

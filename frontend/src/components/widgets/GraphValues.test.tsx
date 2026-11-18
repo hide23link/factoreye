@@ -47,4 +47,31 @@ describe("GraphValues（グラフの右の今の値）", () => {
     expect(arrows[1].querySelector("polygon")).toHaveAttribute("points", expect.stringMatching(/^0,-20 /));
     expect(arrows[1].querySelector("polygon")).toHaveAttribute("fill", "#ea580c");
   });
+
+  it("センサーが 1 つのときは、札の下に最高・最低・平均を出す", () => {
+    render(
+      <GraphValues
+        items={[{ name: "温度", color: "#2563eb", unit: "℃", value: 22.44, stats: { max: 23.4, min: 19, average: 21.2 } }]}
+        decimals={1}
+      />,
+    );
+    expect(screen.getByText("最高")).toBeInTheDocument();
+    expect(screen.getByText("23.4")).toBeInTheDocument();
+    expect(screen.getByText("19.0")).toBeInTheDocument();
+    expect(screen.getByText("21.2")).toBeInTheDocument();
+  });
+
+  it("複数のときは場所が足りないので、最高・最低・平均は札の title（ホバーの説明）に入れる", () => {
+    render(
+      <GraphValues
+        items={[
+          { name: "洋室", color: "#2563eb", unit: "℃", value: 20, stats: { max: 23, min: 19, average: 21 } },
+          { name: "寝室", color: "#ea580c", unit: "℃", value: 21 },
+        ]}
+        decimals={0}
+      />,
+    );
+    expect(screen.queryByText("最高")).not.toBeInTheDocument();
+    expect(screen.getByTitle("洋室 最高 23 最低 19 平均 21")).toBeInTheDocument();
+  });
 });

@@ -71,4 +71,20 @@ describe("DeviceTreeWidget（機器の系統）", () => {
     expect(screen.getByRole("group", { name: "機器の系統図" })).toBeInTheDocument();
     expect(screen.getByText("読み込み中...")).toBeInTheDocument();
   });
+
+  it("機器は 1 列（横）に並べる（段に折り返さない。入りきらないときは横にスクロール）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(
+      Array.from({ length: 12 }, (_, i) => sensor(`s${i}`, `センサー${i}`, { deviceId: `d${i}`, deviceName: `env-${i}` })),
+    );
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [], total: 0 });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+
+    renderWithQueryClient(<DeviceTreeWidget />);
+
+    await screen.findByText("env-0");
+    // 機器の列は 1 つだけで、その中に 12 台が並ぶ
+    const lists = screen.getAllByRole("list");
+    expect(lists).toHaveLength(1);
+    expect(lists[0].querySelectorAll("li")).toHaveLength(12);
+  });
 });

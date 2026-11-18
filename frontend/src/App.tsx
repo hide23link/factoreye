@@ -18,11 +18,12 @@ import { Suspense, useEffect } from "react";
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardTabs } from "./components/DashboardTabs";
-import { useAlarms, useDisplaySettings } from "./hooks/queries";
+import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
+import { countDevicesAndSensors } from "./lib/overview";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
 import { startThemeWatch, useThemeStore } from "./store/useThemeStore";
@@ -87,7 +88,8 @@ function HealthBadge() {
   return (
     <div className="flex items-center gap-1.5 font-num text-xs" style={{ color }} title={error ? "サーバーにつながっていません" : "サーバーにつながっています"}>
       <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-      {label}
+      {/* 狭い画面（スマホ）では、上の帯を 1 行に収めるため、文字を隠して点だけにする（色と、押したときの title で分かる） */}
+      <span className="hidden sm:inline">{label}</span>
     </div>
   );
 }
@@ -145,7 +147,7 @@ function Clock() {
   return (
     <span className="font-num text-base font-bold text-gray-900" aria-label={`現在 ${time} 日本時間`}>
       {time}
-      <span className="ml-1 text-[10px] font-normal text-gray-500">JST</span>
+      <span className="ml-1 hidden text-[10px] font-normal text-gray-500 sm:inline">JST</span>
     </span>
   );
 }
@@ -347,6 +349,18 @@ const VIEW_TITLES: Record<AppView, string> = {
   wizard: "セットアップガイド",
 };
 
+/** 上の帯に出す、全体監視の「機器 N · センサー M」（取れるまでは何も出さない） */
+function OverviewCounts() {
+  const { data: sensors } = useSensors();
+  if (!sensors) return null;
+  const { devices, sensors: sensorCount } = countDevicesAndSensors(sensors);
+  return (
+    <span className="hidden truncate font-num text-xs text-gray-500 sm:inline">
+      機器 {devices} · センサー {sensorCount}
+    </span>
+  );
+}
+
 /** メニュー・上の帯つきの、ふだんの画面の枠。 */
 function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashboardId: string | null }) {
   // 画面表示モード（キオスク）では、メニューと上の帯を隠す
@@ -362,6 +376,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
             <div className="flex min-w-0 items-center gap-3">
               <span className="shrink-0 text-base font-bold tracking-wide">FactorEye</span>
               <span className="hidden truncate text-sm text-gray-500 sm:inline">{VIEW_TITLES[view]}</span>
+              {view === "overview" && <OverviewCounts />}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-3">
               <UserBadge />

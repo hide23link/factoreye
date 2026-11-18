@@ -46,9 +46,9 @@ export const useSensors = () =>
 export const useDevices = () =>
   useQuery({ queryKey: ["devices"], queryFn: fetchDevices, refetchInterval: 30000 });
 
-/** ダッシュボードの一覧。 */
-export const useDashboards = () =>
-  useQuery({ queryKey: ["dashboards"], queryFn: fetchDashboards });
+/** ダッシュボードの一覧。enabled を false にすると取りに行かない（必要な段階だけ取りたいとき。既定は取る）。 */
+export const useDashboards = (enabled = true) =>
+  useQuery({ queryKey: ["dashboards"], queryFn: fetchDashboards, enabled });
 
 /** 1つのダッシュボードの詳細（5 秒ごとに取り直す）。id が無いときは取りに行かない。 */
 export const useDashboard = (id: string | null) =>
@@ -101,6 +101,7 @@ export const useSensorReadings = (
   sensorId: string | null,
   hours = 1,
   limit = DEFAULT_READINGS_LIMIT,
+  refetchMs = POLL_INTERVAL_MS, // 取り直す間隔（セットアップガイドは、届くのを待つので 3 秒）
 ) =>
   useQuery({
     // limit が違う取得（最新 1 件だけ／グラフ用）のキャッシュが混ざらないよう、キーに含める
@@ -110,7 +111,7 @@ export const useSensorReadings = (
       return fetchSensorReadings(sensorId as string, from, limit);
     },
     enabled: sensorId !== null,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: refetchMs,
   });
 
 /**
@@ -191,3 +192,25 @@ export const useDownsampledReadings = (
 /** 全センサーの最新の測定値（全体監視の画面）。数が多くても 1 回の取得で済む。15 秒ごとに取り直す */
 export const useLatestReadings = () =>
   useQuery({ queryKey: ["latest-readings"], queryFn: () => fetchLatestReadings(), refetchInterval: 15000 });
+
+/** 1 時間前の値として使える古さの上限。1 時間前の時点で、すでに 15 分より前から受信が止まっていた値は使わない */
+export const HOUR_AGO_MAX_STALE_MS = 15 * 60_000;
+
+/**
+ * 全センサーの 1 時間前の値（全体監視の「1 時間の変化」用）。センサーの ID → 値。
+ * 変化は 1 分ごとに取り直せば十分なので、60 秒ごと。
+ * 1 時間前より古い測定値が無いセンサーと、1 時間前の時点で受信が止まっていた（測定時刻が 1 時間前の
+ * 15 分より前の）センサーは入らない（止まった古い値との差を、1 時間の変化として出さないため）。
+ */
+export const useReadingsHourAgo = () =>
+  useQuery({
+    queryKey: ["latest-readings", "hour-ago"],
+    queryFn: async () => {
+      const hourAgo = Date.now() - 3_600_000;
+      const { readings } = await fetchLatestReadings(new Date(hourAgo).toISOString());
+      const usable = readings.filter((reading) => new Date(reading.recordedAt).getTime() >= hourAgo - HOUR_AGO_MAX_STALE_MS);
+      return new Map(usable.map((reading) => [reading.sensorId, reading.value]));
+    },
+    refetchInterval: 60_000,
+    staleTime: 55_000,
+  });

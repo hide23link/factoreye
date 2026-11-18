@@ -19,7 +19,34 @@ export function widgetsInReadingOrder(widgets: readonly Widget[]): Widget[] {
 /** スマホの縦 1 列での、ウィジェットの高さ。計器は低く、計器グラフは行の数に合わせる（1 行 96px + 見出しなど 56px） */
 export function narrowHeightPx(widget: Widget): number {
   if (widget.type === "TapeGauge") return 168;
+  if (widget.type === "DeviceTree") return 200;
   if (widget.type === "TrendStack") return 56 + 96 * Math.max(1, graphSensorIds(widget).length);
   return NARROW_DEFAULT_HEIGHT;
 }
 
+
+/** スマホの縦 1 列の、1 つのまとまり。pair が true のときは、2 列に並べる（計器が続くとき） */
+export interface NarrowGroup {
+  pair: boolean;
+  widgets: Widget[];
+}
+
+/**
+ * 並んだウィジェットを、スマホの表示のまとまりに分ける。計器（TapeGauge）が 2 つ続くところは、2 列に並べる。
+ * 1 つだけ（前後が計器でない）の計器は、1 列のまま。奇数個のときは、最後の 1 つが 1 列になる。
+ * 例: [計器, 計器, 計器グラフ, 計器] → [{ pair: true, [計器, 計器] }, { pair: false, [計器グラフ] }, { pair: false, [計器] }]
+ */
+export function groupNarrowWidgets(widgets: readonly Widget[]): NarrowGroup[] {
+  const groups: NarrowGroup[] = [];
+  for (let i = 0; i < widgets.length; i++) {
+    const widget = widgets[i];
+    const next = widgets[i + 1];
+    if (widget.type === "TapeGauge" && next?.type === "TapeGauge") {
+      groups.push({ pair: true, widgets: [widget, next] });
+      i++;
+    } else {
+      groups.push({ pair: false, widgets: [widget] });
+    }
+  }
+  return groups;
+}

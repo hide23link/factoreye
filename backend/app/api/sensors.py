@@ -229,8 +229,13 @@ async def _to_read(
 async def list_latest_readings(
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+    before: Annotated[AwareDatetime | None, Query()] = None,
 ) -> Response:
     """全センサーの最新の測定値を 1 件ずつ返す（まだ受信の無いセンサーは含めない）。
+
+    before を付けると、その時刻以前でいちばん新しい 1 件にする（「1 時間前の値」を、
+    全センサーまとめて 1 回で取るため。全体監視の「1 時間の変化」に使う）。
+    例: GET /api/sensors/latest?before=2026-11-18T00:42:00Z
 
     全体監視の画面が、センサーの数だけ取りに行かずに済むようにする（数百あっても 1 回）。
     【呼ばれ方】GET /api/sensors/latest → 返事の例:
@@ -240,9 +245,10 @@ async def list_latest_readings(
     測定値が何百万件あっても、センサーの数に比例する時間で済む。
     """
     # 「このセンサーの、いちばん新しい 1 件」。外側のセンサーの行ごとに実行される（LATERAL）
+    at_or_before = [] if before is None else [Reading.recorded_at <= before]
     newest = (
         select(Reading.value, Reading.recorded_at)
-        .where(Reading.sensor_id == Sensor.id)
+        .where(Reading.sensor_id == Sensor.id, *at_or_before)
         .order_by(Reading.recorded_at.desc())  # type: ignore[attr-defined]
         .limit(1)
         .lateral("newest")

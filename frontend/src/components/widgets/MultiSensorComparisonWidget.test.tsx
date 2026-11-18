@@ -114,4 +114,25 @@ describe("MultiSensorComparisonWidget", () => {
       );
     }
   });
+
+  it("複数のときの最高・最低・平均（札の title）は、センサーごとの区間の max・min と、avg を件数で重みづけした平均", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "洋室"), makeSensor("s2", "寝室")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (sensorId) => ({
+      bucketSeconds: 60,
+      buckets:
+        sensorId === "s1"
+          ? [
+              { start: "2024-01-01T00:10:00.000Z", min: 10, max: 30, avg: 20, count: 3 },
+              { start: "2024-01-01T00:20:00.000Z", min: 0, max: 40, avg: 30, count: 1 },
+            ]
+          : [{ start: "2024-01-01T00:10:00.000Z", min: 5, max: 6, avg: 5, count: 1 }],
+    }));
+
+    renderWithQueryClient(
+      <MultiSensorComparisonWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], timeRangeHours: 1, decimals: 1 } as Widget["config"] })} />,
+    );
+
+    // 洋室: 最高 40.0（区間 max の最大）、最低 0.0（区間 min の最小）、平均 22.5（(20×3 + 30×1) ÷ 4）
+    await waitFor(() => expect(screen.getByTitle("洋室 最高 40.0 最低 0.0 平均 22.5")).toBeInTheDocument());
+  });
 });

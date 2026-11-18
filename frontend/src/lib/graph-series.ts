@@ -104,3 +104,28 @@ export function nearestValue(rows: ReadonlyArray<GraphRow>, sensorId: string, at
   }
   return best;
 }
+
+/**
+ * 区間のデータから、表示期間の最高・最低・平均を出す。
+ * 最高＝区間の最大（max）の最大、最低＝区間の最小（min）の最小、平均＝区間の平均（avg）を、測定件数（count）で重みづけして平均する
+ * （区間の平均どうしを単純に平均すると、本当の最高・最低より内側の値になり、件数の違う区間の影響も正しくならないため）。
+ * 区間が無ければ undefined。件数が 0 の区間は、重みを 1 とする（計器グラフの trendStats と同じ）。
+ * 例: [{ min: 1, max: 5, avg: 2, count: 3 }, { min: 0, max: 9, avg: 8, count: 1 }] → { max: 9, min: 0, average: 3.5 }
+ */
+export function summarizeBuckets(
+  buckets: ReadonlyArray<{ min: number; max: number; avg: number; count: number }>,
+): { max: number; min: number; average: number } | undefined {
+  if (buckets.length === 0) return undefined;
+  let max = Number.NEGATIVE_INFINITY;
+  let min = Number.POSITIVE_INFINITY;
+  let sum = 0;
+  let weight = 0;
+  for (const bucket of buckets) {
+    max = Math.max(max, bucket.max);
+    min = Math.min(min, bucket.min);
+    const w = bucket.count > 0 ? bucket.count : 1;
+    sum += bucket.avg * w;
+    weight += w;
+  }
+  return { max, min, average: sum / weight };
+}

@@ -68,6 +68,54 @@ async def test_latest_returns_newest_reading_per_sensor(
     assert "recordedAt" in by_sensor[str(first)]
 
 
+async def test_latest_before_returns_newest_reading_at_or_before_the_time(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    """before を付けると、その時刻以前の最新（1 時間前の値）。それ以前が無いセンサーは含めない。"""
+    sensor_id = await _make_sensor(session, None, "温度")
+    only_new = await _make_sensor(session, None, "さっき始めた")
+    now = datetime.now(UTC)
+    for minutes_ago, value in [(70, 20.0), (50, 21.0)]:
+        recorded_at = now - timedelta(minutes=minutes_ago)
+        await buffer.add(PendingReading(sensor_id=sensor_id, value=value, recorded_at=recorded_at))
+    await buffer.add(PendingReading(sensor_id=sensor_id, value=22.4, recorded_at=now))
+    await buffer.add(PendingReading(sensor_id=only_new, value=5.0, recorded_at=now))
+    await flush_once()
+
+    hour_ago = (now - timedelta(hours=1)).isoformat()
+    resp = await client.get("/api/sensors/latest", params={"before": hour_ago})
+
+    assert resp.status_code == 200
+    by_sensor = {item["sensorId"]: item for item in resp.json()["readings"]}
+    assert by_sensor[str(sensor_id)]["value"] == 20.0
+    assert str(only_new) not in by_sensor
+
+
+async def test_latest_before_includes_a_reading_at_exactly_the_same_time(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    """before とちょうど同じ時刻の測定値は含める（<=）。1 マイクロ秒後のものは含めない。"""
+    sensor_id = await _make_sensor(session, None, "温度")
+    boundary = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    await buffer.add(PendingReading(sensor_id=sensor_id, value=20.0, recorded_at=boundary))
+    just_after = boundary + timedelta(microseconds=1)
+    await buffer.add(PendingReading(sensor_id=sensor_id, value=99.0, recorded_at=just_after))
+    await flush_once()
+
+    resp = await client.get("/api/sensors/latest", params={"before": boundary.isoformat()})
+
+    assert resp.status_code == 200
+    readings = resp.json()["readings"]
+    assert [item["value"] for item in readings] == [20.0]
+
+
+async def test_latest_before_without_timezone_is_rejected(client: httpx.AsyncClient) -> None:
+    """before は時刻帯つきだけ受ける（時刻帯が無いと、どの時刻か決まらないので 422）。"""
+    resp = await client.get("/api/sensors/latest", params={"before": "2026-11-18T00:42:00"})
+
+    assert resp.status_code == 422
+
+
 async def test_latest_is_limited_to_own_workspace(
     client: httpx.AsyncClient, session: AsyncSession
 ) -> None:

@@ -215,4 +215,22 @@ describe("SensorGraphWidget", () => {
     renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], ...extra } })} />);
     expect(screen.queryByText("複数センサー比較")).toBeNull();
   });
+
+  it("札の下の最高・最低・平均は、区間の max の最大・min の最小・avg を件数で重みづけした平均（区間の平均どうしの平均ではない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [
+        { start: "2024-01-01T00:10:00.000Z", min: 10, max: 30, avg: 20, count: 3 },
+        { start: "2024-01-01T00:20:00.000Z", min: 0, max: 40, avg: 30, count: 1 },
+      ],
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
+
+    // 最高 40（区間 max の最大）、最低 0（区間 min の最小）、平均 22.5（(20×3 + 30×1) ÷ 4。単純な平均なら 25）
+    expect(await screen.findByText("40")).toBeInTheDocument();
+    expect(screen.getByText("22.5")).toBeInTheDocument();
+    expect(screen.queryByText("25")).not.toBeInTheDocument();
+  });
 });
