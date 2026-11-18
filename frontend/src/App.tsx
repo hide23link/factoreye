@@ -18,11 +18,12 @@ import { Suspense, useEffect } from "react";
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardListPage } from "./components/DashboardListPage";
 import { DashboardTabs } from "./components/DashboardTabs";
-import { useAlarms } from "./hooks/queries";
+import { useAlarms, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
+import { countDevicesAndSensors } from "./lib/overview";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
 import { startThemeWatch } from "./store/useThemeStore";
@@ -312,6 +313,18 @@ const VIEW_TITLES: Record<AppView, string> = {
   wizard: "セットアップガイド",
 };
 
+/** 上の帯に出す、全体監視の「機器 N · センサー M」（取れるまでは何も出さない） */
+function OverviewCounts() {
+  const { data: sensors } = useSensors();
+  if (!sensors) return null;
+  const { devices, sensors: sensorCount } = countDevicesAndSensors(sensors);
+  return (
+    <span className="hidden truncate font-num text-xs text-gray-500 sm:inline">
+      機器 {devices} · センサー {sensorCount}
+    </span>
+  );
+}
+
 /** メニュー・上の帯つきの、ふだんの画面の枠。 */
 function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashboardId: string | null }) {
   // 画面表示モード（キオスク）では、メニューと上の帯を隠す
@@ -327,6 +340,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
             <div className="flex min-w-0 items-center gap-3">
               <span className="shrink-0 text-base font-bold tracking-wide">FactorEye</span>
               <span className="hidden truncate text-sm text-gray-500 sm:inline">{VIEW_TITLES[view]}</span>
+              {view === "overview" && <OverviewCounts />}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-3">
               <UserBadge />
