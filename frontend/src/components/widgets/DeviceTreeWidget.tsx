@@ -1,5 +1,6 @@
 /**
  * 機器の系統図のウィジェット。サーバーを上に置き、そこへつながる機器（機器に属さないセンサーは 1 つずつ）を下に並べる。
+ * 機器は 1 列（横）に並べる。入りきらないときは、横にスクロールする（段に折り返さない）。
  * 各機器に、最後の受信からの時間と状態の色（緑の線＝受信、橙＝注意、点線＝受信なし・未受信）を出す。
  * 状態の決め方は全体監視の札と同じ（lib/overview.ts の buildStrips）。
  *
@@ -13,6 +14,9 @@ import { useAlarms, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useNow } from "../../hooks/useNow";
 import { buildStrips, formatAge, type Strip, type StripState } from "../../lib/overview";
 import { ErrorNotice } from "../ErrorNotice";
+
+/** 1 台の札に割り当てる幅の下限（px）。これより狭くなるときは、全体を広げて横にスクロールする */
+const TRUNK_CELL_PX = 118;
 
 const LINE_COLOR: Record<StripState, string> = {
   critical: "var(--fe-red)",
@@ -29,7 +33,7 @@ export function DeviceTreeWidget() {
   const rootRef = useRef<HTMLDivElement>(null);
   const { width } = useElementSize(rootRef);
   return (
-    <div ref={rootRef} className="flex h-full flex-col overflow-y-auto px-1 text-xs" role="group" aria-label="機器の系統図">
+    <div ref={rootRef} className="flex h-full flex-col overflow-auto px-1 text-xs" role="group" aria-label="機器の系統図">
       <DeviceTreeBody width={width} />
     </div>
   );
@@ -55,14 +59,13 @@ function DeviceTreeBody({ width }: { width: number }) {
     now,
   ).sort((a, b) => a.title.localeCompare(b.title, "ja"));
   const newest = Math.max(0, ...strips.map((strip) => strip.lastTime ?? 0));
-  // 1 段に並べる数は、枠の幅から決める（1 台に 8.5rem ほど）。多いときは段に分け、段どうしを左の線でつなぐ
-  const columns = Math.max(1, Math.min(8, Math.floor((width || 960) / 136)));
-  const rows = Array.from({ length: Math.ceil(strips.length / columns) }, (_, i) => strips.slice(i * columns, (i + 1) * columns));
+  // 機器は 1 列に並べる。1 台の幅は 7rem 以上で、枠に入りきらないときは、全体を広げて横にスクロールする
+  const trunkWidth = Math.max(width, strips.length * TRUNK_CELL_PX);
 
   if (strips.length === 0) return <p className="text-sm text-gray-500">センサーがまだありません</p>;
 
   return (
-    <>
+    <div className="flex flex-col" style={{ minWidth: trunkWidth }}>
       <div className="mx-auto flex flex-col items-center rounded-sm border px-4 py-1.5" style={{ borderColor: "var(--fe-mut)", background: "var(--fe-panel)" }}>
         <span className="font-bold">サーバー（FactorEye）</span>
         <span className="font-num text-[11px] text-gray-500">
@@ -70,41 +73,31 @@ function DeviceTreeBody({ width }: { width: number }) {
         </span>
       </div>
       <div className="mx-auto h-3 w-0.5" style={{ background: "var(--fe-ok)" }} aria-hidden="true" />
-      {rows.map((row, rowIndex) => (
-        <div key={rowIndex} className="relative px-[3%]" role="presentation">
-          {/* 左の縦の線。段どうしをつなぐ（最初の段は上の横線から下へ、最後の段は横線の高さまで） */}
-          {rows.length > 1 && (
-            <span
-              className="absolute left-[1.5%] w-0.5"
-              style={{ background: "var(--fe-ok)", top: rowIndex === 0 ? 0 : -8, bottom: rowIndex === rows.length - 1 ? "calc(100% - 2px)" : -8 }}
-              aria-hidden="true"
-            />
-          )}
-          <div className="h-0.5" style={{ background: "var(--fe-ok)", marginLeft: "-1.5%", marginRight: "-1.5%" }} aria-hidden="true" />
-          <ul className="grid gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-            {row.map((strip) => (
-              <li key={strip.key} className="flex flex-col items-center">
-                <Branch strip={strip} />
-                <div
-                  className="w-full min-w-0 rounded-sm border px-2 py-1.5"
-                  style={{ borderColor: strip.state === "normal" ? "var(--fe-line)" : LINE_COLOR[strip.state], background: "var(--fe-panel)" }}
-                >
-                  <p className="truncate font-bold" style={{ color: strip.state === "normal" || strip.state === "never" ? undefined : LINE_COLOR[strip.state] }} title={strip.title}>
-                    {strip.title}
+      <div className="relative px-[1%]" role="presentation">
+        <div className="h-0.5" style={{ background: "var(--fe-ok)", marginLeft: "-1%", marginRight: "-1%" }} aria-hidden="true" />
+        <ul className="grid gap-2" style={{ gridTemplateColumns: `repeat(${strips.length}, minmax(0, 1fr))` }}>
+          {strips.map((strip) => (
+            <li key={strip.key} className="flex flex-col items-center">
+              <Branch strip={strip} />
+              <div
+                className="w-full min-w-0 rounded-sm border px-2 py-1.5"
+                style={{ borderColor: strip.state === "normal" ? "var(--fe-line)" : LINE_COLOR[strip.state], background: "var(--fe-panel)" }}
+              >
+                <p className="truncate font-bold" style={{ color: strip.state === "normal" || strip.state === "never" ? undefined : LINE_COLOR[strip.state] }} title={strip.title}>
+                  {strip.title}
+                </p>
+                <p className="truncate font-num text-[11px] text-gray-500">{strip.lastTime === null ? "未受信" : formatAge(now - strip.lastTime)}</p>
+                {strip.reason && strip.state !== "never" && (
+                  <p className="truncate text-[11px]" style={{ color: LINE_COLOR[strip.state] }}>
+                    {strip.reason}
                   </p>
-                  <p className="truncate font-num text-[11px] text-gray-500">{strip.lastTime === null ? "未受信" : formatAge(now - strip.lastTime)}</p>
-                  {strip.reason && strip.state !== "never" && (
-                    <p className="truncate text-[11px]" style={{ color: LINE_COLOR[strip.state] }}>
-                      {strip.reason}
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 

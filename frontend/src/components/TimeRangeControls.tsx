@@ -6,8 +6,12 @@
  * - ＋・－: 範囲の幅を半分・2 倍にする
  * - 期間: プリセット、または開始と終了を入力した任意の期間
  *
- * 【誰が使うか】DashboardView.tsx が、画面の上部に置く。引数（props）はない
- * （表示範囲は、useTimeRangeStore に直接読み書きする）。
+ * 狭い画面（スマホ）では、1 行に収まるよう、よく使う期間のボタンだけを出す。前へ・今・一時停止・後ろへ・拡大縮小、期間の選択、
+ * 期間の指定は、「操作」ボタンで開く。
+ *
+ * 【誰が使うか】DashboardView.tsx が、画面の上部に置く。
+ * 【引数（props）】className = 外側に足す class（既定は下に余白 mb-3。上の帯に並べるときは "" を渡す）。
+ * 表示範囲は、useTimeRangeStore に直接読み書きする。
  */
 import { useState } from "react";
 
@@ -46,7 +50,7 @@ function presetKeyOf(range: TimeRange): string | null {
   return PRESETS.find((p) => p.durationMs === range.durationMs)?.key ?? null;
 }
 
-export function TimeRangeControls() {
+export function TimeRangeControls({ className = "mb-3" }: { className?: string } = {}) {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
   // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
@@ -61,6 +65,8 @@ export function TimeRangeControls() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // 狭い画面で、前へ・今・拡大縮小などを出しているか（広い画面では、いつも出す）
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const applyCustom = () => {
     // 欄に見えている値（未入力のときは、今の範囲）を使う。state が空のままだと、見えている値が無視されて NaN になる
@@ -80,7 +86,8 @@ export function TimeRangeControls() {
   };
 
   return (
-    <div role="group" aria-label="表示時間の操作" className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+    <div role="group" aria-label="表示時間の操作" className={`flex flex-wrap items-center gap-2 text-sm ${className}`}>
+      <span className={`${moreOpen ? "contents" : "hidden"} sm:contents`}>
       <button
         type="button"
         aria-label="前へ"
@@ -134,6 +141,7 @@ export function TimeRangeControls() {
         ＋
       </button>
       </span>
+      </span>
 
       {/* よく使う期間は、ボタンで 1 回で選べる（操作室の期間切り替えと同じ）。ほかの期間は、右の選択で */}
       <span role="group" aria-label="よく使う表示期間" className="inline-flex overflow-hidden rounded border border-gray-300">
@@ -158,7 +166,17 @@ export function TimeRangeControls() {
         })}
       </span>
 
-      <span className="inline-block">
+      {/* 狭い画面だけ: ほかの操作（前へ・今・拡大縮小・期間の選択・期間の指定）を出し入れする */}
+      <button
+        type="button"
+        aria-expanded={moreOpen}
+        onClick={() => setMoreOpen(!moreOpen)}
+        className="min-h-10 rounded border border-gray-300 px-2.5 text-xs hover:bg-gray-100 sm:hidden"
+      >
+        操作
+      </button>
+
+      <span className={moreOpen ? "inline-block" : "hidden sm:inline-block"}>
       <select
         aria-label="表示期間"
         value={visiblePresetKey ?? "custom"}
@@ -177,11 +195,11 @@ export function TimeRangeControls() {
       </select>
       </span>
 
-      <span className="text-xs text-gray-500" data-testid="time-range-label">
+      <span className={`text-xs text-gray-500 ${moreOpen ? "" : "hidden sm:inline"}`} data-testid="time-range-label">
         {range.mode === "relative" ? "自動で更新" : "固定"}：{describeRange(range)}
       </span>
 
-      <details className="text-xs">
+      <details className={`text-xs ${moreOpen ? "" : "hidden sm:block"}`}>
         <summary className="cursor-pointer text-gray-600">期間を指定</summary>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1">

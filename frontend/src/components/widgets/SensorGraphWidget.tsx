@@ -30,7 +30,7 @@ import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hoo
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
-import { bucketValue } from "../../lib/graph-series";
+import { bucketValue, summarizeValues } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
 import {
   effectiveRange,
@@ -148,7 +148,14 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const latestValue = latest?.readings.find((reading) => reading.sensorId === widget.sensorId)?.value;
   const lastPlotted = [...chartData].reverse().find((point) => typeof point.value === "number")?.value;
   const valueItems: GraphValueItem[] = [
-    { name: sensor?.name ?? "値", color, unit: sensor?.unit ?? "", value: latestValue, position: latestValue ?? lastPlotted ?? undefined },
+    {
+      name: sensor?.name ?? "値",
+      color,
+      unit: sensor?.unit ?? "",
+      value: latestValue,
+      position: latestValue ?? lastPlotted ?? undefined,
+      stats: summarizeValues(chartData.map((point) => point.value)),
+    },
   ];
   const valueProbe = linkView ? null : <GraphValueProbe items={valueItems} onMeasure={setValueMeasure} />;
   const graphType = widget.config.graphType ?? "line";

@@ -2,6 +2,10 @@
  * 発生中のアラームを一覧にして、確認（既読）できるウィジェット。
  * 発生中（active）と、確認済み（acknowledged）を並べて出す。解決すると自然に一覧から消える。
  *
+ * 上に見出し「警報・注意」と「すべて確認」ボタン（未確認のものをまとめて確認）。
+ * 同じ画面に計器グラフ（TrendStack）があるときは、一覧の下に「カーソルの時刻の値」（計器グラフのカーソルが指す時刻の各センサーの値）と
+ * 「色の意味」の凡例を出す。
+ *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "AlarmAlert" のときに出す。引数（props）はない。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -9,6 +13,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 import { describeActionError } from "../../lib/errors";
+import { formatTickTime } from "../../lib/trend-stack";
+import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import { ErrorNotice } from "../ErrorNotice";
 
 /** 一覧に出す件数の上限（状態ごと）。新しい順に取る。全件は取らない（応答が大きくなり、サーバーの負荷になるため）。 */
@@ -44,7 +50,19 @@ export function AlarmAlertWidget() {
     },
   });
 
-  const ackError = ackMutation.isError ? describeActionError(ackMutation.error, "アラームの確認") : null;
+  // すべて確認: 未確認（発生中）のアラームを、まとめて確認済みにする
+  const ackAllMutation = useMutation({
+    mutationFn: (alarmIds: string[]) => Promise.all(alarmIds.map((alarmId) => acknowledgeAlarm(alarmId, "admin"))),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["alarms"] });
+    },
+  });
+
+  const ackError = ackMutation.isError
+    ? describeActionError(ackMutation.error, "アラームの確認")
+    : ackAllMutation.isError
+      ? describeActionError(ackAllMutation.error, "アラームの確認")
+      : null;
 
   if ((!activeData && activeError) || (!ackedData && ackedError)) {
     return (
@@ -65,9 +83,21 @@ export function AlarmAlertWidget() {
   const alarms = [...activeData.alarms, ...ackedData.alarms];
   // 解消済み（直近 24 時間）。取れなくても、発生中の一覧は出す（失敗は黙って省く）
   const resolved = (resolvedData?.alarms ?? []).filter((alarm) => alarm.status === "resolved" && isWithinDay(alarm.resolvedAt ?? alarm.triggeredAt));
+  const unacknowledgedIds = activeData.alarms.map((alarm) => alarm.id);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto text-[13px]">
+      <div className="flex items-center gap-2 border-b px-2.5 py-1.5" style={{ borderColor: "var(--fe-line)" }}>
+        <span className="flex-1 text-[11px] font-bold tracking-wider text-gray-500">警報・注意</span>
+        <button
+          type="button"
+          onClick={() => ackAllMutation.mutate(unacknowledgedIds)}
+          disabled={unacknowledgedIds.length === 0 || ackAllMutation.isPending}
+          className="rounded border border-gray-300 px-2 py-0.5 text-xs font-bold disabled:opacity-40"
+        >
+          すべて確認
+        </button>
+      </div>
       {ackError && (
         <p role="alert" className="px-2 py-1 text-xs text-red-600">
           {ackError}
@@ -139,6 +169,58 @@ export function AlarmAlertWidget() {
           })}
         </>
       )}
+      <CursorValues />
+    </div>
+  );
+}
+
+/** 色の意味の凡例（計器盤の色は、この 6 つの意味だけ） */
+const COLOR_MEANINGS: ReadonlyArray<{ color: string; text: string }> = [
+  { color: "var(--fe-ink)", text: "白・黒　今の値" },
+  { color: "var(--fe-cy)", text: "水色　しきい値" },
+  { color: "var(--fe-mag)", text: "桃　目標・予測" },
+  { color: "var(--fe-amb)", text: "橙　注意" },
+  { color: "var(--fe-red)", text: "赤　警報" },
+  { color: "var(--fe-mut)", text: "灰　止まっている" },
+];
+
+/**
+ * 同じ画面の計器グラフのカーソルが指す時刻の、各センサーの値と、色の意味の凡例。
+ * 計器グラフが無い画面（カーソルの時刻が無い）では、何も出さない。
+ */
+function CursorValues() {
+  const time = useTrendCursorStore((s) => s.time);
+  const spanMs = useTrendCursorStore((s) => s.spanMs);
+  const rows = useTrendCursorStore((s) => s.rows);
+  if (time === null) return null;
+
+  return (
+    <div className="mt-auto">
+      <p className="border-y px-2.5 py-1.5 text-[11px] font-bold tracking-wider text-gray-500" style={{ borderColor: "var(--fe-line)" }}>
+        カーソル <span className="font-num">{formatTickTime(time, spanMs)}</span> の値
+      </p>
+      <ul className="px-2.5 py-1">
+        {rows.map((row) => (
+          <li key={row.id} className="flex items-baseline gap-2 py-0.5">
+            <span className="min-w-0 flex-1 truncate" style={{ color: row.color }} title={row.name}>
+              {row.name}
+            </span>
+            <span className="font-num font-bold">{row.value}</span>
+            <span className="w-8 font-num text-[11px] text-gray-500">{row.unit}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t px-2.5 py-1.5 text-[11px] font-bold tracking-wider text-gray-500" style={{ borderColor: "var(--fe-line)" }}>
+        色の意味
+      </p>
+      <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5 px-2.5 pb-2 text-[11px]">
+        {COLOR_MEANINGS.map((meaning) => (
+          <li key={meaning.text} className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: meaning.color }} aria-hidden="true" />
+            {meaning.text}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

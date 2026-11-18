@@ -125,4 +125,13 @@ describe("TimeRangeControls", () => {
     expect(screen.getByRole("button", { name: "直近 1 時間" })).toHaveAttribute("aria-pressed", "false");
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 });
   });
+
+  it("狭い画面用の「操作」ボタンで、ほかの操作（前へ・今・拡大縮小・期間の選択）を出し入れする", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+    const toggle = screen.getByRole("button", { name: "操作" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
 });

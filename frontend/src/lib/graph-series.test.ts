@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RAW_SUFFIX, bucketValue, buildRows, nearestValue, normalizeRows, rawValueOf, type GraphRow } from "./graph-series";
+import { RAW_SUFFIX, bucketValue, buildRows, nearestValue, normalizeRows, rawValueOf, summarizeValues, type GraphRow } from "./graph-series";
 
 const bucket = (start: string, min: number, avg: number, max: number) => ({ start, min, avg, max });
 
@@ -131,5 +131,15 @@ describe("nearestValue", () => {
 
   it("値が 1 つも無ければ null", () => {
     expect(nearestValue(rows, "s3", 1000)).toBeNull();
+  });
+});
+
+describe("summarizeValues（最高・最低・平均）", () => {
+  it("値の列から、最高・最低・平均を出す（無い値は数えない）", () => {
+    expect(summarizeValues([3, 1, undefined, null, 2])).toEqual({ max: 3, min: 1, average: 2 });
+  });
+  it("値が 1 つも無ければ undefined", () => {
+    expect(summarizeValues([])).toBeUndefined();
+    expect(summarizeValues([undefined, null])).toBeUndefined();
   });
 });

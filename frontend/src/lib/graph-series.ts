@@ -104,3 +104,14 @@ export function nearestValue(rows: ReadonlyArray<GraphRow>, sensorId: string, at
   }
   return best;
 }
+
+/** 値の列の、最高・最低・平均。値が 1 つも無ければ undefined（例: [3, 1, 2] → { max: 3, min: 1, average: 2 }） */
+export function summarizeValues(values: ReadonlyArray<number | null | undefined>): { max: number; min: number; average: number } | undefined {
+  const numbers = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numbers.length === 0) return undefined;
+  return {
+    max: Math.max(...numbers),
+    min: Math.min(...numbers),
+    average: numbers.reduce((sum, value) => sum + value, 0) / numbers.length,
+  };
+}

@@ -11,6 +11,10 @@ import {
   pointNear,
   staleAfterMs,
   timeTicks,
+  describeInterval,
+  describeSpanShort,
+  formatRangeJst,
+  maxTimeTicks,
   toPoints,
   trendLimits,
   trendStats,
@@ -195,5 +199,39 @@ describe("staleAfterMs（受信なしの判定）", () => {
   it("区間 3 つ分。ただし 10 分より短くしない", () => {
     expect(staleAfterMs(60)).toBe(10 * 60_000);
     expect(staleAfterMs(600)).toBe(30 * 60_000);
+  });
+});
+
+describe("時間の軸の目盛りの数（スマホの狭い幅）", () => {
+  it("幅から目盛りの数の上限を決める（64px に 1 つ。2〜8）", () => {
+    expect(maxTimeTicks(320)).toBe(5);
+    expect(maxTimeTicks(100)).toBe(2);
+    expect(maxTimeTicks(2000)).toBe(8);
+    expect(maxTimeTicks(0)).toBe(8);
+  });
+
+  it("上限を小さくすると、目盛りの間隔が広がり、数が上限以下になる", () => {
+    const from = new Date(2026, 10, 17, 9, 42).getTime();
+    const to = from + 24 * 3_600_000;
+    expect(timeTicks(from, to, 4).length).toBeLessThanOrEqual(4);
+    expect(timeTicks(from, to, 4).length).toBeLessThan(timeTicks(from, to, 8).length + 1);
+  });
+});
+
+describe("見出しの文字", () => {
+  it("区間の幅（5 分・30 秒・2 時間）", () => {
+    expect(describeInterval(300_000)).toBe("5 分");
+    expect(describeInterval(30_000)).toBe("30 秒");
+    expect(describeInterval(7_200_000)).toBe("2 時間");
+  });
+  it("表示範囲の短い名前（24H・15M・7D）", () => {
+    expect(describeSpanShort(24 * 3_600_000)).toBe("24H");
+    expect(describeSpanShort(15 * 60_000)).toBe("15M");
+    expect(describeSpanShort(7 * 24 * 3_600_000)).toBe("7D");
+  });
+  it("範囲の始めと終わりは日本時間で、JST を付ける", () => {
+    // 2026-11-17 00:42 UTC = 09:42 JST
+    const from = Date.UTC(2026, 10, 17, 0, 42);
+    expect(formatRangeJst(from, from + 24 * 3_600_000)).toBe("11/17 09:42 — 11/18 09:42 JST");
   });
 });

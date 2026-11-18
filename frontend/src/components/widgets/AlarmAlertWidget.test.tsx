@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
 import type { Alarm, Sensor } from "../../types";
+import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import { AlarmAlertWidget } from "./AlarmAlertWidget";
 
 vi.mock("../../lib/api", () => ({
@@ -56,6 +57,7 @@ const warningAlarm: Alarm = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  useTrendCursorStore.getState().clear();
 });
 
 describe("AlarmAlertWidget", () => {
@@ -144,5 +146,57 @@ describe("AlarmAlertWidget", () => {
     await user.click(await screen.findByRole("button", { name: "確認" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("アラームの確認に失敗しました");
+  });
+
+  it("「すべて確認」で、未確認のアラームをまとめて確認する（無いときは押せない）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchAlarms).mockImplementation(async (status) =>
+      status === "active" ? { alarms: [criticalAlarm, warningAlarm], total: 2 } : { alarms: [], total: 0 },
+    );
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.acknowledgeAlarm).mockResolvedValue({ ...criticalAlarm, status: "acknowledged" });
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+
+    await user.click(await screen.findByRole("button", { name: "すべて確認" }));
+
+    await waitFor(() => expect(api.acknowledgeAlarm).toHaveBeenCalledTimes(2));
+    expect(api.acknowledgeAlarm).toHaveBeenCalledWith("a1", "admin");
+    expect(api.acknowledgeAlarm).toHaveBeenCalledWith("a2", "admin");
+  });
+
+  it("アラームが無いときは、「すべて確認」を押せない", async () => {
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+
+    expect(await screen.findByRole("button", { name: "すべて確認" })).toBeDisabled();
+  });
+
+  it("計器グラフが無い画面では、「カーソルの時刻の値」と色の意味を出さない", async () => {
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+
+    await screen.findByText("現在アラームはありません");
+    expect(screen.queryByText("色の意味")).not.toBeInTheDocument();
+  });
+
+  it("同じ画面の計器グラフのカーソルが指す時刻の各センサーの値と、色の意味を出す", async () => {
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    const cursor = useTrendCursorStore.getState();
+    cursor.setCursor(new Date(2026, 10, 18, 7, 2).getTime(), 3_600_000);
+    cursor.setRow({ id: "s1", order: 0, name: "洋室 CO2", unit: "ppm", value: "561", color: "var(--fe-red)" });
+
+    renderWithQueryClient(<AlarmAlertWidget />);
+
+    expect(await screen.findByText("洋室 CO2")).toBeInTheDocument();
+    expect(screen.getByText("561")).toBeInTheDocument();
+    expect(screen.getByText("07:02")).toBeInTheDocument();
+    expect(screen.getByText("色の意味")).toBeInTheDocument();
+    expect(screen.getByText(/水色\s*しきい値/)).toBeInTheDocument();
   });
 });
