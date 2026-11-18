@@ -10,7 +10,10 @@
  *
  * 無効にしたセンサー（enabled が false）は、札に入れない。
  *
- * 【誰が使うか】components/OverviewPage.tsx。
+ * 値の桁・経過時間・1 時間の変化・種類の切り替え（温度・CO2 など）の文字づくりも、ここにまとめる
+ * （全体監視の画面・配置図・機器の札で、同じ見え方にするため）。
+ *
+ * 【誰が使うか】components/OverviewPage.tsx、components/widgets/FloorPlanWidget.tsx、DeviceTreeWidget.tsx、App.tsx（上の帯）。
  */
 import { classifySeverity } from "./severity";
 import type { Alarm, Reading, Sensor } from "../types";
@@ -122,4 +125,82 @@ export function formatAge(ms: number): string {
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours} 時間前`;
   return `${Math.round(hours / 24)} 日前`;
+}
+
+/** 経過時間の、等幅向けの短い文字（例: 12s、5m、3h、2d）。60 秒未満は秒、60 分未満は分、48 時間未満は時間、それ以上は日 */
+export function formatShortAge(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/** 単位ごとの、値の小数の桁（℃・hPa は 1 桁、% と ppm は 0 桁）。ほかの単位は null（有効数字 4 桁） */
+function decimalsOfUnit(unit: string): number | null {
+  if (unit === "℃" || unit === "°C" || unit === "hPa") return 1;
+  if (unit === "%" || unit === "ppm") return 0;
+  return null;
+}
+
+/** 値の文字（例: 22.4、49、1012.4）。桁は単位で決め、決められない単位は有効数字 4 桁 */
+export function formatSensorNumber(value: number, unit: string): string {
+  const decimals = decimalsOfUnit(unit);
+  return decimals === null ? String(Number(value.toPrecision(4))) : value.toFixed(decimals);
+}
+
+/** 値に単位をつけた文字（例: 22.4℃、49%、1050ppm） */
+export function formatSensorValue(value: number, unit: string): string {
+  return `${formatSensorNumber(value, unit)}${unit}`;
+}
+
+/** 1 時間の変化の文字（例: ↑0.6、↓0.2、0.0）。丸めて 0 になるときは矢印をつけない */
+export function formatChange(delta: number, unit: string): string {
+  const text = formatSensorNumber(Math.abs(delta), unit);
+  if (Number(text) === 0) return text;
+  return `${delta > 0 ? "↑" : "↓"}${text}`;
+}
+
+/** 種類の切り替えに出す名前。単位から決める（例: ℃ → 温度、ppm → CO2）。知らない単位は、その単位そのもの */
+export function kindOfUnit(unit: string): string {
+  if (unit === "℃" || unit === "°C") return "温度";
+  if (unit === "%") return "湿度";
+  if (unit === "ppm") return "CO2";
+  if (unit === "hPa") return "気圧";
+  return unit || "その他";
+}
+
+/** センサーに今ある種類を、決まった順（温度・湿度・CO2・気圧、ほかは名前順）に並べる */
+export function kindsOf(sensors: ReadonlyArray<Pick<Sensor, "unit" | "enabled">>): string[] {
+  const order = ["温度", "湿度", "CO2", "気圧"];
+  const kinds = [...new Set(sensors.filter((s) => s.enabled).map((s) => kindOfUnit(s.unit)))];
+  return kinds.sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia === -1 ? order.length : ia) - (ib === -1 ? order.length : ib) || a.localeCompare(b, "ja");
+  });
+}
+
+/** 上の帯に出す「機器 N · センサー M」の数（機器に属さないセンサーは 1 つずつ数える。無効なセンサーは除く） */
+export function countDevicesAndSensors(sensors: ReadonlyArray<Pick<Sensor, "id" | "enabled" | "deviceId">>): { devices: number; sensors: number } {
+  const enabled = sensors.filter((sensor) => sensor.enabled);
+  const devices = new Set(enabled.map((sensor) => (sensor.deviceId ? `device:${sensor.deviceId}` : `sensor:${sensor.id}`)));
+  return { devices: devices.size, sensors: enabled.length };
+}
+
+/** 札の中の、選んだ種類のセンサーの値（無ければ null）と、1 時間前の値からの変化 */
+export function pickKindValue(
+  strip: Strip,
+  kind: string,
+  hourAgo: ReadonlyMap<string, number>,
+): { text: string; change: string | null } | null {
+  const item = strip.sensors.find((entry) => kindOfUnit(entry.sensor.unit) === kind && entry.latest);
+  if (!item?.latest) return null;
+  const before = hourAgo.get(item.sensor.id);
+  return {
+    text: formatSensorValue(item.latest.value, item.sensor.unit),
+    change: before === undefined ? null : formatChange(item.latest.value - before, item.sensor.unit),
+  };
 }

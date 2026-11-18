@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../test/test-utils";
@@ -78,6 +79,25 @@ describe("OverviewPage（全体監視）", () => {
     expect(screen.getByText("22.4℃")).toBeInTheDocument();
     // 記録
     expect(screen.getByText(/洋室 CO2 上限超え/)).toBeInTheDocument();
+  });
+
+  it("値は単位ごとの桁で出し、経過は短い文字（12s）。正常は 4 台まででたたみ、「ほか N 台」で全部出す", async () => {
+    const sensors = Array.from({ length: 6 }, (_, i) => sensor(`s${i}`, `温度${i}`, { unit: "%", deviceId: `d${i}`, deviceName: `env-${i}` }));
+    vi.mocked(api.fetchSensors).mockResolvedValue(sensors);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({
+      readings: sensors.map((s) => ({ sensorId: s.id, value: 49.84, recordedAt: new Date(Date.now() - 12_000).toISOString() })),
+      total: 6,
+    });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+
+    renderWithQueryClient(<OverviewPage />);
+
+    expect((await screen.findAllByText("50%")).length).toBe(4);
+    expect(screen.queryByText("49.84%")).not.toBeInTheDocument();
+    expect(screen.getAllByText("12s").length).toBe(4);
+    expect(screen.queryByText("env-5")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "ほか 2 台" }));
+    expect(screen.getByText("env-5")).toBeInTheDocument();
   });
 
   it("センサーが無ければ、セットアップガイドへ案内する", async () => {

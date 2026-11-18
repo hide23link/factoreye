@@ -70,6 +70,43 @@ describe("FloorPlanWidget（配置図）", () => {
     expect(screen.getByText("洋室 CO2 重故障")).toBeInTheDocument();
   });
 
+  it("札に、1 時間前からの変化を出す。表示の種類を選ぶと、その種類の値にする（選んだ種類は覚える）", async () => {
+    window.localStorage.clear();
+    const temperature: Sensor = { ...sensor, id: "t", name: "洋室 温度", unit: "℃", thresholdMaxCritical: null };
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, temperature]);
+    // before 付きの取得は「1 時間前の値」。付かない取得は「今の値」
+    vi.mocked(api.fetchLatestReadings).mockImplementation((before?: string) => {
+      const at = new Date().toISOString();
+      return Promise.resolve(
+        before === undefined
+          ? { readings: [{ sensorId: "a", value: 650, recordedAt: at }, { sensorId: "t", value: 22.4, recordedAt: at }], total: 2 }
+          : { readings: [{ sensorId: "a", value: 640, recordedAt: at }, { sensorId: "t", value: 21.8, recordedAt: at }], total: 2 },
+      );
+    });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+
+    renderWithQueryClient(<FloorPlanWidget widget={widget({ floorPlacements: { "device:d1": { x: 20, y: 40 } } })} />);
+
+    // 「すべて」: 先頭の値と、その 1 時間の変化
+    expect(await screen.findByText(/650ppm 22\.4℃/)).toBeInTheDocument();
+    expect(await screen.findByText(/↑10/)).toBeInTheDocument();
+    // 温度を選ぶと、温度の値と変化
+    await userEvent.click(screen.getByRole("button", { name: "温度" }));
+    expect(await screen.findByText("22.4℃")).toBeInTheDocument();
+    expect(screen.getByText(/↑0\.6/)).toBeInTheDocument();
+    expect(window.localStorage.getItem("fe-floorplan-kind")).toBe("温度");
+  });
+
+  it("受信が止まった機器の札は「受信なし 5m」。点から札へ引き出し線が出る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [{ sensorId: "a", value: 600, recordedAt: new Date(Date.now() - 20 * 60_000).toISOString() }], total: 1 });
+    vi.mocked(api.fetchAlarms).mockResolvedValue({ alarms: [], total: 0 });
+
+    renderWithQueryClient(<FloorPlanWidget widget={widget({ floorPlacements: { "device:d1": { x: 20, y: 40 } } })} />);
+
+    expect(await screen.findByText(/受信なし 20m/)).toBeInTheDocument();
+  });
+
   it("設定が空なら、編集で置けることを案内する", async () => {
     mockData();
     renderWithQueryClient(<FloorPlanWidget widget={widget({})} />);

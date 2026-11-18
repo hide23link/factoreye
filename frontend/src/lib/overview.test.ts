@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import type { Alarm, Reading, Sensor } from "../types";
-import { buildStrips, countStates, formatAge, STALE_MS } from "./overview";
+import {
+  buildStrips,
+  countDevicesAndSensors,
+  countStates,
+  formatAge,
+  formatChange,
+  formatSensorNumber,
+  formatSensorValue,
+  formatShortAge,
+  kindOfUnit,
+  kindsOf,
+  pickKindValue,
+  STALE_MS,
+} from "./overview";
 
 const NOW = new Date("2026-11-18T00:42:00Z").getTime();
 
@@ -109,5 +122,62 @@ describe("formatAge", () => {
     expect(formatAge(5 * 60_000)).toBe("5 分前");
     expect(formatAge(3 * 3_600_000)).toBe("3 時間前");
     expect(formatAge(3 * 86_400_000)).toBe("3 日前");
+  });
+});
+
+describe("formatShortAge（等幅向けの短い経過時間）", () => {
+  it("60 秒未満は秒、60 分未満は分、48 時間未満は時間、それ以上は日", () => {
+    expect(formatShortAge(12_000)).toBe("12s");
+    expect(formatShortAge(5 * 60_000)).toBe("5m");
+    expect(formatShortAge(3 * 3_600_000)).toBe("3h");
+    expect(formatShortAge(3 * 86_400_000)).toBe("3d");
+  });
+});
+
+describe("値の桁（単位で決める）", () => {
+  it("℃ と hPa は 1 桁、% と ppm は 0 桁、ほかは有効数字 4 桁", () => {
+    expect(formatSensorValue(22.4321, "℃")).toBe("22.4℃");
+    expect(formatSensorValue(49.84, "%")).toBe("50%");
+    expect(formatSensorValue(1050.4, "ppm")).toBe("1050ppm");
+    expect(formatSensorValue(1012.44, "hPa")).toBe("1012.4hPa");
+    expect(formatSensorNumber(3.14159265, "mm/s")).toBe("3.142");
+  });
+  it("1 時間の変化は、増えれば ↑、減れば ↓。丸めて 0 なら矢印なし", () => {
+    expect(formatChange(0.64, "℃")).toBe("↑0.6");
+    expect(formatChange(-0.24, "℃")).toBe("↓0.2");
+    expect(formatChange(0.02, "℃")).toBe("0.0");
+  });
+});
+
+describe("種類の切り替え", () => {
+  it("単位から種類を決め、温度・湿度・CO2・気圧の順に並べる（無効なセンサーは除く）", () => {
+    expect(kindOfUnit("ppm")).toBe("CO2");
+    expect(kindOfUnit("mm/s")).toBe("mm/s");
+    const sensors = [
+      sensor("a", "A", { unit: "ppm" }),
+      sensor("b", "B", { unit: "℃" }),
+      sensor("c", "C", { unit: "個" }),
+      sensor("d", "D", { unit: "%", enabled: false }),
+    ];
+    expect(kindsOf(sensors)).toEqual(["温度", "CO2", "個"]);
+  });
+  it("札の中の選んだ種類の値と、1 時間前からの変化を取り出す。無ければ null", () => {
+    const sensors = [sensor("t", "温度", { unit: "℃", deviceId: "d", deviceName: "env" }), sensor("c", "CO2", { unit: "ppm", deviceId: "d", deviceName: "env" })];
+    const [strip] = buildStrips(sensors, [reading("t", 22.4), reading("c", 650)], [], NOW);
+    expect(pickKindValue(strip, "温度", new Map([["t", 21.8]]))).toEqual({ text: "22.4℃", change: "↑0.6" });
+    expect(pickKindValue(strip, "CO2", new Map())).toEqual({ text: "650ppm", change: null });
+    expect(pickKindValue(strip, "湿度", new Map())).toBeNull();
+  });
+});
+
+describe("countDevicesAndSensors（上の帯の「機器 N · センサー M」）", () => {
+  it("同じ機器は 1 台、機器の無いセンサーは 1 つずつ。無効なセンサーは数えない", () => {
+    const sensors = [
+      sensor("a", "A", { deviceId: "d1" }),
+      sensor("b", "B", { deviceId: "d1" }),
+      sensor("c", "C"),
+      sensor("d", "D", { enabled: false }),
+    ];
+    expect(countDevicesAndSensors(sensors)).toEqual({ devices: 2, sensors: 3 });
   });
 });

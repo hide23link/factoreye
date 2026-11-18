@@ -183,3 +183,18 @@ export const useDownsampledReadings = (
 /** 全センサーの最新の測定値（全体監視の画面）。数が多くても 1 回の取得で済む。15 秒ごとに取り直す */
 export const useLatestReadings = () =>
   useQuery({ queryKey: ["latest-readings"], queryFn: () => fetchLatestReadings(), refetchInterval: 15000 });
+
+/**
+ * 全センサーの 1 時間前の値（全体監視の「1 時間の変化」用）。センサーの ID → 値。
+ * 変化は 1 分ごとに取り直せば十分なので、60 秒ごと。1 時間前より古い測定値が無いセンサーは入らない。
+ */
+export const useReadingsHourAgo = () =>
+  useQuery({
+    queryKey: ["latest-readings", "hour-ago"],
+    queryFn: async () => {
+      const { readings } = await fetchLatestReadings(new Date(Date.now() - 3_600_000).toISOString());
+      return new Map(readings.map((reading) => [reading.sensorId, reading.value]));
+    },
+    refetchInterval: 60_000,
+    staleTime: 55_000,
+  });

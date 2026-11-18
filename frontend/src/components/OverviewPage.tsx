@@ -6,17 +6,21 @@
  * 【誰が使うか】App.tsx が、メニューで「全体監視」を選んだときに出す。引数（props）はない。
  */
 import { useQueries } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { useAlarms, useDashboards, useLatestReadings, useSensors } from "../hooks/queries";
 import { fetchDashboard } from "../lib/api";
 import { useNow } from "../hooks/useNow";
-import { buildStrips, countStates, formatAge, type Strip, type StripState } from "../lib/overview";
+import { buildStrips, countStates, formatSensorValue, formatShortAge, type Strip, type StripState } from "../lib/overview";
 import type { Alarm, Sensor, Widget } from "../types";
 import { ErrorNotice } from "./ErrorNotice";
 import { FloorPlanWidget } from "./widgets/FloorPlanWidget";
 
 // 記録に出す件数（新しい順）
 const LOG_LIMIT = 30;
+
+// 正常の機器は、これだけ出して、残りは「ほか N 台」にたたむ（押すと全部。正常は見に行く必要が少ないので、場所をとらせない）
+const NORMAL_SHOWN = 4;
 
 const BAYS: { state: StripState; title: string; color: string }[] = [
   { state: "critical", title: "警報", color: "var(--fe-red)" },
@@ -82,12 +86,8 @@ export function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-3 p-3 md:p-4">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-bold tracking-wide text-gray-900">全体監視</h1>
-        <span className="font-num text-xs text-gray-500">
-          札 {strips.length}・センサー {sensors.data.filter((sensor) => sensor.enabled).length}
-        </span>
-      </div>
+      {/* 画面の名前と「機器 N · センサー M」は、上の帯（App.tsx）に出す。ここは読み上げ用の見出しだけ */}
+      <h1 className="sr-only">全体監視</h1>
       {!floorPlan && !floorPlanLoading && strips.length > 0 && (
         <p className="text-xs text-gray-500">
           ダッシュボードの編集で「配置図」のウィジェットを置くと、ここに配置図が出ます（部屋の枠の上に機器の札を置いて、全部の状態を 1 枚で見られます）。
@@ -110,6 +110,10 @@ export function OverviewPage() {
           {/* 右: 機器の札と記録 */}
           <div className="flex min-w-0 flex-[2] flex-col gap-3">
           <section aria-label="機器の札" className="flex min-w-0 flex-col rounded border border-gray-200 bg-white">
+            <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-2 text-[11px] font-semibold tracking-wider text-gray-500">
+              <span className="flex-1">機器の札</span>
+              <span>並び: 状態順</span>
+            </div>
             {BAYS.map((bay) => {
               const inBay = strips.filter((strip) => strip.state === bay.state);
               if (inBay.length === 0) return null;
@@ -119,13 +123,7 @@ export function OverviewPage() {
                     <span>{bay.title}</span>
                     <span className="font-num">{counts[bay.state]}</span>
                   </h2>
-                  <ul className="grid gap-1 2xl:grid-cols-2">
-                    {inBay.map((strip) => (
-                      <li key={strip.key}>
-                        <StripCard strip={strip} now={now} />
-                      </li>
-                    ))}
-                  </ul>
+                  <Bay strips={inBay} collapsible={bay.state === "normal"} now={now} />
                 </div>
               );
             })}
@@ -138,6 +136,34 @@ export function OverviewPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 1 つの欄の札の並び。たたむ欄（正常）は、最初の NORMAL_SHOWN 枚だけ出し、「ほか N 台」を押すと全部出す */
+function Bay({ strips, collapsible, now }: { strips: ReadonlyArray<Strip>; collapsible: boolean; now: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const hidden = collapsible && !expanded ? Math.max(0, strips.length - NORMAL_SHOWN) : 0;
+  const shown = hidden > 0 ? strips.slice(0, NORMAL_SHOWN) : strips;
+  return (
+    <>
+      <ul className="grid gap-1 2xl:grid-cols-2">
+        {shown.map((strip) => (
+          <li key={strip.key}>
+            <StripCard strip={strip} now={now} />
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && (
+        <button type="button" onClick={() => setExpanded(true)} className="self-start rounded px-1 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100">
+          ほか {hidden} 台
+        </button>
+      )}
+      {collapsible && expanded && strips.length > NORMAL_SHOWN && (
+        <button type="button" onClick={() => setExpanded(false)} className="self-start rounded px-1 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100">
+          たたむ
+        </button>
+      )}
+    </>
   );
 }
 
@@ -174,25 +200,20 @@ function StripCard({ strip, now }: { strip: Strip; now: number }) {
       </div>
       <div className="flex flex-col items-end justify-center border-l border-gray-200 px-2 py-1 font-num text-xs">
         <span style={{ color: strip.reason?.endsWith("受信なし") ? "var(--fe-amb)" : undefined }}>
-          {strip.lastTime === null ? "---" : formatAge(now - strip.lastTime)}
+          {strip.lastTime === null ? "---" : formatShortAge(now - strip.lastTime)}
         </span>
       </div>
     </div>
   );
 }
 
-/** 札に並べる値（例: 「22.4℃ 48% 650ppm」）。多いときは先頭の 4 つと「ほか n」 */
+/** 札に並べる値（例: 「22.4℃ 48% 650ppm」）。桁は単位で決める（lib/overview.ts）。多いときは先頭の 4 つと「ほか n」 */
 function describeValues(strip: Strip): string {
   const shown = strip.sensors.slice(0, 4).map((item) =>
-    item.latest ? `${formatValue(item.latest.value)}${item.sensor.unit}` : `---${item.sensor.unit}`,
+    item.latest ? formatSensorValue(item.latest.value, item.sensor.unit) : `---${item.sensor.unit}`,
   );
   const rest = strip.sensors.length - shown.length;
   return shown.join("\u3000") + (rest > 0 ? `\u3000ほか ${rest}` : "");
-}
-
-/** 値の文字（大きな値は小数を省き、小さな値は 2 桁まで） */
-function formatValue(value: number): string {
-  return Math.abs(value) >= 100 ? String(Math.round(value)) : String(Number(value.toFixed(2)));
 }
 
 /** 記録の一覧（時刻・種類・内容）。解消したものは灰色 */
@@ -213,8 +234,7 @@ function AlarmLog({ alarms, sensorById }: { alarms: ReadonlyArray<Alarm>; sensor
               {kind}
             </span>
             <span className={resolved ? "text-gray-500" : "text-gray-900"}>
-              {sensor?.name ?? "削除されたセンサー"} {side} <span className="font-num">{formatValue(alarm.value)}</span>
-              {sensor?.unit ?? ""}
+              {sensor?.name ?? "削除されたセンサー"} {side} <span className="font-num">{formatSensorValue(alarm.value, sensor?.unit ?? "")}</span>
             </span>
           </li>
         );
