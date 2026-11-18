@@ -45,9 +45,9 @@ export const useSensors = () =>
 export const useDevices = () =>
   useQuery({ queryKey: ["devices"], queryFn: fetchDevices, refetchInterval: 30000 });
 
-/** ダッシュボードの一覧。 */
-export const useDashboards = () =>
-  useQuery({ queryKey: ["dashboards"], queryFn: fetchDashboards });
+/** ダッシュボードの一覧。enabled を false にすると取りに行かない（必要な段階だけ取りたいとき。既定は取る）。 */
+export const useDashboards = (enabled = true) =>
+  useQuery({ queryKey: ["dashboards"], queryFn: fetchDashboards, enabled });
 
 /** 1つのダッシュボードの詳細（5 秒ごとに取り直す）。id が無いときは取りに行かない。 */
 export const useDashboard = (id: string | null) =>

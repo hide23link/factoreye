@@ -254,16 +254,16 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 - 色は CSS 変数（`frontend/src/theme.css`）。Tailwind の gray・blue・red などを変数に向け（`tailwind.config.js`）、`<html data-theme>` で切り替える。色の意味は両方で同じ（白／黒＝今の値、水色＝しきい値、桃＝目標、橙＝注意、赤＝警報）
 - 数字は B612 Mono（操作室の表示用に作られた等幅の字体。OFL-1.1。`@fontsource/b612-mono` で同梱し、外部から読み込まない）
 
-### セットアップガイド
-- 縦に 4 段階（1 センサーを登録する・2 テストデータを送る・3 計器盤を作る・4 完了）と、「N / 4 完了」の進み具合の帯。画面刷新モックの形（`components/SetupWizard.tsx`、段階の行は `components/setup/`）
-- 段階 2: 送信コードの例（curl・Arduino・Python のタブとコピー）と、受信待ちの表。サーバー（`GET /health` の接続と応答の ms）・受信キー・最後に届いた値を **3 秒ごと**に確かめ、値が 1 件届くと自動で段階 3 へ進む。待ち時間と、届かないときの原因 3 つを出す
-- 段階 3: ダッシュボード「はじめてのダッシュボード」を作り、計器（TapeGauge）と計器グラフ（TrendStack）を置く
-- 進み具合（段階・登録したセンサー・作ったダッシュボード）は、この端末のブラウザ（`localStorage` の `factoreye.setup-guide`）に覚える。途中でやめても、次に開いたとき続きから再開する。「最初からやり直す」で消す。最後まで終わって「ダッシュボードを見る」を押すと消す（`lib/setup-progress.ts`）
-
 **TargetStrip**: センサーごとに 1 行。一定の間隔（1・5・10 分）を 1 マスにした帯。
 - `stripJudge: "count"`（既定）: マスの合計が目標以上なら緑
 - `stripJudge: "interval"`: 受信の途切れが `stripMaxGapSeconds`（既定 90 秒）を超えたら赤（ハートビート確認用）
 - ほかの設定: `stripBucketMinutes`・`stripHourlyTarget`・`stripWorkOnly`・`stripTolerant`
+
+### セットアップガイド
+- 縦に 4 段階（1 センサーを登録する・2 テストデータを送る・3 計器盤を作る・4 完了）と、「N / 4 完了」の進み具合の帯。画面刷新モックの形（`components/SetupWizard.tsx`、段階の行は `components/setup/`）
+- 段階 2: 送信コードの例（curl・Arduino・Python のタブとコピー）と、受信待ちの表。サーバー（`GET /health` の接続と応答の ms）・最後に届いた値を **3 秒ごと**に確かめ（受信キーは、登録済みであることを出すだけで、確かめてはいない）、値が 1 件届くと自動で段階 3 へ進む。待ち時間と、届かないときの原因 3 つを出す。コードの例のサーバーのアドレスは、`VITE_API_URL` が空（本番・ラズパイ）なら画面を開いているアドレス（`window.location.origin`）にする（設定の「つなぎ方」も同じ。`lib/ingest-snippets.ts` の `serverBaseUrl`）
+- 段階 3: ダッシュボード「はじめてのダッシュボード」を作り、計器（TapeGauge）と計器グラフ（TrendStack）を置く
+- 進み具合（段階・登録したセンサー・作ったダッシュボード）は、この端末のブラウザ（`localStorage` の `factoreye.setup-guide`）に覚える。途中でやめても、次に開いたとき続きから再開する。覚えたセンサー・ダッシュボードが、あとで削除されていた（取得が 404、完了の段階で一覧に無い）ときは、画面の上で「最初からやり直す」を案内する。「最初からやり直す」で消す。最後まで終わって「ダッシュボードを見る」を押すと消す（`lib/setup-progress.ts`）
 
 ### グラフの時間操作
 - **直近モード**（右端が常に現在）と**固定モード**（開始・終了を指定）

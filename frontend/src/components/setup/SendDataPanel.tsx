@@ -121,7 +121,7 @@ export function SendDataPanel({ ingestKey, unit, latest, startedAt }: { ingestKe
             <Light tone={server.status === "ok" ? "ok" : server.status === "down" ? "bad" : "wait"} />
           </dd>
           <dt className="text-gray-500">受信キー</dt>
-          <dd className="break-all">{ingestKey}&emsp;有効</dd>
+          <dd className="break-all">{ingestKey}&emsp;登録済み</dd>
           <dd>
             <Light tone="ok" />
           </dd>

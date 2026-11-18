@@ -2,7 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../lib/errors";
-import { saveSetupProgress } from "../lib/setup-progress";
+import { loadSetupProgress, saveSetupProgress } from "../lib/setup-progress";
 import { useUiStore } from "../store/useUiStore";
 import { renderWithQueryClient, screen, waitFor } from "../test/test-utils";
 import type { Sensor } from "../types";
@@ -13,6 +13,7 @@ vi.mock("../lib/api", () => ({
   fetchHealth: vi.fn(),
   fetchSensorReadings: vi.fn(),
   fetchSensors: vi.fn(),
+  fetchDashboards: vi.fn(),
   createSensor: vi.fn(),
   createDashboard: vi.fn(),
   addWidget: vi.fn(),
@@ -42,6 +43,7 @@ function mockNothingReceived() {
   vi.mocked(api.fetchSensors).mockResolvedValue([]);
   vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 });
   vi.mocked(api.fetchHealth).mockResolvedValue({ status: "ok", timestamp: "2024-01-01T00:00:00Z", services: { database: "connected" } });
+  vi.mocked(api.fetchDashboards).mockResolvedValue([]);
 }
 
 beforeEach(() => {
@@ -124,7 +126,9 @@ describe("SetupWizard", () => {
     renderWithQueryClient(<SetupWizard />);
 
     expect(await screen.findByText(/接続 OK/)).toBeInTheDocument();
-    expect(screen.getByText(/demo-sensor-xyz\s+有効/)).toBeInTheDocument();
+    expect(screen.getByText(/demo-sensor-xyz\s+登録済み/)).toBeInTheDocument();
+    // 受信キーは何も確かめていないので、「有効」とは出さない
+    expect(screen.queryByText(/有効/)).not.toBeInTheDocument();
     expect(screen.getByText("まだありません")).toBeInTheDocument();
     expect(screen.getByText(/受信待ち/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "次へ（値が届いたら押せます）" })).toBeDisabled();
@@ -165,6 +169,7 @@ describe("SetupWizard", () => {
     });
     vi.mocked(api.createDashboard).mockResolvedValue({ id: "d-new", name: "はじめてのダッシュボード" } as never);
     vi.mocked(api.addWidget).mockResolvedValue({} as never);
+    vi.mocked(api.fetchDashboards).mockResolvedValue([{ id: "d-new", name: "はじめてのダッシュボード" }] as never);
     saveSetupProgress({ step: 2, sensor: savedSensor, dashboardId: null });
 
     renderWithQueryClient(<SetupWizard />);
@@ -179,7 +184,9 @@ describe("SetupWizard", () => {
     expect(vi.mocked(api.addWidget).mock.calls[1][1].config).toEqual({ sensorIds: ["s-new"] });
 
     expect(await screen.findByText("4 / 4 完了")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "ダッシュボードを見る" }));
+    const viewButton = screen.getByRole("button", { name: "ダッシュボードを見る" });
+    await waitFor(() => expect(viewButton).toBeEnabled());
+    await user.click(viewButton);
     expect(useUiStore.getState().selectedDashboardId).toBe("d-new");
     // 最後まで終わったので、覚えた進み具合は消える
     expect(window.localStorage.getItem("factoreye.setup-guide")).toBeNull();
@@ -196,5 +203,64 @@ describe("SetupWizard", () => {
 
     expect(screen.getByText("0 / 4 完了")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /名前/ })).toBeInTheDocument();
+    // やり直したあとは、前のセンサーの進み具合が残らない（再読み込みしても段階 1 から）
+    expect(window.localStorage.getItem("factoreye.setup-guide")).toBeNull();
+    expect(loadSetupProgress().step).toBe(1);
+  });
+
+  it("段階の番号の札は、済みの段階を「N 済み」と読み上げる", async () => {
+    mockNothingReceived();
+    saveSetupProgress({ step: 2, sensor: savedSensor, dashboardId: null });
+
+    renderWithQueryClient(<SetupWizard />);
+
+    expect(await screen.findByRole("img", { name: "1 済み" })).toBeInTheDocument();
+  });
+
+  it("覚えたセンサーが削除されていて、取得が 404 のときは、待ち続けず、最初からやり直すよう案内する", async () => {
+    mockNothingReceived();
+    vi.mocked(api.fetchSensorReadings).mockRejectedValue(new ApiError(404, "GET /api/sensors/s-new/readings failed: 404"));
+    saveSetupProgress({ step: 2, sensor: savedSensor, dashboardId: null });
+
+    renderWithQueryClient(<SetupWizard />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("登録したセンサーが見つかりません");
+    expect(screen.getByRole("alert")).toHaveTextContent("最初からやり直す");
+
+    // 案内のとおり、やり直すと段階 1 に戻り、案内は消える
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "最初からやり直す" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /名前/ })).toBeInTheDocument();
+  });
+
+  it("段階 4 で、作ったダッシュボードがあれば「ダッシュボードを見る」で開き、覚えた進み具合を消す", async () => {
+    const user = userEvent.setup();
+    mockNothingReceived();
+    vi.mocked(api.fetchDashboards).mockResolvedValue([{ id: "d-keep", name: "はじめてのダッシュボード" }] as never);
+    saveSetupProgress({ step: 4, sensor: savedSensor, dashboardId: "d-keep" });
+
+    renderWithQueryClient(<SetupWizard />);
+
+    expect(await screen.findByText("4 / 4 完了")).toBeInTheDocument();
+    expect(window.localStorage.getItem("factoreye.setup-guide")).not.toBeNull();
+    const button = screen.getByRole("button", { name: "ダッシュボードを見る" });
+    await waitFor(() => expect(button).toBeEnabled());
+
+    await user.click(button);
+
+    expect(useUiStore.getState().selectedDashboardId).toBe("d-keep");
+    expect(window.localStorage.getItem("factoreye.setup-guide")).toBeNull();
+  });
+
+  it("段階 4 で、作ったダッシュボードが削除されていたら、開けず、最初からやり直すよう案内する", async () => {
+    mockNothingReceived();
+    vi.mocked(api.fetchDashboards).mockResolvedValue([{ id: "d-other", name: "別のダッシュボード" }] as never);
+    saveSetupProgress({ step: 4, sensor: savedSensor, dashboardId: "d-gone" });
+
+    renderWithQueryClient(<SetupWizard />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("作ったダッシュボードが見つかりません");
+    expect(screen.getByRole("button", { name: "ダッシュボードを見る" })).toBeDisabled();
   });
 });

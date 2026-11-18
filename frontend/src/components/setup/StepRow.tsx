@@ -23,6 +23,7 @@ export function StepRow({ number, state, last = false, children }: { number: num
         <span
           className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[3px] border-[1.5px] font-num text-xs font-bold"
           style={BUBBLE_STYLE[state]}
+          role="img"
           aria-label={state === "done" ? `${number} 済み` : `${number}`}
         >
           {state === "done" ? "✓" : number}

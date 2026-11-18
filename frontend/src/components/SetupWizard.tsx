@@ -10,7 +10,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { useSensorReadings } from "../hooks/queries";
+import { useDashboards, useSensorReadings } from "../hooks/queries";
 import { SERVER_CHECK_INTERVAL_MS } from "../hooks/useServerCheck";
 import { addWidget, createDashboard, createSensor } from "../lib/api";
 import { describeActionError, errorStatus } from "../lib/errors";
@@ -35,6 +35,10 @@ const REGISTER_FORM_ID = "setup-register-form";
 
 /** ダッシュボードの名前 */
 const DASHBOARD_NAME = "はじめてのダッシュボード";
+
+/** 覚えておいたセンサー・ダッシュボードが、あとで削除されていたときの案内 */
+const SENSOR_GONE_MESSAGE = "登録したセンサーが見つかりません（削除されたようです）。下の「最初からやり直す」で、もう一度登録してください。";
+const DASHBOARD_GONE_MESSAGE = "作ったダッシュボードが見つかりません（削除されたようです）。下の「最初からやり直す」で、もう一度作れます。";
 
 /** 進み具合の 4 本の帯の色 */
 const BAR_COLOR = { done: "var(--fe-ok)", current: "var(--fe-cy)", todo: "var(--fe-line)" } as const;
@@ -80,8 +84,15 @@ export function SetupWizard() {
 
   // 段階 2・3 の間、最後に届いた値を 3 秒ごとに確かめる（最新の 1 件だけ。総件数で「届いた」を判断する）
   const waiting = step === 2 || step === 3;
-  const { data: readingsData } = useSensorReadings(waiting && sensor ? sensor.id : null, 24, 1, SERVER_CHECK_INTERVAL_MS);
+  const { data: readingsData, error: readingsError } = useSensorReadings(waiting && sensor ? sensor.id : null, 24, 1, SERVER_CHECK_INTERVAL_MS);
   const latest = readingsData?.readings[0];
+  // 覚えておいたセンサーが、あとで削除されていると、取得が 404 になる（待ち続けても届かない）
+  const sensorGone = waiting && errorStatus(readingsError) === 404;
+  // 作ったダッシュボードが、あとで削除されていないか（完了の段階でだけ、一覧で確かめる）
+  // 取り直している間は、古い一覧（今作ったばかりのダッシュボードが無い）で判断しない
+  const { data: dashboards, isFetching: dashboardsFetching } = useDashboards(step === 4);
+  const dashboardGone =
+    step === 4 && !dashboardsFetching && dashboards !== undefined && dashboardId !== null && !dashboards.some((d) => d.id === dashboardId);
 
   // 段階 2 でデータが 1 件でも届いたら、段階 3 へ自動で進める
   useEffect(() => {
@@ -90,9 +101,11 @@ export function SetupWizard() {
     }
   }, [step, readingsData]);
 
-  // 進み具合は、変わるたびにこの端末に覚えておく（途中でやめても続きから再開できる）
+  // 進み具合は、変わるたびにこの端末に覚えておく（途中でやめても続きから再開できる）。
+  // 何も始めていない状態（段階 1 でセンサーが無い）は、覚えるものが無いので、残さない
   useEffect(() => {
-    saveSetupProgress({ step, sensor, dashboardId });
+    if (step === 1 && sensor === null) clearSetupProgress();
+    else saveSetupProgress({ step, sensor, dashboardId });
   }, [step, sensor, dashboardId]);
 
   // エラーの種類を、利用者に分かる文言にする（上限・名前の重複・その他）
@@ -171,6 +184,10 @@ export function SetupWizard() {
   };
 
   const bars = stepBarStates(step);
+  // 画面の上に出す知らせ。操作の失敗を先に、なければ、センサー・ダッシュボードが消えていることを案内する
+  const notice =
+    errorMessage ??
+    (sensorGone ? SENSOR_GONE_MESSAGE : dashboardGone ? DASHBOARD_GONE_MESSAGE : null);
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-5 p-6">
@@ -188,9 +205,9 @@ export function SetupWizard() {
         </div>
       </header>
 
-      {errorMessage && (
+      {notice && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {errorMessage}
+          {notice}
         </div>
       )}
 
@@ -296,7 +313,7 @@ export function SetupWizard() {
           </button>
         )}
         {step === 3 && (
-          <button type="button" onClick={() => createDashboardMutation.mutate()} disabled={createDashboardMutation.isPending} className={PRIMARY_BUTTON_CLASS}>
+          <button type="button" onClick={() => createDashboardMutation.mutate()} disabled={createDashboardMutation.isPending || sensorGone} className={PRIMARY_BUTTON_CLASS}>
             計器盤を作る
           </button>
         )}
@@ -309,6 +326,7 @@ export function SetupWizard() {
               clearSetupProgress();
               selectDashboard(dashboardId);
             }}
+            disabled={dashboardGone}
             className={PRIMARY_BUTTON_CLASS}
           >
             ダッシュボードを見る
