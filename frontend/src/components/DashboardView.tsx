@@ -21,7 +21,7 @@ import "react-resizable/css/styles.css";
 
 import { useDashboard, useDashboards } from "../hooks/queries";
 import { useWidgetActions } from "../hooks/useWidgetActions";
-import { GRID_MARGIN, GRID_ROW_HEIGHT } from "../lib/grid-placement";
+import { GRID_MARGIN, GRID_ROW_HEIGHT, minGridRows } from "../lib/grid-placement";
 import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
 import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
 import { isGraphWidget } from "../lib/graph-link";
@@ -31,7 +31,7 @@ import { useKioskStore } from "../store/useKioskStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Widget } from "../types";
-import { narrowHeightPx, widgetsInReadingOrder } from "../lib/narrow-layout";
+import { groupNarrowWidgets, narrowHeightPx, widgetsInReadingOrder } from "../lib/narrow-layout";
 import { DropSurface } from "./editor/DropSurface";
 import { EditorShelf } from "./editor/EditorShelf";
 import { EditorToast } from "./editor/EditorToast";
@@ -59,14 +59,17 @@ const BAR_HIDE_MS = 6000;
 // スマホ用の下部ナビ（App.tsx の BottomNav、min-h-14）の高さ（px）
 const BOTTOM_NAV_HEIGHT = 56;
 
-/** ウィジェットを、格子のレイアウト項目に変換する（列・行は 0 始まりに直す）。最小サイズは 1 列・2 行。 */
+/**
+ * ウィジェットを、格子のレイアウト項目に変換する（列・行は 0 始まりに直す）。最小サイズは 1 列・2 行。
+ * 計器グラフは、センサーの数に必要な高さに満たないとき、その高さまで広げて出す（枠の中でスクロールしなくても全行が見えるように）。
+ */
 function toLayoutItem(widget: Widget) {
   return {
     i: widget.id,
     x: widget.gridColumn - 1,
     y: widget.gridRow - 1,
     w: widget.gridWidth,
-    h: widget.gridHeight,
+    h: Math.max(widget.gridHeight, minGridRows(widget)),
     minW: 1,
     minH: 2,
   };
@@ -252,11 +255,22 @@ function LoadedDashboard({
   const grid = isNarrow ? (
     // スマホ: 格子をやめて、ウィジェットを縦 1 列に並べる（各ウィジェットに十分な高さを与える）
     <div className="flex flex-col gap-3">
-      {widgetsInReadingOrder(dashboard.widgets).map((widget) => (
-        <div key={widget.id} style={{ height: narrowHeightPx(widget) }}>
-          <WidgetCard widget={widget} dashboard={dashboard} />
-        </div>
-      ))}
+      {groupNarrowWidgets(widgetsInReadingOrder(dashboard.widgets)).map((group) =>
+        group.pair ? (
+          // 計器が続くときは、2 列に並べる（スマホの縦の長さを抑える）
+          <div key={group.widgets[0].id} className="grid grid-cols-2 gap-3">
+            {group.widgets.map((widget) => (
+              <div key={widget.id} style={{ height: narrowHeightPx(widget) }}>
+                <WidgetCard widget={widget} dashboard={dashboard} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div key={group.widgets[0].id} style={{ height: narrowHeightPx(group.widgets[0]) }}>
+            <WidgetCard widget={group.widgets[0]} dashboard={dashboard} />
+          </div>
+        ),
+      )}
     </div>
   ) : (
     <ResponsiveGridLayout
@@ -449,12 +463,14 @@ function LoadedDashboard({
         </>
       )}
       {kiosk && barShown && <KioskBar dashboardId={dashboard.id} onExit={() => setKiosk(false)} onInteract={() => setBarTick((n) => n + 1)} />}
-      {!kiosk && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{dashboard.name}</h1>
-          {dashboard.description && <p className="text-xs text-gray-500">{dashboard.description}</p>}
+      {/* 上の帯: 名前・期間の操作・ボタンを 1 行に並べる（狭いときは折り返す）。窓（棚・パネル）の上端は、この帯の下に合わせる */}
+      {!kiosk && <div ref={controlsRef} className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-bold text-gray-900">{dashboard.name}</h1>
+          {dashboard.description && <p className="truncate text-xs text-gray-500">{dashboard.description}</p>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <TimeRangeControls className="" />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {editing ? (
             <>
               <button
@@ -552,12 +568,6 @@ function LoadedDashboard({
           )}
         </div>
       </div>}
-
-      {!kiosk && (
-        <div ref={controlsRef}>
-          <TimeRangeControls />
-        </div>
-      )}
 
       {!editing && dashboard.widgets.length === 0 ? (
         <p className="text-sm text-gray-500">

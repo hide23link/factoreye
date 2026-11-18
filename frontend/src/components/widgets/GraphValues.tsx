@@ -15,8 +15,11 @@
 import { useEffect } from "react";
 import { useChartHeight, usePlotArea, useYAxisScale } from "recharts";
 import { formatYTick } from "./graph-parts";
-import { layoutValueTags } from "../../lib/graph-value-tags";
+import { layoutValueTags, TAG_BLOCK_HEIGHT } from "../../lib/graph-value-tags";
 import type { GraphValueMeasure } from "../../hooks/useGraphValueMeasure";
+
+/** 最高・最低・平均の 3 行の高さ（px） */
+const STATS_HEIGHT = 40;
 
 export interface GraphValueItem {
   name: string;
@@ -28,6 +31,8 @@ export interface GraphValueItem {
   position?: number;
   /** その線が載る縦軸（左右の 2 軸のときの "left" / "right"）。1 つの軸なら undefined */
   yAxisId?: string;
+  /** 表示中の期間の最高・最低・平均。センサーが 1 つのときは札の下に出し、複数のときは札の title（ホバーの説明）に入れる */
+  stats?: { max: number; min: number; average: number };
 }
 
 /**
@@ -79,6 +84,22 @@ export function GraphValues({
     value === undefined ? "---" : decimals === undefined ? formatYTick(value) : value.toFixed(decimals);
   // 札の下の小さな文字。1 つのセンサーなら単位だけ、複数なら名前と単位
   const caption = (item: GraphValueItem) => (items.length > 1 ? `${item.name} ${item.unit}`.trim() : item.unit);
+  // 最高・最低・平均の行は、センサーが 1 つのときだけ札の下に出す（複数のときは場所が足りないので title に入れる）
+  const showStats = items.length === 1;
+  const blockHeight = TAG_BLOCK_HEIGHT + (showStats && items[0]?.stats ? STATS_HEIGHT : 0);
+  const statsText = (item: GraphValueItem) =>
+    item.stats ? `${item.name} 最高 ${format(item.stats.max)} 最低 ${format(item.stats.min)} 平均 ${format(item.stats.average)}` : item.name;
+  const statsLines = (item: GraphValueItem) =>
+    showStats && item.stats ? (
+      <dl className="mt-0.5 grid grid-cols-[auto_1fr] gap-x-1 self-stretch font-num text-[10px] leading-3 text-gray-500">
+        <dt>最高</dt>
+        <dd className="text-right font-bold text-gray-900">{format(item.stats.max)}</dd>
+        <dt>最低</dt>
+        <dd className="text-right font-bold text-gray-900">{format(item.stats.min)}</dd>
+        <dt>平均</dt>
+        <dd className="text-right font-bold text-gray-900">{format(item.stats.average)}</dd>
+      </dl>
+    ) : null;
 
   // まだ測れていない（グラフの描画前・試験の環境）ときは、縦に並べるだけ
   if (!measure || measure.ys.length !== items.length) {
@@ -89,20 +110,21 @@ export function GraphValues({
             <span
               className="max-w-full truncate rounded-sm border-[1.5px] px-1 text-right font-num text-sm font-bold text-gray-900"
               style={{ borderColor: item.color }}
-              title={item.name}
+              title={statsText(item)}
             >
               {format(item.value)}
             </span>
             <span className="max-w-full truncate text-[10px] text-gray-500" title={item.name}>
               {caption(item)}
             </span>
+            {statsLines(item)}
           </li>
         ))}
       </ul>
     );
   }
 
-  const tops = layoutValueTags(measure.ys, measure.height);
+  const tops = layoutValueTags(measure.ys, measure.height, blockHeight);
   return (
     <ul className="relative w-[76px] shrink-0" aria-label="今の値">
       {items.map((item, i) => {
@@ -123,13 +145,14 @@ export function GraphValues({
             <span
               className="block h-5 w-full truncate rounded-sm border-[1.5px] px-1 text-right font-num text-sm font-bold leading-4 text-gray-900"
               style={{ borderColor: item.color }}
-              title={item.name}
+              title={statsText(item)}
             >
               {format(item.value)}
             </span>
             <span className="h-3 max-w-full truncate text-[10px] leading-3 text-gray-500" title={item.name}>
               {caption(item)}
             </span>
+            {statsLines(item)}
           </li>
         );
       })}

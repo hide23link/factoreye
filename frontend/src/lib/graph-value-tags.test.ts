@@ -21,4 +21,9 @@ describe("layoutValueTags（今の値の札の高さ）", () => {
   it("上端より上には出さない", () => {
     expect(layoutValueTags([0], 200)).toEqual([0]);
   });
+
+  it("札の高さを大きくしたとき（最高・最低・平均の行を足したとき）は、その高さの分だけ間をあける", () => {
+    const tops = layoutValueTags([50, 55], 400, 72);
+    expect(tops[1] - tops[0]).toBe(72 + TAG_GAP);
+  });
 });

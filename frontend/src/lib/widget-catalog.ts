@@ -54,7 +54,7 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     label: "計器",
     description: "今の値を四角の数字で出し、目盛りの帯で、しきい値までの余裕・1 時間の変化・15 分後の予測を見る",
     width: 3,
-    height: 4,
+    height: 3,
     suitedSensor: "measure",
     defaultConfig: { decimals: 1 },
   },

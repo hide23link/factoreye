@@ -65,7 +65,7 @@
 
 /*
  * 計器グラフ（TrendStackWidget）の 1 行の並び: 左の欄（名前・最高・最低・平均）｜縦軸の数字｜グラフ｜今の値の札。
- * 枠が狭いとき（560px 未満）は、左の欄を隠し、名前をグラフの左上に出す。
+ * 枠が狭いとき（560px 未満）は、左の欄を隠し、名前・範囲・最高・最低を行の上に 1 行で出す（trend-headline）。
  * 枠の大きさは利用者が変えられるので、画面の幅ではなく、ウィジェットそのものの幅（container query）で切り替える。
  */
 .trend-stack {
@@ -75,7 +75,7 @@
   display: grid;
   grid-template-columns: 168px 48px minmax(0, 1fr) 84px;
 }
-.trend-inline-name {
+.trend-headline {
   display: none;
 }
 @container trend (max-width: 560px) {
@@ -85,7 +85,7 @@
   .trend-side {
     display: none;
   }
-  .trend-inline-name {
-    display: block;
+  .trend-headline {
+    display: flex;
   }
 }

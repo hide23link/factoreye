@@ -20,10 +20,11 @@ export const TAG_GAP = 2;
  * 札の上端の位置（px）を、渡した順に返す。
  * @param ys 線ごとの、最後の点の高さ（グラフの上端からの px）。分からない線は undefined（ほかの札の下に並べる）
  * @param height 札を並べる欄の高さ（px）
+ * @param blockHeight 札 1 つの高さ（px）。最高・最低・平均の行を足すときは、その分だけ大きくする（既定は TAG_BLOCK_HEIGHT）
  * @returns 例: layoutValueTags([50, 55, undefined], 200) → [40, 74, 108]
  */
-export function layoutValueTags(ys: ReadonlyArray<number | undefined>, height: number): number[] {
-  const step = TAG_BLOCK_HEIGHT + TAG_GAP;
+export function layoutValueTags(ys: ReadonlyArray<number | undefined>, height: number, blockHeight: number = TAG_BLOCK_HEIGHT): number[] {
+  const step = blockHeight + TAG_GAP;
   // 高さの分かる札を上から順に、その後ろに高さの分からない札を、渡した順に並べる
   const order = ys
     .map((y, index) => ({ index, wanted: y === undefined ? Number.POSITIVE_INFINITY : y - TAG_CENTER_OFFSET }))
@@ -38,7 +39,7 @@ export function layoutValueTags(ys: ReadonlyArray<number | undefined>, height: n
   });
   // 下から: 欄の下にはみ出す札と、1 つ下の札にかかる札を、上へ戻す（上端 0 より上には出さない）
   for (let i = tops.length - 1; i >= 0; i--) {
-    const limit = i === tops.length - 1 ? height - TAG_BLOCK_HEIGHT : tops[i + 1] - step;
+    const limit = i === tops.length - 1 ? height - blockHeight : tops[i + 1] - step;
     tops[i] = Math.max(0, Math.min(tops[i], limit));
   }
 

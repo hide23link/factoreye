@@ -59,7 +59,7 @@ export function TapeGaugeWidget({ widget }: { widget: Widget }) {
   );
 
   return (
-    <div className="flex h-full flex-col justify-center gap-2 px-1" style={{ background: severity === "critical" ? "var(--fe-red-bg)" : undefined }}>
+    <div className="flex h-full flex-col justify-start gap-2 px-1" style={{ background: severity === "critical" ? "var(--fe-red-bg)" : undefined }}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-xs font-bold" style={{ color: severity === "normal" ? "var(--fe-mut)" : color }} title={sensor.name}>
           {sensor.name}

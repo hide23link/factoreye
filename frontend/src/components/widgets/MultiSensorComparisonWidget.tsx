@@ -33,7 +33,7 @@ import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { useNow } from "../../hooks/useNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
-import { buildRows, normalizeRows, rawValueOf } from "../../lib/graph-series";
+import { buildRows, normalizeRows, rawValueOf, summarizeBuckets } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
 import {
   absoluteRange,
@@ -210,6 +210,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
       value,
       position,
       yAxisId: dualAxis ? axis.sides[sensorId] : undefined,
+      // 最高・最低・平均は、区間の max・min・avg（件数で重みづけ）から。実際の値なので、0〜100% にそろえたグラフでも換算前の値
+      stats: summarizeBuckets(results[i]?.data?.buckets ?? []),
     };
   });
 

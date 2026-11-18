@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithQueryClient, screen } from "../../test/test-utils";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
+import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Sensor, Widget } from "../../types";
 import { TrendStackWidget } from "./TrendStackWidget";
 
@@ -55,6 +56,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
+  useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
   vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [], total: 0 });
 });
@@ -79,16 +81,17 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     renderWithQueryClient(<TrendStackWidget widget={widget(["co2"])} />);
 
-    // 左の欄の名前と、グラフの左上（狭い枠のとき用）の名前
+    // 左の欄の名前と、行の上（狭い枠のとき用）の名前
     expect((await screen.findAllByText("洋室 CO2")).length).toBeGreaterThan(0);
-    // 最高は区間の max（1103）、最低は区間の min（580）
-    expect(screen.getByText("1103")).toBeInTheDocument();
-    expect(screen.getByText("580")).toBeInTheDocument();
+    // 最高は区間の max（1103）、最低は区間の min（580）。左の欄と、行の上（狭い枠のとき用）の両方に出る
+    expect(screen.getAllByText("1103").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("580").length).toBeGreaterThan(0);
     expect(screen.getByText(/最高 1103/)).toBeInTheDocument();
     // 今の値の札（最後の区間の値）。重故障のしきい値の外
     expect(screen.getByText("1050")).toBeInTheDocument();
-    expect(screen.getByText("重 上限 1000")).toBeInTheDocument();
-    expect(screen.getByText("上限 1000 ppm")).toBeInTheDocument();
+    // しきい値の線の数値（軽故障と重故障の両方があるときは、重故障の線にだけ付ける）
+    expect(screen.getByText("上限 1000")).toBeInTheDocument();
+    expect(screen.getAllByText("上限 1000 ppm").length).toBeGreaterThan(0);
     // 縦軸の目盛り
     expect(screen.getByText("1200")).toBeInTheDocument();
   });
@@ -106,7 +109,34 @@ describe("TrendStackWidget（計器グラフ）", () => {
     expect(tag).toHaveStyle({ color: "var(--fe-amb)" });
     // 札の左の矢印も、札と同じ色
     expect(screen.getByTestId("now-tag-arrow")).toHaveStyle({ borderRightColor: "var(--fe-amb)" });
-    expect(screen.getByText(/受信なし/)).toBeInTheDocument();
+    expect(screen.getAllByText(/受信なし/).length).toBeGreaterThan(0);
+  });
+
+  it("軽故障と重故障の両方があるときは、線は 2 本とも引き、数値は重故障の線にだけ付ける（文字が重ならない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("co2", "洋室 CO2", { thresholdMaxWarning: 900, thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(5, 800)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["co2"])} />);
+
+    await screen.findAllByText("洋室 CO2");
+    expect(screen.getByText("上限 1000")).toBeInTheDocument();
+    expect(screen.queryByText("上限 900")).not.toBeInTheDocument();
+  });
+
+  it("カーソルは最初から出ていて、その時刻の値を、同じ画面の別のウィジェット用に出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a", "b"])} />);
+
+    await screen.findAllByText("センサーA");
+    // 見出しに、期間と、カーソルの時刻
+    expect(screen.getByText("推移 1H")).toBeInTheDocument();
+    expect(screen.getByText(/^カーソル \d{2}:\d{2}$/)).toBeInTheDocument();
+    // 時刻と、行ごとの値（カーソルの位置にデータが無いので「---」）を、この計器グラフ（w1）の分として store に出している
+    await vi.waitFor(() => expect(useTrendCursorStore.getState().widgets.w1?.rows.map((row) => row.name)).toEqual(["センサーA", "センサーB"]));
+    expect(useTrendCursorStore.getState().widgets.w1?.time).toBeDefined();
+    expect(useTrendCursorStore.getState().widgets.w1?.spanMs).toBe(60 * 60_000);
   });
 
   it("センサーごとに 1 行ずつ並べる", async () => {
@@ -135,5 +165,45 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     const tag = await screen.findByText("1080", { selector: "span.font-num" });
     expect(tag).toHaveStyle({ color: "var(--fe-red)" });
+  });
+
+  it("計器グラフを 2 つ置いても、カーソルの値は混ざらない。片方が消えても、もう片方の分は残る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+    const first = { ...widget(["a"]), id: "w1" };
+    const second = { ...widget(["b"]), id: "w2" };
+
+    const { rerender } = renderWithQueryClient(
+      <>{[<TrendStackWidget key="w1" widget={first} />, <TrendStackWidget key="w2" widget={second} />]}</>,
+    );
+
+    await vi.waitFor(() => {
+      const widgets = useTrendCursorStore.getState().widgets;
+      expect(widgets.w1?.rows.map((row) => row.name)).toEqual(["センサーA"]);
+      expect(widgets.w2?.rows.map((row) => row.name)).toEqual(["センサーB"]);
+    });
+
+    // 片方（w1）を消す: w2 の分は残る
+    // key をそろえて、w2 を作り直さずに w1 だけ外す
+    rerender(<>{[<TrendStackWidget key="w2" widget={second} />]}</>);
+    await vi.waitFor(() => expect(useTrendCursorStore.getState().widgets.w1).toBeUndefined());
+    expect(useTrendCursorStore.getState().widgets.w2?.rows.map((row) => row.name)).toEqual(["センサーB"]);
+  });
+
+  it("最高・最低の札とカーソルの札は重ならない（カーソルを優先し、最高・最低を逃がす）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(50, 600, 700, 500), bucketAgo(30, 650, 700, 600), bucketAgo(5, 900, 1000, 800)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+    // 札はどれも px の位置で置かれる（左上の角が、枠の外に出ない）
+    const labels = screen.getAllByText(/^最(高|低) \d/, { selector: "span.font-num" }).filter((el) => el.style.left !== "");
+    expect(labels.length).toBe(2);
+    for (const label of labels) {
+      expect(parseFloat(label.style.left)).toBeGreaterThanOrEqual(0);
+      expect(parseFloat(label.style.top)).toBeGreaterThanOrEqual(0);
+    }
   });
 });

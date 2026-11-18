@@ -11,6 +11,15 @@ import {
   pointNear,
   staleAfterMs,
   timeTicks,
+  boxesOverlap,
+  describeInterval,
+  describeSpanShort,
+  estimateTextWidth,
+  placeCursorLabel,
+  placeExtremeLabels,
+  placeLabelAround,
+  formatRangeJst,
+  maxTimeTicks,
   toPoints,
   trendLimits,
   trendStats,
@@ -195,5 +204,93 @@ describe("staleAfterMs（受信なしの判定）", () => {
   it("区間 3 つ分。ただし 10 分より短くしない", () => {
     expect(staleAfterMs(60)).toBe(10 * 60_000);
     expect(staleAfterMs(600)).toBe(30 * 60_000);
+  });
+});
+
+describe("時間の軸の目盛りの数（スマホの狭い幅）", () => {
+  it("幅から目盛りの数の上限を決める（64px に 1 つ。2〜8）", () => {
+    expect(maxTimeTicks(320)).toBe(5);
+    expect(maxTimeTicks(100)).toBe(2);
+    expect(maxTimeTicks(2000)).toBe(8);
+    expect(maxTimeTicks(0)).toBe(8);
+  });
+
+  it("上限を小さくすると、目盛りの間隔が広がり、数が上限以下になる", () => {
+    const from = new Date(2026, 10, 17, 9, 42).getTime();
+    const to = from + 24 * 3_600_000;
+    expect(timeTicks(from, to, 4).length).toBeLessThanOrEqual(4);
+    expect(timeTicks(from, to, 4).length).toBeLessThan(timeTicks(from, to, 8).length + 1);
+  });
+});
+
+describe("見出しの文字", () => {
+  it("区間の幅（5 分・30 秒・2 時間）", () => {
+    expect(describeInterval(300_000)).toBe("5 分");
+    expect(describeInterval(30_000)).toBe("30 秒");
+    expect(describeInterval(7_200_000)).toBe("2 時間");
+  });
+  it("表示範囲の短い名前（24H・15M・7D）", () => {
+    expect(describeSpanShort(24 * 3_600_000)).toBe("24H");
+    expect(describeSpanShort(15 * 60_000)).toBe("15M");
+    expect(describeSpanShort(7 * 24 * 3_600_000)).toBe("7D");
+  });
+  it("範囲の始めと終わりは日本時間で、JST を付ける", () => {
+    // 2026-11-17 00:42 UTC = 09:42 JST
+    const from = Date.UTC(2026, 10, 17, 0, 42);
+    expect(formatRangeJst(from, from + 24 * 3_600_000)).toBe("11/17 09:42 — 11/18 09:42 JST");
+  });
+});
+
+describe("札の置き場所（最高・最低・カーソルの値）", () => {
+  const plot = { width: 400, height: 100 };
+
+  it("文字の幅は、全角を文字の大きさ、半角を 0.62 倍で見積もる", () => {
+    expect(estimateTextWidth("最高", 10)).toBe(20);
+    expect(estimateTextWidth("1103", 10)).toBe(Math.ceil(4 * 6.2));
+  });
+
+  it("左の端（15% 付近）でも、札は枠の外へ切れない", () => {
+    const box = placeLabelAround({ x: 10, y: 60 }, { width: 80, height: 14 }, "above", plot);
+    expect(box.left).toBe(0);
+    const right = placeLabelAround({ x: 395, y: 60 }, { width: 80, height: 14 }, "above", plot);
+    expect(right.left + right.width).toBe(400);
+  });
+
+  it("最高は点の上・最低は点の下が優先。上端の最高は下に、下端の最低は上に置く（行が低くても枠の外へ出ない）", () => {
+    const low = { width: 400, height: 64 };
+    const placed = placeExtremeLabels({ max: { x: 100, y: 4, width: 70 }, min: { x: 300, y: 62, width: 70 }, cursor: null, plot: low });
+    expect(placed.max.box.top).toBeGreaterThan(4); // 点の下
+    expect(placed.min.box.top + placed.min.box.height).toBeLessThan(62); // 点の上
+    expect(placed.max.box.top).toBeGreaterThanOrEqual(0);
+    expect(placed.min.box.top + placed.min.box.height).toBeLessThanOrEqual(low.height);
+  });
+
+  it("最高と最低が近くて同じ側だと重なるときは、最低を反対側へ逃がす（重ならない）", () => {
+    const placed = placeExtremeLabels({ max: { x: 200, y: 50, width: 70 }, min: { x: 210, y: 52, width: 70 }, cursor: null, plot });
+    expect(boxesOverlap(placed.max.box, placed.min.box)).toBe(false);
+    expect(placed.max.faded).toBe(false);
+    expect(placed.min.faded).toBe(false);
+  });
+
+  it("カーソルの札を優先し、重なる最高・最低の札は反対側へ逃がす", () => {
+    const cursor = placeCursorLabel({ x: 200, y: 40 }, { width: 60, height: 18 }, plot);
+    const placed = placeExtremeLabels({ max: { x: 230, y: 40, width: 70 }, min: { x: 20, y: 90, width: 70 }, cursor, plot });
+    expect(boxesOverlap(placed.max.box, cursor)).toBe(false);
+    expect(placed.max.faded).toBe(false);
+  });
+
+  it("どこに置いてもカーソルの札に重なるときは、薄くする", () => {
+    // 札を置ける所がほとんど無い低い枠で、カーソルの札が全面を覆う
+    const tiny = { width: 80, height: 20 };
+    const cursor = { left: 0, top: 0, width: 80, height: 20 };
+    const placed = placeExtremeLabels({ max: { x: 40, y: 10, width: 70 }, min: { x: 40, y: 10, width: 70 }, cursor, plot: tiny });
+    expect(placed.max.faded).toBe(true);
+  });
+
+  it("カーソルの札は、右寄りでは点の左・上寄りでは点の下に置く", () => {
+    const right = placeCursorLabel({ x: 350, y: 80 }, { width: 60, height: 18 }, plot);
+    expect(right.left + right.width).toBeLessThanOrEqual(350);
+    const top = placeCursorLabel({ x: 100, y: 10 }, { width: 60, height: 18 }, plot);
+    expect(top.top).toBeGreaterThan(10);
   });
 });

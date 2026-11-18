@@ -5,6 +5,7 @@
  * 【誰が使うか】useWidgetActions（置く位置を決める）、DashboardView（ドロップ位置の点線）。
  */
 import type { Widget } from "../types";
+import { graphSensorIds } from "./graph-config";
 
 export const GRID_COLUMNS = 12;
 /** 1行の高さと、ウィジェットどうしの間隔（px）。DashboardView の react-grid-layout の設定と同じ値 */
@@ -90,4 +91,21 @@ export function rectToPixels(metrics: GridMetrics, rect: GridRect) {
     width: rect.width * colW + (rect.width - 1) * metrics.margin,
     height: rect.height * metrics.rowHeight + (rect.height - 1) * metrics.margin,
   };
+}
+
+// 計器グラフ（TrendStack）が、全行を枠の中で見せるのに必要な高さ（px）。1 行の最低の高さと、行以外（枠の余白・タイトル・
+// 上の見出し・下の時間の軸）の分
+const TREND_ROW_PX = 88;
+const TREND_FIXED_PX = 112;
+
+/**
+ * ウィジェットが、中身を切らずに見せるのに必要な行数（格子の行）。計器グラフだけが、センサー（行）の数で決まる。
+ * それ以外は 1（保存した高さをそのまま使う）。
+ * 例: センサー 6 つの計器グラフ → (112 + 88×6) ÷ 48 を切り上げて 14 行
+ */
+export function minGridRows(widget: Pick<Widget, "type" | "sensorId" | "config">): number {
+  if (widget.type !== "TrendStack") return 1;
+  const rows = Math.max(1, graphSensorIds(widget).length);
+  // 格子 h 行の高さは、h × 36 + (h − 1) × 12 = 48h − 12（px）
+  return Math.ceil((TREND_FIXED_PX + TREND_ROW_PX * rows + GRID_MARGIN) / (GRID_ROW_HEIGHT + GRID_MARGIN));
 }

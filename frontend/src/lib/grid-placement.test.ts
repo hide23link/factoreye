@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bottomRow, columnWidth, findFreeSpot, pointToCell, rectToPixels } from "./grid-placement";
+import { bottomRow, columnWidth, findFreeSpot, minGridRows, pointToCell, rectToPixels } from "./grid-placement";
 
 const widget = (gridColumn: number, gridRow: number, gridWidth: number, gridHeight: number) => ({
   gridColumn,
@@ -71,5 +71,18 @@ describe("ピクセルと列・行の変換", () => {
       width: 89 * 2 + 12,
       height: 36 * 2 + 12,
     });
+  });
+});
+
+describe("minGridRows（計器グラフが全行を見せるのに必要な行数）", () => {
+  const trend = (sensorIds: string[]) => ({ type: "TrendStack" as const, sensorId: sensorIds[0] ?? null, config: { sensorIds } });
+
+  it("計器グラフは、センサー（行）の数で決まる（6 つ → 14 行、1 つ → 5 行）", () => {
+    expect(minGridRows(trend(["a", "b", "c", "d", "e", "f"]))).toBe(14);
+    expect(minGridRows(trend(["a"]))).toBe(5);
+  });
+
+  it("それ以外のウィジェットは 1（保存した高さをそのまま使う）", () => {
+    expect(minGridRows({ type: "StatValue", sensorId: "a", config: {} })).toBe(1);
   });
 });
