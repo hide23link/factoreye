@@ -159,6 +159,21 @@ describe("WidgetSettings: 1つだけ選ぶ欄", () => {
   });
 });
 
+describe("WidgetSettings: 計器グラフ", () => {
+  const trend = widget("TrendStack", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], colors: ["#111111", "#222222"] } });
+
+  it("色の丸をクリックすると、その行の線だけ次の色になる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={trend} dashboard={dashboardOf(trend)} />);
+
+    await user.click(await screen.findByRole("button", { name: "圧力の線の色を変える" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig().colors).toEqual(["#111111", GRAPH_COLORS[0]]);
+    expect(lastConfig().sensorIds).toEqual(["s1", "s2"]);
+  });
+});
+
 describe("WidgetSettings: グラフ", () => {
   const graph = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], colors: ["#111111", "#222222"] } });
 
