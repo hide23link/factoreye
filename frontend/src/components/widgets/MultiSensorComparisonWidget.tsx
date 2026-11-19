@@ -70,7 +70,7 @@ import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
 import { withSharedCursor } from "../../lib/shared-cursor";
 import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
 import { LegendTable, type LegendTableItem } from "./LegendTable";
-import { isDimmed, toggleSelection, valueAtCursor } from "../../lib/legend-table";
+import { isDimmed, tableCursorTime, toggleSelection, valueAtCursor } from "../../lib/legend-table";
 import { useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useState } from "react";
 import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
@@ -233,13 +233,21 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   // 凡例の表（複数センサーのときだけ。リンクの画面・凡例「出さない」の設定では出さない）
   const showLegendTable = sensorIds.length >= 2 && !linkView && style.legendPosition !== "off";
   const cursorToleranceMs = (2 * (fetchBounds.to - fetchBounds.from)) / GRAPH_BUCKETS;
+  // 表の値は、換算前・埋め草なしの実測の行から取る（0〜100% への換算値や、積み上げのために埋めた値を出さない）
+  const measuredRows = options.axisMode === "normalized" || options.stack !== "none" ? buildRows(inputs, options.aggregation) : rawRows;
+  // 共有のカーソルが、このグラフの表示範囲の外にあるときは、最新の値を出す
+  const tableCursor = tableCursorTime(cursorTime, bounds.from, bounds.to);
+  const lastMeasured = (sensorId: string) => {
+    const row = [...measuredRows].reverse().find((r) => typeof r[sensorId] === "number");
+    return row ? row[sensorId] : undefined;
+  };
   const legendItems: LegendTableItem[] = sensorIds.map((sensorId, i) => ({
     sensorId,
     name: valueItems[i].name,
     color: valueItems[i].color,
     unit: valueItems[i].unit,
-    // カーソルがあればその時刻の値（線と同じ行・換算前）、なければ最新の値
-    value: cursorTime === null ? (valueItems[i].value ?? lastPlotted(sensorId)) : valueAtCursor(rawRows, sensorId, cursorTime, cursorToleranceMs),
+    // カーソルがあればその時刻の値（線と同じ実測の行）、なければ最新の値。取れなければ「---」
+    value: tableCursor === null ? (valueItems[i].value ?? lastMeasured(sensorId)) : valueAtCursor(measuredRows, sensorId, tableCursor, cursorToleranceMs),
     stats: valueItems[i].stats,
   }));
   // 選ばれていない線は薄くする
@@ -409,7 +417,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           selected={selected}
           onToggle={(id, multi) => setSelected((current) => toggleSelection(current, id, multi))}
           decimals={widget.config.decimals}
-          atCursor={cursorTime !== null}
+          atCursor={tableCursor !== null}
         />
       )}
     </div>

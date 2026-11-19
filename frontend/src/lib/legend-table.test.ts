@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GraphRow } from "./graph-series";
-import { isDimmed, toggleSelection, valueAtCursor } from "./legend-table";
+import { isDimmed, tableCursorTime, toggleSelection, valueAtCursor } from "./legend-table";
 
 const rows: GraphRow[] = [
   { time: 1000, a: 5 },
@@ -49,5 +49,14 @@ describe("isDimmed", () => {
   it("選ばれていない線だけ薄くする", () => {
     expect(isDimmed(["a"], "a")).toBe(false);
     expect(isDimmed(["a"], "b")).toBe(true);
+  });
+});
+
+describe("tableCursorTime", () => {
+  it("表示範囲の中だけ返し、外・未設定は null", () => {
+    expect(tableCursorTime(500, 0, 1000)).toBe(500);
+    expect(tableCursorTime(2000, 0, 1000)).toBeNull();
+    expect(tableCursorTime(-1, 0, 1000)).toBeNull();
+    expect(tableCursorTime(null, 0, 1000)).toBeNull();
   });
 });

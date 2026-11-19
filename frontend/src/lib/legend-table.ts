@@ -8,10 +8,12 @@
  *
  * 【誰が使うか】MultiSensorComparisonWidget（線の薄め方）、LegendTable（表の値・行の操作）。
  */
-import { nearestValue, type GraphRow } from "./graph-series";
+import type { GraphRow } from "./graph-series";
 
 /**
- * カーソルの時刻の、そのセンサーの値。時刻に近い行（toleranceMs 以内）のうち、いちばん近い行の値を返す。無ければ undefined。
+ * カーソルの時刻の、そのセンサーの値。そのセンサーの値がある行のうち、時刻にいちばん近い行を選び、
+ * 時刻の差が toleranceMs 以内ならその値を返す。遠すぎる・値のある行が無ければ undefined。
+ * 呼び出し側は、実測のある行だけ（積み上げの埋め草を含まない行）を渡す。
  * 例: rows = [{ time: 1000, a: 5 }, { time: 2000, a: 7 }] のとき、valueAtCursor(rows, "a", 1900, 300) → 7、valueAtCursor(rows, "a", 5000, 300) → undefined
  */
 export function valueAtCursor(
@@ -20,14 +22,23 @@ export function valueAtCursor(
   at: number,
   toleranceMs: number,
 ): number | undefined {
-  const value = nearestValue(rows, sensorId, at);
-  if (value === null) return undefined;
-  // nearestValue は値を返すだけで時刻の差が分からないので、差をもう一度測る
-  const gap = rows.reduce(
-    (best, row) => (row[sensorId] === value ? Math.min(best, Math.abs(row.time - at)) : best),
-    Number.POSITIVE_INFINITY,
-  );
-  return gap <= toleranceMs ? value : undefined;
+  let best: { value: number; gap: number } | undefined;
+  for (const row of rows) {
+    const value = row[sensorId];
+    if (value === undefined) continue;
+    const gap = Math.abs(row.time - at);
+    if (!best || gap < best.gap) best = { value, gap };
+  }
+  return best && best.gap <= toleranceMs ? best.value : undefined;
+}
+
+/**
+ * 値の列に使うカーソルの時刻。共有の時刻が、このグラフの表示範囲（from〜to）の中にあるときだけ返す。
+ * 無い・範囲の外なら null（そのときの表は「最新」の値を出す）。
+ * 例: tableCursorTime(500, 0, 1000) → 500、tableCursorTime(2000, 0, 1000) → null、tableCursorTime(null, 0, 1000) → null
+ */
+export function tableCursorTime(time: number | null, from: number, to: number): number | null {
+  return time !== null && time >= from && time <= to ? time : null;
 }
 
 /**

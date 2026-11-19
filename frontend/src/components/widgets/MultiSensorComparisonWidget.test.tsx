@@ -166,4 +166,46 @@ describe("MultiSensorComparisonWidget", () => {
     await user.click(within(row).getByRole("button"));
     expect(screen.getByRole("button", { name: "洋室 だけ表示する" })).toHaveAttribute("aria-pressed", "false");
   });
+
+  it("0〜100% にそろえて最新値が未取得でも、凡例の表の「値（最新）」は換算前の値を出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "洋室"), makeSensor("s2", "寝室")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (sensorId) => ({
+      bucketSeconds: 60,
+      buckets: [
+        { start: "2024-01-01T00:10:00.000Z", min: 10, max: 10, avg: 10, count: 1 },
+        { start: "2024-01-01T00:20:00.000Z", min: 20, max: 20, avg: sensorId === "s1" ? 20 : 30, count: 1 },
+      ],
+    }));
+    renderWithQueryClient(
+      <MultiSensorComparisonWidget
+        widget={makeWidget({ config: { sensorIds: ["s1", "s2"], timeRangeHours: 1, decimals: 1, axisMode: "normalized" } as Widget["config"] })}
+      />,
+    );
+    const row = (await screen.findByRole("button", { name: "洋室 だけ表示する" })).closest("tr") as HTMLElement;
+    // 洋室の最新は 20.0（換算後の 100 ではない）
+    await waitFor(() => expect(within(row).getAllByText("20.0").length).toBeGreaterThan(0));
+    expect(within(row).queryByText("100.0")).toBeNull();
+  });
+
+  it("積み上げでは、実測のない区間の埋めた値を、値の列に出さない（最新は実測の最後の値）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "洋室"), makeSensor("s2", "寝室")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (sensorId) => ({
+      bucketSeconds: 60,
+      buckets:
+        sensorId === "s1"
+          ? [{ start: "2024-01-01T00:10:00.000Z", min: 7, max: 7, avg: 7, count: 1 }]
+          : [
+              { start: "2024-01-01T00:10:00.000Z", min: 1, max: 1, avg: 1, count: 1 },
+              { start: "2024-01-01T00:20:00.000Z", min: 2, max: 2, avg: 2, count: 1 },
+            ],
+    }));
+    renderWithQueryClient(
+      <MultiSensorComparisonWidget
+        widget={makeWidget({ config: { sensorIds: ["s1", "s2"], timeRangeHours: 1, decimals: 1, graphType: "area", stack: "normal" } as Widget["config"] })}
+      />,
+    );
+    const row = (await screen.findByRole("button", { name: "洋室 だけ表示する" })).closest("tr") as HTMLElement;
+    // 洋室の最後の実測は 7.0。20 分の行に埋めた 0.0 は出さない（値・最小・最大・平均がすべて 7.0 で 4 回）
+    await waitFor(() => expect(within(row).getAllByText("7.0").length).toBe(4));
+  });
 });

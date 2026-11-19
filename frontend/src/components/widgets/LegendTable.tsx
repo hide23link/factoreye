@@ -41,15 +41,15 @@ export function LegendTable({
 }) {
   const format = (value: number | undefined) =>
     value === undefined ? "---" : decimals === undefined ? formatYTick(value) : value.toFixed(decimals);
-  const head = "whitespace-nowrap px-1.5 py-0.5 text-right font-normal text-gray-500";
-  const cell = "whitespace-nowrap px-1.5 py-0.5 text-right font-num text-gray-900";
+  const head = "whitespace-nowrap px-1 py-0.5 text-right font-normal text-gray-500";
+  const cell = "whitespace-nowrap px-1 py-0.5 text-right font-num text-gray-900";
 
   return (
-    <div className="mt-1 max-h-[40%] shrink-0 overflow-y-auto text-[11px]" data-testid="legend-table">
+    <div className="mt-1 max-h-[40%] shrink-0 overflow-auto text-[11px]" data-testid="legend-table">
       <table className="w-full border-collapse" aria-label="凡例の表">
         <thead>
           <tr className="border-b border-gray-200">
-            <th scope="col" className="px-1.5 py-0.5 text-left font-normal text-gray-500">
+            <th scope="col" className="px-1 py-0.5 text-left font-normal text-gray-500">
               名前
             </th>
             <th scope="col" className={head}>
@@ -78,7 +78,7 @@ export function LegendTable({
                 // 行のどこを押しても切り替える。名前のボタンの押下（Enter・Space を含む）も、ここに伝わる
                 onClick={(e) => onToggle(item.sensorId, e.shiftKey || e.ctrlKey || e.metaKey)}
               >
-                <td className="w-full min-w-[5rem] max-w-0 px-1.5 py-0.5 text-left text-gray-700">
+                <td className="w-full min-w-[5rem] max-w-0 px-1 py-0.5 text-left text-gray-700">
                   <button
                     type="button"
                     aria-pressed={pressed}
@@ -91,10 +91,9 @@ export function LegendTable({
                       style={{ background: item.color }}
                       aria-hidden="true"
                     />
-                    <span className="truncate" title={item.name}>
+                    <span className="truncate" title={item.unit ? `${item.name}（${item.unit}）` : item.name}>
                       {item.name}
                     </span>
-                    {item.unit && <span className="shrink-0 text-gray-500">{item.unit}</span>}
                   </button>
                 </td>
                 <td className={`${cell} font-bold`}>{format(item.value)}</td>
