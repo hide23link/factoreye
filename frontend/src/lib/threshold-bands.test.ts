@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { bandAt, computeBands, describeBand } from "./threshold-bands";
-import type { TrendLimit, TrendPoint } from "./trend-stack";
+import { bandAt, computeBands, describeBand, toBandSamples, type BandSample } from "./threshold-bands";
+import type { TrendLimit } from "./trend-stack";
 
 const MIN = 60_000;
-const at = (minute: number, value: number): TrendPoint => ({ time: minute * MIN, value });
+// 平均だけの区間（最高＝最低＝value）
+const at = (minute: number, value: number): BandSample => ({ time: minute * MIN, max: value, min: value });
+// 区間の最高・最低が、平均（線の値）と違う区間
+const spread = (minute: number, min: number, max: number): BandSample => ({ time: minute * MIN, max, min });
 
 // 上限: 注意 40・警報 50
 const upper: TrendLimit[] = [
@@ -56,10 +59,34 @@ describe("computeBands（しきい値を超えた区間）", () => {
     expect(bands.map((band) => [band.startMs, band.endMs])).toEqual([[0, 10 * MIN], [60 * MIN, 60 * MIN]]);
   });
 
-  it("線の色の切り替わり（levelOf）と同じ点が、帯の端になる", () => {
-    const points = [at(0, 39.9), at(10, 40.1), at(20, 40.1), at(30, 39.9)];
-    const [band] = computeBands(points, upper);
-    expect([band.startMs, band.endMs]).toEqual([10 * MIN, 20 * MIN]);
+  it("10 分の区間に 1 秒だけ警報値があり、平均は超えていなくても、帯が出る（区間の最高で判定）", () => {
+    const bands = computeBands([spread(0, 20, 30), spread(10, 20, 95), spread(20, 20, 30)], upper);
+    expect(bands).toEqual([{ startMs: 10 * MIN, endMs: 10 * MIN, level: "critical", side: "max", extreme: 95 }]);
+  });
+
+  it("平均が超えている区間でも、帯が出る", () => {
+    expect(computeBands([spread(0, 44, 48), spread(10, 44, 48)], upper)).toHaveLength(1);
+  });
+
+  it("下限側は、区間の最低で判定する（最高が内側でも、最低が下限を割れば帯）", () => {
+    const bands = computeBands([spread(0, 20, 30), spread(10, 2, 30), spread(20, 20, 30)], lower);
+    expect(bands).toEqual([{ startMs: 10 * MIN, endMs: 10 * MIN, level: "critical", side: "min", extreme: 2 }]);
+  });
+
+  it("上限側のしきい値だけのときは、最低が低くても帯にならない", () => {
+    expect(computeBands([spread(0, -100, 30)], upper)).toEqual([]);
+  });
+
+  it("値が数でない区間（欠け）は読み飛ばし、前後が超えていれば 1 つの帯のまま", () => {
+    const bands = computeBands([at(0, 45), { time: 10 * MIN, max: NaN, min: NaN }, at(20, 46)], upper);
+    expect(bands.map((band) => [band.startMs, band.endMs])).toEqual([[0, 20 * MIN]]);
+  });
+
+  it("toBandSamples は、区間の中央の時刻に区間の最高・最低を置く（endTime より後にはしない）", () => {
+    const start = "2026-11-20T00:00:00.000Z";
+    const t0 = Date.parse(start);
+    expect(toBandSamples([{ start, max: 9, min: 1 }], 600)).toEqual([{ time: t0 + 300_000, max: 9, min: 1 }]);
+    expect(toBandSamples([{ start, max: 9, min: 1 }], 600, t0 + 100_000)[0].time).toBe(t0 + 100_000);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compareAvailability, compareName, compareOffsetMs, describeCompare, parseCompareMode, shiftPointsForward, shiftRange } from "./compare-range";
+import { compareAvailability, compareFetchRange, compareName, compareOffsetMs, describeCompare, parseCompareMode, shiftPointsForward, shiftRange } from "./compare-range";
 
 const DAY = 86_400_000;
 const format = (value: number) => value.toFixed(1);
@@ -49,5 +49,12 @@ describe("compare-range（昨日の重ね）", () => {
   it("差が丸めて 0 なら符号なし。今の値が無ければ差を出さない", () => {
     expect(describeCompare("yesterday", 62.4, 62.41, format)).toBe("昨日 62.4（差 0.0）");
     expect(describeCompare("yesterday", 62.4, null, format)).toBe("昨日 62.4");
+  });
+
+  it("比較側の取得範囲は、ずらしたうえで 1 区間の倍数に切り下げる（直近で範囲が進んでも、同じ取得になる）", () => {
+    const a = compareFetchRange({ from: 10 * DAY + 37_000, to: 10 * DAY + 3_637_000 }, "yesterday", 60_000);
+    expect(a).toEqual({ from: 9 * DAY, to: 9 * DAY + 3_600_000 });
+    const b = compareFetchRange({ from: 10 * DAY + 41_000, to: 10 * DAY + 3_641_000 }, "yesterday", 60_000);
+    expect(b).toEqual(a);
   });
 });

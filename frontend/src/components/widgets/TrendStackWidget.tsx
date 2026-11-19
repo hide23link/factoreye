@@ -64,7 +64,8 @@ import {
   type TrendPoint,
 } from "../../lib/trend-stack";
 import { compareAvailability, describeCompare, shiftPointsForward, shiftRange, type CompareMode } from "../../lib/compare-range";
-import { bandAt, computeBands, describeBand, type AlarmBand } from "../../lib/threshold-bands";
+import { useCompareReadings } from "../../hooks/useCompareReadings";
+import { bandAt, computeBands, describeBand, toBandSamples, type AlarmBand } from "../../lib/threshold-bands";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { requestCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
@@ -159,15 +160,15 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
         <span className="font-num">
           {formatRangeJst(bounds.from, bounds.to)}&emsp;{describeInterval(span / GRAPH_BUCKETS)}ごと
         </span>
-        <span className="ml-auto inline-flex items-center gap-1">
+        <span className="trend-legend ml-auto inline-flex items-center gap-1">
           <i className="inline-block w-3.5 border-t border-dashed" style={{ borderColor: CYAN }} aria-hidden="true" />
           しきい値
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="trend-legend inline-flex items-center gap-1">
           <i className="inline-block h-0.5 w-3.5" style={{ background: RED }} aria-hidden="true" />
           超過
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="trend-legend inline-flex items-center gap-1">
           <i className="inline-block h-2 w-2 rounded-full border" style={{ borderColor: INK }} aria-hidden="true" />
           最高・最低
         </span>
@@ -289,8 +290,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   // 比較の線のデータ。同じ間引き API を、範囲をずらして取る（取れなくても、今の線には影響しない）
-  const compareBounds = useMemo(() => shiftRange(bounds, compareMode), [bounds, compareMode]);
-  const { data: compareData } = useDownsampledReadings(compareMode === "none" ? null : sensorId, compareBounds, GRAPH_BUCKETS, live, refreshMs);
+  const compareData = useCompareReadings(sensorId, bounds, compareMode, GRAPH_BUCKETS, (bounds.to - bounds.from) / GRAPH_BUCKETS);
   const rowRef = useRef<HTMLDivElement>(null);
   const { height } = useElementSize(rowRef);
   const maxIntervals = height > 0 ? Math.min(7, Math.max(2, Math.floor(height / 22))) : 7;
@@ -551,7 +551,8 @@ function buildRowModel(input: {
     lineD: linePath(points, scale, bounds.from, bounds.to, gapMs),
     warningD: overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to),
     criticalD: overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to),
-    bands: computeBands(points, limits, gapMs),
+    // 帯は区間の最高・最低で判定する（線の色の切り替えは線の値。行の「最高」札と食い違わないように）
+    bands: computeBands(toBandSamples(data.buckets, data.bucketSeconds, bounds.to), limits, gapMs),
     comparePoints,
     compareD: linePath(comparePoints, scale, bounds.from, bounds.to, gapThreshold(comparePoints, bucketMs)),
   };

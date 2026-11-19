@@ -118,7 +118,9 @@ describe("SensorGraphWidget", () => {
     expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
     await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled)).toHaveBeenCalledTimes(2));
     const [today, previous] = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((call) => Date.parse(call[1]));
-    expect(today - previous).toBe(24 * 3_600_000);
+    // 取得の数を増やさないよう、比較側の範囲は 1 区間の長さに切り下げる（最大で 1 分のずれ）
+    expect(today - previous).toBeGreaterThanOrEqual(24 * 3_600_000);
+    expect(today - previous).toBeLessThan(24 * 3_600_000 + 60_000);
     expect(screen.queryByText("グラフのデータを取得できませんでした。")).not.toBeInTheDocument();
   });
 

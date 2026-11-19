@@ -41,6 +41,18 @@ export function shiftRange(range: { from: number; to: number }, mode: CompareMod
   return { from: range.from - offset, to: range.to - offset };
 }
 
+/**
+ * 比較側を取るときの範囲。ずらしたうえで、始めと終わりを stepMs（グラフの 1 区間の長さ）の倍数に切り下げる。
+ * 直近の表示では範囲が毎回少しずつ進むが、丸めておけば、区間 1 つ進むまでは同じ取得になり、取り直しが増えない
+ * （比較側は過去のデータで変わらないため、取り直す間隔も持たない）。点は最大で 1 区間ずれるが、線とカーソルの値には影響しない。
+ * 例: stepMs = 60000 のとき、範囲 10:00:37〜11:00:37 を昨日にずらして → 前日の 10:00:00〜11:00:00
+ */
+export function compareFetchRange(range: { from: number; to: number }, mode: CompareMode, stepMs: number): { from: number; to: number } {
+  const shifted = shiftRange(range, mode);
+  if (stepMs <= 0) return shifted;
+  return { from: Math.floor(shifted.from / stepMs) * stepMs, to: Math.floor(shifted.to / stepMs) * stepMs };
+}
+
 /** 比較側の点を、今の時刻の位置へ進める */
 export function shiftPointsForward(points: ReadonlyArray<TrendPoint>, mode: CompareMode): TrendPoint[] {
   const offset = compareOffsetMs(mode);

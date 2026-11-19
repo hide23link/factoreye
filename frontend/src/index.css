@@ -88,4 +88,8 @@
   .trend-headline {
     display: flex;
   }
+  /* 見出しの凡例（しきい値・超過・最高最低）は、狭い枠では隠す。切り替えボタンで見出しが高くなり、グラフが潰れるため */
+  .trend-stack .trend-legend {
+    display: none;
+  }
 }

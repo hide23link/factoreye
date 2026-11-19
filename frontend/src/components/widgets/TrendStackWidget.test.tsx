@@ -424,6 +424,19 @@ describe("TrendStackWidget の警報の帯", () => {
     expect(bands[0]).toHaveAttribute("data-level", "critical");
   });
 
+  it("平均は超えていなくても、区間の最高が警報値なら、帯が出る（行の「最高」札と食い違わない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2", { thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 600,
+      buckets: [bucketAgo(50, 600), bucketAgo(30, 600, 1200, 500), bucketAgo(10, 600)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    const bands = await screen.findAllByTestId("threshold-band");
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toHaveAttribute("data-level", "critical");
+    expect(screen.getByText(/最高 1200/)).toBeInTheDocument();
+  });
+
   it("しきい値が無ければ、帯は出ない", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 1100), bucketAgo(20, 1200)] });
@@ -470,9 +483,12 @@ describe("TrendStackWidget の昨日の重ね", () => {
     expect(await screen.findByTestId("compare-line")).toBeInTheDocument();
     const calls = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls;
     const [today, previous] = [calls.find((c) => !isCompareCall(c[1])), calls.find((c) => isCompareCall(c[1]))];
-    // 比較側の範囲は、今の範囲のちょうど 24 時間前
-    expect(Date.parse(today![1]) - Date.parse(previous![1])).toBe(24 * 3_600_000);
-    expect(Date.parse(today![2]) - Date.parse(previous![2])).toBe(24 * 3_600_000);
+    // 比較側の範囲は、今の範囲の 24 時間前（取得の数を増やさないよう、1 区間の長さに切り下げるので、最大で 1 区間（1 分）のずれ）
+    for (const index of [1, 2] as const) {
+      const gap = Date.parse(today![index]) - Date.parse(previous![index]);
+      expect(gap).toBeGreaterThanOrEqual(24 * 3_600_000);
+      expect(gap).toBeLessThan(24 * 3_600_000 + 60_000);
+    }
     // 縦軸は、比較の値（5000）が入る高さまで伸びる
     expect(screen.getByText("5000")).toBeInTheDocument();
   });
@@ -516,5 +532,34 @@ describe("TrendStackWidget の昨日の重ね", () => {
       const notes = useTrendCursorStore.getState().widgets.w1?.rows[0]?.notes?.map((n) => n.text) ?? [];
       expect(notes).toEqual([expect.stringMatching(/^昨日 62\.4（差 \+4\.\d）$/)]);
     });
+  });
+
+  it("昨日から先週に切り替えた直後は、昨日のデータを先週として描かない（空にする）", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation((_id, from) => {
+      const ago = Date.now() - Date.parse(from);
+      // 先週の取得は、返ってこない（取得中のまま）
+      if (ago > 6 * 24 * 3_600_000) return new Promise(() => {});
+      if (isCompareCall(from)) return Promise.resolve({ bucketSeconds: 60, buckets: [{ ...bucketAgo(0, 700), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] });
+      return Promise.resolve({ bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] });
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findByTestId("compare-line");
+    fireEvent.click(screen.getByRole("button", { name: "比較: 先週" }));
+    await vi.waitFor(() => expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument());
+  });
+
+  it("比較側は取り直さない。直近の表示で今の線が取り直されても、比較側の取得は増えない（範囲を丸めるため）", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from) ? { bucketSeconds: 60, buckets: [] } : { bucketSeconds: 60, buckets: [bucketAgo(30, 600)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1);
   });
 });

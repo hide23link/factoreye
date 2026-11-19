@@ -49,9 +49,10 @@ import {
   spanHours,
   zoomAround,
 } from "../../lib/timeRange";
-import { compareAvailability, compareName, compareOffsetMs, describeDiff, shiftRange, type CompareMode } from "../../lib/compare-range";
-import { bandAt, computeBands, describeBand } from "../../lib/threshold-bands";
-import { gapThreshold, trendLimits, type TrendPoint } from "../../lib/trend-stack";
+import { compareAvailability, compareName, compareOffsetMs, describeCompare, type CompareMode } from "../../lib/compare-range";
+import { useCompareReadings } from "../../hooks/useCompareReadings";
+import { bandAt, computeBands, describeBand, toBandSamples } from "../../lib/threshold-bands";
+import { gapThreshold, pointNear, trendLimits, type TrendPoint } from "../../lib/trend-stack";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
@@ -138,14 +139,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const compareMode: CompareMode =
     linkView || isBar || !compareAvailability(selectedCompare, bounds.from, now, maxRangeForBuild()).ok ? "none" : selectedCompare;
   // 比較の線のデータ。同じ間引き API を、範囲をずらして取る（取れなくても、今の線には影響しない）
-  const compareBounds = shiftRange(fetchBounds, compareMode);
-  const { data: compareData } = useDownsampledReadings(
-    compareMode === "none" ? null : widget.sensorId,
-    compareBounds,
-    GRAPH_BUCKETS,
-    range.mode === "relative",
-    options.refreshMs,
-  );
+  const compareData = useCompareReadings(widget.sensorId, fetchBounds, compareMode, GRAPH_BUCKETS, (fetchBounds.to - fetchBounds.from) / GRAPH_BUCKETS);
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
@@ -168,20 +162,25 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     value: bucketValue(b, options.aggregation),
   }));
 
-  // 比較の線の点（今の時刻の位置へ進める）。今の点と時刻が同じなら、同じ行にまとめる（ツールチップが 1 回で両方を出せるように）
+  // 比較の線の点（今の時刻の位置へ進める）。今の線とは別のデータ（Line の data）で重ねるので、今の線の欠測の見え方は変わらない
   const compareOffset = compareOffsetMs(compareMode);
-  const comparePoints =
+  const comparePoints: TrendPoint[] =
     compareMode !== "none" && compareData
       ? compareData.buckets.map((b) => ({ time: new Date(b.start).getTime() + compareOffset + halfBucketMs, value: bucketValue(b, options.aggregation) }))
       : [];
-  const mergedByTime = new Map<number, { time: number; value?: number; compare?: number }>(chartData.map((point) => [point.time, { ...point }]));
-  for (const point of comparePoints) mergedByTime.set(point.time, { ...(mergedByTime.get(point.time) ?? { time: point.time }), compare: point.value });
-  const plotData: Array<{ time: number; value?: number; compare?: number }> = compareMode === "none" ? chartData : [...mergedByTime.values()].sort((a, b) => a.time - b.time);
+  // 欠測（区間 2.5 個分より離れた点の間）には空の行を入れて、比較の線もつなげない
+  const compareRows: Array<{ time: number; compare?: number }> = [];
+  comparePoints.forEach((point, i) => {
+    const previous = comparePoints[i - 1];
+    if (previous && point.time - previous.time > halfBucketMs * 5) compareRows.push({ time: previous.time + halfBucketMs });
+    compareRows.push({ time: point.time, compare: point.value });
+  });
   const compareLabel = compareName(compareMode);
   const compareLine =
     compareMode === "none" ? null : (
       <Line
         key="compare"
+        data={compareRows}
         type="linear"
         dataKey="compare"
         name={compareLabel}
@@ -189,7 +188,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
         strokeWidth={1.4}
         strokeDasharray="4 3"
         dot={false}
-        connectNulls
+        tooltipType="none"
         isAnimationActive={false}
       />
     );
@@ -221,7 +220,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const linePoints: TrendPoint[] = chartData.flatMap((point) => (typeof point.value === "number" ? [{ time: point.time, value: point.value }] : []));
   const alarmBands =
     showBands && sensor
-      ? computeBands(linePoints, trendLimits(sensor), gapThreshold(linePoints, data.bucketSeconds * 1000))
+      ? computeBands(toBandSamples(data.buckets, data.bucketSeconds), trendLimits(sensor), gapThreshold(linePoints, data.bucketSeconds * 1000))
       : [];
   const alarmBandElements = renderAlarmBands(alarmBands, bounds.from, bounds.to);
   const yDomain = graphYDomain(
@@ -247,20 +246,20 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     tick: { fontSize: 10 },
   };
   // カーソルが警報の帯の中にあれば、時刻の後ろに「警報 11:42〜12:58 最高 89.2」を添える
+  // 比較の線があれば、「昨日 62.4（差 +4.1）」も添える（比較の線は今の線と別のデータなので、ツールチップの行ではなく、ここで出す）
   const tooltipLabelFormatter = (label: ReactNode) => {
-    const band = bandAt(alarmBands, Number(label), halfBucketMs);
-    if (!band) return formatTime(Number(label));
-    return `${formatTime(Number(label))}\u3000${describeBand(band, formatTime, (value) => formatTooltipValue(value, sensor?.unit))}`;
+    const time = Number(label);
+    const format = (value: number) => formatTooltipValue(value, sensor?.unit);
+    const parts = [formatTime(time)];
+    const band = bandAt(alarmBands, time, halfBucketMs);
+    if (band) parts.push(describeBand(band, formatTime, format));
+    const comparePoint = compareMode === "none" ? null : pointNear(comparePoints, time, halfBucketMs * 2);
+    if (comparePoint) parts.push(describeCompare(compareMode, comparePoint.value, chartData.find((point) => point.time === time)?.value ?? null, format));
+    return parts.join("\u3000");
   };
   // ツールチップは「センサー名: 値 単位」（既定の「value: 83.60231701333902」だと、何の値か分からず、桁も多すぎる）
   const seriesName = sensor?.name ?? "値";
-  // 比較の線は「昨日: 62.4 ℃（差 +4.1）」。差は 今の値 − 比較の値
-  const tooltipValueFormatter = (value: unknown, name?: unknown, _item?: unknown, _index?: number, payload?: ReadonlyArray<{ dataKey?: unknown; value?: unknown }>) => {
-    const text = formatTooltipValue(value, sensor?.unit);
-    const today = payload?.find((entry) => entry.dataKey === "value")?.value;
-    if (name !== compareLabel || compareMode === "none" || typeof value !== "number" || typeof today !== "number") return text;
-    return `${text}${describeDiff(value, today, (v) => formatTooltipValue(v, undefined))}`;
-  };
+  const tooltipValueFormatter = (value: unknown) => formatTooltipValue(value, sensor?.unit);
   const selection = drag.selection;
   const showTooltip = style.showTooltip && !linkView;
 
@@ -295,7 +294,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={plotData} margin={chartMargin} {...pointerHandlers}>
+            <AreaChart data={chartData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
@@ -303,7 +302,6 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               {compareLine}
               <Area
-                connectNulls={compareMode !== "none"}
                 dataKey="value"
                 name={seriesName}
                 type={style.curveType}
@@ -321,7 +319,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </AreaChart>
           ) : (
-            <LineChart data={plotData} margin={chartMargin} {...pointerHandlers}>
+            <LineChart data={chartData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
@@ -329,7 +327,6 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               {compareLine}
               <Line
-                connectNulls={compareMode !== "none"}
                 type={style.curveType}
                 dataKey="value"
                 name={seriesName}
