@@ -15,29 +15,26 @@ self-hosted では None）は、呼び出す人が渡すものではない。Fas
 """
 import hashlib
 from collections import OrderedDict
-from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import AwareDatetime
-from sqlalchemy import and_, func, null, or_, true
+from sqlalchemy import and_, func, null, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import ingest_cache
+from app import ingest_cache, readings_query
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
 from app.api.updates import apply_update
-from app.db.models import IngestDevice, Reading, Sensor
+from app.db.models import IngestDevice, Sensor
 from app.db.session import get_session
 from app.schemas import (
-    DownsampledBucket,
     DownsampledReadings,
     ReadingAggregate,
     ReadingListResponse,
-    ReadingRead,
     SensorCreate,
     SensorRead,
     SensorUpdate,
@@ -242,31 +239,10 @@ async def list_latest_readings(
       {"readings": [{"sensorId": "...", "value": 22.4, "recordedAt": "2026-11-18T00:42:00Z"}],
        "total": 1}
     センサーごとに、主キー（sensor_id, recorded_at）の索引を後ろから 1 件だけ読む（LATERAL）ので、
-    測定値が何百万件あっても、センサーの数に比例する時間で済む。
+    測定値が何百万件あっても、センサーの数に比例する時間で済む。古い分が 1 分にまとめられていて
+    生の行が無いセンサーは、まとめた行の最後の値を返す（app/readings_query.py）。
     """
-    # 「このセンサーの、いちばん新しい 1 件」。外側のセンサーの行ごとに実行される（LATERAL）
-    at_or_before = [] if before is None else [Reading.recorded_at <= before]
-    newest = (
-        select(Reading.value, Reading.recorded_at)
-        .where(Reading.sensor_id == Sensor.id, *at_or_before)
-        .order_by(Reading.recorded_at.desc())  # type: ignore[attr-defined]
-        .limit(1)
-        .lateral("newest")
-    )
-    # SaaS は自分のワークスペースのセンサーだけ（self-hosted は全部）
-    in_workspace = [] if workspace_id is None else [Sensor.workspace_id == workspace_id]
-    query = (
-        select(col(Sensor.id), newest.c.value, newest.c.recorded_at)
-        .select_from(Sensor)
-        .join(newest, true())
-        .where(*in_workspace)
-    )
-
-    result = await session.exec(query)
-    readings = [
-        ReadingRead(sensor_id=sensor_id, value=value, recorded_at=recorded_at)
-        for sensor_id, value, recorded_at in result.all()
-    ]
+    readings = await readings_query.latest_values(session, workspace_id, before)
     return json_response(ReadingListResponse(readings=readings, total=len(readings)))
 
 
@@ -342,19 +318,9 @@ async def get_sensor_readings(
 ) -> Response:
     await _get_active_sensor(session, sensor_id, workspace_id)
 
-    # 新しい順に、limit 件まで返す（グラフ用）。期間は from / to で絞る
-    # 使う列だけを読む（ORM のオブジェクトを作らないため、CPU を使わない）
-    query = select(Reading.sensor_id, Reading.value, Reading.recorded_at).where(
-        Reading.sensor_id == sensor_id
-    )
-    if from_ is not None:
-        query = query.where(Reading.recorded_at >= from_)
-    if to is not None:
-        query = query.where(Reading.recorded_at <= to)
-    query = query.order_by(Reading.recorded_at.desc()).limit(limit)  # type: ignore[attr-defined]
-
-    result = await session.exec(query)
-    readings = [ReadingRead.model_validate(row) for row in result.all()]
+    # 新しい順に、limit 件まで返す（グラフ用）。期間は from / to で絞る。
+    # 古い分が 1 分にまとめられているときは、生の行に続けて、まとめた行の平均で埋める
+    readings = await readings_query.recent_readings(session, sensor_id, from_, to, limit)
     return json_response(ReadingListResponse(readings=readings, total=len(readings)))
 
 
@@ -371,17 +337,8 @@ async def get_sensor_readings_aggregate(
     """
     await _get_active_sensor(session, sensor_id, workspace_id)
 
-    # func.count(Reading.sensor_id)のように列を渡すと、SQLModelのクラス属性がmypyには素のPython型に
-    # 見えてしまい弾かれるため、カラムを渡さずCOUNT(1)として行数を数える
-    query = select(func.sum(Reading.value), func.count(1)).where(
-        Reading.sensor_id == sensor_id, Reading.recorded_at >= from_
-    )
-    if to is not None:
-        query = query.where(Reading.recorded_at <= to)
-
-    result = await session.exec(query)
-    total, count = result.one()
-    return ReadingAggregate(sum=float(total or 0.0), count=count)
+    total, count = await readings_query.sum_and_count(session, sensor_id, from_, to)
+    return ReadingAggregate(sum=total, count=count)
 
 
 @router.get("/{sensor_id}/readings/downsampled", response_model=DownsampledReadings)
@@ -404,46 +361,4 @@ async def get_sensor_readings_downsampled(
         )
     await _get_active_sensor(session, sensor_id, workspace_id)
 
-    width = (to - from_).total_seconds() / buckets
-    start_epoch = from_.timestamp()
-    # 区間の番号（0 始まり）。to ちょうどの測定値は最後の区間に入れる
-    index = func.least(
-        func.floor(
-            (func.extract("epoch", Reading.recorded_at) - start_epoch) / width  # type: ignore[arg-type]
-        ),
-        buckets - 1,
-    )
-    # 列は 5 つ（区間・最小・平均・最大・件数）。SQLModel の select は 4 つまでの型のため一覧で渡す
-    columns = [
-        index,
-        func.min(Reading.value),
-        func.avg(Reading.value),
-        func.max(Reading.value),
-        func.count(1),
-    ]
-    query = (
-        select(*columns)
-        .where(
-            Reading.sensor_id == sensor_id,
-            Reading.recorded_at >= from_,
-            Reading.recorded_at <= to,
-        )
-        .group_by(index)
-        .order_by(index)
-    )
-
-    result = await session.exec(query)
-    rows = result.all()
-    return DownsampledReadings(
-        bucket_seconds=width,
-        buckets=[
-            DownsampledBucket(
-                start=datetime.fromtimestamp(from_.timestamp() + int(i) * width, tz=UTC),
-                min=float(mn),
-                avg=float(avg),
-                max=float(mx),
-                count=count,
-            )
-            for i, mn, avg, mx, count in rows
-        ],
-    )
+    return await readings_query.downsample(session, sensor_id, from_, to, buckets)
