@@ -90,6 +90,19 @@ describe("SensorGraphWidget", () => {
     expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
   });
 
+  it("見出しに「警報の帯」の切り替えを出す（既定は入）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:00:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }],
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
+
+    const toggle = await screen.findByRole("button", { name: "警報の帯を表示する" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("表示範囲は、ダッシュボードの範囲（時間範囲の状態）に従って取得する", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({

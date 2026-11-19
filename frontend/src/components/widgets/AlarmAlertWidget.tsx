@@ -205,12 +205,20 @@ function CursorValues() {
       </p>
       <ul className="min-h-0 overflow-y-auto px-2.5 py-1">
         {rows.map((row) => (
-          <li key={row.id} className="flex items-baseline gap-2 py-0.5">
-            <span className="min-w-0 flex-1 truncate" style={{ color: row.color }} title={row.name}>
-              {row.name}
-            </span>
-            <span className="font-num font-bold">{row.value}</span>
-            <span className="w-8 font-num text-[11px] text-gray-500">{row.unit}</span>
+          <li key={row.id} className="py-0.5">
+            <div className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate" style={{ color: row.color }} title={row.name}>
+                {row.name}
+              </span>
+              <span className="font-num font-bold">{row.value}</span>
+              <span className="w-8 font-num text-[11px] text-gray-500">{row.unit}</span>
+            </div>
+            {/* 警報の帯の中・昨日との差などの注記 */}
+            {row.notes?.map((note) => (
+              <p key={note.text} className="font-num text-[11px]" style={{ color: note.color }}>
+                {note.text}
+              </p>
+            ))}
           </li>
         ))}
       </ul>

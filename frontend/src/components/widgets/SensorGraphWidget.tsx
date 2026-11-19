@@ -49,6 +49,9 @@ import {
   spanHours,
   zoomAround,
 } from "../../lib/timeRange";
+import { bandAt, computeBands, describeBand } from "../../lib/threshold-bands";
+import { gapThreshold, trendLimits, type TrendPoint } from "../../lib/trend-stack";
+import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
@@ -57,6 +60,7 @@ import {
   GRAPH_BUCKETS,
   formatTooltipValue,
   formatYTick,
+  renderAlarmBands,
   renderCursorLine,
   renderThresholdBands,
   renderThresholdLines,
@@ -66,6 +70,7 @@ import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
 import { withSharedCursor } from "../../lib/shared-cursor";
 import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
 import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
+import { GraphViewControls } from "./GraphViewControls";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
 export { GRAPH_BUCKETS };
@@ -124,6 +129,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
   // 右の今の値の札を置く高さ（グラフの中で測る）
   const [valueMeasure, setValueMeasure] = useGraphValueMeasure();
+  // 警報の帯を出すか（この端末の設定。見出しで切り替える）
+  const showBands = useGraphViewStore((s) => s.showBands);
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
@@ -169,6 +176,13 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const style = graphStyle(widget.config);
   const overlay = thresholdOverlay(widget.config, sensor);
   const { lines, bands } = overlay;
+  // 警報の帯。しきい値の表示を切っている（off）グラフには出さない。線の点と同じ値で判定する
+  const linePoints: TrendPoint[] = chartData.flatMap((point) => (typeof point.value === "number" ? [{ time: point.time, value: point.value }] : []));
+  const alarmBands =
+    showBands && sensor && overlay.axisValues.length > 0
+      ? computeBands(linePoints, trendLimits(sensor), gapThreshold(linePoints, data.bucketSeconds * 1000))
+      : [];
+  const alarmBandElements = renderAlarmBands(alarmBands, bounds.from, bounds.to);
   const yDomain = graphYDomain(
     widget.config,
     overlay.axisValues,
@@ -190,7 +204,12 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     tickFormatter: formatTime,
     tick: { fontSize: 10 },
   };
-  const tooltipLabelFormatter = (label: ReactNode) => formatTime(Number(label));
+  // カーソルが警報の帯の中にあれば、時刻の後ろに「警報 11:42〜12:58 最高 89.2」を添える
+  const tooltipLabelFormatter = (label: ReactNode) => {
+    const band = bandAt(alarmBands, Number(label), halfBucketMs);
+    if (!band) return formatTime(Number(label));
+    return `${formatTime(Number(label))}\u3000${describeBand(band, formatTime, (value) => formatTooltipValue(value, sensor?.unit))}`;
+  };
   // ツールチップは「センサー名: 値 単位」（既定の「value: 83.60231701333902」だと、何の値か分からず、桁も多すぎる）
   const seriesName = sensor?.name ?? "値";
   const tooltipValueFormatter = (value: unknown) => formatTooltipValue(value, sensor?.unit);
@@ -202,10 +221,13 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
       {!linkView && <CursorResetButton widgetId={widget.id} />}
       {/* リンクの画面は、上にグラフの名前と今の値を出すので、見出しを出さない */}
       {!linkView && (
-        <p className="mb-1 text-sm font-medium text-gray-700">
-          {sensor?.name ?? "センサー"}
-          {sensor ? ` (${sensor.unit})` : ""}
-        </p>
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="text-sm font-medium text-gray-700">
+            {sensor?.name ?? "センサー"}
+            {sensor ? ` (${sensor.unit})` : ""}
+          </p>
+          <GraphViewControls />
+        </div>
       )}
       <div className="flex min-h-0 flex-1 gap-1.5">
       <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
@@ -215,6 +237,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
+              {alarmBandElements}
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Bar dataKey="value" name={seriesName} fill={color} isAnimationActive={false} />
               {renderThresholdBands(bands, ends)}
@@ -228,6 +251,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
+              {alarmBandElements}
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Area
                 dataKey="value"
@@ -251,6 +275,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
+              {alarmBandElements}
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
               <Line
                 type={style.curveType}

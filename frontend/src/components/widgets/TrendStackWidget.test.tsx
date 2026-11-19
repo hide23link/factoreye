@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fireEvent, renderWithQueryClient, screen } from "../../test/test-utils";
 import { cancelPendingCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
+import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Sensor, Widget } from "../../types";
@@ -71,6 +72,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
+  useGraphViewStore.setState({ showBands: true });
   useCursorTimeStore.getState().reset();
   useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
@@ -400,5 +402,54 @@ describe("TrendStackWidget の色（センサーごとの設定色）", () => {
     await screen.findAllByTitle("外気南 温度");
     expect(nameColors("外気南 温度")).toEqual(expect.arrayContaining(["var(--fe-amb)"]));
     expect(nameColors("外気南 温度")).not.toContain(rgb("#2fa84f"));
+  });
+});
+
+describe("TrendStackWidget の警報の帯", () => {
+  const bandWidgetData = () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2", { thresholdMaxWarning: 800, thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(50, 600), bucketAgo(40, 900), bucketAgo(30, 1100), bucketAgo(20, 600), bucketAgo(10, 600)],
+    });
+  };
+
+  it("しきい値を超えた区間に、帯を重ねる（注意は橙、警報は赤）", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    const bands = await screen.findAllByTestId("threshold-band");
+    // 900 と 1100 は連続しているので、1 つの帯。区間内の最悪は警報
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toHaveAttribute("data-level", "critical");
+  });
+
+  it("しきい値が無ければ、帯は出ない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 1100), bucketAgo(20, 1200)] });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    expect(screen.queryByTestId("threshold-band")).not.toBeInTheDocument();
+  });
+
+  it("見出しの「警報の帯」を切ると、帯が消える", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByTestId("threshold-band");
+    fireEvent.click(screen.getByRole("button", { name: "警報の帯を表示する" }));
+    expect(screen.queryByTestId("threshold-band")).not.toBeInTheDocument();
+  });
+
+  it("カーソルが帯の中にあると、値の一覧に「警報 … 最高 …」を出す", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByTestId("threshold-band");
+    // カーソルを、警報の点（30 分前）に置く
+    useCursorTimeStore.setState({ time: Date.now() - 30 * 60_000 + 30_000, owner: "w1" });
+    await vi.waitFor(() => {
+      const note = useTrendCursorStore.getState().widgets.w1?.rows[0]?.notes?.[0]?.text;
+      expect(note).toMatch(/^警報 \d{2}:\d{2}〜\d{2}:\d{2} 最高 1100$/);
+    });
+    expect(screen.getByTestId("cursor-note")).toHaveTextContent(/^警報 /);
   });
 });

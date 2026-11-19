@@ -17,6 +17,8 @@ export interface TrendCursorRow {
   unit: string;
   value: string;
   color: string;
+  /** 値に添える注記（カーソルが警報の帯の中にあるときの「警報 11:42〜12:58 最高 89.2」など）。無ければ省く */
+  notes?: Array<{ text: string; color: string }>;
 }
 
 /** 1 つの計器グラフのカーソル。spanMs は表示範囲の長さ（ミリ秒。時刻の文字に日付を付けるかを決める） */
@@ -56,7 +58,7 @@ export const useTrendCursorStore = create<TrendCursorState>((set) => ({
     set((state) => {
       const entry = state.widgets[widgetId] ?? { time: 0, spanMs: 0, rows: [] };
       const same = entry.rows.find((r) => r.id === row.id);
-      if (same && same.order === row.order && same.name === row.name && same.unit === row.unit && same.value === row.value && same.color === row.color) {
+      if (same && same.order === row.order && same.name === row.name && same.unit === row.unit && same.value === row.value && same.color === row.color && JSON.stringify(same.notes ?? []) === JSON.stringify(row.notes ?? [])) {
         return state;
       }
       const rows = [...entry.rows.filter((r) => r.id !== row.id), row].sort((a, b) => a.order - b.order);
