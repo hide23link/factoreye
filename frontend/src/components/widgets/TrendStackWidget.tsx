@@ -8,14 +8,17 @@
  * - しきい値の線（水色の点線）と、その数値
  * - 最高・最低の点と、その値・時刻
  * - 右端: 今の値の札（縦軸の今の値の高さを指す）。受信が止まったら橙で「---」
- * 全行で同じ時刻の縦線と値が出る（カーソル）。最初は右寄りに出ていて、グラフの上でマウスを動かす（スマホはタップ）と、その位置に動く。
+ * 全行で同じ時刻の縦線と値が出る（カーソル）。最初は「現在位置」（表示範囲の右端）に出ていて、直近の表示では、動かすまで今に追従する。
+ * グラフの上でマウスを動かす（スマホはタップ・ドラッグ）と、その位置に動き、マウスが外れてもその位置に残る。時刻は、縦線の真下（時間の軸の行）に札で出す。
+ * カーソルの時刻は、同じダッシュボードのすべてのグラフ（ふつうのグラフ・複数のグラフも）と共有する（useCursorTimeStore）。
+ * 見出しの「今に戻す」で、現在位置に戻す。
  * カーソルの時刻と各行の値は useTrendCursorStore に出し、同じ画面の警報の欄の下に「カーソルの時刻の値」として並ぶ。
  *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "TrendStack" のときに出す。
  * 【引数（props）】widget = このウィジェット（センサーは config.sensorIds、先頭は sensorId にも入る）。WidgetCard が渡す。
  * 表示範囲は、ほかのグラフと同じく画面上部の時間の操作（useTimeRangeStore）に従う。
  */
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
 
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
@@ -24,6 +27,7 @@ import { effectiveRange, graphDataOptions, graphSensorIds, type Aggregation } fr
 import { resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
   CURSOR_LABEL_HEIGHT,
+  boxesOverlap,
   describeInterval,
   estimateTextWidth,
   describeSpanShort,
@@ -37,6 +41,8 @@ import {
   maxTimeTicks,
   placeCursorLabel,
   placeExtremeLabels,
+  placeTimeLabel,
+  shownCursorTime,
   type LabelBox,
   type PlacedLabel,
   niceScale,
@@ -56,12 +62,10 @@ import {
   type TrendPoint,
 } from "../../lib/trend-stack";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
+import { requestCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Reading, Sensor, Widget } from "../../types";
 import { GRAPH_BUCKETS } from "./graph-parts";
-
-// カーソルの最初の位置（表示範囲の左端から右端までの割合）。右寄りに置いて、今の値の近くの様子が分かるように
-const DEFAULT_CURSOR_RATIO = 0.8;
 
 // 色はすべて theme.css の意味の色（暗い・明るいで切り替わる）
 const INK = "var(--fe-ink)";
@@ -87,14 +91,23 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const now = useNow(options.refreshMs);
   const bounds = resolveRange(range, now);
   const ids = graphSensorIds(widget);
-  // カーソルの時刻（ミリ秒）。null は、利用者が動かしていないとき（このときは右寄りの既定の位置に出す）
-  const [cursor, setCursor] = useState<number | null>(null);
+  // カーソルの時刻（ミリ秒）。全グラフで共有する。null は、利用者が動かしていない（現在位置＝表示範囲の右端に、今に追従して出す）
+  const cursorTime = useCursorTimeStore((s) => s.time);
+  const resetCursor = useCursorTimeStore((s) => s.reset);
   const span = bounds.to - bounds.from;
-  const shownCursor = cursor ?? bounds.from + span * DEFAULT_CURSOR_RATIO;
+  const shownCursor = shownCursorTime(cursorTime, bounds.from, bounds.to);
   // 時間の軸の目盛りの数は、軸の幅から決める（スマホの狭い幅で、時刻の文字が重ならないように）
   const axisRef = useRef<HTMLDivElement>(null);
   const { width: axisWidth } = useElementSize(axisRef);
   const ticks = timeTicks(bounds.from, bounds.to, maxTimeTicks(axisWidth));
+  // 時間の軸の行に出す、カーソルの時刻の札の位置（軸の幅が測れる前は、標準の幅 600px で決める）
+  const plotWidth = axisWidth > 0 ? axisWidth : 600;
+  const timeText = formatTickTime(shownCursor, span);
+  const timeLabel = placeTimeLabel(
+    (xPercent(shownCursor, bounds.from, bounds.to) / 100) * plotWidth,
+    estimateTextWidth(timeText, 12) + 12,
+    plotWidth,
+  );
 
   // カーソルの時刻を、警報の欄の下の「カーソルの時刻の値」に渡す。この計器グラフが消えたら取り下げる
   const publishCursor = useTrendCursorStore((s) => s.setCursor);
@@ -108,19 +121,16 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-500">センサーが設定されていません（編集で、センサーをこのウィジェットに入れてください）</p>;
   }
 
-  const pointer = {
-    onPointerMove: (event: PointerEvent<HTMLDivElement>) => {
-      const box = event.currentTarget.getBoundingClientRect();
-      // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
-      if (box.width <= 0) return;
-      const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-      setCursor(bounds.from + ratio * span);
-    },
-    // マウスが外れたら、既定の位置に戻す。指（タップ）のときは、離しても残す（値を読むため）
-    onPointerLeave: (event: PointerEvent<HTMLDivElement>) => {
-      if (event.pointerType === "mouse") setCursor(null);
-    },
+  // 動かした位置を、共有のカーソルの時刻にする（グラフの 1 区間に丸め、描画 1 回にまとめる）。
+  // マウスが外れても、指を離しても、カーソルはその位置に残す（勝手に今へ戻さない。戻すのは「今に戻す」）
+  const moveCursor = (event: PointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
+    if (box.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+    requestCursorTime(bounds.from + ratio * span, span / GRAPH_BUCKETS);
   };
+  const pointer = { onPointerMove: moveCursor, onPointerDown: moveCursor };
 
   return (
     <div className="trend-stack flex h-full min-h-0 flex-col text-[13px]" style={{ color: INK }}>
@@ -146,6 +156,12 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
         <span className="rounded-sm px-1.5 font-num font-bold" style={{ background: INK, color: "var(--fe-panel)" }} aria-live="polite">
           カーソル {formatTickTime(shownCursor, span)}
         </span>
+        {/* 動かしたあとだけ出る。全グラフのカーソルを、現在位置（右端）に戻す */}
+        {cursorTime !== null && (
+          <button type="button" onClick={resetCursor} className="rounded border px-1.5 font-bold hover:opacity-80" style={{ borderColor: "var(--fe-line)", color: INK }}>
+            今に戻す
+          </button>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {ids.map((id, index) => (
@@ -171,11 +187,30 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
         <span className="trend-side" />
         <span />
         <div ref={axisRef} className="relative h-5 font-num text-[11px]" style={{ color: MUTED }}>
-          {ticks.map((time) => (
-            <span key={time} className="absolute top-0.5 -translate-x-1/2 whitespace-nowrap" style={{ left: `${xPercent(time, bounds.from, bounds.to)}%` }}>
-              {formatTickTime(time, span)}
-            </span>
-          ))}
+          {ticks.map((time) => {
+            // 時刻の札と重なる目盛りの文字は薄くする（札を優先）
+            const tickText = formatTickTime(time, span);
+            const tickWidth = estimateTextWidth(tickText, 11);
+            const tickLeft = (xPercent(time, bounds.from, bounds.to) / 100) * plotWidth - tickWidth / 2;
+            const covered = boxesOverlap({ left: tickLeft, top: 0, width: tickWidth, height: 14 }, timeLabel);
+            return (
+              <span
+                key={time}
+                className="absolute top-0.5 -translate-x-1/2 whitespace-nowrap"
+                style={{ left: `${xPercent(time, bounds.from, bounds.to)}%`, opacity: covered ? 0.2 : 1 }}
+              >
+                {tickText}
+              </span>
+            );
+          })}
+          {/* カーソルの時刻の札。縦線の真下（時間の軸の行）に出す。左端・右端では内側に寄せる */}
+          <span
+            data-testid="cursor-time-label"
+            className="absolute z-10 whitespace-nowrap rounded-sm px-1.5 font-num text-xs font-bold leading-4"
+            style={{ left: timeLabel.left, top: 0, background: INK, color: "var(--fe-panel)" }}
+          >
+            {timeText}
+          </span>
         </div>
         <span className="pr-2 pt-0.5 text-right text-[11px]" style={{ color: MUTED }}>
           今
@@ -183,6 +218,12 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
       </div>
     </div>
   );
+}
+
+/** グラフの上の操作（マウスを動かす・指で触れる）で、カーソルの時刻を更新する */
+interface PlotPointerHandlers {
+  onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
 }
 
 interface RowProps {
@@ -202,10 +243,7 @@ interface RowProps {
   /** 計器グラフの中の行の順（カーソルの時刻の値の並び順に使う） */
   order: number;
   ticks: number[];
-  pointer: {
-    onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
-    onPointerLeave: (event: PointerEvent<HTMLDivElement>) => void;
-  };
+  pointer: PlotPointerHandlers;
 }
 
 /** 1 センサー分の行。データの取得（間引き）は行ごとに行う */
@@ -589,7 +627,7 @@ function PlotBox({
   pointer,
   children,
 }: {
-  pointer: { onPointerMove: (event: PointerEvent<HTMLDivElement>) => void; onPointerLeave: (event: PointerEvent<HTMLDivElement>) => void };
+  pointer: PlotPointerHandlers;
   children: (plot: { width: number; height: number }) => ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);

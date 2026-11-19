@@ -63,6 +63,8 @@ import {
   type LinkGraphView,
 } from "./graph-parts";
 import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
+import { withSharedCursor } from "../../lib/shared-cursor";
+import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
 import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
 import { MultiSensorComparisonWidget } from "./MultiSensorComparisonWidget";
 
@@ -112,8 +114,9 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     const next = absoluteRange(from, to);
     if (next && !hasOwnRange) setRange(next);
   });
-  // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）
-  const pointerHandlers = coarse || linkView ? {} : drag.handlers;
+  // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）。
+  // それ以外は、動かした位置を、全グラフ共有のカーソルの時刻にする（指ならタップ・ドラッグも。1 区間に丸めて、描画 1 回にまとめる）
+  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
@@ -195,7 +198,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const showTooltip = style.showTooltip && !linkView;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
+      {!linkView && <CursorResetButton />}
       {/* リンクの画面は、上にグラフの名前と今の値を出すので、見出しを出さない */}
       {!linkView && (
         <p className="mb-1 text-sm font-medium text-gray-700">
@@ -216,7 +220,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
-              {renderCursorLine(linkView?.cursorTime ?? null)}
+              {linkView ? renderCursorLine(linkView.cursorTime ?? null) : <SharedCursorOverlay from={bounds.from} to={bounds.to} />}
               {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
@@ -239,7 +243,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
-              {renderCursorLine(linkView?.cursorTime ?? null)}
+              {linkView ? renderCursorLine(linkView.cursorTime ?? null) : <SharedCursorOverlay from={bounds.from} to={bounds.to} />}
               {valueProbe}
             </AreaChart>
           ) : (
@@ -260,7 +264,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {renderThresholdBands(bands, ends)}
               {renderThresholdLines(lines)}
               {selection && <ReferenceArea x1={selection.x1} x2={selection.x2} />}
-              {renderCursorLine(linkView?.cursorTime ?? null)}
+              {linkView ? renderCursorLine(linkView.cursorTime ?? null) : <SharedCursorOverlay from={bounds.from} to={bounds.to} />}
               {valueProbe}
             </LineChart>
           )}

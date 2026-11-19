@@ -2,6 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { act, cleanup, createEvent, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../test/test-utils";
+import { useCursorTimeStore } from "../store/useCursorTimeStore";
 import { useEditorStore } from "../store/useEditorStore";
 import * as panelPlacement from "../lib/panel-placement";
 import { useKioskStore } from "../store/useKioskStore";
@@ -129,6 +130,17 @@ describe("DashboardView", () => {
     await user.click(await screen.findByRole("button", { name: "画面表示を終える" }));
     expect(useUiStore.getState().kiosk).toBe(false);
     expect(await screen.findByRole("button", { name: /編集する/ })).toBeInTheDocument();
+  });
+
+  it("ダッシュボードを閉じると、グラフのカーソルは「今」（現在位置）に戻る（次に開いたとき、前の位置から始まらない）", async () => {
+    vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+    const { unmount } = renderWithQueryClient(<DashboardView dashboardId="d1" />);
+    await screen.findByRole("heading", { name: "工場A" });
+    act(() => useCursorTimeStore.getState().setTime(123456));
+
+    unmount();
+
+    expect(useCursorTimeStore.getState().time).toBeNull();
   });
 
   it("ローディング中はスピナーテキストを表示する", () => {

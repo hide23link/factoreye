@@ -424,3 +424,25 @@ export function placeExtremeLabels(input: {
   const min = place(input.min, "below");
   return { max, min };
 }
+
+// ---- カーソルの時刻（全グラフで共有）----
+
+/**
+ * 各グラフが縦線を引く時刻。共有の時刻（time）が無ければ（利用者が動かしていない）表示範囲の右端＝現在位置、あれば範囲の中に収める。
+ * 例: shownCursorTime(null, 0, 100) → 100、shownCursorTime(150, 0, 100) → 100、shownCursorTime(40, 0, 100) → 40
+ */
+export function shownCursorTime(time: number | null, from: number, to: number): number {
+  if (time === null) return to;
+  return Math.min(Math.max(time, from), to);
+}
+
+/**
+ * 時間の軸の行に出す、時刻の札の位置。縦線（anchorX）の真下に中心を合わせ、左端・右端では内側へ寄せる。
+ * 例: placeTimeLabel(5, 50, 400) → { left: 0, top: 0, width: 50, height: 16 }（左端は内側へ）
+ */
+export function placeTimeLabel(anchorX: number, width: number, plotWidth: number): LabelBox {
+  return { left: clamp(anchorX - width / 2, 0, plotWidth - width), top: 0, width, height: TIME_LABEL_HEIGHT };
+}
+
+/** 時間の軸の行に出す、時刻の札の高さ */
+export const TIME_LABEL_HEIGHT = 16;
