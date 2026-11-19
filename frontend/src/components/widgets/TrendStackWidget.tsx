@@ -23,7 +23,7 @@ import { memo, useEffect, useMemo, useRef, type PointerEvent, type ReactNode } f
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useNow } from "../../hooks/useNow";
-import { effectiveRange, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
+import { effectiveRange, graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
 import { resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
   CURSOR_LABEL_HEIGHT,
@@ -183,6 +183,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
             cursor={shownCursor}
             widgetId={widget.id}
             order={index}
+            lineColor={graphColor(widget, index)}
             ticks={ticks}
             pointer={pointer}
           />
@@ -247,6 +248,8 @@ interface RowProps {
   widgetId: string;
   /** 計器グラフの中の行の順（カーソルの時刻の値の並び順に使う） */
   order: number;
+  /** 正常なときの線・名前の色（編集画面で、センサーごとに選んだ色） */
+  lineColor: string;
   ticks: number[];
   pointer: PlotPointerHandlers;
 }
@@ -257,7 +260,7 @@ interface RowProps {
  * 線・目盛り・しきい値の絵は PlotStatic に分け、カーソルが動くだけでは描き直さない。
  * React.memo で、親の描き直しのうち、この行に関係する値（props）が変わらないものでは、行ごと飛ばす。
  */
-const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, ticks, pointer }: RowProps) {
+const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, lineColor, ticks, pointer }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   const rowRef = useRef<HTMLDivElement>(null);
@@ -297,7 +300,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
   const cursorPoint = pointNear(points, cursor, gapMs / 2);
   const cursorText = cursorPoint ? format(cursorPoint.value) : "---";
   const rowBackground = !stale && level === "critical" ? "var(--fe-red-row)" : undefined;
-  const nameColor = stale || level !== "normal" ? color : INK;
+  const nameColor = stale || level !== "normal" ? color : lineColor;
 
   return (
     <div ref={rowRef} className="trend-cell flex min-h-[88px] flex-1 flex-col border-b" style={{ borderColor: "var(--fe-line)", background: rowBackground }}>
@@ -317,7 +320,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
         )}
       </div>
       <div className="trend-row min-h-0 flex-1">
-        <RowSide name={name} nameColor={stale || level !== "normal" ? color : INK} sub={sub} subColor={stale ? AMBER : MUTED}>
+        <RowSide name={name} nameColor={nameColor} sub={sub} subColor={stale ? AMBER : MUTED}>
           {stats && (
             <dl className="mt-1 grid grid-cols-[2.2em_auto_1fr] items-baseline gap-x-1.5 font-num text-[11px]">
               <dt style={{ color: MUTED }}>最高</dt>
@@ -370,6 +373,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
                   bounds={bounds}
                   limits={limits}
                   lineD={lineD}
+                  lineColor={lineColor}
                   warningD={warningD}
                   criticalD={criticalD}
                   label={describeRow(name, unit, stats, format)}
@@ -491,6 +495,7 @@ const PlotStatic = memo(function PlotStatic({
   bounds,
   limits,
   lineD,
+  lineColor,
   warningD,
   criticalD,
   label,
@@ -500,6 +505,7 @@ const PlotStatic = memo(function PlotStatic({
   bounds: ResolvedRange;
   limits: ReadonlyArray<TrendLimit>;
   lineD: string;
+  lineColor: string;
   warningD: string;
   criticalD: string;
   label: string;
@@ -509,7 +515,7 @@ const PlotStatic = memo(function PlotStatic({
       <Grid scale={scale} ticks={ticks} bounds={bounds} />
       <LimitLines limits={limits} scale={scale} />
       <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label={label}>
-        <path d={lineD} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+        <path d={lineD} fill="none" style={{ stroke: lineColor }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
         <path d={warningD} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
         <path d={criticalD} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
       </svg>
