@@ -1,6 +1,7 @@
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
+import { renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import type { Sensor, Widget } from "../../types";
 import { DEFAULT_RANGE } from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
@@ -134,5 +135,35 @@ describe("MultiSensorComparisonWidget", () => {
 
     // 洋室: 最高 40.0（区間 max の最大）、最低 0.0（区間 min の最小）、平均 22.5（(20×3 + 30×1) ÷ 4）
     await waitFor(() => expect(screen.getByTitle("洋室 最高 40.0 最低 0.0 平均 22.5")).toBeInTheDocument());
+  });
+
+  it("凡例の表の最小・最大・平均は線と同じ区間データから出し、行を押すとその 1 本だけが選ばれる", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "洋室"), makeSensor("s2", "寝室")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (sensorId) => ({
+      bucketSeconds: 60,
+      buckets:
+        sensorId === "s1"
+          ? [
+              { start: "2024-01-01T00:10:00.000Z", min: 10, max: 30, avg: 20, count: 3 },
+              { start: "2024-01-01T00:20:00.000Z", min: 0, max: 40, avg: 30, count: 1 },
+            ]
+          : [{ start: "2024-01-01T00:10:00.000Z", min: 5, max: 6, avg: 5, count: 1 }],
+    }));
+
+    renderWithQueryClient(
+      <MultiSensorComparisonWidget widget={makeWidget({ config: { sensorIds: ["s1", "s2"], timeRangeHours: 1, decimals: 1 } as Widget["config"] })} />,
+    );
+
+    const row = (await screen.findByRole("button", { name: "洋室 だけ表示する" })).closest("tr") as HTMLElement;
+    // 最小 0.0・最大 40.0・平均 22.5（件数で重みづけ）
+    await waitFor(() => expect(within(row).getByText("22.5")).toBeInTheDocument());
+    expect(within(row).getByText("40.0")).toBeInTheDocument();
+    expect(within(row).getByText("0.0")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole("button"));
+    expect(screen.getByRole("button", { name: "洋室 だけ表示する" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "寝室 だけ表示する" })).toHaveAttribute("aria-pressed", "false");
+    await user.click(within(row).getByRole("button"));
+    expect(screen.getByRole("button", { name: "洋室 だけ表示する" })).toHaveAttribute("aria-pressed", "false");
   });
 });
