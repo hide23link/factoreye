@@ -220,6 +220,8 @@ export interface WidgetConfig {
   showGrid?: boolean;
   showTooltip?: boolean;
   legendPosition?: "bottom" | "right" | "off";
+  /** 複数センサー比較の下の凡例の表（最小・最大・平均）を出すか。未設定は出す */
+  showLegendTable?: boolean;
   // グラフ用: 区間（間引いたデータ）の値の出し方。未指定は平均
   aggregation?: "avg" | "max" | "min";
   // グラフ用: 自動で取り直す間隔（秒）。未指定は 30 秒

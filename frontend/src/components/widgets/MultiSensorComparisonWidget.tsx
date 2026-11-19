@@ -230,8 +230,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     };
   });
 
-  // 凡例の表（複数センサーのときだけ。リンクの画面・凡例「出さない」の設定では出さない）
-  const showLegendTable = sensorIds.length >= 2 && !linkView && style.legendPosition !== "off";
+  // 凡例の表（複数センサーのときだけ。リンクの画面・凡例「出さない」・表の設定を切にしたときは出さない。切のときは、元の凡例を位置の設定どおりに出す）
+  const showLegendTable = sensorIds.length >= 2 && !linkView && style.legendPosition !== "off" && widget.config.showLegendTable !== false;
   const cursorToleranceMs = (2 * (fetchBounds.to - fetchBounds.from)) / GRAPH_BUCKETS;
   // 表の値は、換算前・埋め草なしの実測の行から取る（0〜100% への換算値や、積み上げのために埋めた値を出さない）
   const measuredRows = options.axisMode === "normalized" || options.stack !== "none" ? buildRows(inputs, options.aggregation) : rawRows;

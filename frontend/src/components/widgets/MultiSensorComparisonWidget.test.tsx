@@ -208,4 +208,25 @@ describe("MultiSensorComparisonWidget", () => {
     // 洋室の最後の実測は 7.0。20 分の行に埋めた 0.0 は出さない（値・最小・最大・平均がすべて 7.0 で 4 回）
     await waitFor(() => expect(within(row).getAllByText("7.0").length).toBe(4));
   });
+
+  it("凡例の表は、未設定・入のとき出る。切のときは出さず、元の凡例を出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([makeSensor("s1", "洋室"), makeSensor("s2", "寝室")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [{ start: "2024-01-01T00:10:00.000Z", min: 1, max: 1, avg: 1, count: 1 }],
+    });
+    const config = (extra: object) => ({ sensorIds: ["s1", "s2"], timeRangeHours: 1, ...extra }) as Widget["config"];
+
+    const unset = renderWithQueryClient(<MultiSensorComparisonWidget widget={makeWidget({ config: config({}) })} />);
+    expect(await screen.findByTestId("legend-table")).toBeInTheDocument();
+    unset.unmount();
+
+    const on = renderWithQueryClient(<MultiSensorComparisonWidget widget={makeWidget({ config: config({ showLegendTable: true }) })} />);
+    expect(await screen.findByTestId("legend-table")).toBeInTheDocument();
+    on.unmount();
+
+    renderWithQueryClient(<MultiSensorComparisonWidget widget={makeWidget({ config: config({ showLegendTable: false }) })} />);
+    await waitFor(() => expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalled());
+    expect(screen.queryByTestId("legend-table")).toBeNull();
+  });
 });

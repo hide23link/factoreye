@@ -565,6 +565,11 @@ function GraphSettings({ widget, actions }: SectionProps) {
               options={LEGEND_OPTIONS}
               onChange={(legendPosition) => void changeConfig(actions, widget, { legendPosition })}
             />
+            <Toggle
+              label="凡例の表（最小・最大・平均）を表示"
+              checked={config.showLegendTable !== false}
+              onChange={(showLegendTable) => void changeConfig(actions, widget, { showLegendTable })}
+            />
           </>
         )}
       </Section>
