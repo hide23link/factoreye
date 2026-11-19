@@ -7,7 +7,7 @@
  * - 期間: プリセット、または開始と終了を入力した任意の期間
  *
  * 狭い画面（スマホ）では、1 行に収まるよう、よく使う期間のボタンだけを出す。前へ・今・一時停止・後ろへ・拡大縮小、期間の選択、
- * 期間の指定は、「操作」ボタンで開く。
+ * 期間の指定、更新間隔（RefreshControls）は、「操作」ボタンで開く。
  *
  * 【誰が使うか】DashboardView.tsx が、画面の上部に置く。
  * 【引数（props）】className = 外側に足す class（既定は下に余白 mb-3。上の帯に並べるときは "" を渡す）。
@@ -29,6 +29,7 @@ import {
   type TimeRange,
 } from "../lib/timeRange";
 import { useTimeRangeStore } from "../store/useTimeRangeStore";
+import { RefreshControls } from "./RefreshControls";
 
 // ビルド時に決まる動作モード（.env の VITE_AUTH_MODE）。SaaS は保持期間（14 日）まで
 const IS_MULTI_TENANT = import.meta.env.VITE_AUTH_MODE === "multi_tenant";
@@ -197,6 +198,10 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
 
       <span className={`text-xs text-gray-500 ${moreOpen ? "" : "hidden sm:inline"}`} data-testid="time-range-label">
         {range.mode === "relative" ? "自動で更新" : "固定"}：{describeRange(range)}
+      </span>
+
+      <span className={moreOpen ? "inline-flex" : "hidden sm:inline-flex"}>
+        <RefreshControls />
       </span>
 
       <details className={`text-xs ${moreOpen ? "" : "hidden sm:block"}`}>

@@ -11,6 +11,8 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { pendingSaves } from "../lib/pending-saves";
+import { resolveRefetchMs } from "../lib/refresh-interval";
+import { useRefreshStore } from "../store/useRefreshStore";
 import {
   fetchAlarms,
   fetchDashboard,
@@ -124,8 +126,9 @@ export const useReadingTimes = (
   range: { from: number; to: number },
   limit: number,
   intervalMs: number = LIVE_CHART_INTERVAL_MS,
-) =>
-  useQuery({
+) => {
+  const refreshChoice = useRefreshStore((s) => s.choice);
+  return useQuery({
     queryKey: ["reading-times", sensorId, Math.round(range.from / 1000), Math.round(range.to / 1000), limit],
     queryFn: () =>
       fetchSensorReadings(
@@ -135,9 +138,10 @@ export const useReadingTimes = (
         new Date(range.to).toISOString(),
       ),
     enabled: sensorId !== null,
-    refetchInterval: intervalMs,
+    refetchInterval: resolveRefetchMs(refreshChoice, intervalMs),
     placeholderData: keepPreviousData,
   });
+};
 
 // from/to は呼び出し側（ウィジェット）が計算して渡す（例: 「直近1時間」「本日0時から」）。
 // pollごとに境界がわずかにズレてもキャッシュが無駄に増えないよう、分単位に丸めたISO文字列を
@@ -167,8 +171,10 @@ export const useDownsampledReadings = (
   live: boolean,
   // 直近モードで取り直す間隔（ミリ秒）。グラフの設定（refreshSeconds）で変えられる
   intervalMs: number = LIVE_CHART_INTERVAL_MS,
-) =>
-  useQuery({
+) => {
+  // 画面の更新間隔の選択（各グラフの設定に従う以外なら、intervalMs を上書きする）
+  const refreshChoice = useRefreshStore((s) => s.choice);
+  return useQuery({
     queryKey: [
       "readings-downsampled",
       sensorId,
@@ -184,10 +190,11 @@ export const useDownsampledReadings = (
         buckets,
       ),
     enabled: sensorId !== null,
-    refetchInterval: live ? intervalMs : false,
+    refetchInterval: live ? resolveRefetchMs(refreshChoice, intervalMs) : false,
     // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（グラフが消えて描き直されるのを防ぐ）
     placeholderData: keepPreviousData,
   });
+};
 
 /** 全センサーの最新の測定値（全体監視の画面）。数が多くても 1 回の取得で済む。15 秒ごとに取り直す */
 export const useLatestReadings = () =>
