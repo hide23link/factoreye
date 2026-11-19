@@ -67,14 +67,14 @@ import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Reading, Sensor, Widget } from "../../types";
 import { GRAPH_BUCKETS } from "./graph-parts";
 
-// 色はすべて theme.css の意味の色（暗い・明るいで切り替わる）
+// 色は theme.css の意味の色（暗い・明るいで切り替わる）。ただし、正常なときの線・名前は、利用者が選んだ設定色（lineColor）
 const INK = "var(--fe-ink)";
 const MUTED = "var(--fe-mut)";
 const CYAN = "var(--fe-cy)";
 const AMBER = "var(--fe-amb)";
 const RED = "var(--fe-red)";
 
-/** 行の状態ごとの色（重故障＝赤、軽故障・受信なし＝橙、正常＝今の値の色） */
+/** 行の状態ごとの色（重故障＝赤、軽故障・受信なし＝橙、正常＝INK）。正常な線・名前は、設定色（lineColor）で上書きして使う */
 function stateColor(level: "critical" | "warning" | "normal", stale: boolean): string {
   if (stale) return AMBER;
   return level === "critical" ? RED : level === "warning" ? AMBER : INK;
