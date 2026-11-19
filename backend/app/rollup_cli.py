@@ -5,6 +5,12 @@
         → 生の行・まとめた行の件数、いちばん古い生の行、表のサイズを出す（何も変えない）
     docker compose exec backend python -m app.rollup_cli run [--days 7]
         → 今すぐ、--days 日より古い生の行を 1 分にまとめる（省略は設定 READINGS_ROLLUP_DAYS）
+    docker compose exec backend python -m app.rollup_cli minute-build
+        → 今すぐ、直近の分の 1 分の集計（readings_minute）を、閉じた分まで作る
+          （初めては時間がかかる。常駐処理も 30 秒ごとに同じことをするので、手で実行しなくてもよい）
+    docker compose exec backend python -m app.rollup_cli minute-reset --yes
+        → 1 分の集計と印を全部消す（読み出しは従来の方法に戻り、常駐処理が作り直す）。
+          バックアップから生の行を戻したあと・生の行を直接書き換えたあとに使う
     docker compose exec backend python -m app.rollup_cli vacuum-full --yes
         → readings の領域を OS に返す（VACUUM FULL）。終わるまで readings の読み書きが止まる
           （数分。取り込みはその間待たされる）。まとめたあと、ディスクを空けたいときに 1 回だけ使う
@@ -21,6 +27,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.db.session import engine
+from app.minute_cache import TickResult, reset_cache, run_tick
 from app.rollup import rollup_old_readings
 
 _STATUS_SQL = text(
@@ -30,6 +37,12 @@ _STATUS_SQL = text(
         (SELECT min(recorded_at) FROM readings) AS oldest_raw,
         (SELECT count(*) FROM readings_rollup) AS rollup_rows,
         (SELECT min(bucket_start) FROM readings_rollup) AS oldest_rollup,
+        (SELECT count(*) FROM readings_minute) AS minute_rows,
+        (SELECT count(*) FROM readings_minute_state) AS state_rows,
+        (SELECT count(*) FROM readings_minute_state
+         WHERE built_until >= now() - interval '5 minutes') AS state_current,
+        (SELECT count(*) FROM readings_dirty_minutes) AS dirty_rows,
+        pg_size_pretty(pg_total_relation_size('readings_minute')) AS minute_size,
         pg_size_pretty(pg_total_relation_size('readings')) AS raw_size,
         pg_size_pretty(pg_total_relation_size('readings_rollup')) AS rollup_size,
         pg_size_pretty(pg_database_size(current_database())) AS db_size
@@ -47,7 +60,23 @@ async def _status() -> None:
         f"1 分の行    : {row.rollup_rows:,} 件（いちばん古い: {row.oldest_rollup}）  "
         f"{row.rollup_size}"
     )
+    print(
+        f"直近の 1 分の集計: {row.minute_rows:,} 件  {row.minute_size}"
+        f"（印 {row.state_rows} 件のうち、最新まで作ってある {row.state_current} 件、"
+        f"作り直し待ち {row.dirty_rows} 件）"
+    )
     print(f"DB 全体     : {row.db_size}")
+
+
+async def _minute_build() -> None:
+    """今すぐ、1 分の集計を、閉じた分まで作る（初めては、古い方から 1 日分ずつ）。"""
+    result: TickResult = await run_tick()
+    print(
+        f"印を {result.new_states} 件作り、1 日分の作成を {result.window_builds} 回、"
+        f"最新まで足したセンサー {result.topped_up} 件、遅れて届いた分の作り直し "
+        f"{result.settled_minutes} 件"
+    )
+    await _status()
 
 
 async def _run(days: int | None) -> None:
@@ -93,6 +122,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="件数・サイズを出す（何も変えない）")
     run_parser = sub.add_parser("run", help="今すぐ、古い生の行を 1 分にまとめる")
     run_parser.add_argument("--days", type=int, default=None, help="残す日数（省略は設定の値）")
+    sub.add_parser("minute-build", help="今すぐ、直近の 1 分の集計を、閉じた分まで作る")
+    reset_parser = sub.add_parser(
+        "minute-reset", help="1 分の集計と印を全部消す（従来の方法に戻る）"
+    )
+    reset_parser.add_argument("--yes", action="store_true", help="消すことを理解して実行する")
     vacuum_parser = sub.add_parser("vacuum-full", help="readings の領域を返す（読み書きが止まる）")
     vacuum_parser.add_argument("--yes", action="store_true", help="止まることを理解して実行する")
     args = parser.parse_args(argv)
@@ -101,6 +135,17 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_status())
     elif args.command == "run":
         asyncio.run(_run(args.days))
+    elif args.command == "minute-build":
+        asyncio.run(_minute_build())
+    elif args.command == "minute-reset":
+        if not args.yes:
+            print(
+                "1 分の集計と印を全部消します（生の行は消えません）。"
+                "--yes を付けて実行してください"
+            )
+            return 2
+        asyncio.run(reset_cache())
+        print("消しました。常駐処理が、30 秒ごとの処理で作り直します")
     else:
         if not args.yes:
             print(

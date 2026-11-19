@@ -55,6 +55,7 @@ from app.auth import decode_access_token
 from app.config import AuthMode, settings
 from app.db.session import engine
 from app.ingest_buffer import flush_loop, flush_once
+from app.minute_cache import minute_loop
 from app.purge import purge_loop
 from app.rate_limit import limiter
 from app.rollup import rollup_loop
@@ -102,6 +103,8 @@ async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
                 settings.readings_rollup_days,
             )
             tasks.append(asyncio.create_task(rollup_loop()))
+            # 直近の分の 1 分の集計も作って保つ（グラフ・集計を速くする。app/minute_cache.py）
+            tasks.append(asyncio.create_task(minute_loop()))
     yield
     for task in tasks:
         task.cancel()

@@ -200,6 +200,63 @@ class ReadingRollup(SQLModel, table=True):
     last_at: datetime
 
 
+class ReadingMinute(SQLModel, table=True):
+    """直近の測定値（まだ生の行が残っている分）の、1 分ごとの集計。
+
+    OSS 版で READINGS_ROLLUP_DAYS が 1 以上のときに使う。
+
+    readings_rollup は「生の行が消えた古い分」の集計だが、この表は「生の行がまだある分」の集計で、
+    生の行から作り直せる（作り直しは上書き。足し算ではない）。グラフ・集計が、直近 7 日分の生の行
+    （1 秒ごとなら 60 万行）を読まずに済むようにするための控え。app/minute_cache.py が作り、
+    app/readings_query.py が読む。生の行が消える夜のまとめ（app/rollup.py）のとき、同じ分の行は
+    ここから消えて、readings_rollup に移る（二重に数えない）。
+    列の意味は ReadingRollup と同じ。
+    """
+
+    __tablename__ = "readings_minute"
+
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", primary_key=True)
+    # 1 分の開始時刻（UTC。秒は 0）
+    bucket_start: datetime = Field(primary_key=True)
+    count: int
+    sum: float
+    min: float
+    max: float
+    last_value: float
+    last_at: datetime
+
+
+class ReadingMinuteState(SQLModel, table=True):
+    """センサーごとの、1 分の集計（readings_minute）の「どこからどこまで作ったか」の印。
+
+    - finalized_until: この時刻より前の分は、生の行が消えて readings_rollup にまとめられている
+      （このあとに届いた古い生の行は、次の夜のまとめで足される）。
+    - built_until: この時刻より前（finalized_until 以後）の分は、readings_minute に作ってある。
+      この時刻以後の分は、生の行を直接読む。
+    印が無いセンサーは、読み出しが従来の方法（生の行＋まとめた行）で答える。
+    """
+
+    __tablename__ = "readings_minute_state"
+
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", primary_key=True)
+    finalized_until: datetime
+    built_until: datetime
+
+
+class ReadingDirtyMinute(SQLModel, table=True):
+    """遅れて届いた測定値の、(センサー・分) の記録（readings_minute を作り直す対象）。
+
+    1 秒ごとの通常の取り込みでは何も足さず、「今の分より 2 分以上前の時刻」の行が入ったときだけ
+    記録する（機器が時刻をつけて、あとから送り直したときなど）。常駐処理と読み出しが、その分の
+    集計を生の行から作り直して、この行を消す。
+    """
+
+    __tablename__ = "readings_dirty_minutes"
+
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", primary_key=True)
+    bucket_start: datetime = Field(primary_key=True)
+
+
 # ──────────────────────────────────────────────────────────────
 # Alarm（基本は追記専用の監査ログだが、センサー削除時はCASCADEで追従削除される。
 # 2026-10-02、運用者の判断: センサー削除＝関連データ全削除を優先）
