@@ -6,6 +6,10 @@
  * - 「停止とみなす値」は、設定した行だけ有効（その値以下なら停止）。優先は 受信なし > 警報 > 停止 > 稼働
  * - センサーが多くても重くならないよう、画面に見えた行だけデータを取る（一度見えた行は取り続ける）
  * 表示期間は、グラフと同じ（ダッシュボードの時間操作。ウィジェット個別の期間があればそれ）。
+ * 短い欠測（連続して 120 秒未満）は、前の状態を引き継いで「稼働」などに見える（lib/state-timeline.ts の fillShortGaps）。
+ * 60 秒ごとのハートビートが、区間より長い間隔で届くと縞になってしまうのを避けるため。区間の幅は表示期間で変わるので
+ * （約 144 区間）、1 時間表示（区間 約 25 秒）では 120 秒未満の欠測が稼働に見え、24 時間・7D では同じ欠測が区間に収まらず
+ * 受信なしに見えることがある。これは意図した動き（凡例の近くに注記を出す）。
  * 状態の決め方は lib/state-timeline.ts。データは既存の間引き API（センサーごと、約 144 区間）から取る。
  *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "StateTimeline" のときに出す。
@@ -39,11 +43,14 @@ export const TIMELINE_BUCKETS = 144;
 const NONE_BACKGROUND =
   "repeating-linear-gradient(135deg, var(--fe-amb) 0 2px, transparent 2px 5px)";
 
+/** 停止の灰。暗い背景でも明るい背景でも読める灰（文字用の --fe-mut）を、薄めて使う（枠の下地 --fe-grid と見分けがつく） */
+const STOPPED_STYLE: React.CSSProperties = { background: "var(--fe-mut)", opacity: 0.6 };
+
 function segmentStyle(segment: TimelineSegment): React.CSSProperties {
   const base: React.CSSProperties = { left: `${segment.leftPercent}%`, width: `${segment.widthPercent}%` };
   if (segment.state === "none") return { ...base, backgroundImage: NONE_BACKGROUND, boxShadow: "inset 0 0 0 1px var(--fe-amb)" };
   if (segment.state === "alarm") return { ...base, background: segment.level === "critical" ? "var(--fe-red)" : "var(--fe-amb)" };
-  if (segment.state === "stopped") return { ...base, background: "var(--fe-line)" };
+  if (segment.state === "stopped") return { ...base, ...STOPPED_STYLE };
   return { ...base, background: "var(--fe-ok)", opacity: 0.75 };
 }
 
@@ -128,7 +135,7 @@ const LEGEND: Array<{ label: string; style: React.CSSProperties }> = [
   { label: stateLabel("running"), style: { background: "var(--fe-ok)", opacity: 0.75 } },
   { label: stateLabel("alarm", "critical"), style: { background: "var(--fe-red)" } },
   { label: stateLabel("alarm", "warning"), style: { background: "var(--fe-amb)" } },
-  { label: stateLabel("stopped"), style: { background: "var(--fe-line)" } },
+  { label: stateLabel("stopped"), style: STOPPED_STYLE },
   { label: stateLabel("none"), style: { backgroundImage: NONE_BACKGROUND, boxShadow: "inset 0 0 0 1px var(--fe-amb)" } },
 ];
 
@@ -190,6 +197,9 @@ export function StateTimelineWidget({ widget }: { widget: Widget }) {
           </span>
         ))}
       </div>
+      <p className="text-[11px]" style={{ color: "var(--fe-mut)" }}>
+        短い欠測（2 分未満）は、表示の細かさにより、稼働として表示されます
+      </p>
     </div>
   );
 }

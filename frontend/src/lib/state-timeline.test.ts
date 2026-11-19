@@ -69,6 +69,16 @@ describe("buildTimelineCells", () => {
     ]);
   });
 
+  it("区間の幅が割り切れなくても（25 分幅など）、開始時刻が少しずれた区間が隣に落ちない", () => {
+    // 25 分幅（割り切れない）で、API が開始時刻をミリ秒で切り捨てて返した場合
+    const from = FROM;
+    const width = 1500 * 1000 + 0.4; // 25 分 + 0.4 ms（割り切れない）
+    const to = from + width * 6;
+    const at = (i: number) => ({ start: new Date(Math.floor(from + i * width)).toISOString(), min: 1, max: 1, count: 1 });
+    const cells = buildTimelineCells([0, 1, 2, 3, 4, 5].map(at), from, to, 6, [], null);
+    expect(cells.map((c) => c.state)).toEqual(Array(6).fill("running"));
+  });
+
   it("最後の区間より後ろにはみ出した開始時刻は、最後の区間に入れる", () => {
     const cells = buildTimelineCells([bucketAt(10, 1, 1)], FROM, TO, 10, [], null);
     expect(cells[9].state).toBe("running");

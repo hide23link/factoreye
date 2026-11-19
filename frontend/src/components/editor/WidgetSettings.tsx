@@ -806,7 +806,7 @@ function StateTimelineSettings({ widget, actions }: SectionProps) {
           onMove={moveAt}
         />
       </Section>
-      <Section title="停止とみなす値" note="この値以下なら「停止」（灰）にします。空欄の行は、停止を判定しません（受信していて警報でなければ稼働）">
+      <Section title="停止とみなす値" note="この値以下なら「停止」（灰）にします。空欄の行は、停止を判定しません（受信していて警報でなければ稼働）。しきい値の範囲を超えている区間は、停止ではなく警報として表示します">
         {ids.length === 0 ? (
           <p className="text-xs text-gray-500">センサーを入れると、行ごとに設定できます</p>
         ) : (

@@ -21,8 +21,8 @@ export function narrowHeightPx(widget: Widget): number {
   if (widget.type === "TapeGauge") return 168;
   if (widget.type === "DeviceTree") return 200;
   if (widget.type === "TrendStack") return 56 + 96 * Math.max(1, graphSensorIds(widget).length);
-  // 状態の帯: 1 行 28px + 目盛り・凡例など 96px
-  if (widget.type === "StateTimeline") return 96 + 28 * Math.max(1, graphSensorIds(widget).length);
+  // 状態の帯: スマホでは 1 行が「名前・帯・稼働率」の 3 段で約 68px。ほかに目盛り・凡例・注記など約 140px（実機で、4 行 = 約 393px を測った）
+  if (widget.type === "StateTimeline") return 140 + 68 * Math.max(1, graphSensorIds(widget).length);
   return NARROW_DEFAULT_HEIGHT;
 }
 

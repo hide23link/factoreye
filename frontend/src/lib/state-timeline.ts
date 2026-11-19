@@ -86,6 +86,7 @@ export function fillShortGaps(cells: ReadonlyArray<TimelineCell>, cellMs: number
 /**
  * 表示範囲（from〜to）を cellCount 等分した区間ごとの状態。データの無い区間は受信なし。
  * 区間の位置は、API と同じく from からの等間隔（(to - from) / cellCount）で、開始時刻から求める。
+ * 開始時刻はミリ秒で丸めて届くので、区間の幅が割り切れないとき（25 分幅など）に隣へ落ちないよう、四捨五入で区間に入れる。
  */
 export function buildTimelineCells(
   buckets: ReadonlyArray<Pick<DownsampledBucket, "start" | "min" | "max" | "count">>,
@@ -98,7 +99,7 @@ export function buildTimelineCells(
   const width = (toMs - fromMs) / cellCount;
   const byIndex = new Map<number, BucketLike>();
   for (const bucket of buckets) {
-    const index = Math.min(cellCount - 1, Math.floor((new Date(bucket.start).getTime() - fromMs) / width));
+    const index = Math.min(cellCount - 1, Math.round((new Date(bucket.start).getTime() - fromMs) / width));
     if (index >= 0) byIndex.set(index, bucket);
   }
   const raw = Array.from({ length: cellCount }, (_, i) => bucketCell(byIndex.get(i), limits, stopAt));
