@@ -173,6 +173,33 @@ class Reading(SQLModel, table=True):
     sensor: Sensor = Relationship(back_populates="readings")
 
 
+class ReadingRollup(SQLModel, table=True):
+    """古い測定値を 1 分ごとにまとめた行（OSS 版。設定 READINGS_ROLLUP_DAYS で有効になる）。
+
+    1 秒ごとの測定値は 1 日 8.6 万行/センサーずつ増えて重くなるので、設定した日数より古い分は、
+    1 分ごとの「件数・合計・最小・最大・最後の値」にまとめて、元の行を消す（app/rollup.py）。
+    平均は 合計 ÷ 件数 で求める（重みづけ平均。まとめた行どうし、生の行とも正しく合わせられる）。
+    グラフ・集計の API は、生の行（readings）とこの表を合わせて答える（app/readings_query.py）。
+
+    1 つの分（bucket_start）の測定値は、生の行かこの行のどちらか（遅れて届いた値は、次の実行で
+    この行に足し込む）。同じ値を両方に持たないので、合わせても二重に数えない。
+    """
+
+    __tablename__ = "readings_rollup"
+
+    sensor_id: UUID = Field(foreign_key="sensors.id", ondelete="CASCADE", primary_key=True)
+    # 1 分の開始時刻（UTC。秒は 0）
+    bucket_start: datetime = Field(primary_key=True)
+    count: int
+    sum: float
+    min: float
+    max: float
+    # その分でいちばん新しい値と、その時刻（最新の値・「その時刻以前の値」を、
+    # まとめた後も答えるため）
+    last_value: float
+    last_at: datetime
+
+
 # ──────────────────────────────────────────────────────────────
 # Alarm（基本は追記専用の監査ログだが、センサー削除時はCASCADEで追従削除される。
 # 2026-10-02、運用者の判断: センサー削除＝関連データ全削除を優先）

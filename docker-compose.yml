@@ -13,6 +13,8 @@ services:
       - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
       # 取り込みの照合（機器のキー・センサー）を覚えておく秒数。0 で無効
       - INGEST_CACHE_SECONDS=${INGEST_CACHE_SECONDS:-5}
+      # 1 秒ごとの測定値を残す日数。これより古い分は 1 分ごとにまとめる（self-hosted だけ。0 は何もしない）
+      - READINGS_ROLLUP_DAYS=${READINGS_ROLLUP_DAYS:-0}
       - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       # LAN上の別ホストから使う場合は、このファイルと同じ階層の.envで
