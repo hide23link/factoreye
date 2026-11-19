@@ -15,6 +15,22 @@ describe("escapeCsvField", () => {
   });
 });
 
+describe("式の無害化（CSV インジェクション）", () => {
+  it("文字列の欄の先頭が = + - @ タブ CR のときは、先頭に ' を付ける", () => {
+    expect(escapeCsvField("=HYPERLINK(\"http://x\")")).toBe(`"'=HYPERLINK(""http://x"")"`);
+    expect(escapeCsvField("+1")).toBe("'+1");
+    expect(escapeCsvField("-cmd")).toBe("'-cmd");
+    expect(escapeCsvField("@SUM(1)")).toBe("'@SUM(1)");
+    expect(escapeCsvField("\tx")).toBe("'\tx");
+    expect(escapeCsvField("\rx")).toBe(`"'\rx"`);
+  });
+  it("数値の欄（負数）や、途中に記号がある文字列はそのまま", () => {
+    expect(escapeCsvField(-5.5)).toBe("-5.5");
+    expect(escapeCsvField("a=b")).toBe("a=b");
+    expect(escapeCsvField("2026-11-20T10:00:00+09:00")).toBe("2026-11-20T10:00:00+09:00");
+  });
+});
+
 describe("buildCsv", () => {
   it("BOM 付き・CRLF・最後に改行。行数は入力と一致する", () => {
     const csv = buildCsv([["時刻", "温度 (℃)"], ["2026-11-20T10:00:00+09:00", 1.5], ["2026-11-20T10:01:00+09:00", null]]);

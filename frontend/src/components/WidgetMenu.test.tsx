@@ -80,6 +80,22 @@ describe("WidgetMenu", () => {
     expect(openButton()).toHaveFocus();
   });
 
+  it("Tab で閉じ、フォーカスは ⋮ のボタンに戻る", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(openButton());
+    await user.keyboard("{Tab}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(openButton()).toHaveFocus();
+  });
+
+  it("リンクの注記を出す", async () => {
+    const user = userEvent.setup();
+    setup({ linkNote: "直近 60 分のリンクになります" });
+    await user.click(openButton());
+    expect(screen.getByText("直近 60 分のリンクになります")).toBeInTheDocument();
+  });
+
   it("外側のクリックで閉じる", async () => {
     const user = userEvent.setup();
     setup();

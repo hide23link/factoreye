@@ -118,9 +118,32 @@ describe("WidgetCard の ⋮ メニュー", () => {
     await user.click(screen.getByRole("menuitem", { name: /全画面で見る/ }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("グラフ本体")).toBeInTheDocument();
+    // 本体は 1 つだけ（裏のカードは描かない）
+    expect(screen.getAllByText("グラフ本体")).toHaveLength(1);
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByText("グラフ本体")).toBeInTheDocument();
+    // フォーカスは ⋮ のボタンに戻る
+    expect(screen.getByRole("button", { name: "ウィジェットのメニュー" })).toHaveFocus();
+  });
+
+  it("10 秒以内に開き直したときは取得を使い回し、ゲージのカードは何も取得しない", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetCard widget={makeWidget()} dashboard={dashboard} />);
+    await screen.findByText("グラフ本体");
+    await user.click(screen.getByRole("button", { name: "ウィジェットのメニュー" }));
+    await waitFor(() => expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalledTimes(1));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "ウィジェットのメニュー" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.fetchSensorReadingsDownsampled).toHaveBeenCalledTimes(1);
+  });
+
+  it("ゲージのカードは、センサーの一覧も取得しない", async () => {
+    renderWithQueryClient(<WidgetCard widget={makeWidget({ type: "Gauge" })} dashboard={dashboard} />);
+    await screen.findByText("ゲージ本体");
+    expect(api.fetchSensors).not.toHaveBeenCalled();
   });
 
   it("「この期間のリンクをコピー」で、グラフを開くリンクをコピーする", async () => {

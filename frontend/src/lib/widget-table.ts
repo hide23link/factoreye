@@ -84,3 +84,13 @@ export function linkMinutes(range: TimeRange, bounds: ResolvedRange): number {
   const ms = range.mode === "relative" ? range.durationMs : bounds.to - bounds.from;
   return Math.min(LINK_MAX_MINUTES, Math.max(LINK_MIN_MINUTES, Math.round(ms / 60000)));
 }
+
+/** 「この期間のリンクをコピー」の下に出す注記。リンクは常に「直近 N 分」になる（固定の期間は、その長さ。7 日までに収める） */
+export function linkNote(range: TimeRange, bounds: ResolvedRange): string {
+  const ms = range.mode === "relative" ? range.durationMs : bounds.to - bounds.from;
+  const minutes = Math.round(ms / 60000);
+  const parts = [`直近 ${linkMinutes(range, bounds)} 分のリンクになります`];
+  if (range.mode === "absolute") parts.push("固定の期間は、長さだけを使います");
+  if (minutes > LINK_MAX_MINUTES) parts.push("7 日を超える分は切り詰めます");
+  return parts.join("。");
+}

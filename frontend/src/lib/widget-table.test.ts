@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildCsv } from "./csv";
-import { buildCsvRows, buildTableRows, columnTitle, formatTableTime, formatTableValue, linkMinutes, periodLabel, type TableSeries } from "./widget-table";
+import { buildCsvRows, buildTableRows, columnTitle, formatTableTime, formatTableValue, linkMinutes, linkNote, periodLabel, type TableSeries } from "./widget-table";
 
 const b = (start: string, avg: number, max = avg, min = avg) => ({ start, avg, max, min });
 
@@ -61,5 +61,14 @@ describe("表示・期間の文字", () => {
     expect(linkMinutes({ mode: "relative", durationMs: 60_000 }, bounds)).toBe(10);
     expect(linkMinutes({ mode: "relative", durationMs: 30 * 86400_000 }, bounds)).toBe(10080);
     expect(linkMinutes({ mode: "absolute", ...bounds }, bounds)).toBe(60);
+  });
+});
+
+describe("linkNote", () => {
+  const bounds = { from: 0, to: 60 * 60_000 };
+  it("直近は分数だけ、固定の期間は長さだけを使うこと、7 日超は切り詰めることを書く", () => {
+    expect(linkNote({ mode: "relative", durationMs: 3600_000 }, bounds)).toBe("直近 60 分のリンクになります");
+    expect(linkNote({ mode: "absolute", ...bounds }, bounds)).toBe("直近 60 分のリンクになります。固定の期間は、長さだけを使います");
+    expect(linkNote({ mode: "relative", durationMs: 30 * 86400_000 }, bounds)).toContain("7 日を超える分は切り詰めます");
   });
 });

@@ -13,22 +13,13 @@
 import { Suspense, useCallback, useRef, useState } from "react";
 
 import { useWidgetActions } from "../hooks/useWidgetActions";
-import { useWidgetSeries, type WidgetSnapshot } from "../hooks/useWidgetSeries";
-import { buildCsv, csvFileName, downloadCsv } from "../lib/csv";
-import { effectiveRange } from "../lib/graph-config";
-import { buildGraphLinkUrl, graphName, isGraphWidget } from "../lib/graph-link";
 import { lazyNamed } from "../lib/lazyWithRetry";
-import { resolveRange } from "../lib/timeRange";
-import { buildCsvRows, linkMinutes, periodLabel } from "../lib/widget-table";
 import { widgetLabel } from "../lib/widget-catalog";
 import { useEditorStore } from "../store/useEditorStore";
-import { useTimeRangeStore } from "../store/useTimeRangeStore";
-import { useSensors } from "../hooks/queries";
 import type { DashboardDetail, Widget } from "../types";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { WidgetFullscreen } from "./WidgetFullscreen";
-import { WidgetMenu } from "./WidgetMenu";
-import { WidgetTable } from "./WidgetTable";
+import { WidgetTools } from "./WidgetTools";
 import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
 import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
 
@@ -100,56 +91,21 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   // タイトルの行を、枠の中身の上に置くか（タイトルがあるとき。編集中の入力の場所は、タイトルがないときは重ねて出す）
   const showsTitleLine = title !== "";
 
-  // ⋮ メニュー。開いた時点の表示範囲（snapshot）で、表・CSV のデータを取り直す
+  // ⋮ メニュー（グラフ系だけ。取得・メニューの処理は WidgetTools の中。ここでは、枠の形に関わる「表を開いているか」「全画面か」だけ持つ）
   const hasMenu = MENU_TYPES.has(widget.type);
-  const dashboardRange = useTimeRangeStore((s) => s.range);
-  const { data: sensors } = useSensors();
-  const [snapshot, setSnapshot] = useState<WidgetSnapshot | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [tableShown, setTableShown] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const exportData = useWidgetSeries(widget, snapshot);
   const closeFullscreen = useCallback(() => setFullscreen(false), []);
-  const openMenu = () => {
-    const range = effectiveRange(widget, dashboardRange);
-    const now = Date.now();
-    setSnapshot({ range, bounds: resolveRange(range, now), nonce: now });
-  };
-  const saveCsv = () => {
-    if (!snapshot) return;
-    const name = graphName(widget, sensors);
-    downloadCsv(csvFileName(name, periodLabel(snapshot.range, snapshot.bounds)), buildCsv(buildCsvRows(exportData.series, exportData.rows)));
-  };
-  // リンクは、グラフ 2 種類だけ開ける（計器グラフは、リンクの画面が未対応のため項目を出さない）
-  const copyLink = async (): Promise<boolean> => {
-    if (!snapshot) return false;
-    try {
-      const base = `${window.location.origin}${window.location.pathname}`;
-      await navigator.clipboard.writeText(buildGraphLinkUrl(base, dashboard.id, widget.id, linkMinutes(snapshot.range, snapshot.bounds)));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const menu = hasMenu ? (
-    <WidgetMenu
-      onOpen={openMenu}
-      onFullscreen={() => setFullscreen(true)}
-      onToggleTable={() => {
-        if (!tableShown && !snapshot) openMenu();
-        setTableShown((v) => !v);
-      }}
-      tableShown={tableShown}
-      csv={exportData.isError ? "error" : exportData.ready ? "ready" : "loading"}
-      onSaveCsv={saveCsv}
-      onCopyLink={isGraphWidget(widget) ? copyLink : null}
-    />
-  ) : null;
+  // 閉じたあとにフォーカスを戻す先（このカードの ⋮ のボタン）
+  const menuButton = useCallback(() => cardRef.current?.querySelector<HTMLElement>("[data-widget-menu-button]") ?? null, []);
   // 表を開いているときも、タイトルの行と同じく、枠を縦に並べる（グラフの下に表を置く）
   const stacked = showsTitleLine || (hasMenu && tableShown);
 
   return (
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- 編集中のカード選択。キーボードは下の onKeyDown（Enter/Space）で対応済み
     <div
+      ref={cardRef}
       data-widget-id={widget.id}
       role="group"
       aria-label={label}
@@ -174,6 +130,9 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
         editing ? "widget-drag-handle cursor-grab touch-none active:cursor-grabbing" : ""
       } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"} ${
         stacked ? "flex flex-col" : ""
+      } ${
+        // 計器グラフの見出しの行（凡例など）が、右上の ⋮ に隠れないよう、右に空きを作る（タイトルがあるときは、タイトルの行が避けている）
+        hasMenu && widget.type === "TrendStack" && !showsTitleLine ? "[&_.trend-stack>div:first-child]:pr-7" : ""
       }`}
     >
       {titleDraft !== null ? (
@@ -227,24 +186,23 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       <div className={`${stacked ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
           <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
-            <WidgetBody widget={widget} />
+            {/* 全画面のあいだは、カードの本体を描かない（同じ本体を 2 つ出すと、共有カーソルなどが書き合うため） */}
+            {fullscreen ? <p className="text-sm text-gray-500">全画面で表示中</p> : <WidgetBody widget={widget} />}
           </Suspense>
         </ChunkErrorBoundary>
       </div>
-      {hasMenu && tableShown && (
-        <WidgetTable
-          series={exportData.series}
-          rows={exportData.rows}
-          loading={exportData.isLoading || snapshot === null}
-          error={exportData.isError}
-          onRetry={exportData.refetch}
-          onClose={() => setTableShown(false)}
+      {hasMenu && (
+        <WidgetTools
+          widget={widget}
+          dashboard={dashboard}
+          editing={editing}
+          tableShown={tableShown}
+          onTableShownChange={setTableShown}
+          onFullscreen={() => setFullscreen(true)}
         />
       )}
-      {/* 閲覧中の ⋮ は、カードの右上に重ねる（編集中は、下の編集用の操作に入れる） */}
-      {!editing && menu && <div className="absolute right-1 top-1 z-10 rounded-md bg-white/80">{menu}</div>}
       {hasMenu && fullscreen && (
-        <WidgetFullscreen label={graphName(widget, sensors)} onClose={closeFullscreen}>
+        <WidgetFullscreen label={title || label} onClose={closeFullscreen} returnFocus={menuButton}>
           <ChunkErrorBoundary>
             <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
               <WidgetBody widget={widget} />
@@ -258,7 +216,6 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
           <span aria-label="ドラッグして移動" role="img" title="カードをつかんで移動" className="px-1 text-xs text-gray-500">
             ⋮⋮
           </span>
-          {menu}
           <button
             type="button"
             aria-label="ウィジェットの設定"

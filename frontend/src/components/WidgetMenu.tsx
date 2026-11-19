@@ -26,6 +26,8 @@ export interface WidgetMenuProps {
   csv: "loading" | "ready" | "error";
   onSaveCsv: () => void;
   onCopyLink: (() => Promise<boolean>) | null;
+  /** リンクの項目の下に出す注記（実際の動きの説明） */
+  linkNote?: string;
   className?: string;
 }
 
@@ -40,7 +42,7 @@ interface Item {
 }
 
 export function WidgetMenu(props: WidgetMenuProps) {
-  const { onOpen, onFullscreen, onToggleTable, tableShown, csv, onSaveCsv, onCopyLink, className } = props;
+  const { onOpen, onFullscreen, onToggleTable, tableShown, csv, onSaveCsv, onCopyLink, linkNote, className } = props;
   const [open, setOpen] = useState(false);
   // 「コピーしました」を出している間の文字（null は出していない）
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -48,6 +50,11 @@ export function WidgetMenu(props: WidgetMenuProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  // 「コピーしました」のあと閉じる待ち時間の予約。画面から消えるとき（アンマウント）に取り消す
+  const closeTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+  }, []);
 
   const close = useCallback((returnFocus: boolean) => {
     setOpen(false);
@@ -72,7 +79,7 @@ export function WidgetMenu(props: WidgetMenuProps) {
           run: () => {
             void onCopyLink().then((ok) => {
               setCopyNotice(ok ? "コピーしました" : "コピーできませんでした");
-              window.setTimeout(() => close(true), 1200);
+              closeTimer.current = window.setTimeout(() => close(true), 1200);
             });
           },
         }]
@@ -136,7 +143,9 @@ export function WidgetMenu(props: WidgetMenuProps) {
       e.preventDefault();
       focusItem(nodes.length - 1);
     } else if (e.key === "Tab") {
-      close(false);
+      // ⋮ のボタンに戻して閉じる（Tab 自体は止める。次の Tab で、ボタンの次の場所へ進む）
+      e.preventDefault();
+      close(true);
     } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
       // 頭文字のキー（V・T）
       const hit = items.find((item) => item.key !== undefined && item.key.toLowerCase() === e.key.toLowerCase());
@@ -153,6 +162,7 @@ export function WidgetMenu(props: WidgetMenuProps) {
         ref={buttonRef}
         type="button"
         aria-label="ウィジェットのメニュー"
+        data-widget-menu-button
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -212,6 +222,7 @@ export function WidgetMenu(props: WidgetMenuProps) {
                 {item.key && <kbd className="rounded border border-gray-200 px-1 font-num text-[10px] text-gray-500">{item.key}</kbd>}
               </button>
             ))}
+            {onCopyLink && linkNote && <p className="border-t border-gray-100 px-3 pb-1 pt-1 text-[11px] text-gray-500">{linkNote}</p>}
           </div>,
           document.body,
         )}

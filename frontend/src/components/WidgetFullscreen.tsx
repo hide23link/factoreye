@@ -4,12 +4,13 @@
  * 中身は、呼び出し側が渡す（WidgetCard が、同じウィジェットの本体をもう 1 つ出す）。
  *
  * 【誰が使うか】WidgetCard が、メニューの「全画面で見る」を選んだときに出す。
- * 【引数（props）】label = 画面の読み上げ名、onClose = 閉じるとき、children = ウィジェットの本体。
+ * 【引数（props）】label = 画面の読み上げ名、onClose = 閉じるとき、children = ウィジェットの本体、
+ *   returnFocus = 閉じたあとにフォーカスを戻す要素を返す関数（⋮ のボタン。なければ、開く前にフォーカスがあった要素）。
  */
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-export function WidgetFullscreen({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+export function WidgetFullscreen({ label, onClose, children, returnFocus }: { label: string; onClose: () => void; children: ReactNode; returnFocus?: () => HTMLElement | null }) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -25,8 +26,10 @@ export function WidgetFullscreen({ label, onClose, children }: { label: string; 
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      before?.focus?.();
+      (returnFocus?.() ?? before)?.focus?.();
     };
+    // returnFocus は、毎回新しい関数でも構わない（開いている間の最新の値で足りる）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   return createPortal(

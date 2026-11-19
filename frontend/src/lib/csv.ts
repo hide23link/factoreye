@@ -13,10 +13,14 @@
 /** 先頭に付ける BOM（Excel が UTF-8 と判断して、日本語が文字化けしないようにする） */
 export const CSV_BOM = "﻿";
 
-/** 1 つの欄を CSV の文字にする。カンマ・改行・引用符を含むときは "…" で囲み、引用符は 2 つにする */
+/**
+ * 1 つの欄を CSV の文字にする。カンマ・改行・引用符を含むときは "…" で囲み、引用符は 2 つにする。
+ * 文字列の欄で、先頭が = + - @・タブ・CR のときは、先頭に「'」を付ける（Excel が式として実行しないため。
+ * センサー名に「=HYPERLINK(...)」と付けられても無害になる）。数値の欄（負数は - で始まる）は、そのまま出す。
+ */
 export function escapeCsvField(value: string | number | null): string {
   if (value === null) return "";
-  const text = String(value);
+  const text = typeof value === "string" && /^[=+\-@\t\r]/.test(value) ? `'${value}` : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
