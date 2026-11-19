@@ -313,11 +313,12 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     fireEvent.pointerMove(plotOf(), { clientX: 0 });
     await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
-    // どちらの計器グラフの札も、同じ時刻（1 時間前）になる。どちらにも「今に戻す」が出る
+    // どちらの計器グラフの札も、同じ時刻（1 時間前）になる。「今に戻す」と見出しのカーソルの札は、動かした方（1 つ目）にだけ出る
     const labels = screen.getAllByTestId("cursor-time-label").map((el) => el.textContent);
     expect(labels).toHaveLength(2);
     expect(labels[0]).toBe(labels[1]);
-    expect(screen.getAllByRole("button", { name: "今に戻す" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "今に戻す" })).toHaveLength(1);
+    expect(screen.getAllByText(/^カーソル \d/)).toHaveLength(1);
   });
 
   it("期間が 1 日を超えるときは、時刻の札に日付も付ける（月/日 時:分）", async () => {
@@ -338,28 +339,28 @@ describe("TrendStackWidget の色（センサーごとの設定色）", () => {
   it("正常なときは、線も名前も設定色で描く", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
-    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2fa84f"])} />);
     await screen.findAllByTitle("洋室 温度");
-    expect(lineStrokes()).toEqual([rgb("#16a34a")]);
-    expect(nameColors("洋室 温度")).toContain(rgb("#16a34a"));
+    expect(lineStrokes()).toEqual([rgb("#2fa84f")]);
+    expect(nameColors("洋室 温度")).toContain(rgb("#2fa84f"));
   });
 
   it("センサーが 2 つのときは、行ごとに別の設定色で描く（順番どおり）", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度"), sensor("b", "和室 温度")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
-    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a", "b"], ["#2563eb", "#9333ea"])} />);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a", "b"], ["#2f80ed", "#8b5cf6"])} />);
     await screen.findAllByTitle("和室 温度");
-    expect(lineStrokes()).toEqual([rgb("#2563eb"), rgb("#9333ea")]);
+    expect(lineStrokes()).toEqual([rgb("#2f80ed"), rgb("#8b5cf6")]);
   });
 
   it("設定色を変えて描き直すと、線の色も変わる", async () => {
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度")]);
     vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
-    const { rerender } = renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2563eb"])} />);
+    const { rerender } = renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2f80ed"])} />);
     await screen.findAllByTitle("洋室 温度");
-    expect(lineStrokes()).toEqual([rgb("#2563eb")]);
-    rerender(<TrendStackWidget widget={coloredWidget(["a"], ["#0891b2"])} />);
-    expect(lineStrokes()).toEqual([rgb("#0891b2")]);
+    expect(lineStrokes()).toEqual([rgb("#2f80ed")]);
+    rerender(<TrendStackWidget widget={coloredWidget(["a"], ["#0fb5a8"])} />);
+    expect(lineStrokes()).toEqual([rgb("#0fb5a8")]);
   });
 
   it("重故障のしきい値を超えている間は、名前を赤にする（設定色で上書きされない）", async () => {
@@ -368,10 +369,10 @@ describe("TrendStackWidget の色（センサーごとの設定色）", () => {
       bucketSeconds: 60,
       buckets: [bucketAgo(30, 600), bucketAgo(2, 1200)],
     });
-    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2fa84f"])} />);
     await screen.findAllByTitle("洋室 CO2");
     expect(nameColors("洋室 CO2")).toEqual(expect.arrayContaining(["var(--fe-red)"]));
-    expect(nameColors("洋室 CO2")).not.toContain(rgb("#16a34a"));
+    expect(nameColors("洋室 CO2")).not.toContain(rgb("#2fa84f"));
   });
 
   it("受信なしのときは、名前を橙にする（設定色で上書きされない）", async () => {
@@ -380,9 +381,9 @@ describe("TrendStackWidget の色（センサーごとの設定色）", () => {
       bucketSeconds: 60,
       buckets: [bucketAgo(50, 8.9), bucketAgo(40, 9.1)],
     });
-    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2fa84f"])} />);
     await screen.findAllByTitle("外気南 温度");
     expect(nameColors("外気南 温度")).toEqual(expect.arrayContaining(["var(--fe-amb)"]));
-    expect(nameColors("外気南 温度")).not.toContain(rgb("#16a34a"));
+    expect(nameColors("外気南 温度")).not.toContain(rgb("#2fa84f"));
   });
 });

@@ -103,7 +103,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     if (next && !hasOwnRange) setRange(next);
   });
   // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）
-  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers);
+  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers, widget.id);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
@@ -348,7 +348,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
 
   return (
     <div className="relative flex h-full flex-col">
-      {!linkView && <CursorResetButton />}
+      {!linkView && <CursorResetButton widgetId={widget.id} />}
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
       {sensorIds.length === 1 && !linkView && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
       <div className="flex min-h-0 flex-1 gap-1.5">

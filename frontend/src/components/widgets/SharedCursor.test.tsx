@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { Line, LineChart, XAxis, YAxis } from "recharts";
 
-import { act, fireEvent, render, screen } from "../../test/test-utils";
+import { act, fireEvent, render, screen, within } from "../../test/test-utils";
 import { useDragSelect } from "../../hooks/useDragSelect";
 import { withSharedCursor } from "../../lib/shared-cursor";
 import { cancelPendingCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
@@ -75,12 +75,29 @@ describe("SharedCursorOverlay（ふつうのグラフ・複数のグラフの共
 
 describe("CursorResetButton（カーソルを今に戻す）", () => {
   it("動かしていないときは出さない。動かしたあとに出て、押すと現在位置に戻る", () => {
-    render(<CursorResetButton />);
+    render(<CursorResetButton widgetId="w1" />);
     expect(screen.queryByRole("button", { name: "カーソルを今に戻す" })).not.toBeInTheDocument();
 
     act(() => useCursorTimeStore.getState().setTime(FROM));
     fireEvent.click(screen.getByRole("button", { name: "カーソルを今に戻す" }));
     expect(useCursorTimeStore.getState().time).toBeNull();
+  });
+});
+
+describe("CursorResetButton は、カーソルを動かしたグラフにだけ出る", () => {
+  it("別のグラフ（owner が違う）には出さず、動かしたグラフと、動かした人が不明のときには出す", () => {
+    render(
+      <>
+        <div data-testid="a"><CursorResetButton widgetId="a" /></div>
+        <div data-testid="b"><CursorResetButton widgetId="b" /></div>
+      </>,
+    );
+    act(() => useCursorTimeStore.getState().setTime(FROM, "a"));
+    expect(within(screen.getByTestId("a")).queryByRole("button")).toBeInTheDocument();
+    expect(within(screen.getByTestId("b")).queryByRole("button")).not.toBeInTheDocument();
+
+    act(() => useCursorTimeStore.getState().setTime(FROM + 60_000));
+    expect(within(screen.getByTestId("b")).queryByRole("button")).toBeInTheDocument();
   });
 });
 
@@ -136,7 +153,7 @@ describe("ふつうのグラフ・複数のグラフの操作（withSharedCursor
 
 describe("CursorResetButton の色", () => {
   it("固定の色ではなく、画面の明るさに合わせた変数の色（暗い画面で白く浮かない）", () => {
-    render(<CursorResetButton />);
+    render(<CursorResetButton widgetId="w1" />);
     act(() => useCursorTimeStore.getState().setTime(FROM));
     const button = screen.getByRole("button", { name: "カーソルを今に戻す" });
     const style = button.getAttribute("style") ?? "";
