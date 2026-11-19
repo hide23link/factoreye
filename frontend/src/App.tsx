@@ -19,6 +19,7 @@ import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardHome, LinkNotFoundNotice } from "./components/DashboardHome";
 import { DashboardNavList } from "./components/DashboardNavList";
 import { DashboardTabs } from "./components/DashboardTabs";
+import { NewSensorNotice } from "./components/NewSensorNotice";
 import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
@@ -397,6 +398,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
         )}
         {!kiosk && view === "main" && <DashboardTabs />}
         {!kiosk && view === "main" && <LinkNotFoundNotice />}
+        {!kiosk && <NewSensorNotice />}
         <main className={kiosk ? "" : "pb-20 sm:pb-0"}>
           {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。ダッシュボードの切り替えも含む） */}
           <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>
