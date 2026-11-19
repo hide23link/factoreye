@@ -91,7 +91,7 @@ const TimelineRow = memo(function TimelineRow({ sensor, sensorId, stopAt, fromMs
     band = (
       <div
         role="img"
-        aria-label={`${name}: 稼働率 ${percent ?? "—"}%。${summary}`}
+        aria-label={`${name}: 稼働率 ${percent === null ? "---" : `${percent}%`}。${summary}`}
         className="relative h-5 overflow-hidden rounded-[2px]"
         style={{ background: "var(--fe-grid)" }}
       >
@@ -118,7 +118,7 @@ const TimelineRow = memo(function TimelineRow({ sensor, sensorId, stopAt, fromMs
         style={{ color: "var(--fe-mut)" }}
         aria-label={percent === null ? "稼働率 不明" : `稼働率 ${percent}%`}
       >
-        {percent === null ? "—" : `${percent}%`}
+        {percent === null ? "---" : `${percent}%`}
       </span>
     </div>
   );

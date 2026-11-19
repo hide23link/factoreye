@@ -9,7 +9,12 @@
  * - 停止: 「停止とみなす値」を設定した行だけ。区間の最高がその値以下（区間のすべての値が、その値以下）
  * - 稼働: 値を受信していて、警報でも停止でもない
  *
- * 稼働率 = 稼働の区間 ÷ 表示範囲の全区間（受信なし・警報・停止は稼働に数えない）。
+ * 短い欠けは受信なしにしない: 値の無い区間が連続して合計 120 秒（MAX_GAP_MS）未満なら、前の状態を引き継ぐ
+ * （60 秒ごとのハートビートが、区間の幅より長い間隔で届いても、縞にならないように）。120 秒以上続くと受信なし。
+ * 先頭（最初の受信より前）の欠けは引き継ぐ前の状態が無いので受信なしのまま。末尾の欠けは、120 秒未満なら前の状態を引き継ぐ。
+ *
+ * 稼働率 = 稼働の区間 ÷ そのセンサーの最初の受信区間から最後の区間まで（受信なし・警報・停止は稼働に数えない。作る前・受信前の区間は含めない）。
+ * 一度も受信が無いセンサーは null（画面は「---」）。
  *
  * 【誰が使うか】components/widgets/StateTimelineWidget.tsx。
  */
@@ -53,6 +58,31 @@ export function bucketCell(bucket: BucketLike | undefined, limits: ReadonlyArray
   return { state: "running" };
 }
 
+/** 値の無い欠けを「受信なし」にする長さ（ミリ秒）。これ未満の欠けは、前の状態を引き継ぐ */
+export const MAX_GAP_MS = 120_000;
+
+/**
+ * 短い欠けを、前の状態で埋める。「受信なし」が連続する区間の合計（cellMs × 個数）が maxGapMs 未満で、
+ * 直前に受信できている区間があるときだけ（先頭の欠けは埋めない）。
+ */
+export function fillShortGaps(cells: ReadonlyArray<TimelineCell>, cellMs: number, maxGapMs: number = MAX_GAP_MS): TimelineCell[] {
+  const result = cells.map((cell) => ({ ...cell }));
+  let i = 0;
+  while (i < result.length) {
+    if (result[i].state !== "none") {
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < result.length && result[end].state === "none") end++;
+    if (i > 0 && (end - i) * cellMs < maxGapMs) {
+      for (let k = i; k < end; k++) result[k] = { ...result[i - 1] };
+    }
+    i = end;
+  }
+  return result;
+}
+
 /**
  * 表示範囲（from〜to）を cellCount 等分した区間ごとの状態。データの無い区間は受信なし。
  * 区間の位置は、API と同じく from からの等間隔（(to - from) / cellCount）で、開始時刻から求める。
@@ -71,7 +101,8 @@ export function buildTimelineCells(
     const index = Math.min(cellCount - 1, Math.floor((new Date(bucket.start).getTime() - fromMs) / width));
     if (index >= 0) byIndex.set(index, bucket);
   }
-  return Array.from({ length: cellCount }, (_, i) => bucketCell(byIndex.get(i), limits, stopAt));
+  const raw = Array.from({ length: cellCount }, (_, i) => bucketCell(byIndex.get(i), limits, stopAt));
+  return fillShortGaps(raw, width);
 }
 
 /** 同じ状態（警報は段階も同じ）が続く区間を、1 本の帯にまとめる。帯の右端は表示範囲の右端（toMs）を越えない */
@@ -98,11 +129,13 @@ export function buildSegments(cells: ReadonlyArray<TimelineCell>, fromMs: number
   return segments;
 }
 
-/** 稼働率（%、整数）。稼働の区間 ÷ 全区間。区間が無ければ null */
+/** 稼働率（%、整数）。稼働の区間 ÷（最初の受信区間から最後の区間まで）。一度も受信が無ければ null */
 export function uptimePercent(cells: ReadonlyArray<TimelineCell>): number | null {
-  if (cells.length === 0) return null;
-  const running = cells.filter((cell) => cell.state === "running").length;
-  return Math.round((running / cells.length) * 100);
+  const first = cells.findIndex((cell) => cell.state !== "none");
+  if (first < 0) return null;
+  const counted = cells.slice(first);
+  const running = counted.filter((cell) => cell.state === "running").length;
+  return Math.round((running / counted.length) * 100);
 }
 
 const STATE_LABEL: Record<TimelineState, string> = { none: "受信なし", alarm: "警報", stopped: "停止", running: "稼働" };

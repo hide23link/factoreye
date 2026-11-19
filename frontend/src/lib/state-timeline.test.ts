@@ -5,6 +5,7 @@ import {
   buildSegments,
   buildTimelineCells,
   describeSegment,
+  fillShortGaps,
   stateLabel,
   uptimePercent,
   type TimelineCell,
@@ -61,10 +62,10 @@ describe("buildTimelineCells", () => {
     count: 1,
   });
 
-  it("開始時刻で区間に入れ、データの無い区間は受信なし", () => {
+  it("開始時刻で区間に入れる。120 秒未満の欠けは前の状態を引き継ぎ、長い欠けは受信なし", () => {
     const cells = buildTimelineCells([bucketAt(0, 1, 1), bucketAt(2, 1, 1)], FROM, TO, 10, [], null);
     expect(cells.map((c) => c.state)).toEqual([
-      "running", "none", "running", "none", "none", "none", "none", "none", "none", "none",
+      "running", "running", "running", "none", "none", "none", "none", "none", "none", "none",
     ]);
   });
 
@@ -102,8 +103,14 @@ describe("uptimePercent", () => {
     expect(uptimePercent([{ state: "alarm", level: "critical" }])).toBe(0);
   });
 
-  it("区間が無ければ null", () => {
+  it("区間が無い・一度も受信が無ければ null", () => {
     expect(uptimePercent([])).toBeNull();
+    expect(uptimePercent([{ state: "none" }, { state: "none" }])).toBeNull();
+  });
+
+  it("最初の受信より前の区間は分母に含めない", () => {
+    const cells: TimelineCell[] = [{ state: "none" }, { state: "none" }, { state: "running" }, { state: "none" }];
+    expect(uptimePercent(cells)).toBe(50);
   });
 });
 
@@ -130,5 +137,61 @@ describe("describeSegment・stateLabel", () => {
     expect(stateLabel("none")).toBe("受信なし");
     expect(stateLabel("alarm", "warning")).toBe("警報（軽故障）");
     expect(stateLabel("running")).toBe("稼働");
+  });
+});
+
+describe("短い欠けの引き継ぎ（fillShortGaps・buildTimelineCells）", () => {
+  const FROM = Date.UTC(2024, 0, 1, 0, 0);
+  const HOUR = 3_600_000;
+  /** 60 秒ごとのハートビート（値 1）。skipFromS〜skipToS（秒）の受信は欠けたことにする */
+  const heartbeats = (skipFromS = -1, skipToS = -1, lastS = 3599) =>
+    Array.from({ length: Math.floor(lastS / 60) + 1 }, (_, i) => i * 60)
+      .filter((t) => !(t >= skipFromS && t < skipToS))
+      .map((t) => ({ start: new Date(FROM + t * 1000).toISOString(), min: 1, max: 1, count: 1 }));
+  const states = (buckets: ReturnType<typeof heartbeats>, hours = 1, count = 144) =>
+    buildTimelineCells(buckets, FROM, FROM + hours * HOUR, count, [], null).map((c) => c.state);
+
+  it("60 秒周期のハートビートは、1 時間（区間 25 秒）でも縞にならない", () => {
+    const cells = states(heartbeats());
+    expect(cells.slice(0, 143).every((s) => s === "running")).toBe(true);
+  });
+
+  it("6 時間・24 時間・7 日でも縞にならない（区間が 60 秒より長ければ、そのまま稼働）", () => {
+    for (const [hours, lastS] of [[6, 6 * 3600 - 1], [24, 24 * 3600 - 1]] as const) {
+      expect(states(heartbeats(-1, -1, lastS), hours).every((s) => s === "running")).toBe(true);
+    }
+    const week = Array.from({ length: 7 * 24 * 60 }, (_, i) => ({ start: new Date(FROM + i * 60_000).toISOString(), min: 1, max: 1, count: 1 }));
+    expect(states(week, 168).every((s) => s === "running")).toBe(true);
+  });
+
+  it("欠け 3 分（180 秒）は受信なしになり、その前後は稼働", () => {
+    const cells = states(heartbeats(1200, 1380)); // 20:00〜23:00 の受信が無い
+    const none = cells.filter((s) => s === "none").length;
+    expect(none).toBeGreaterThanOrEqual(6); // 180 秒 ÷ 25 秒 = 約 7 区間
+    expect(cells[0]).toBe("running");
+    expect(cells[100]).toBe("running");
+  });
+
+  it("欠け 1 回分（2 分未満）は前の状態を引き継ぐ", () => {
+    // 1 件抜けると受信の間隔は 120 秒。値の無い区間は 95 秒以下
+    const cells = states(heartbeats(1200, 1260));
+    expect(cells.slice(0, 143).every((s) => s === "running")).toBe(true);
+  });
+
+  it("先頭の欠けは受信なしのまま、末尾の短い欠けは引き継ぎ、長い欠けは受信なし", () => {
+    const late = states(heartbeats().filter((b) => new Date(b.start).getTime() >= FROM + 1800_000));
+    expect(late[0]).toBe("none");
+    expect(late[70]).toBe("none");
+    expect(late[75]).toBe("running");
+    // 末尾: 最後の受信が 59 分 → 末尾の欠けは 60 秒（区間 2〜3 個）で引き継ぐ。50 分で止まると受信なし
+    expect(states(heartbeats(-1, -1, 3000))[143]).toBe("none");
+  });
+
+  it("fillShortGaps: 区間の幅 × 個数が上限未満のときだけ埋める", () => {
+    const run: TimelineCell = { state: "running" };
+    const none: TimelineCell = { state: "none" };
+    expect(fillShortGaps([run, none, none, run], 50_000).map((c) => c.state)).toEqual(["running", "running", "running", "running"]);
+    expect(fillShortGaps([run, none, none, run], 60_000).map((c) => c.state)).toEqual(["running", "none", "none", "running"]);
+    expect(fillShortGaps([none, none, run], 10_000).map((c) => c.state)).toEqual(["none", "none", "running"]);
   });
 });
