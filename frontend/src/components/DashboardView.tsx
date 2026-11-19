@@ -26,6 +26,7 @@ import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from 
 import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
 import { isGraphWidget } from "../lib/graph-link";
 import { lazyNamed } from "../lib/lazyWithRetry";
+import { useCursorTimeStore } from "../store/useCursorTimeStore";
 import { useEditorStore } from "../store/useEditorStore";
 import { useKioskStore } from "../store/useKioskStore";
 import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
@@ -90,7 +91,13 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
   useEffect(() => {
     initTimeRangeFromUrl();
-    return () => resetTimeRange();
+    // 開くときも、グラフのカーソルを「今」から始める（ほかの画面で動かした時刻が、共有の時刻に残っていても引き継がない）
+    useCursorTimeStore.getState().reset();
+    return () => {
+      resetTimeRange();
+      // グラフのカーソルも「今」に戻す（次に開いたときは、現在位置から）
+      useCursorTimeStore.getState().reset();
+    };
   }, []);
 
   // 別のダッシュボードへ移るとき・閉じるときは、編集の状態（履歴・選択）を捨てる。

@@ -1,9 +1,10 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fireEvent, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
+import { act, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import { ApiError } from "../../lib/errors";
 import type { Sensor } from "../../types";
+import { useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useUiStore } from "../../store/useUiStore";
 import { SensorSettingsPanel } from "./SensorSettingsPanel";
 
@@ -42,6 +43,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  useCursorTimeStore.getState().reset();
 });
 
 const NO_READINGS = { readings: [], total: 0 };
@@ -150,6 +152,26 @@ describe("SensorSettingsPanel", () => {
 
     await user.type(screen.getByRole("searchbox", { name: "センサーを絞り込む" }), "センサー");
     expect(screen.getAllByRole("row")).toHaveLength(1 + 50);
+  });
+
+  it("詳細のグラフで動かしたカーソルは、詳細を閉じたとき・別のセンサーに切り替えたときに「今」へ戻る（ダッシュボードに古い時刻を持ち越さない）", async () => {
+    const other: Sensor = { ...sensor, id: "s2", name: "温度計B", ingestKey: "sensor-b" };
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor, other]);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue(NO_READINGS);
+    const user = userEvent.setup();
+    renderWithQueryClient(<SensorSettingsPanel />);
+
+    await openDetail(user, "圧力計A-1");
+    act(() => useCursorTimeStore.getState().setTime(123456));
+
+    // 別のセンサーを選ぶと、詳細が作り直されて、今に戻る
+    await user.click(await screen.findByRole("button", { name: "温度計B の詳細" }));
+    expect(useCursorTimeStore.getState().time).toBeNull();
+
+    // 閉じたときも、今に戻る
+    act(() => useCursorTimeStore.getState().setTime(654321));
+    await user.click(screen.getByRole("button", { name: "詳細を閉じる" }));
+    expect(useCursorTimeStore.getState().time).toBeNull();
   });
 
   it("詳細の欄を開くと、表は狭くなるので、種類・直近 1 時間・最終受信の列を隠す（閉じると戻る）", async () => {

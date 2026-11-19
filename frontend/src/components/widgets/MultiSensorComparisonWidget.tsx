@@ -67,6 +67,8 @@ import {
   type LinkGraphView,
 } from "./graph-parts";
 import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
+import { withSharedCursor } from "../../lib/shared-cursor";
+import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
 import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
 
 /**
@@ -101,7 +103,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     if (next && !hasOwnRange) setRange(next);
   });
   // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）
-  const pointerHandlers = coarse || linkView ? {} : drag.handlers;
+  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
@@ -287,7 +289,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     ...renderThresholdBands(bands, ends),
     ...renderThresholdLines(lines),
     drag.selection ? <ReferenceArea key="sel" x1={drag.selection.x1} x2={drag.selection.x2} /> : null,
-    renderCursorLine(linkView?.cursorTime ?? null, dualAxis ? "left" : undefined),
+    linkView ? renderCursorLine(linkView.cursorTime ?? null, dualAxis ? "left" : undefined) : <SharedCursorOverlay key="shared-cursor" from={bounds.from} to={bounds.to} />,
     linkView ? null : <GraphValueProbe key="value-probe" items={valueItems} onMeasure={setValueMeasure} />,
   ];
   // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
@@ -345,7 +347,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   });
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
+      {!linkView && <CursorResetButton />}
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
       {sensorIds.length === 1 && !linkView && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
       <div className="flex min-h-0 flex-1 gap-1.5">

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithQueryClient, screen } from "../../test/test-utils";
+import { fireEvent, renderWithQueryClient, screen } from "../../test/test-utils";
+import { cancelPendingCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Sensor, Widget } from "../../types";
@@ -56,12 +57,14 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
+  useCursorTimeStore.getState().reset();
   useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
   vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [], total: 0 });
 });
 
 afterEach(() => {
+  cancelPendingCursorTime();
   vi.restoreAllMocks();
 });
 
@@ -214,5 +217,103 @@ describe("TrendStackWidget（計器グラフ）", () => {
       expect(parseFloat(label.style.left)).toBeGreaterThanOrEqual(0);
       expect(parseFloat(label.style.top)).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  /** 今の時刻の「時:分」（分の変わり目をまたいでも通るよう、1 分前も許す） */
+  const clockNow = () => {
+    const text = (ms: number) => new Date(ms).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    return [text(Date.now()), text(Date.now() - 60_000)];
+  };
+
+  /** グラフの上の枠（マウス・指の操作を受ける）。大きさ（600×80）を、測れたことにする */
+  const plotOf = () => {
+    const plot = screen.getAllByRole("img", { name: /の推移/ })[0].parentElement as HTMLElement;
+    plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 80, right: 600, bottom: 80, x: 0, y: 0, toJSON: () => ({}) });
+    return plot;
+  };
+
+  it("カーソルは最初「現在位置」（表示範囲の右端＝今）で、縦線の真下（時間の軸の行）に時刻の札を出す", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+
+    // 共有の時刻は null（利用者が動かしていない）。見出しの札と、時間の軸の行の札が、どちらも今の時刻
+    expect(useCursorTimeStore.getState().time).toBeNull();
+    expect(clockNow()).toContain(screen.getByTestId("cursor-time-label").textContent);
+    expect(screen.getByText(/^カーソル \d{2}:\d{2}$/).textContent).toBe(`カーソル ${screen.getByTestId("cursor-time-label").textContent}`);
+    // 動かしていないので、「今に戻す」は出ない
+    expect(screen.queryByRole("button", { name: "今に戻す" })).not.toBeInTheDocument();
+  });
+
+  it("グラフの上で動かすと、その時刻に動き（札の時刻も変わる）、マウスが外れても残る。「今に戻す」で現在位置へ戻る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+    const plot = plotOf();
+
+    // 幅 600px の左端（x = 0）＝ 1 時間前
+    fireEvent.pointerMove(plot, { clientX: 0 });
+    await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
+    const oneHourAgo = new Date(Date.now() - 60 * 60_000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    const oneHourAgoBefore = new Date(Date.now() - 61 * 60_000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    expect([oneHourAgo, oneHourAgoBefore]).toContain(screen.getByTestId("cursor-time-label").textContent);
+
+    // マウスが外れても、その位置に残る（勝手に今へ戻さない）
+    fireEvent.pointerLeave(plot);
+    expect(useCursorTimeStore.getState().time).not.toBeNull();
+
+    // 「今に戻す」で、現在位置（右端）に戻る
+    fireEvent.click(screen.getByRole("button", { name: "今に戻す" }));
+    expect(useCursorTimeStore.getState().time).toBeNull();
+    expect(clockNow()).toContain(screen.getByTestId("cursor-time-label").textContent);
+  });
+
+  it("指でタップしたとき（pointerdown）も、その位置にカーソルが動く", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+
+    fireEvent.pointerDown(plotOf(), { clientX: 300 });
+    await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
+  });
+
+  it("計器グラフを 2 つ置くと、片方で動かしたカーソルが、もう片方にも同じ時刻で連動する", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+    const first = { ...widget(["a"]), id: "w1" };
+    const second = { ...widget(["b"]), id: "w2" };
+
+    renderWithQueryClient(
+      <>
+        <TrendStackWidget widget={first} />
+        <TrendStackWidget widget={second} />
+      </>,
+    );
+    await screen.findAllByText("センサーB");
+
+    fireEvent.pointerMove(plotOf(), { clientX: 0 });
+    await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
+    // どちらの計器グラフの札も、同じ時刻（1 時間前）になる。どちらにも「今に戻す」が出る
+    const labels = screen.getAllByTestId("cursor-time-label").map((el) => el.textContent);
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toBe(labels[1]);
+    expect(screen.getAllByRole("button", { name: "今に戻す" })).toHaveLength(2);
+  });
+
+  it("期間が 1 日を超えるときは、時刻の札に日付も付ける（月/日 時:分）", async () => {
+    useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 3 * 24 * 60 * 60_000 } });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+
+    expect(screen.getByTestId("cursor-time-label").textContent).toMatch(/^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/);
   });
 });

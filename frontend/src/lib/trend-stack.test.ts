@@ -18,6 +18,8 @@ import {
   placeCursorLabel,
   placeExtremeLabels,
   placeLabelAround,
+  placeTimeLabel,
+  shownCursorTime,
   formatRangeJst,
   maxTimeTicks,
   toPoints,
@@ -303,5 +305,21 @@ describe("札の置き場所（最高・最低・カーソルの値）", () => {
     expect(right.left + right.width).toBeLessThanOrEqual(350);
     const top = placeCursorLabel({ x: 100, y: 10 }, { width: 60, height: 18 }, plot);
     expect(top.top).toBeGreaterThan(10);
+  });
+});
+
+describe("カーソルの時刻（全グラフで共有）", () => {
+  it("共有の時刻が無ければ、表示範囲の右端（現在位置）。あれば範囲の中に収める", () => {
+    expect(shownCursorTime(null, 0, 100)).toBe(100);
+    expect(shownCursorTime(40, 0, 100)).toBe(40);
+    expect(shownCursorTime(150, 0, 100)).toBe(100);
+    expect(shownCursorTime(-5, 0, 100)).toBe(0);
+  });
+
+  it("時刻の札は、縦線の真下に中心を合わせ、左端・右端では内側へ寄せる", () => {
+    expect(placeTimeLabel(200, 50, 400)).toEqual({ left: 175, top: 0, width: 50, height: 16 });
+    expect(placeTimeLabel(5, 50, 400).left).toBe(0);
+    const right = placeTimeLabel(399, 50, 400);
+    expect(right.left + right.width).toBe(400);
   });
 });
