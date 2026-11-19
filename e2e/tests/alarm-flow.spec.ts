@@ -9,7 +9,7 @@ test("閾値超過でアラームが発生し、設定画面から確認でき�
   const ingestKey = `e2e-${Date.now()}`;
 
   await page.goto("/");
-  await page.getByRole("navigation", { name: "メインメニュー" }).getByRole("button", { name: "設定" }).click();
+  await page.getByRole("navigation", { name: /メインメニュー|画面の切り替え/ }).getByRole("button", { name: "設定" }).click();
 
   // 追加のフォームは「＋センサーを追加」で開く（センサーが 0 件のときは最初から開いている）
   await page.getByRole("button", { name: "＋センサーを追加" }).click();

@@ -32,7 +32,8 @@ test("セットアップウィザードでセンサー登録からダッシュ�
   await expect(page.getByText("4 / 4 完了")).toBeVisible();
 
   await page.getByRole("button", { name: "ダッシュボードを見る" }).click();
-  await expect(page.getByText("はじめてのダッシュボード").first()).toBeVisible();
+  // 同じ名前が、左のメニュー（スマホでは隠れる）・上のタブ・見出しに出るので、見えているものだけを数える
+  await expect(page.getByText("はじめてのダッシュボード").locator("visible=true").first()).toBeVisible();
   // 計器グラフ（TrendStack）が、センサーの推移を描画していること
   await expect(page.getByRole("img", { name: /の推移/ })).toBeVisible();
 });
