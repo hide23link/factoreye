@@ -18,7 +18,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import {
   STOP_BUCKET_MINUTES,
   forecastTone,
@@ -71,7 +71,7 @@ function toCountBucket(bucket: { start: string; avg: number; count: number }): C
 export function ProductionPlanWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  const now = useLiveNow(LIVE_CHART_INTERVAL_MS);
   const schedule = scheduleFromConfig(widget.config);
   const target = widget.config.dailyTarget ?? 0;
 

@@ -13,7 +13,7 @@
  * 【引数（props）】widget = このウィジェット（センサーの ID と設定を持つ）。WidgetCard が渡す。
  */
 import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useReadingTimes, useSensors } from "../../hooks/queries";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import { effectiveRange, graphSensorIds } from "../../lib/graph-config";
 import { resolveRange } from "../../lib/timeRange";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
@@ -164,7 +164,7 @@ function IntervalRow({ widget, sensor, sensorId, window, settings, nowMs }: RowP
 
 export function TargetStripWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
-  const now = useNow(LIVE_CHART_INTERVAL_MS);
+  const now = useLiveNow(LIVE_CHART_INTERVAL_MS);
   // 表示期間は、グラフと同じ（ダッシュボードの時間範囲。ウィジェット個別の期間があればそれ）
   const dashboardRange = useTimeRangeStore((s) => s.range);
   const settings = stripSettingsFromConfig(widget.config);

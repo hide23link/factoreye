@@ -22,7 +22,7 @@ import { memo, useEffect, useMemo, useRef, type PointerEvent, type ReactNode } f
 
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import { effectiveRange, graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
 import { resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
@@ -88,7 +88,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const dashboardRange = useTimeRangeStore((s) => s.range);
   const range = effectiveRange(widget, dashboardRange);
   const options = graphDataOptions(widget.config, 1);
-  const now = useNow(options.refreshMs);
+  const now = useLiveNow(options.refreshMs);
   const resolved = resolveRange(range, now);
   // 範囲の値が同じなら、同じオブジェクトを使い続ける（行（TrendRow）が、カーソルが動くだけでは、重い計算をやり直さないように）
   const bounds = useMemo<ResolvedRange>(() => ({ from: resolved.from, to: resolved.to }), [resolved.from, resolved.to]);

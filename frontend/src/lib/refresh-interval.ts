@@ -4,6 +4,8 @@
  * - 選択は「各グラフの設定に従う」（既定。今までの動き）、Off（自動で取り直さない）、10 秒〜5 分
  * - 10 秒は OSS（自前ホスト）だけ。SaaS（multi_tenant）は 30 秒以上だけを出す（サーバーの負荷のため）
  *
+ * 更新の対象は「ウィジェット（グラフ・数値・ゲージなど）の測定値の取得」だけ。センサー一覧・警報・全体監視・最新値は、今までの間隔のまま。
+ *
  * 【誰が使うか】store/useRefreshStore.ts（選択の保存）、hooks/queries.ts（取り直し間隔）、
  * components/TimeRangeControls.tsx（選択肢の表示と最終更新時刻）。
  */
@@ -57,4 +59,12 @@ export function formatUpdatedAt(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// 更新の対象にする取得（queryKey の先頭の名前）。ウィジェットが測定値を取るものだけ
+const WIDGET_QUERY_KEYS = ["readings", "readings-downsampled", "reading-times", "readings-aggregate"];
+
+/** この queryKey が、画面の「更新」の対象（ウィジェットの測定値の取得）か。⟳ と最終更新時刻が使う */
+export function isWidgetQueryKey(queryKey: readonly unknown[]): boolean {
+  return typeof queryKey[0] === "string" && WIDGET_QUERY_KEYS.includes(queryKey[0]);
 }

@@ -16,7 +16,7 @@
 import { useState } from "react";
 
 import { LIVE_CHART_INTERVAL_MS } from "../hooks/queries";
-import { useNow } from "../hooks/useNow";
+import { useLiveNow } from "../hooks/useLiveNow";
 import {
   absoluteRange,
   describeRange,
@@ -56,7 +56,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
   const setRange = useTimeRangeStore((s) => s.setRange);
   // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
   // 再描画の合図（30 秒ごと）。計算に使う時刻は、操作の時点の現在時刻にする
-  useNow(LIVE_CHART_INTERVAL_MS);
+  useLiveNow(LIVE_CHART_INTERVAL_MS);
   const now = Date.now();
   const maxMs = maxRangeMs(IS_MULTI_TENANT);
   const bounds = resolveRange(range, now);

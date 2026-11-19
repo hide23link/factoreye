@@ -84,7 +84,7 @@ export function SetupWizard() {
 
   // 段階 2・3 の間、最後に届いた値を 3 秒ごとに確かめる（最新の 1 件だけ。総件数で「届いた」を判断する）
   const waiting = step === 2 || step === 3;
-  const { data: readingsData, error: readingsError } = useSensorReadings(waiting && sensor ? sensor.id : null, 24, 1, SERVER_CHECK_INTERVAL_MS);
+  const { data: readingsData, error: readingsError } = useSensorReadings(waiting && sensor ? sensor.id : null, 24, 1, SERVER_CHECK_INTERVAL_MS, false);
   const latest = readingsData?.readings[0];
   // 覚えておいたセンサーが、あとで削除されていると、取得が 404 になる（待ち続けても届かない）
   const sensorGone = waiting && errorStatus(readingsError) === 404;

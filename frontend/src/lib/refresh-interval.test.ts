@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   availableRefreshChoices,
+  isWidgetQueryKey,
   formatUpdatedAt,
   latestUpdatedAt,
   resolveRefetchMs,
@@ -44,5 +45,17 @@ describe("最終更新", () => {
   });
   it("時刻を HH:mm:ss にする", () => {
     expect(formatUpdatedAt(new Date(2024, 0, 1, 7, 5, 9).getTime())).toBe("07:05:09");
+  });
+});
+
+describe("isWidgetQueryKey", () => {
+  it("測定値の取得だけが対象で、センサー一覧・警報などは対象外", () => {
+    expect(isWidgetQueryKey(["readings-downsampled", "s1", 1, 2, 500])).toBe(true);
+    expect(isWidgetQueryKey(["readings", "s1", 1, 1])).toBe(true);
+    expect(isWidgetQueryKey(["readings-aggregate", "s1", "a"])).toBe(true);
+    expect(isWidgetQueryKey(["sensors"])).toBe(false);
+    expect(isWidgetQueryKey(["alarms"])).toBe(false);
+    expect(isWidgetQueryKey(["latest-readings"])).toBe(false);
+    expect(isWidgetQueryKey([])).toBe(false);
   });
 });

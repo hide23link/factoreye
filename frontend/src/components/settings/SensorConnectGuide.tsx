@@ -23,7 +23,7 @@ export function SensorConnectGuide({ sensor, onClose }: { sensor: GuideSensor; o
     return () => clearTimeout(timer);
   }, [copyState]);
   // 直近 24 時間に1件でもあれば「届いた」とみなす（5 秒ごとに自動で確認する）
-  const { data } = useSensorReadings(sensor.id, 24, 1);
+  const { data } = useSensorReadings(sensor.id, 24, 1, undefined, false);
   const latest = data?.readings[0];
 
   // クリップボードが使えない環境（http のページなど）では、コピーできなかったことを伝える（キーは画面に出ているので、選んでコピーできる）

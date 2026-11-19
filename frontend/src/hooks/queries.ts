@@ -104,8 +104,10 @@ export const useSensorReadings = (
   hours = 1,
   limit = DEFAULT_READINGS_LIMIT,
   refetchMs = POLL_INTERVAL_MS, // 取り直す間隔（セットアップガイドは、届くのを待つので 3 秒）
-) =>
-  useQuery({
+  followRefreshChoice = true, // 画面の更新間隔の選択に従うか（セットアップの待ち受けは従わない）
+) => {
+  const refreshChoice = useRefreshStore((s) => s.choice);
+  return useQuery({
     // limit が違う取得（最新 1 件だけ／グラフ用）のキャッシュが混ざらないよう、キーに含める
     queryKey: ["readings", sensorId, hours, limit],
     queryFn: () => {
@@ -113,8 +115,9 @@ export const useSensorReadings = (
       return fetchSensorReadings(sensorId as string, from, limit);
     },
     enabled: sensorId !== null,
-    refetchInterval: refetchMs,
+    refetchInterval: followRefreshChoice ? resolveRefetchMs(refreshChoice, refetchMs) : refetchMs,
   });
+};
 
 /**
  * 期間内の測定値の時刻だけを使う取得（達成ストリップの「受信間隔」判定用。値は使わない）。
@@ -150,13 +153,15 @@ export const useSensorReadingsAggregate = (
   sensorId: string | null,
   from: string,
   to?: string,
-) =>
-  useQuery({
+) => {
+  const refreshChoice = useRefreshStore((s) => s.choice);
+  return useQuery({
     queryKey: ["readings-aggregate", sensorId, from, to ?? null],
     queryFn: () => fetchSensorReadingsAggregate(sensorId as string, from, to),
     enabled: sensorId !== null,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: resolveRefetchMs(refreshChoice, POLL_INTERVAL_MS),
   });
+};
 
 /**
  * グラフ用の間引きデータ。from / to は、ミリ秒の時刻（呼び出し側が範囲から求める）。
