@@ -40,3 +40,14 @@ export function currentAlembicHead(): string {
   if (heads.length !== 1) throw new Error(`alembic の head が 1 つではありません: ${heads.join(", ")}`);
   return heads[0];
 }
+
+/**
+ * 移行ファイル（書き出し形式）の版。backend/app/migrate_saas_to_oss.py の `VERSION = <数>` を読む。
+ * 取り込み側は、版が違うファイルを拒否する。形式を変えて版を上げるたびに、テストの直書きを直さなくて済む。
+ */
+export function exportFormatVersion(): number {
+  const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "backend", "app", "migrate_saas_to_oss.py");
+  const version = readFileSync(path, "utf8").match(/^VERSION\s*=\s*(\d+)/m)?.[1];
+  if (version === undefined) throw new Error("migrate_saas_to_oss.py に VERSION が見つかりません");
+  return Number(version);
+}

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { gzipSync } from "node:zlib";
 
-import { currentAlembicHead } from "./helpers";
+import { currentAlembicHead, exportFormatVersion } from "./helpers";
 
 // 設定画面の「データ移行」パネルを、実際のブラウザから操作する。
 // 取り込みは「内容を確認（dry-run）」まで。最後に確定すると開発用DBにセンサーが入るため、ここでは行わない
@@ -22,7 +22,8 @@ test("データ移行: 書き出しファイルの件数を確認できる（取
   const lines = [
     {
       format: "factoreye-workspace-export",
-      version: 3,
+      // 書き出し形式の版（backend の VERSION。取り込み側は、版が違うファイルを拒否する）
+      version: exportFormatVersion(),
       workspace_id: workspaceId,
       exported_at: now,
       // 取り込み先と同じスキーマ版でないと取り込めない（backend の移行を足すたびに変わるので、ファイルから読む）

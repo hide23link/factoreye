@@ -14,7 +14,6 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import rollup as rollup_module
 from app.db.models import Reading, ReadingRollup, Sensor, User, Workspace
 from app.db.session import engine
 from app.readings_query import merge_bucket_rows
@@ -159,7 +158,7 @@ async def test_api_answers_are_the_same_before_and_after_rollup(client: httpx.As
     after = await _api_snapshot(client, sensor_id, from_, to)
 
     assert await _counts(sensor_id) == (120, 3)
-    assert after["sum"] == pytest.approx(before["sum"])  # type: ignore[arg-type]
+    assert after["sum"] == pytest.approx(before["sum"])
     assert after["count"] == before["count"] == 300
     assert after["buckets"] == before["buckets"]
 
@@ -196,7 +195,7 @@ async def test_rollup_is_idempotent_and_atomic_per_window(monkeypatch: pytest.Mo
         calls["n"] += 1
         raise RuntimeError("途中で止まった")
 
-    monkeypatch.setattr(rollup_module.asyncio, "sleep", failing_sleep)
+    monkeypatch.setattr(asyncio, "sleep", failing_sleep)
     with pytest.raises(RuntimeError):
         await rollup_old_readings(7, now=NOW)
     monkeypatch.undo()
