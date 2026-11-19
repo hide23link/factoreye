@@ -51,7 +51,8 @@ import app.db.models  # noqa: F401
 # 書き出しファイルの識別子と版。取り込み側は、この2つが一致しないファイルを拒否する。
 # 形式を変えたら VERSION を上げる（版 1 は未リリースのため、互換性は持たない）
 FORMAT = "factoreye-workspace-export"
-VERSION = 3  # 3: 機器ごとのキーの表（ingest_devices）を追加
+# 3: 機器ごとのキーの表（ingest_devices）を追加、4: 1 分にまとめた測定値（readings_rollup）を追加
+VERSION = 4
 # 書き出し・取り込みの順序。外部キーの参照先が先に来る（取り込みはこの順で流す）
 TABLES = [
     "ingest_devices",  # sensors.device_id の参照先。センサーより先に入れる
@@ -59,6 +60,7 @@ TABLES = [
     "dashboards",
     "widgets",
     "readings",
+    "readings_rollup",  # 古い測定値を 1 分にまとめた行（READINGS_ROLLUP_DAYS。app/rollup.py）
     "alarms",
     "webhook_subscriptions",
     "notification_settings",
@@ -179,6 +181,11 @@ async def export_workspace(
             _ws_eq(dashboards.c.workspace_id, workspace_id), dashboards.c.deleted_at.is_(None)
         ),
         "widgets": sa.select(widgets).where(widgets.c.dashboard_id.in_(dashboard_ids)),
+        # 1 分にまとめた測定値。まとめた分の履歴は、これでしか残らないので、移行にも含める
+        # （SaaS はまとめないので空。件数は多くないので、readings のような圧縮はしない）
+        "readings_rollup": sa.select(t["readings_rollup"]).where(
+            t["readings_rollup"].c.sensor_id.in_(sensor_ids)
+        ),
         "alarms": sa.select(alarms).where(alarms.c.sensor_id.in_(sensor_ids)),
         "webhook_subscriptions": sa.select(webhooks).where(
             _ws_eq(webhooks.c.workspace_id, workspace_id)
