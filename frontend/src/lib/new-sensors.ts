@@ -6,12 +6,28 @@
  * 【誰が使うか】NewSensorNotice（画面の上の通知カード）。
  * 【初回】記録が無いときは、いま在るセンサーをすべて「見た」ことにして、通知しない。
  */
-const KEY = "factoreye.seenSensorIds";
+const KEY_PREFIX = "factoreye.seenSensorIds";
+
+/** 一度に追加・表示するセンサーの最大数。残りは編集画面のセンサー棚から追加してもらう */
+export const MAX_NOTICE_SENSORS = 8;
+
+/**
+ * 記録の鍵。利用者（ワークスペース）ごとに分け、同じブラウザで別の人が入っても混ざらないようにする。
+ * scope = ワークスペースの ID。OSS・ログイン無しのときは "local"
+ */
+export function seenKey(scope: string): string {
+  return `${KEY_PREFIX}.${scope}`;
+}
+
+/** ids を、追加する分（先頭から max 件）と、残りに分ける。例: splitForAdd(["a","b","c"], 2) → { head: ["a","b"], rest: ["c"] } */
+export function splitForAdd(ids: string[], max: number = MAX_NOTICE_SENSORS): { head: string[]; rest: string[] } {
+  return { head: ids.slice(0, max), rest: ids.slice(max) };
+}
 
 /** 見たセンサー ID の集合。記録が無い・壊れている・読めないときは null（= 初回） */
-export function readSeenSensorIds(): Set<string> | null {
+export function readSeenSensorIds(scope: string): Set<string> | null {
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(seenKey(scope));
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
@@ -22,9 +38,9 @@ export function readSeenSensorIds(): Set<string> | null {
 }
 
 /** 見たセンサー ID の集合を覚える。覚えられなくても、画面は動く */
-export function writeSeenSensorIds(ids: Iterable<string>): void {
+export function writeSeenSensorIds(scope: string, ids: Iterable<string>): void {
   try {
-    window.localStorage.setItem(KEY, JSON.stringify([...ids]));
+    window.localStorage.setItem(seenKey(scope), JSON.stringify([...ids]));
   } catch {
     // 覚えられなくても動く
   }

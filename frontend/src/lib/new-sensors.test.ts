@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addSeen, findNewSensorIds, readSeenSensorIds, writeSeenSensorIds } from "./new-sensors";
+import { addSeen, findNewSensorIds, readSeenSensorIds, seenKey, splitForAdd, writeSeenSensorIds } from "./new-sensors";
 
 afterEach(() => {
   window.localStorage.clear();
@@ -27,17 +27,30 @@ describe("addSeen", () => {
   it("null からでも作れる", () => expect([...addSeen(null, ["x"])]).toEqual(["x"]));
 });
 
+describe("splitForAdd（8 件まで）", () => {
+  it("上限までを head、残りを rest に分ける", () => {
+    expect(splitForAdd(["a", "b", "c"], 2)).toEqual({ head: ["a", "b"], rest: ["c"] });
+    expect(splitForAdd(["a"], 2)).toEqual({ head: ["a"], rest: [] });
+    expect(splitForAdd(Array.from({ length: 9 }, (_, i) => String(i))).rest).toEqual(["8"]);
+  });
+});
+
 describe("見たセンサーの記録", () => {
+  it("利用者（ワークスペース）ごとに別の記録", () => {
+    writeSeenSensorIds("w1", ["a"]);
+    expect(readSeenSensorIds("w2")).toBeNull();
+    expect([...(readSeenSensorIds("w1") ?? [])]).toEqual(["a"]);
+  });
   it("書いた集合を読める。無ければ null（初回）", () => {
-    expect(readSeenSensorIds()).toBeNull();
-    writeSeenSensorIds(["a", "b"]);
-    expect([...(readSeenSensorIds() ?? [])].sort()).toEqual(["a", "b"]);
+    expect(readSeenSensorIds("w1")).toBeNull();
+    writeSeenSensorIds("w1", ["a", "b"]);
+    expect([...(readSeenSensorIds("w1") ?? [])].sort()).toEqual(["a", "b"]);
   });
   it("壊れた記録は null（初回）として扱う", () => {
-    window.localStorage.setItem("factoreye.seenSensorIds", "{oops");
-    expect(readSeenSensorIds()).toBeNull();
-    window.localStorage.setItem("factoreye.seenSensorIds", '{"a":1}');
-    expect(readSeenSensorIds()).toBeNull();
+    window.localStorage.setItem(seenKey("w1"), "{oops");
+    expect(readSeenSensorIds("w1")).toBeNull();
+    window.localStorage.setItem(seenKey("w1"), '{"a":1}');
+    expect(readSeenSensorIds("w1")).toBeNull();
   });
   it("localStorage が使えなくても、例外にしない", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
@@ -46,7 +59,7 @@ describe("見たセンサーの記録", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
-    expect(readSeenSensorIds()).toBeNull();
-    expect(() => writeSeenSensorIds(["a"])).not.toThrow();
+    expect(readSeenSensorIds("w1")).toBeNull();
+    expect(() => writeSeenSensorIds("w1", ["a"])).not.toThrow();
   });
 });
