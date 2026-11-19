@@ -47,6 +47,20 @@ const widget = (ids: string[]): Widget => ({
   updatedAt: "",
 });
 
+/** センサーごとの設定色（config.colors）つきのウィジェット */
+const coloredWidget = (ids: string[], colors: string[]): Widget => ({ ...widget(ids), config: { sensorIds: ids, colors } });
+
+/** jsdom は色を rgb(...) に直して返すので、試験の期待値の #rrggbb も同じ形にする */
+const rgb = (hex: string) =>
+  `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+
+/** 行の線（aria-label つきの svg の最初の path ＝ 正常なときの線）の色 */
+const lineStrokes = () =>
+  screen.getAllByRole("img").map((svg) => (svg.querySelector("path") as SVGPathElement).style.stroke);
+
+/** センサー名の文字の色（左の欄の名前。title で引く） */
+const nameColors = (name: string) => screen.getAllByTitle(name).map((el) => (el as HTMLElement).style.color);
+
 /** 今から minutesAgo 分前を始まりとする 1 分の区間 */
 const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) => ({
   start: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
@@ -315,5 +329,60 @@ describe("TrendStackWidget（計器グラフ）", () => {
     await screen.findAllByText("センサーA");
 
     expect(screen.getByTestId("cursor-time-label").textContent).toMatch(/^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/);
+  });
+});
+
+describe("TrendStackWidget の色（センサーごとの設定色）", () => {
+  const recent = { bucketSeconds: 60, buckets: [bucketAgo(30, 10), bucketAgo(2, 11)] };
+
+  it("正常なときは、線も名前も設定色で描く", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    await screen.findAllByTitle("洋室 温度");
+    expect(lineStrokes()).toEqual([rgb("#16a34a")]);
+    expect(nameColors("洋室 温度")).toContain(rgb("#16a34a"));
+  });
+
+  it("センサーが 2 つのときは、行ごとに別の設定色で描く（順番どおり）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度"), sensor("b", "和室 温度")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a", "b"], ["#2563eb", "#9333ea"])} />);
+    await screen.findAllByTitle("和室 温度");
+    expect(lineStrokes()).toEqual([rgb("#2563eb"), rgb("#9333ea")]);
+  });
+
+  it("設定色を変えて描き直すと、線の色も変わる", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 温度")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue(recent);
+    const { rerender } = renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#2563eb"])} />);
+    await screen.findAllByTitle("洋室 温度");
+    expect(lineStrokes()).toEqual([rgb("#2563eb")]);
+    rerender(<TrendStackWidget widget={coloredWidget(["a"], ["#0891b2"])} />);
+    expect(lineStrokes()).toEqual([rgb("#0891b2")]);
+  });
+
+  it("重故障のしきい値を超えている間は、名前を赤にする（設定色で上書きされない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2", { thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(30, 600), bucketAgo(2, 1200)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    await screen.findAllByTitle("洋室 CO2");
+    expect(nameColors("洋室 CO2")).toEqual(expect.arrayContaining(["var(--fe-red)"]));
+    expect(nameColors("洋室 CO2")).not.toContain(rgb("#16a34a"));
+  });
+
+  it("受信なしのときは、名前を橙にする（設定色で上書きされない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "外気南 温度")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(50, 8.9), bucketAgo(40, 9.1)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={coloredWidget(["a"], ["#16a34a"])} />);
+    await screen.findAllByTitle("外気南 温度");
+    expect(nameColors("外気南 温度")).toEqual(expect.arrayContaining(["var(--fe-amb)"]));
+    expect(nameColors("外気南 温度")).not.toContain(rgb("#16a34a"));
   });
 });
