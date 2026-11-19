@@ -12,7 +12,7 @@ const pages = [
   {
     name: "設定",
     open: async (page: import("@playwright/test").Page) => {
-      await page.getByRole("button", { name: "設定" }).click();
+      await page.getByRole("navigation", { name: "メインメニュー" }).getByRole("button", { name: "設定" }).click();
       await expect(page.getByRole("button", { name: "＋センサーを追加" })).toBeVisible();
     },
   },
@@ -20,7 +20,7 @@ const pages = [
     name: "アラーム",
     // アラームは設定画面の中のタブ
     open: async (page: import("@playwright/test").Page) => {
-      await page.getByRole("button", { name: "設定" }).click();
+      await page.getByRole("navigation", { name: "メインメニュー" }).getByRole("button", { name: "設定" }).click();
       await page.getByRole("button", { name: "アラーム" }).click();
     },
   },

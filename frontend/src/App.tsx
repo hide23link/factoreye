@@ -326,7 +326,7 @@ function AppShell() {
   // 画面表示モードに入っている間（ダッシュボードを選んでいるときだけ）は、常に暗くする
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 
-  // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（一覧に黄色の帯が出る）
+  // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（ダッシュボードの画面に黄色の帯が出る）
   useEffect(() => {
     if (linkNotFound) clearGraphLinkFromUrl();
   }, [linkNotFound]);
@@ -398,7 +398,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
         {!kiosk && view === "main" && <DashboardTabs />}
         {!kiosk && view === "main" && <LinkNotFoundNotice />}
         <main className={kiosk ? "" : "pb-20 sm:pb-0"}>
-          {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。一覧と詳細の行き来も含む） */}
+          {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。ダッシュボードの切り替えも含む） */}
           <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>
             <Suspense fallback={<PageFallback />}>
               {view === "settings" && <SettingsPage />}

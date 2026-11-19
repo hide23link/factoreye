@@ -54,8 +54,9 @@ function DashboardSettings({ dashboard }: { dashboard: DashboardDetail }) {
   });
   const deleteMutation = useMutation({
     mutationFn: () => deleteDashboard(dashboard.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+    // 一覧を取り直し終えてから、選びを外す（古い一覧のまま、消したダッシュボードを開き直さないため。外すと、次のものが開く）
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["dashboards"] });
       selectDashboard(null);
     },
   });
