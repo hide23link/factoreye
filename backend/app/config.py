@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # on にすると、timestamp を付けた値は、その時刻で保存する（付けない値は、受信時刻のまま）。
     # 機器の時計が NTP などで合っていることが前提。1 秒サンプリングを溜めてまとめ送りする使い方向け
     ingest_device_time: bool = False
+    # 1 秒ごとの測定値を残す日数。これより古い分は、1 分ごとの「件数・合計・最小・最大・最後の値」に
+    # まとめて元の行を消す（self-hosted だけ。SaaS は今までの 14 日削除）。0 は何もしない（既定）。
+    # 例: 7 → 直近 7 日は 1 秒のまま、それより古い分は 1 分にまとめる（app/rollup.py）
+    readings_rollup_days: int = Field(default=0, ge=0, le=3650)
     # Webhook送信先に社内ネットワーク（プライベートIP・http）を許可する。既定は禁止（SSRF対策）。
     # 社内LANの自動化基盤（n8n等）へ送る自己ホスト利用者だけ true にする
     webhook_allow_private_networks: bool = False
