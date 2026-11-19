@@ -10,7 +10,8 @@ OSS 版で READINGS_ROLLUP_DAYS を設定すると、古い 1 秒ごとの測定
 【精度】まとめた行は 1 分の粒度なので、期間の端（from・to）が分の途中のときは、最大 1 分ぶんの
 誤差が出る（その分の行を、開始時刻で入れるか入れないかで決める）。
 
-【速い道】範囲が 10 分以上（グラフは 1 区間が 2 分以上）で、センサーに 1 分の集計の印
+【速い道】グラフは範囲が 6 時間以上（1 区間が 2 分以上）、合計・件数は範囲が 2 日以上で、
+センサーに 1 分の集計の印
 （readings_minute_state。app/minute_cache.py）があるときは、直近の生の行（1 秒ごとなら 7 日で
 60 万行）を読まずに、1 分の集計（readings_minute）と合わせて答える。範囲を 6 つに分け、
 1 つの SQL で（同じ時点の状態で）読む（_FAST_SOURCES_SQL）。範囲の端は、生の行から読むので正確
@@ -58,8 +59,12 @@ def merge_bucket_rows(raw_rows: list[BucketRow], rolled_rows: list[BucketRow]) -
 
 # 終わりを決めない取得（from 以後すべて）を、速い道の SQL で表すための、ずっと先の時刻
 _FAR_FUTURE = datetime(9999, 12, 31, tzinfo=UTC)
-# 速い道を使う、いちばん短い範囲（これより短いときは、生の行が少ないので従来どおり）
-_FAST_MIN_RANGE = timedelta(minutes=10)
+# 速い道を使う、いちばん短い範囲。これより短いときは、生の行が少なく（1 秒ごとで 6 時間 2.2 万行）、
+# 速い道の手間（印・記録の確認と、6 つに分けた読み出し）のほうが大きいので、従来どおり読む
+_FAST_MIN_RANGE = timedelta(hours=6)
+# 合計・件数は、1 回の読み出しが軽く（1 日分なら 1 秒ごとでも約 8 万行を足すだけ）、速い道の手間と
+# 釣り合うのは 2 日以上なので、そのときだけ使う（Pi の 7 日分は 0.5 秒 → 約 0.02 秒）
+_FAST_MIN_RANGE_SUM = timedelta(days=2)
 # 速い道を使う、いちばん細かい区間の幅（秒）。1 分の集計を区間に入れるので、これ未満では粗すぎる
 _FAST_MIN_BUCKET_SECONDS = 120.0
 
@@ -183,7 +188,9 @@ async def sum_and_count(
     """
     # 速い道: 終わりが無いときは、ずっと先まで（従来の「from 以後すべて」と同じ）として読む
     upper = to if to is not None else _FAR_FUTURE
-    if await _can_use_fast_path(session, sensor_id, from_, upper):
+    # 範囲の長さは、終わりが無いときは「今まで」で見る（ずっと先ではなく）
+    span = (to if to is not None else datetime.now(UTC)) - from_
+    if span >= _FAST_MIN_RANGE_SUM and await _can_use_fast_path(session, sensor_id, from_, upper):
         fast = await _fast_sum_and_count(session, sensor_id, from_, upper)
         if fast is not None:
             return fast

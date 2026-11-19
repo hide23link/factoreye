@@ -21,6 +21,7 @@ from app.config import settings
 from app.db.models import Reading, ReadingMinute, ReadingMinuteState, Sensor, User, Workspace
 from app.db.session import engine
 from app.ingest_buffer import PendingReading, _insert_readings
+from app.main import app, start_and_stop
 from app.minute_cache import (
     build_window,
     create_missing_states,
@@ -301,13 +302,13 @@ async def test_fast_sum_and_count_is_exact_even_for_unaligned_edges(
     monkeypatch: pytest.MonkeyPatch, now: datetime, minute_cache_on: None
 ) -> None:
     sensor_id = await _create_sensor()
-    await _add_readings(sensor_id, _series(now - timedelta(hours=8), now, 3))
+    await _add_readings(sensor_id, _series(now - timedelta(days=4), now, 17))
     await run_tick(now)
 
     for lo, hi in [
-        (now - timedelta(hours=5, seconds=-17), now - timedelta(minutes=20, seconds=-41)),
-        (now - timedelta(hours=1, seconds=-5), None),  # 「直近 1 時間」のように終わりが無い
-        (now - timedelta(minutes=30), now),
+        (now - timedelta(days=3, seconds=-17), now - timedelta(minutes=20, seconds=-41)),
+        (now - timedelta(days=2, seconds=-5), None),  # 「直近 2 日」のように終わりが無い
+        (now - timedelta(days=2, hours=6), now),
     ]:
         fast, legacy = await _fast_and_legacy_sum(monkeypatch, sensor_id, lo, hi)
         assert fast == legacy
@@ -318,7 +319,7 @@ async def test_fast_sum_and_count_is_exact_even_for_unaligned_edges(
 async def test_short_ranges_use_the_legacy_path(
     monkeypatch: pytest.MonkeyPatch, now: datetime, minute_cache_on: None
 ) -> None:
-    """範囲が 10 分未満・区間が 2 分未満のときは、1 分の集計を読まない。"""
+    """範囲が 6 時間未満・区間が 2 分未満のときは、1 分の集計を読まない。"""
     sensor_id = await _create_sensor()
     await _add_readings(sensor_id, _series(now - timedelta(hours=2), now, 10))
     await run_tick(now)
@@ -339,19 +340,19 @@ async def test_setting_zero_ignores_the_minute_cache(
     monkeypatch: pytest.MonkeyPatch, now: datetime
 ) -> None:
     sensor_id = await _create_sensor()
-    await _add_readings(sensor_id, _series(now - timedelta(hours=6), now, 10))
+    await _add_readings(sensor_id, _series(now - timedelta(hours=10), now, 10))
     monkeypatch.setattr(settings, "readings_rollup_days", 7)
     await run_tick(now)
     async with AsyncSession(engine) as session:
         await session.execute(text("UPDATE readings_minute SET count = count + 1000"))
         await session.commit()
 
-    lo, hi = now - timedelta(hours=5), now - timedelta(hours=1)
+    lo, hi = now - timedelta(hours=8), now - timedelta(hours=1)
     fast, legacy = await _fast_and_legacy_buckets(monkeypatch, sensor_id, lo, hi, 4)
 
     # 設定 7 では集計を読み（壊した件数が出る）、設定 0 では読まない
     assert sum(b.cnt for b in fast) > sum(b.cnt for b in legacy)
-    assert sum(b.cnt for b in legacy) == 4 * 360 + 1  # 範囲の両端を含む
+    assert sum(b.cnt for b in legacy) == 7 * 360 + 1  # 範囲の両端を含む
 
 
 @pytest.mark.asyncio
@@ -590,3 +591,23 @@ async def test_downsampled_api_uses_the_fast_path(
 
     assert fast == legacy
     assert sum(b["count"] for b in fast["buckets"]) == 24 * 3600 // 20
+
+
+@pytest.mark.asyncio
+async def test_startup_with_setting_zero_empties_the_cache(
+    monkeypatch: pytest.MonkeyPatch, now: datetime
+) -> None:
+    """設定が 0 のまま起動したら、古い集計を残さない（あとで有効にしても古い値を読まない）。"""
+    monkeypatch.setattr(settings, "readings_rollup_days", 7)
+    sensor_id = await _create_sensor()
+    await _add_readings(sensor_id, _series(now - timedelta(hours=2), now, 10))
+    await run_tick(now)
+    assert await _minute_rows(sensor_id) > 0
+
+    monkeypatch.setattr(settings, "readings_rollup_days", 0)
+    async with start_and_stop(app):
+        pass
+
+    assert await _minute_rows(sensor_id) == 0
+    async with AsyncSession(engine) as session:
+        assert await load_state(session, sensor_id) is None
