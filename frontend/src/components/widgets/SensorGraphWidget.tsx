@@ -49,6 +49,7 @@ import {
   spanHours,
   zoomAround,
 } from "../../lib/timeRange";
+import { compareAvailability, compareName, compareOffsetMs, describeDiff, shiftRange, type CompareMode } from "../../lib/compare-range";
 import { bandAt, computeBands, describeBand } from "../../lib/threshold-bands";
 import { gapThreshold, trendLimits, type TrendPoint } from "../../lib/trend-stack";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
@@ -131,6 +132,20 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const [valueMeasure, setValueMeasure] = useGraphValueMeasure();
   // 警報の帯を出すか（この端末の設定。見出しで切り替える）
   const showBands = useGraphViewStore((s) => s.showBands);
+  // 昨日・先週の重ね。リンクの画面・棒グラフ・保持期間の外になる範囲では出さない
+  const selectedCompare = useGraphViewStore((s) => s.compare);
+  const isBar = widget.config.graphType === "bar";
+  const compareMode: CompareMode =
+    linkView || isBar || !compareAvailability(selectedCompare, bounds.from, now, maxRangeForBuild()).ok ? "none" : selectedCompare;
+  // 比較の線のデータ。同じ間引き API を、範囲をずらして取る（取れなくても、今の線には影響しない）
+  const compareBounds = shiftRange(fetchBounds, compareMode);
+  const { data: compareData } = useDownsampledReadings(
+    compareMode === "none" ? null : widget.sensorId,
+    compareBounds,
+    GRAPH_BUCKETS,
+    range.mode === "relative",
+    options.refreshMs,
+  );
 
   if (!widget.sensorId) {
     return <p className="text-sm text-gray-500">センサーが設定されていません</p>;
@@ -152,6 +167,32 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     time: new Date(b.start).getTime() + halfBucketMs,
     value: bucketValue(b, options.aggregation),
   }));
+
+  // 比較の線の点（今の時刻の位置へ進める）。今の点と時刻が同じなら、同じ行にまとめる（ツールチップが 1 回で両方を出せるように）
+  const compareOffset = compareOffsetMs(compareMode);
+  const comparePoints =
+    compareMode !== "none" && compareData
+      ? compareData.buckets.map((b) => ({ time: new Date(b.start).getTime() + compareOffset + halfBucketMs, value: bucketValue(b, options.aggregation) }))
+      : [];
+  const mergedByTime = new Map<number, { time: number; value?: number; compare?: number }>(chartData.map((point) => [point.time, { ...point }]));
+  for (const point of comparePoints) mergedByTime.set(point.time, { ...(mergedByTime.get(point.time) ?? { time: point.time }), compare: point.value });
+  const plotData: Array<{ time: number; value?: number; compare?: number }> = compareMode === "none" ? chartData : [...mergedByTime.values()].sort((a, b) => a.time - b.time);
+  const compareLabel = compareName(compareMode);
+  const compareLine =
+    compareMode === "none" ? null : (
+      <Line
+        key="compare"
+        type="linear"
+        dataKey="compare"
+        name={compareLabel}
+        stroke="var(--fe-mut)"
+        strokeWidth={1.4}
+        strokeDasharray="4 3"
+        dot={false}
+        connectNulls
+        isAnimationActive={false}
+      />
+    );
 
   const color = graphColor(widget, 0);
   // 縦軸の上に出す単位（単位が無いセンサーは出さない）
@@ -176,17 +217,18 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const style = graphStyle(widget.config);
   const overlay = thresholdOverlay(widget.config, sensor);
   const { lines, bands } = overlay;
-  // 警報の帯。しきい値の表示を切っている（off）グラフには出さない。線の点と同じ値で判定する
+  // 警報の帯。しきい値の線・色の帯の設定（thresholdMode）とは別。線の点と同じ値で判定する（しきい値が未設定なら帯なし）
   const linePoints: TrendPoint[] = chartData.flatMap((point) => (typeof point.value === "number" ? [{ time: point.time, value: point.value }] : []));
   const alarmBands =
-    showBands && sensor && overlay.axisValues.length > 0
+    showBands && sensor
       ? computeBands(linePoints, trendLimits(sensor), gapThreshold(linePoints, data.bucketSeconds * 1000))
       : [];
   const alarmBandElements = renderAlarmBands(alarmBands, bounds.from, bounds.to);
   const yDomain = graphYDomain(
     widget.config,
     overlay.axisValues,
-    chartData.flatMap((point) => (typeof point.value === "number" ? [point.value] : [])),
+    // 縦軸の範囲は、今日と比較の両方が入るようにそろえる
+    [...chartData, ...comparePoints].flatMap((point) => (typeof point.value === "number" ? [point.value] : [])),
   );
   const ends = bandEnds(
     widget.config,
@@ -212,7 +254,13 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   };
   // ツールチップは「センサー名: 値 単位」（既定の「value: 83.60231701333902」だと、何の値か分からず、桁も多すぎる）
   const seriesName = sensor?.name ?? "値";
-  const tooltipValueFormatter = (value: unknown) => formatTooltipValue(value, sensor?.unit);
+  // 比較の線は「昨日: 62.4 ℃（差 +4.1）」。差は 今の値 − 比較の値
+  const tooltipValueFormatter = (value: unknown, name?: unknown, _item?: unknown, _index?: number, payload?: ReadonlyArray<{ dataKey?: unknown; value?: unknown }>) => {
+    const text = formatTooltipValue(value, sensor?.unit);
+    const today = payload?.find((entry) => entry.dataKey === "value")?.value;
+    if (name !== compareLabel || compareMode === "none" || typeof value !== "number" || typeof today !== "number") return text;
+    return `${text}${describeDiff(value, today, (v) => formatTooltipValue(v, undefined))}`;
+  };
   const selection = drag.selection;
   const showTooltip = style.showTooltip && !linkView;
 
@@ -226,7 +274,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
             {sensor?.name ?? "センサー"}
             {sensor ? ` (${sensor.unit})` : ""}
           </p>
-          <GraphViewControls />
+          <GraphViewControls rangeFrom={bounds.from} nowMs={now} compareDisabledReason={isBar ? "棒グラフでは、昨日・先週を重ねられません" : undefined} />
         </div>
       )}
       <div className="flex min-h-0 flex-1 gap-1.5">
@@ -247,13 +295,15 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} margin={chartMargin} {...pointerHandlers}>
+            <AreaChart data={plotData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
               {alarmBandElements}
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              {compareLine}
               <Area
+                connectNulls={compareMode !== "none"}
                 dataKey="value"
                 name={seriesName}
                 type={style.curveType}
@@ -271,13 +321,15 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} margin={chartMargin} {...pointerHandlers}>
+            <LineChart data={plotData} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
               {alarmBandElements}
               {showTooltip && <Tooltip trigger={coarse ? "click" : "hover"} labelFormatter={tooltipLabelFormatter} formatter={tooltipValueFormatter} />}
+              {compareLine}
               <Line
+                connectNulls={compareMode !== "none"}
                 type={style.curveType}
                 dataKey="value"
                 name={seriesName}

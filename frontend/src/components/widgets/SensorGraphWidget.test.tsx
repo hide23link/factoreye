@@ -4,6 +4,7 @@ import { renderWithQueryClient, screen } from "../../test/test-utils";
 import type { Sensor, Widget } from "../../types";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { DEFAULT_RANGE } from "../../lib/timeRange";
+import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { SensorGraphWidget } from "./SensorGraphWidget";
 
 vi.mock("../../lib/api", () => ({
@@ -50,6 +51,7 @@ function makeWidget(overrides: Partial<Widget> = {}): Widget {
 }
 
 afterEach(() => {
+  useGraphViewStore.setState({ compare: "none" });
   vi.restoreAllMocks();
   useTimeRangeStore.setState({ range: DEFAULT_RANGE });
 });
@@ -101,6 +103,31 @@ describe("SensorGraphWidget", () => {
 
     const toggle = await screen.findByRole("button", { name: "警報の帯を表示する" });
     expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("比較を「昨日」にすると、範囲を 24 時間ずらした取得を足す。比較の取得が失敗しても、今日のグラフは残る", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) => {
+      if (Date.parse(from) < Date.parse("2024-01-01T00:00:00.000Z")) throw new Error("boom");
+      return { bucketSeconds: 60, buckets: [{ start: "2024-01-01T00:30:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }] };
+    });
+
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget()} />);
+
+    expect(await screen.findByText(/ライン温度/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled)).toHaveBeenCalledTimes(2));
+    const [today, previous] = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.map((call) => Date.parse(call[1]));
+    expect(today - previous).toBe(24 * 3_600_000);
+    expect(screen.queryByText("グラフのデータを取得できませんでした。")).not.toBeInTheDocument();
+  });
+
+  it("棒グラフでは比較を選べない（理由を出す）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [{ start: "2024-01-01T00:30:00.000Z", min: 25, avg: 25.5, max: 26, count: 2 }] });
+    renderWithQueryClient(<SensorGraphWidget widget={makeWidget({ config: { graphType: "bar" } })} />);
+    expect(await screen.findByRole("button", { name: "比較: 昨日" })).toBeDisabled();
+    expect(screen.getByRole("note")).toHaveTextContent("棒グラフ");
   });
 
   it("表示範囲は、ダッシュボードの範囲（時間範囲の状態）に従って取得する", async () => {

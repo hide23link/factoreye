@@ -72,7 +72,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
-  useGraphViewStore.setState({ showBands: true });
+  useGraphViewStore.setState({ showBands: true, compare: "none" });
   useCursorTimeStore.getState().reset();
   useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
@@ -451,5 +451,70 @@ describe("TrendStackWidget の警報の帯", () => {
       expect(note).toMatch(/^警報 \d{2}:\d{2}〜\d{2}:\d{2} 最高 1100$/);
     });
     expect(screen.getByTestId("cursor-note")).toHaveTextContent(/^警報 /);
+  });
+});
+
+describe("TrendStackWidget の昨日の重ね", () => {
+  /** 範囲の始め（from）が今から 1 時間より前なら比較側の取得（24 時間ずらしたもの） */
+  const isCompareCall = (from: string) => Date.now() - Date.parse(from) > 20 * 3_600_000;
+
+  it("比較を「昨日」にすると、24 時間ずらした範囲を取り、灰色の点線を重ねる。縦軸は両方が入る", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from)
+        ? { bucketSeconds: 60, buckets: [{ ...bucketAgo(30, 5000), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] }
+        : { bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    expect(await screen.findByTestId("compare-line")).toBeInTheDocument();
+    const calls = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls;
+    const [today, previous] = [calls.find((c) => !isCompareCall(c[1])), calls.find((c) => isCompareCall(c[1]))];
+    // 比較側の範囲は、今の範囲のちょうど 24 時間前
+    expect(Date.parse(today![1]) - Date.parse(previous![1])).toBe(24 * 3_600_000);
+    expect(Date.parse(today![2]) - Date.parse(previous![2])).toBe(24 * 3_600_000);
+    // 縦軸は、比較の値（5000）が入る高さまで伸びる
+    expect(screen.getByText("5000")).toBeInTheDocument();
+  });
+
+  it("比較しない（既定）ときは、比較の取得も線も無い", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 600)] });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument();
+    expect(vi.mocked(api.fetchSensorReadingsDownsampled)).toHaveBeenCalledTimes(1);
+  });
+
+  it("比較側の取得が失敗しても、今日の線は消えない", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) => {
+      if (isCompareCall(from)) throw new Error("boom");
+      return { bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] };
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.some((c) => isCompareCall(c[1]))).toBe(true));
+    expect(screen.queryByText("データを取得できませんでした")).not.toBeInTheDocument();
+    expect(lineStrokes()).toHaveLength(1);
+    expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument();
+  });
+
+  it("カーソルの値の一覧に「昨日 62.4（差 +4.1）」の形で出す", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "温度", { unit: "℃" })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from)
+        ? { bucketSeconds: 60, buckets: [{ ...bucketAgo(0, 62.4), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] }
+        : { bucketSeconds: 60, buckets: [bucketAgo(30, 66.5)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findByTestId("compare-line");
+    useCursorTimeStore.setState({ time: Date.now() - 30 * 60_000 + 30_000, owner: "w1" });
+    await vi.waitFor(() => {
+      const notes = useTrendCursorStore.getState().widgets.w1?.rows[0]?.notes?.map((n) => n.text) ?? [];
+      expect(notes).toEqual([expect.stringMatching(/^昨日 62\.4（差 \+4\.\d）$/)]);
+    });
   });
 });
