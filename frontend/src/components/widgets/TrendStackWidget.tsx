@@ -18,7 +18,7 @@
  * 【引数（props）】widget = このウィジェット（センサーは config.sensorIds、先頭は sensorId にも入る）。WidgetCard が渡す。
  * 表示範囲は、ほかのグラフと同じく画面上部の時間の操作（useTimeRangeStore）に従う。
  */
-import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, type PointerEvent, type ReactNode } from "react";
 
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
@@ -89,7 +89,9 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const range = effectiveRange(widget, dashboardRange);
   const options = graphDataOptions(widget.config, 1);
   const now = useNow(options.refreshMs);
-  const bounds = resolveRange(range, now);
+  const resolved = resolveRange(range, now);
+  // 範囲の値が同じなら、同じオブジェクトを使い続ける（行（TrendRow）が、カーソルが動くだけでは、重い計算をやり直さないように）
+  const bounds = useMemo<ResolvedRange>(() => ({ from: resolved.from, to: resolved.to }), [resolved.from, resolved.to]);
   const ids = graphSensorIds(widget);
   // カーソルの時刻（ミリ秒）。全グラフで共有する。null は、利用者が動かしていない（現在位置＝表示範囲の右端に、今に追従して出す）
   const cursorTime = useCursorTimeStore((s) => s.time);
@@ -99,7 +101,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   // 時間の軸の目盛りの数は、軸の幅から決める（スマホの狭い幅で、時刻の文字が重ならないように）
   const axisRef = useRef<HTMLDivElement>(null);
   const { width: axisWidth } = useElementSize(axisRef);
-  const ticks = timeTicks(bounds.from, bounds.to, maxTimeTicks(axisWidth));
+  const ticks = useMemo(() => timeTicks(bounds.from, bounds.to, maxTimeTicks(axisWidth)), [bounds, axisWidth]);
   // 時間の軸の行に出す、カーソルの時刻の札の位置（軸の幅が測れる前は、標準の幅 600px で決める）
   const plotWidth = axisWidth > 0 ? axisWidth : 600;
   const timeText = formatTickTime(shownCursor, span);
@@ -117,20 +119,23 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   // この計器グラフが消えたら、この計器グラフの分だけ取り下げる（ほかの計器グラフの分は残す）
   useEffect(() => () => useTrendCursorStore.getState().clear(widget.id), [widget.id]);
 
+  // 動かした位置を、共有のカーソルの時刻にする（グラフの 1 区間に丸め、描画 1 回にまとめる）。
+  // マウスが外れても、指を離しても、カーソルはその位置に残す（勝手に今へ戻さない。戻すのは「今に戻す」）。
+  // 行（TrendRow）に渡すので、範囲が変わらないかぎり同じ関数を使い続ける
+  const pointer = useMemo<PlotPointerHandlers>(() => {
+    const moveCursor = (event: PointerEvent<HTMLDivElement>) => {
+      const box = event.currentTarget.getBoundingClientRect();
+      // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
+      if (box.width <= 0) return;
+      const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+      requestCursorTime(bounds.from + ratio * (bounds.to - bounds.from), (bounds.to - bounds.from) / GRAPH_BUCKETS);
+    };
+    return { onPointerMove: moveCursor, onPointerDown: moveCursor };
+  }, [bounds]);
+
   if (ids.length === 0) {
     return <p className="text-sm text-gray-500">センサーが設定されていません（編集で、センサーをこのウィジェットに入れてください）</p>;
   }
-
-  // 動かした位置を、共有のカーソルの時刻にする（グラフの 1 区間に丸め、描画 1 回にまとめる）。
-  // マウスが外れても、指を離しても、カーソルはその位置に残す（勝手に今へ戻さない。戻すのは「今に戻す」）
-  const moveCursor = (event: PointerEvent<HTMLDivElement>) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
-    if (box.width <= 0) return;
-    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-    requestCursorTime(bounds.from + ratio * span, span / GRAPH_BUCKETS);
-  };
-  const pointer = { onPointerMove: moveCursor, onPointerDown: moveCursor };
 
   return (
     <div className="trend-stack flex h-full min-h-0 flex-col text-[13px]" style={{ color: INK }}>
@@ -246,8 +251,13 @@ interface RowProps {
   pointer: PlotPointerHandlers;
 }
 
-/** 1 センサー分の行。データの取得（間引き）は行ごとに行う */
-function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, ticks, pointer }: RowProps) {
+/**
+ * 1 センサー分の行。データの取得（間引き）は行ごとに行う。
+ * 重い計算（点・最高最低・目盛り・線の形）は、データや範囲が変わったときだけやり直す（buildRowModel を useMemo で）。
+ * 線・目盛り・しきい値の絵は PlotStatic に分け、カーソルが動くだけでは描き直さない。
+ * React.memo で、親の描き直しのうち、この行に関係する値（props）が変わらないものでは、行ごと飛ばす。
+ */
+const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, ticks, pointer }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   const rowRef = useRef<HTMLDivElement>(null);
@@ -255,8 +265,12 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
   const maxIntervals = height > 0 ? Math.min(7, Math.max(2, Math.floor(height / 22))) : 7;
   const name = sensor?.name ?? "センサー";
   const unit = sensor?.unit ?? "";
+  const model = useMemo(
+    () => (data ? buildRowModel({ data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit }) : null),
+    [data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit],
+  );
 
-  if (!data) {
+  if (!data || !model) {
     return (
       <div ref={rowRef} className="trend-cell flex min-h-[88px] flex-1 flex-col border-b" style={{ borderColor: "var(--fe-line)" }}>
         <div className="trend-row min-h-0 flex-1">
@@ -277,29 +291,8 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
     );
   }
 
-  // 区間の中央の時刻は、表示の右端（今）より後にしない（最後の区間は、まだ終わっていないため）
-  const points = toPoints(data.buckets, data.bucketSeconds, aggregation, bounds.to);
-  const stats = trendStats(data.buckets, data.bucketSeconds, points, bounds.to);
-  const limits = sensor ? trendLimits(sensor) : [];
-  const limitValues = limits.map((limit) => limit.value);
-  // 線が無い行（この期間のデータが無い）でも、最後の値が目盛りに収まるようにする
-  const extra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
-  const scale = niceScale(Math.min(...extra, ...limitValues), Math.max(...extra, ...limitValues), maxIntervals);
-  const bucketMs = data.bucketSeconds * 1000;
-  const now = nowPoint(stats?.last ?? null, latest, live);
-  // 直近の表示で、最後の受信が古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
-  const stale = now === null || (live && bounds.to - now.time > staleAfterMs(data.bucketSeconds));
-  const level = now ? levelOf(now.value, limits) : "normal";
-  // 線をつなぐ長さと、カーソルが点を拾う長さは同じ基準にする（線が見えている所で「データなし」と出さないため）
-  const gapMs = gapThreshold(points, bucketMs);
-  const color = stateColor(level, stale);
+  const { points, stats, limits, scale, now, stale, level, gapMs, color, format, sub, lineD, warningD, criticalD } = model;
   const span = bounds.to - bounds.from;
-  const format = (value: number) => formatTrendValue(value, scale, decimals);
-  const limitText = describeLimits(limits);
-
-  let sub = limitText ? `${limitText} ${unit}` : unit || "しきい値なし";
-  if (stale && now) sub = `受信なし\u3000最後の値 ${formatLastSeen(now.time)}`;
-  if (!stats && !now) sub = "この期間のデータはありません";
 
   const cursorPoint = pointNear(points, cursor, gapMs / 2);
   const cursorText = cursorPoint ? format(cursorPoint.value) : "---";
@@ -371,19 +364,16 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
               : null;
             return (
               <>
-                <Grid scale={scale} ticks={ticks} bounds={bounds} />
-                <LimitLines limits={limits} scale={scale} />
-                <svg
-                  viewBox="0 0 1000 100"
-                  preserveAspectRatio="none"
-                  className="absolute inset-0 h-full w-full"
-                  role="img"
-                  aria-label={describeRow(name, unit, stats, format)}
-                >
-                  <path d={linePath(points, scale, bounds.from, bounds.to, gapMs)} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-                  <path d={overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
-                  <path d={overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to)} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
-                </svg>
+                <PlotStatic
+                  scale={scale}
+                  ticks={ticks}
+                  bounds={bounds}
+                  limits={limits}
+                  lineD={lineD}
+                  warningD={warningD}
+                  criticalD={criticalD}
+                  label={describeRow(name, unit, stats, format)}
+                />
                 {stats && extremes && (
                   <>
                     <Extreme point={stats.max} scale={scale} bounds={bounds} placed={extremes.max} text={maxText} />
@@ -416,7 +406,116 @@ function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregati
       </div>
     </div>
   );
+});
+
+/** 行の計算結果（データ・範囲・目盛りの数などが変わらなければ、使い回す） */
+interface RowModel {
+  points: TrendPoint[];
+  stats: ReturnType<typeof trendStats>;
+  limits: TrendLimit[];
+  scale: AxisScale;
+  now: TrendPoint | null;
+  stale: boolean;
+  level: "critical" | "warning" | "normal";
+  gapMs: number;
+  color: string;
+  format: (value: number) => string;
+  /** 左の欄・行の上に出す、しきい値の範囲などの文字 */
+  sub: string;
+  /** 線・しきい値を超えた部分（軽故障・重故障）の SVG の道筋 */
+  lineD: string;
+  warningD: string;
+  criticalD: string;
 }
+
+/** 行の重い計算（点・最高最低・目盛り・状態・線の形）。カーソルには依らないので、カーソルが動くたびにはやり直さない */
+function buildRowModel(input: {
+  data: NonNullable<ReturnType<typeof useDownsampledReadings>["data"]>;
+  aggregation: Aggregation;
+  sensor: Sensor | undefined;
+  latest: Reading | undefined;
+  bounds: ResolvedRange;
+  live: boolean;
+  maxIntervals: number;
+  decimals: number | undefined;
+  unit: string;
+}): RowModel {
+  const { data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit } = input;
+  // 区間の中央の時刻は、表示の右端（今）より後にしない（最後の区間は、まだ終わっていないため）
+  const points = toPoints(data.buckets, data.bucketSeconds, aggregation, bounds.to);
+  const stats = trendStats(data.buckets, data.bucketSeconds, points, bounds.to);
+  const limits = sensor ? trendLimits(sensor) : [];
+  const limitValues = limits.map((limit) => limit.value);
+  // 線が無い行（この期間のデータが無い）でも、最後の値が目盛りに収まるようにする
+  const extra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
+  const scale = niceScale(Math.min(...extra, ...limitValues), Math.max(...extra, ...limitValues), maxIntervals);
+  const bucketMs = data.bucketSeconds * 1000;
+  const now = nowPoint(stats?.last ?? null, latest, live);
+  // 直近の表示で、最後の受信が古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
+  const stale = now === null || (live && bounds.to - now.time > staleAfterMs(data.bucketSeconds));
+  const level = now ? levelOf(now.value, limits) : "normal";
+  // 線をつなぐ長さと、カーソルが点を拾う長さは同じ基準にする（線が見えている所で「データなし」と出さないため）
+  const gapMs = gapThreshold(points, bucketMs);
+  const color = stateColor(level, stale);
+  const limitText = describeLimits(limits);
+
+  let sub = limitText ? `${limitText} ${unit}` : unit || "しきい値なし";
+  if (stale && now) sub = `受信なし\u3000最後の値 ${formatLastSeen(now.time)}`;
+  if (!stats && !now) sub = "この期間のデータはありません";
+
+  return {
+    points,
+    stats,
+    limits,
+    scale,
+    now,
+    stale,
+    level,
+    gapMs,
+    color,
+    format: (value: number) => formatTrendValue(value, scale, decimals),
+    sub,
+    lineD: linePath(points, scale, bounds.from, bounds.to, gapMs),
+    warningD: overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to),
+    criticalD: overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to),
+  };
+}
+
+/**
+ * 行のグラフの、動かない部分（目盛りの線・しきい値・線の絵）。カーソルが動いても props は変わらないので、描き直さない（React.memo）。
+ * 札（最高・最低・カーソル）は、カーソルに合わせて動くので、ここには含めない。
+ */
+const PlotStatic = memo(function PlotStatic({
+  scale,
+  ticks,
+  bounds,
+  limits,
+  lineD,
+  warningD,
+  criticalD,
+  label,
+}: {
+  scale: AxisScale;
+  ticks: number[];
+  bounds: ResolvedRange;
+  limits: ReadonlyArray<TrendLimit>;
+  lineD: string;
+  warningD: string;
+  criticalD: string;
+  label: string;
+}) {
+  return (
+    <>
+      <Grid scale={scale} ticks={ticks} bounds={bounds} />
+      <LimitLines limits={limits} scale={scale} />
+      <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label={label}>
+        <path d={lineD} fill="none" style={{ stroke: INK }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+        <path d={warningD} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+        <path d={criticalD} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
+      </svg>
+    </>
+  );
+});
 
 /** カーソルの時刻の、この行の値を、警報の欄の下の一覧に渡す（何も描かない）。行が消えたら取り下げる */
 function CursorValuePublisher({

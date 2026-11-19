@@ -12,13 +12,14 @@
  * 【引数（props）】sensor = 選んだセンサー、live = 受信の状態（取れていなければ undefined）、onClose = 閉じる、onDeleted = 削除したあとの後片付け。
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 
 import { deleteSensor, updateSensor } from "../../lib/api";
 import { describeActionError, describeSensorError } from "../../lib/errors";
 import { isImeComposing } from "../../lib/ime";
 import { formatLiveValue, type SensorLive } from "../../lib/sensor-list";
 import { validateSensorBasics, validateThresholds } from "../../lib/sensor-validation";
+import { useCursorTimeStore } from "../../store/useCursorTimeStore";
 import type { Sensor, Widget } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { UnitSelect } from "../UnitSelect";
@@ -73,6 +74,9 @@ function DetailChart({ sensor }: { sensor: Sensor }) {
     createdAt: "",
     updatedAt: "",
   };
+  // この計器グラフで動かしたカーソルは、全グラフ共有の時刻に入る。センサーを切り替えたとき・詳細を閉じたときに「今」へ戻す
+  // （戻さないと、あとでダッシュボードを開いたとき、古い時刻でカーソルが固定されてしまう）
+  useEffect(() => () => useCursorTimeStore.getState().reset(), [sensor.id]);
   return (
     <div className="h-44 rounded-sm border border-gray-200">
       <TrendStackWidget widget={widget} />

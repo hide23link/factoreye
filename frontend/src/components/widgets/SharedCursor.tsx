@@ -68,7 +68,9 @@ export function CursorResetButton() {
       type="button"
       onClick={reset}
       title="すべてのグラフのカーソルを、現在位置（右端）に戻す"
-      className="absolute right-0 top-0 z-10 rounded border border-gray-300 bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-gray-600 hover:bg-gray-100"
+      // 色は画面の明るさに合わせた変数（暗い画面でも白く浮かない）
+      style={{ borderColor: "var(--fe-line)", background: "var(--fe-chrome)", color: "var(--fe-ink)" }}
+      className="absolute right-0 top-0 z-10 rounded border px-1.5 py-0.5 text-[10px] font-bold hover:opacity-80"
     >
       カーソルを今に戻す
     </button>

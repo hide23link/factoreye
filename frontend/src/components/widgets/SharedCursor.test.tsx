@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 import { Line, LineChart, XAxis, YAxis } from "recharts";
 
 import { act, fireEvent, render, screen } from "../../test/test-utils";
+import { useDragSelect } from "../../hooks/useDragSelect";
+import { withSharedCursor } from "../../lib/shared-cursor";
 import { cancelPendingCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
 
@@ -25,12 +28,14 @@ function Chart() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "setTimeout", "clearTimeout"] });
   useCursorTimeStore.getState().reset();
 });
 
 afterEach(() => {
   cancelPendingCursorTime();
   useCursorTimeStore.getState().reset();
+  vi.useRealTimers();
 });
 
 describe("SharedCursorOverlay（ふつうのグラフ・複数のグラフの共有カーソル）", () => {
@@ -76,5 +81,68 @@ describe("CursorResetButton（カーソルを今に戻す）", () => {
     act(() => useCursorTimeStore.getState().setTime(FROM));
     fireEvent.click(screen.getByRole("button", { name: "カーソルを今に戻す" }));
     expect(useCursorTimeStore.getState().time).toBeNull();
+  });
+});
+
+describe("ふつうのグラフ・複数のグラフの操作（withSharedCursor）→ ほかのグラフの連動", () => {
+  it("1 つのグラフ（ふつうのグラフ・複数のグラフ）の上で動かすと、同じダッシュボードのほかのグラフの縦線と時刻の札が、同じ時刻に動く", () => {
+    render(
+      <>
+        <Chart />
+        <Chart />
+      </>,
+    );
+    const stepMs = (TO - FROM) / 500;
+    // グラフ A（ふつうのグラフ）の上で、9:20 にマウスを動かす
+    const handlersA = withSharedCursor(true, stepMs, {});
+    act(() => {
+      handlersA.onMouseMove?.({ activeLabel: new Date(2026, 10, 18, 9, 20).getTime() });
+      vi.advanceTimersByTime(20);
+    });
+    // グラフ B（複数のグラフ）も、同じ時刻（9:20）に動く
+    const labels = screen.getAllByTestId("shared-cursor").map((el) => el.textContent);
+    expect(labels).toEqual(["09:20", "09:20"]);
+    // 今度は B 側で、タップ（click）して 9:45 に動かす → A も 9:45
+    const handlersB = withSharedCursor(true, stepMs, {});
+    act(() => {
+      handlersB.onClick?.({ activeLabel: new Date(2026, 10, 18, 9, 45).getTime() });
+      vi.advanceTimersByTime(20);
+    });
+    expect(screen.getAllByTestId("shared-cursor").map((el) => el.textContent)).toEqual(["09:45", "09:45"]);
+  });
+
+  it("ドラッグで期間を選ぶ操作（元のイベント）と両立する（押して・動かして・離すと選択が通り、動かした位置にカーソルも動く）", () => {
+    const selected: Array<[number, number]> = [];
+    const { result } = renderHook(() => useDragSelect((from, to) => selected.push([from, to])));
+    const handlers = withSharedCursor(true, 1000, result.current.handlers);
+
+    act(() => {
+      handlers.onMouseDown?.({ activeLabel: 1_000_000 });
+    });
+    // 元のイベントの state（anchor）を反映した最新のイベントで続ける
+    const moving = withSharedCursor(true, 1000, result.current.handlers);
+    act(() => {
+      moving.onMouseMove?.({ activeLabel: 1_100_000 });
+      vi.advanceTimersByTime(20);
+    });
+    expect(useCursorTimeStore.getState().time).toBe(1_100_000);
+    const ending = withSharedCursor(true, 1000, result.current.handlers);
+    act(() => {
+      ending.onMouseUp?.();
+    });
+    expect(selected).toEqual([[1_000_000, 1_100_000]]);
+  });
+});
+
+describe("CursorResetButton の色", () => {
+  it("固定の色ではなく、画面の明るさに合わせた変数の色（暗い画面で白く浮かない）", () => {
+    render(<CursorResetButton />);
+    act(() => useCursorTimeStore.getState().setTime(FROM));
+    const button = screen.getByRole("button", { name: "カーソルを今に戻す" });
+    const style = button.getAttribute("style") ?? "";
+    expect(style).toContain("var(--fe-line)");
+    expect(style).toContain("var(--fe-chrome)");
+    expect(style).toContain("var(--fe-ink)");
+    expect(button.className).not.toMatch(/gray|white/);
   });
 });

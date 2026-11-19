@@ -91,6 +91,8 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
   useEffect(() => {
     initTimeRangeFromUrl();
+    // 開くときも、グラフのカーソルを「今」から始める（ほかの画面で動かした時刻が、共有の時刻に残っていても引き継がない）
+    useCursorTimeStore.getState().reset();
     return () => {
       resetTimeRange();
       // グラフのカーソルも「今」に戻す（次に開いたときは、現在位置から）

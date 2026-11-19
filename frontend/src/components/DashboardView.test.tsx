@@ -143,6 +143,16 @@ describe("DashboardView", () => {
     expect(useCursorTimeStore.getState().time).toBeNull();
   });
 
+  it("ダッシュボードを開くときも、グラフのカーソルは「今」から始まる（ほかの画面で動かした時刻を引き継がない）", async () => {
+    vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+    act(() => useCursorTimeStore.getState().setTime(123456));
+
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+    await screen.findByRole("heading", { name: "工場A" });
+
+    expect(useCursorTimeStore.getState().time).toBeNull();
+  });
+
   it("ローディング中はスピナーテキストを表示する", () => {
     vi.mocked(api.fetchDashboard).mockReturnValue(new Promise(() => {}));
 

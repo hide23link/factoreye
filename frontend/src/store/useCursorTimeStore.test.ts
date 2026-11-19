@@ -48,4 +48,29 @@ describe("useCursorTimeStore（全グラフで共有するカーソルの時刻�
     vi.advanceTimersByTime(20);
     expect(useCursorTimeStore.getState().time).toBeNull();
   });
+
+  it("1 フレームに何回呼んでも、store の更新（＝全グラフの描き直し）は 1 回だけ。次のフレームで、また 1 回", () => {
+    let updates = 0;
+    const unsubscribe = useCursorTimeStore.subscribe(() => (updates += 1));
+    for (let i = 0; i < 30; i++) requestCursorTime(1000 + i * 10);
+    vi.advanceTimersByTime(20);
+    expect(updates).toBe(1);
+    expect(useCursorTimeStore.getState().time).toBe(1290);
+    requestCursorTime(5000);
+    requestCursorTime(6000);
+    vi.advanceTimersByTime(20);
+    expect(updates).toBe(2);
+    unsubscribe();
+  });
+
+  it("同じ時刻を続けて入れても、更新は 1 回（同じ時刻では、描き直さない）", () => {
+    let updates = 0;
+    const unsubscribe = useCursorTimeStore.subscribe(() => (updates += 1));
+    requestCursorTime(1000, 1000);
+    vi.advanceTimersByTime(20);
+    requestCursorTime(1200, 1000); // 同じ区間に丸まる
+    vi.advanceTimersByTime(20);
+    expect(updates).toBe(1);
+    unsubscribe();
+  });
 });
