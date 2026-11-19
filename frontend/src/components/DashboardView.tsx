@@ -124,12 +124,9 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return (
       <div className="p-4">
         <ErrorNotice message="ダッシュボードを取得できませんでした。" onRetry={() => void refetch()}>
-          <button
-            type="button"
-            onClick={() => selectDashboard(null)}
-            className="text-xs text-gray-500 hover:text-gray-700"
-          >
-            ← 一覧へ
+          {/* 消された・別のワークスペースのものなどで開けないとき、抜ける道（最後に見たものを忘れて、先頭を開く） */}
+          <button type="button" onClick={() => selectDashboard(null)} className="text-xs text-gray-500 hover:text-gray-700">
+            先頭のダッシュボードを開く
           </button>
         </ErrorNotice>
       </div>

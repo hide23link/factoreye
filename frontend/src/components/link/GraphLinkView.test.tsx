@@ -6,7 +6,7 @@ import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { useUiStore } from "../../store/useUiStore";
 import { renderWithQueryClient, screen, waitFor } from "../../test/test-utils";
 import type { DashboardDetail, Sensor, Widget } from "../../types";
-import { DashboardListPage } from "../DashboardListPage";
+import { LinkNotFoundNotice } from "../DashboardHome";
 import { GraphLinkView } from "./GraphLinkView";
 
 vi.mock("../../lib/api", () => ({
@@ -127,7 +127,7 @@ describe("GraphLinkView", () => {
     ["ダッシュボードが無い・別のワークスペース（404）", () => vi.mocked(api.fetchDashboard).mockRejectedValue(new ApiError(404, "not found"))],
     ["グラフが消された", () => vi.mocked(api.fetchDashboard).mockResolvedValue(makeDashboard([]))],
     ["グラフではないウィジェット", () => vi.mocked(api.fetchDashboard).mockResolvedValue(makeDashboard([makeWidget({ type: "Gauge" })]))],
-  ])("見つからない（%s）: URL のリンクを消して、一覧に黄色の帯を出す", async (_label, arrange) => {
+  ])("見つからない（%s）: URL のリンクを消して、ダッシュボードの画面に黄色の帯を出す", async (_label, arrange) => {
     arrange();
     renderWithQueryClient(<GraphLinkView link={link} />);
 
@@ -135,7 +135,7 @@ describe("GraphLinkView", () => {
     expect(useUiStore.getState().graphLink).toBeNull();
     expect(window.location.search).toBe("");
 
-    renderWithQueryClient(<DashboardListPage />);
+    renderWithQueryClient(<LinkNotFoundNotice />);
     expect(screen.getByText("リンクのグラフが見つかりません。消されたか、別のワークスペースのものです。")).toBeInTheDocument();
   });
 

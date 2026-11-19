@@ -16,7 +16,8 @@
 import { Suspense, useEffect } from "react";
 
 import { LoginPage } from "./components/auth/LoginPage";
-import { DashboardListPage } from "./components/DashboardListPage";
+import { DashboardHome, LinkNotFoundNotice } from "./components/DashboardHome";
+import { DashboardNavList } from "./components/DashboardNavList";
 import { DashboardTabs } from "./components/DashboardTabs";
 import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
@@ -172,31 +173,38 @@ function UserBadge() {
   );
 }
 
-/** パソコンの左の縦のメニュー。今の画面に印を付ける。スマホでは出さない（下のメニューを使う） */
+/**
+ * パソコンの左の縦のメニュー。名前つきの項目を並べ、「ダッシュボード」の下にダッシュボード名の一覧を出す（一覧の画面は無い）。
+ * 今の画面に印を付ける。スマホでは出さない（下のメニューと、上のタブを使う）。
+ */
 function SideRail() {
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
 
   return (
-    <nav aria-label="メインメニュー" className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col items-center gap-1 border-r border-gray-200 py-3 sm:flex" style={{ background: "var(--fe-chrome)" }}>
-      <BrandMark />
+    <nav aria-label="メインメニュー" className="sticky top-0 hidden h-screen w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-gray-200 px-2 py-3 sm:flex" style={{ background: "var(--fe-chrome)" }}>
+      <div className="px-2">
+        <BrandMark />
+      </div>
       {NAV_ITEMS.map((item) => {
         const active = view === item.value;
         return (
-          <button
-            key={item.value}
-            type="button"
-            onClick={() => setView(item.value)}
-            aria-label={item.label}
-            aria-current={active ? "page" : undefined}
-            title={item.label}
-            className={`flex w-14 flex-col items-center gap-0.5 rounded py-1.5 text-[10px] ${
-              active ? "bg-gray-100 text-gray-900 shadow-[inset_2px_0_0_rgb(var(--blue-600))]" : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-            }`}
-          >
-            <NavIcon paths={item.icon} />
-            <span aria-hidden="true">{item.short}</span>
-          </button>
+          <div key={item.value} className="flex flex-col">
+            <button
+              type="button"
+              onClick={() => setView(item.value)}
+              aria-label={item.label}
+              aria-current={active ? "page" : undefined}
+              title={item.label}
+              className={`flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-[13px] ${
+                active ? "bg-gray-100 text-gray-900 shadow-[inset_2px_0_0_rgb(var(--blue-600))]" : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              }`}
+            >
+              <NavIcon paths={item.icon} size={18} />
+              <span aria-hidden="true">{item.label}</span>
+            </button>
+            {item.value === "main" && <DashboardNavList />}
+          </div>
         );
       })}
     </nav>
@@ -256,6 +264,7 @@ function ImpersonationBanner() {
     </div>
   );
 }
+
 
 /** スマホ用の下部ナビゲーション。画面の下に固定し、親指で押しやすい大きさにする（パソコンでは出さない）。 */
 function BottomNav() {
@@ -317,7 +326,7 @@ function AppShell() {
   // 画面表示モードに入っている間（ダッシュボードを選んでいるときだけ）は、常に暗くする
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
 
-  // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（一覧に黄色の帯が出る）
+  // リンクの形がおかしい（ID が片方だけ）ときは、URL のリンクの部分を消す（ダッシュボードの画面に黄色の帯が出る）
   useEffect(() => {
     if (linkNotFound) clearGraphLinkFromUrl();
   }, [linkNotFound]);
@@ -387,8 +396,9 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
           </header>
         )}
         {!kiosk && view === "main" && <DashboardTabs />}
+        {!kiosk && view === "main" && <LinkNotFoundNotice />}
         <main className={kiosk ? "" : "pb-20 sm:pb-0"}>
-          {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。一覧と詳細の行き来も含む） */}
+          {/* 画面を切り替えたら、前の読み込み失敗の表示は消す（key。ダッシュボードの切り替えも含む） */}
           <ChunkErrorBoundary key={`${view}:${selectedDashboardId ?? ""}`}>
             <Suspense fallback={<PageFallback />}>
               {view === "settings" && <SettingsPage />}
@@ -398,7 +408,7 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
                 (selectedDashboardId ? (
                   <DashboardView dashboardId={selectedDashboardId} />
                 ) : (
-                  <DashboardListPage />
+                  <DashboardHome />
                 ))}
             </Suspense>
           </ChunkErrorBoundary>

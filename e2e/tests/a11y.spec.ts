@@ -8,11 +8,11 @@ import { expect, test } from "@playwright/test";
 const BLOCKING_IMPACTS = ["critical"];
 
 const pages = [
-  { name: "ダッシュボード一覧", open: async () => {} },
+  { name: "ダッシュボード", open: async () => {} },
   {
     name: "設定",
     open: async (page: import("@playwright/test").Page) => {
-      await page.getByRole("button", { name: "設定" }).click();
+      await page.getByRole("navigation", { name: /メインメニュー|画面の切り替え/ }).getByRole("button", { name: "設定" }).click();
       await expect(page.getByRole("button", { name: "＋センサーを追加" })).toBeVisible();
     },
   },
@@ -20,7 +20,7 @@ const pages = [
     name: "アラーム",
     // アラームは設定画面の中のタブ
     open: async (page: import("@playwright/test").Page) => {
-      await page.getByRole("button", { name: "設定" }).click();
+      await page.getByRole("navigation", { name: /メインメニュー|画面の切り替え/ }).getByRole("button", { name: "設定" }).click();
       await page.getByRole("button", { name: "アラーム" }).click();
     },
   },

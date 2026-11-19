@@ -8,12 +8,14 @@ import * as panelPlacement from "../lib/panel-placement";
 import { useKioskStore } from "../store/useKioskStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Sensor, Widget } from "../types";
+import { DashboardNavList } from "./DashboardNavList";
 import { DashboardView } from "./DashboardView";
 
 vi.mock("../lib/api", () => ({
   fetchDashboard: vi.fn(),
   fetchDashboards: vi.fn(),
   deleteDashboard: vi.fn(),
+  createDashboard: vi.fn(),
   updateDashboard: vi.fn(),
   updateWidget: vi.fn(),
   addWidget: vi.fn(),
@@ -161,15 +163,26 @@ describe("DashboardView", () => {
     expect(screen.getByText("読み込み中...")).toBeInTheDocument();
   });
 
-  it("取得に失敗したとき、エラーと再試行・一覧へ戻る導線を表示する", async () => {
+  it("取得に失敗したとき、エラーと再試行・先頭を開く導線を表示する", async () => {
     vi.mocked(api.fetchDashboard).mockRejectedValue(new Error("boom"));
 
     renderWithQueryClient(<DashboardView dashboardId="d1" />);
 
     expect(await screen.findByText("ダッシュボードを取得できませんでした。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "← 一覧へ" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "先頭のダッシュボードを開く" })).toBeInTheDocument();
     expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument();
+  });
+
+  it("取得に失敗したとき「先頭のダッシュボードを開く」で、選びを外す（DashboardHome が最後に見たもの・先頭を開く）", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchDashboard).mockRejectedValue(new Error("boom"));
+    useUiStore.setState({ selectedDashboardId: "d1" });
+
+    renderWithQueryClient(<DashboardView dashboardId="d1" />);
+    await user.click(await screen.findByRole("button", { name: "先頭のダッシュボードを開く" }));
+
+    expect(useUiStore.getState().selectedDashboardId).toBeNull();
   });
 
   it("ダッシュボード名と説明を表示する", async () => {
@@ -336,6 +349,43 @@ describe("DashboardView", () => {
       await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "削除" }));
 
       await waitFor(() => expect(api.deleteDashboard).toHaveBeenCalledWith("d1"));
+    });
+
+    it("削除したあと、ダッシュボードの一覧を取り直し終えてから、選びを外す（古い一覧のまま、消したものを開き直さない）", async () => {
+      const user = userEvent.setup();
+      const other = { ...emptyDashboard, id: "d2", name: "工場B" };
+      const noop = () => {};
+      let finishRefetch: (value: DashboardDetail[]) => void = noop;
+      vi.mocked(api.fetchDashboard).mockResolvedValue(emptyDashboard);
+      // 削除の前は、2 つの一覧を返す。削除の後の取り直しだけ、終わりを止めておく
+      let deleted = false;
+      vi.mocked(api.fetchDashboards).mockImplementation(() =>
+        deleted ? new Promise((resolve) => { finishRefetch = resolve; }) : Promise.resolve([emptyDashboard, other]),
+      );
+      vi.mocked(api.deleteDashboard).mockImplementation(async () => {
+        deleted = true;
+      });
+      useUiStore.setState({ selectedDashboardId: "d1" });
+
+      // 一覧を読んでいる画面（左のメニュー）が出ていて、取り直しが走る状態にする
+      renderWithQueryClient(
+        <>
+          <DashboardNavList />
+          <DashboardView dashboardId="d1" />
+        </>,
+      );
+      await user.click(await screen.findByRole("button", { name: "✎ 編集する" }));
+      await user.click(screen.getByRole("button", { name: "設定" }));
+      await user.click(screen.getByRole("button", { name: "このダッシュボードを削除" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "削除" }));
+      await waitFor(() => expect(api.deleteDashboard).toHaveBeenCalledWith("d1"));
+
+      // 取り直しが終わるまでは、まだ外さない
+      await waitFor(() => expect(finishRefetch).not.toBe(noop));
+      expect(useUiStore.getState().selectedDashboardId).toBe("d1");
+
+      await act(async () => finishRefetch([other]));
+      await waitFor(() => expect(useUiStore.getState().selectedDashboardId).toBeNull());
     });
 
     it("計測値のセンサーの「＋」で、グラフを新しく作る", async () => {
