@@ -33,6 +33,22 @@ export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): 
       const patch = graphSensorPatch(widget, next, keep);
       return { ok: true, ...patch, message: mode === "add" ? `「${sensor.name}」を計器グラフに追加しました` : `計器グラフを「${sensor.name}」に入れ替えました` };
     }
+    case "StateTimeline": {
+      // 行を足す（すでにあれば何もしない。「入れ替え」はそのセンサーだけにする）。停止とみなす値は、残るセンサーの分だけ残す
+      const ids = graphSensorIds(widget);
+      if (mode === "add" && ids.includes(sensor.id)) {
+        return { ok: false, message: `「${sensor.name}」はすでにこの状態の帯にあります` };
+      }
+      const next = mode === "add" ? [...ids, sensor.id] : [sensor.id];
+      const patch = graphSensorPatch(widget, next, []);
+      const stops = Object.fromEntries(Object.entries(widget.config.stateStopValues ?? {}).filter(([id]) => next.includes(id)));
+      return {
+        ok: true,
+        ...patch,
+        config: { ...patch.config, stateStopValues: stops },
+        message: mode === "add" ? `「${sensor.name}」を状態の帯に追加しました` : `状態の帯を「${sensor.name}」に入れ替えました`,
+      };
+    }
     case "TargetStrip": {
       // 複数のセンサーを並べる（グラフと同じ。すでにあれば何もしない。「入れ替え」はそのセンサーだけにする）
       const ids = graphSensorIds(widget);

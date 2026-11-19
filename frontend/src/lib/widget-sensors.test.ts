@@ -104,3 +104,15 @@ describe("assignSensor（計器グラフ）の線の色", () => {
     expect(assignSensor(w, sensor("c", "C"), "replace")).toMatchObject({ ok: true, config: { colors: [GRAPH_COLORS[0]] } });
   });
 });
+
+describe("assignSensor（状態の帯）", () => {
+  it("追加は行を足し、入れ替えは残るセンサーの停止とみなす値だけ残す", () => {
+    const w = widget("StateTimeline", "a", { sensorIds: ["a", "b"], stateStopValues: { a: 0, b: 5 } });
+    const added = assignSensor(w, sensor("c", "C"), "add");
+    expect(added.ok && added.config.sensorIds).toEqual(["a", "b", "c"]);
+    const replaced = assignSensor(w, sensor("b", "B"), "replace");
+    expect(replaced.ok && replaced.config.sensorIds).toEqual(["b"]);
+    expect(replaced.ok && replaced.config.stateStopValues).toEqual({ b: 5 });
+    expect(assignSensor(w, sensor("a", "A"), "add").ok).toBe(false);
+  });
+});
