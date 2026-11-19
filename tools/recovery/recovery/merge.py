@@ -285,6 +285,9 @@ async def _merge_table(
         source += len(batch)
 
     t, s_ = f"public.{_ident(spec.table)}", _ident(tmp)
+    rolled = 0
+    if spec.table == "readings":
+        rolled = await _skip_rolled_up_readings(dst, s_)
     if spec.remap_workspace and sel.remaps:
         # OSS 版として入れるときは NULL（into_workspace_id が None）
         await dst.execute(f"UPDATE {s_} SET workspace_id = $1::uuid", sel.into_workspace_id)
@@ -298,7 +301,7 @@ async def _merge_table(
         await dst.execute(f"UPDATE {s_} SET id = $1", spec.force_id)
     op = "IS NOT DISTINCT FROM" if spec.nullable_key else "="
     match = " AND ".join(f"x.{_ident(k)} {op} s.{_ident(k)}" for k in spec.key)
-    existing = _rowcount(
+    existing = rolled + _rowcount(
         await dst.execute(f"DELETE FROM {s_} s WHERE EXISTS (SELECT 1 FROM {t} x WHERE {match})")
     )
     ins = ", ".join(_ident(c) for c in insert_cols)
@@ -321,8 +324,37 @@ async def _merge_table(
     # 連番（sequence）は取り消しても戻らないため、実行のときだけ進める
     if spec.fix_sequence and inserted and apply:
         await _advance_sequence(dst, spec.table)
-    note = f"発生中のアラーム {closed} 件を解除済みにして戻します" if closed else None
-    return TableResult(spec.table, source, inserted, existing, note, closed)
+    notes = []
+    if closed:
+        notes.append(f"発生中のアラーム {closed} 件を解除済みにして戻します")
+    if rolled:
+        notes.append(
+            f"1 分にまとめ済みの測定値 {rolled} 件は、今の DB の readings_rollup にあるため"
+            "戻しません"
+        )
+    return TableResult(spec.table, source, inserted, existing, "。".join(notes) or None, closed)
+
+
+async def _skip_rolled_up_readings(dst: asyncpg.Connection, tmp: str) -> int:
+    """戻す測定値のうち、今の DB で 1 分にまとめ済みの分を、一時テーブルから外す。外した件数を返す。
+
+    まとめ済み = readings_rollup に、同じセンサー・同じ分の行がある。
+
+    OSS 版でロールアップ（READINGS_ROLLUP_DAYS）が有効だと、古い 1 秒ごとの行は消えて 1 分の行に
+    なっている。バックアップの 1 秒ごとの行を足すと、まとめた行と二重になる（件数・合計が増える）。
+    まとめていない分（今の DB に readings_rollup の行が無い分）は、これまでどおり戻す
+    （戻した行は、次のロールアップで 1 分の行に足し込まれる）。
+    readings_rollup が無い DB では何もしない。
+    """
+    if not await dst.fetchval("SELECT to_regclass('public.readings_rollup') IS NOT NULL"):
+        return 0
+    return _rowcount(
+        await dst.execute(
+            f"DELETE FROM {tmp} s WHERE EXISTS (SELECT 1 FROM public.readings_rollup r"
+            f" WHERE r.sensor_id = s.sensor_id"
+            f" AND r.bucket_start = date_trunc('minute', s.recorded_at, 'UTC'))"
+        )
+    )
 
 
 async def _advance_sequence(dst: asyncpg.Connection, table: str) -> None:

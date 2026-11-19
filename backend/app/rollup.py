@@ -186,6 +186,15 @@ async def rollup_old_readings(
     return total
 
 
+def next_run_time(now: datetime) -> datetime:
+    """次の実行時刻（毎日 UTC 19:00）。ちょうどその時刻なら、翌日にする。
+
+    例: 2026-11-19 10:00 → 2026-11-19 19:00、2026-11-19 19:00 → 2026-11-20 19:00。
+    """
+    run = now.replace(hour=_RUN_HOUR_UTC, minute=0, second=0, microsecond=0)
+    return run if run > now else run + timedelta(days=1)
+
+
 async def rollup_loop() -> None:
     """毎日 UTC 19:00 に、古い測定値をまとめるループ（常駐タスク）。
 
@@ -193,9 +202,7 @@ async def rollup_loop() -> None:
     """
     while True:
         now = datetime.now(UTC)
-        next_run = now.replace(hour=_RUN_HOUR_UTC, minute=0, second=0, microsecond=0)
-        if next_run <= now:
-            next_run += timedelta(days=1)
+        next_run = next_run_time(now)
         wait_seconds = (next_run - now).total_seconds()
         _logger.info("rollup_loop: next run at %s (%.0fs)", next_run.isoformat(), wait_seconds)
         await asyncio.sleep(wait_seconds)

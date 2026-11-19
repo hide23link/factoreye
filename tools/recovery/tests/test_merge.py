@@ -413,3 +413,70 @@ async def test_destination_workspace_must_exist(cross: tuple[Scratch, dict[str, 
     sel = merge.MergeSelection([], include_self_hosted=True, into_workspace_id=uuid.uuid4())
     with pytest.raises(merge.MergeError, match="ありません"):
         await _run_mode(s, n["oss_backup"], n["saas_current"], sel, "saas")
+
+
+# ── ロールアップ後の DB への書き戻し ──────────────────────────
+
+# 今の DB は、10/6 00:00 の分が 1 分の行にまとめられ（生の行は消えている）、
+# 10/5 の生の行は残っている。
+# バックアップには、10/5 と 10/6 の生の行がある
+ROLLED_CURRENT_SQL = CURRENT_SQL + """
+CREATE TABLE public.readings_rollup (sensor_id uuid NOT NULL, bucket_start timestamptz NOT NULL,
+  count integer NOT NULL, sum double precision NOT NULL, min double precision NOT NULL,
+  max double precision NOT NULL, last_value double precision NOT NULL,
+  last_at timestamptz NOT NULL, PRIMARY KEY (sensor_id, bucket_start));
+ALTER TABLE public.readings_rollup OWNER TO fe_test_owner;
+INSERT INTO public.readings_rollup VALUES
+  ('bbbbbbbb-0000-0000-0000-000000000001', '2026-10-06T00:00:00Z', 60, 1260.0, 20.0, 22.0,
+   21.0, '2026-10-06T00:00:59Z');
+"""
+
+
+@pytest.fixture
+async def rolled_dbs(tmp_path: Path) -> AsyncIterator[tuple[Scratch, str, str]]:
+    """(scratch, バックアップの名前, ロールアップ済みの今の DB の名前)。"""
+    s = Scratch(SCRATCH_DSN)
+    backup, current = _name("factoreye"), _name("rolled")
+    await s.load(backup, write_dump(tmp_path, backup))
+    await s.load(current, write_dump(tmp_path, current, ROLLED_CURRENT_SQL))
+    yield s, backup, current
+    await s.drop(backup)
+    await s.drop(current)
+
+
+async def test_readings_already_rolled_up_are_not_written_back(
+    rolled_dbs: tuple[Scratch, str, str],
+) -> None:
+    """1 分にまとめ済みの分の 1 秒ごとの行を足すと、まとめた行と二重になる。足さない。"""
+    s, backup, current = rolled_dbs
+    r = await _run(s, backup, current, merge.MergeSelection([uuid.UUID(WS_A)]), apply=True)
+
+    readings = next(t for t in r.tables if t.table == "readings")
+    # バックアップの 2 件: 10/5 は今もある（飛ばす）、10/6 00:00 はまとめ済み（飛ばす）
+    # → 足すのは 0 件
+    assert (readings.source, readings.inserted, readings.existing) == (2, 0, 2)
+    assert readings.note is not None and "1 分にまとめ済み" in readings.note
+    dsn = s.dsn_for(current)
+    assert await _count(dsn, "SELECT count(*) FROM readings") == 1
+    assert await _count(dsn, "SELECT count(*) FROM readings_rollup") == 1  # まとめた行は変えない
+
+
+async def test_readings_in_minutes_not_rolled_up_are_still_written_back(
+    rolled_dbs: tuple[Scratch, str, str],
+) -> None:
+    """まとめていない分（1 分の行が無い分）は、これまでどおり戻す（次回の実行で足し込まれる）。"""
+    s, backup, current = rolled_dbs
+    conn = await asyncpg.connect(s.dsn_for(backup))
+    try:
+        await conn.execute(
+            "INSERT INTO public.readings (sensor_id, value, recorded_at) VALUES"
+            " ('bbbbbbbb-0000-0000-0000-000000000001', 22.0, '2026-10-06T00:01:00Z')"
+        )
+    finally:
+        await conn.close()
+
+    r = await _run(s, backup, current, merge.MergeSelection([uuid.UUID(WS_A)]), apply=True)
+
+    readings = next(t for t in r.tables if t.table == "readings")
+    assert (readings.inserted, readings.existing) == (1, 2)
+    assert await _count(s.dsn_for(current), "SELECT count(*) FROM readings") == 2

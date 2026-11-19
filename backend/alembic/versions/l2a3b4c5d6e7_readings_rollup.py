@@ -4,6 +4,11 @@ OSS 版で、設定 READINGS_ROLLUP_DAYS より古い 1 秒ごとの測定値を
 最後の値にまとめて持つ表。新しい表を作るだけで、既存の表（readings など）は変えない
 （Pi・本番の DB に無停止で当たる。設定が 0 のままなら、表は空のまま使われない）。
 
+【downgrade の注意】downgrade は readings_rollup を表ごと消す。ロールアップを実行したあとは、
+設定の日数より古い履歴（生の行は消えていて、この表にしか無い）が失われる。戻す前に必ず
+DB のバックアップ（pg_dump・WAL-G）を取ること。ロールアップを一度も実行していなければ、
+失われるものは無い。
+
 Revision ID: l2a3b4c5d6e7
 Revises: k1f2a3b4c5d6
 Create Date: 2026-11-19 10:30:00.000000
@@ -40,4 +45,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 注意: ロールアップ後は、7 日より古い履歴（この表にしか無い）がここで消える。先にバックアップ
     op.drop_table('readings_rollup')

@@ -17,6 +17,7 @@ import asyncio
 import sys
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.db.session import engine
@@ -58,16 +59,32 @@ async def _run(days: int | None) -> None:
     )
 
 
-async def _vacuum_full() -> None:
-    """readings を作り直して、領域を OS に返す。終わるまで readings が止まる。"""
+# readings のロックを待つ上限。取れなければ（長い問い合わせや取り込みが続いているとき）中止する
+_VACUUM_LOCK_TIMEOUT = "30s"
+
+
+async def _vacuum_full() -> int:
+    """readings を作り直して、領域を OS に返す。終わるまで readings が止まる。終了コードを返す。"""
     # VACUUM はトランザクションの中では実行できないので、自動コミットの接続で実行する
     async with engine.connect() as conn:
         autocommit = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        await autocommit.execute(text(f"SET lock_timeout = '{_VACUUM_LOCK_TIMEOUT}'"))
         print("VACUUM FULL readings を実行します（終わるまで数分かかります）...")
-        await autocommit.execute(text("VACUUM (FULL, ANALYZE) readings"))
+        try:
+            await autocommit.execute(text("VACUUM (FULL, ANALYZE) readings"))
+        except DBAPIError as error:
+            if "lock timeout" not in str(error.orig):
+                raise
+            print(
+                f"readings のロックを {_VACUUM_LOCK_TIMEOUT} 以内に取れませんでした"
+                "（長い問い合わせや取り込みが続いています）。何も変えていません。"
+                "しばらくして、もう一度実行してください"
+            )
+            return 1
         await autocommit.execute(text("VACUUM (ANALYZE) readings_rollup"))
     print("完了しました")
     await _status()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--yes を付けて実行してください"
             )
             return 2
-        asyncio.run(_vacuum_full())
+        return asyncio.run(_vacuum_full())
     return 0
 
 

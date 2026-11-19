@@ -315,11 +315,17 @@ async def test_latest_falls_back_to_rolled_last_value(client: httpx.AsyncClient)
     assert [(r["sensorId"], r["value"]) for r in latest] == [(str(sensor_id), 189.0)]
     assert latest[0]["recordedAt"].startswith("2026-11-05T10:01:29")
 
-    before = (
-        await client.get("/api/sensors/latest", params={"before": "2026-11-05T10:00:30Z"})
-    ).json()["readings"]
-    # 10:00 の分（0〜59 秒の最後の値 159）。まとめた行は分の単位で選ぶ
-    assert [r["value"] for r in before] == [159.0]
+    # 10:00 の分は 0〜59 秒（最後の値 159、時刻 10:00:59）、10:01 の分は 0〜29 秒（最後の値 189）
+    async def latest_before(moment: str) -> list[float]:
+        body = (await client.get("/api/sensors/latest", params={"before": moment})).json()
+        return [r["value"] for r in body["readings"]]
+
+    # before より後の値は返さない: 10:01:10 の時点では、10:01 の分の最後（10:01:29）は未来なので、
+    # 1 つ前の 10:00 の分の最後の値（159）になる
+    assert await latest_before("2026-11-05T10:01:10Z") == [159.0]
+    assert await latest_before("2026-11-05T10:01:30Z") == [189.0]
+    # 10:00 の分の最後（10:00:59）より前の時刻では、まだ値が無い
+    assert await latest_before("2026-11-05T10:00:30Z") == []
     too_early = (
         await client.get("/api/sensors/latest", params={"before": "2026-11-05T09:00:00Z"})
     ).json()["readings"]
@@ -441,3 +447,110 @@ async def _check_rolled_rows_survive_migration(out: Path) -> None:
             ).all()
         ]
     assert restored == expected
+
+
+async def test_aggregate_with_range_end_in_the_middle_of_a_minute(
+    client: httpx.AsyncClient,
+) -> None:
+    """to が分の途中のときは、その分の行（開始時刻が to 以前）を丸ごと足す（誤差は最大 1 分）。"""
+    sensor_id = await _create_sensor()
+    start = datetime(2026, 11, 5, 10, 0, 0, tzinfo=UTC)
+    await _add_readings(sensor_id, _second_values(start, 120, base=1.0))
+    url = f"/api/sensors/{sensor_id}/readings/aggregate"
+    mid = (start + timedelta(seconds=30)).isoformat()
+
+    raw = (await client.get(url, params={"from": start.isoformat(), "to": mid})).json()
+    assert raw["count"] == 31  # まとめる前は、秒まで正確
+    await rollup_old_readings(7, now=NOW)
+    rolled = (await client.get(url, params={"from": start.isoformat(), "to": mid})).json()
+
+    assert rolled["count"] == 60  # 10:00 の分を丸ごと（誤差は 1 分以内）
+    assert rolled["sum"] == pytest.approx(sum(range(1, 61)))
+    # from が分の途中のときは、開始時刻が from 以後の分だけ（10:01 の分）
+    after_mid = (await client.get(url, params={"from": mid})).json()
+    assert after_mid["count"] == 60
+
+
+@pytest.mark.parametrize("limit", [1, 2, 3, 4, 5, 6])
+async def test_history_limit_is_cut_at_the_same_place_across_raw_and_rolled_rows(
+    client: httpx.AsyncClient, limit: int
+) -> None:
+    """履歴の limit が、生の行とまとめた行の境目の前後でも、全体の先頭から limit 件になる。"""
+    sensor_id = await _create_sensor()
+    await _add_readings(sensor_id, _second_values(datetime(2026, 11, 5, 10, 0, tzinfo=UTC), 120))
+    new_start = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
+    await _add_readings(sensor_id, _second_values(new_start, 3, 500.0))
+    await rollup_old_readings(7, now=NOW)
+    # 全体（新しい順）: 生 3 件 → 1 分の平均 2 件
+    everything = [502.0, 501.0, 500.0, 89.5, 29.5]
+
+    body = (
+        await client.get(f"/api/sensors/{sensor_id}/readings", params={"limit": limit})
+    ).json()
+
+    assert [r["value"] for r in body["readings"]] == everything[:limit]
+
+
+def test_next_run_time_is_19_utc_and_never_in_the_past() -> None:
+    from app.rollup import next_run_time
+
+    assert next_run_time(datetime(2026, 11, 19, 10, 0, tzinfo=UTC)) == datetime(
+        2026, 11, 19, 19, 0, tzinfo=UTC
+    )
+    # ちょうど 19:00 なら、翌日（同じ時刻にもう一度走らない）
+    assert next_run_time(datetime(2026, 11, 19, 19, 0, tzinfo=UTC)) == datetime(
+        2026, 11, 20, 19, 0, tzinfo=UTC
+    )
+    assert next_run_time(datetime(2026, 11, 19, 23, 59, 59, tzinfo=UTC)) == datetime(
+        2026, 11, 20, 19, 0, tzinfo=UTC
+    )
+
+
+async def test_import_rejects_an_older_export_format(tmp_path: Path) -> None:
+    """形式の版 3（1 分にまとめた測定値の表を持たない書き出し）は、拒否する。"""
+    import gzip
+    import json
+
+    from sqlalchemy import text
+
+    from app.migrate_saas_to_oss import MigrationError, import_bundle
+
+    path = tmp_path / "old-format.jsonl.gz"
+    header = {
+        "format": "factoreye-workspace-export",
+        "version": 3,
+        "workspace_id": None,
+        "exported_at": "2026-11-18T00:00:00+00:00",
+        "alembic_version": "testrev",
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(header) + "\n")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        )
+        await conn.execute(text("INSERT INTO alembic_version VALUES ('testrev')"))
+    try:
+        with pytest.raises(MigrationError):
+            await import_bundle(engine, path, dry_run=False, with_notifications=False)
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE alembic_version"))
+
+
+async def test_vacuum_full_gives_up_when_the_lock_cannot_be_taken(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """readings のロックが取れないときは、何も変えず、分かるメッセージで終わる（終了コード 1）。"""
+    from sqlalchemy import text
+
+    from app import rollup_cli
+
+    monkeypatch.setattr(rollup_cli, "_VACUUM_LOCK_TIMEOUT", "200ms")
+    async with engine.connect() as holder:
+        await holder.execute(text("LOCK TABLE readings IN ACCESS EXCLUSIVE MODE"))
+        code = await rollup_cli._vacuum_full()
+        await holder.rollback()
+
+    assert code == 1
+    assert "ロックを 200ms 以内に取れませんでした" in capsys.readouterr().out

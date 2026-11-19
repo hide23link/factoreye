@@ -220,7 +220,9 @@ async def latest_values(
         .limit(1)
         .lateral("newest")
     )
-    rolled_at_or_before = [] if before is None else [ReadingRollup.bucket_start <= before]
+    # まとめた行は、その分の「最後の値の時刻」が before 以前のものだけ（分の途中の before で、
+    # before より後の値を返さない）
+    rolled_at_or_before = [] if before is None else [ReadingRollup.last_at <= before]
     newest_rolled = (
         select(ReadingRollup.last_value, ReadingRollup.last_at)
         .where(ReadingRollup.sensor_id == Sensor.id, *rolled_at_or_before)
