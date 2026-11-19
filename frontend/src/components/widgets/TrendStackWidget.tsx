@@ -95,6 +95,8 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const ids = graphSensorIds(widget);
   // カーソルの時刻（ミリ秒）。全グラフで共有する。null は、利用者が動かしていない（現在位置＝表示範囲の右端に、今に追従して出す）
   const cursorTime = useCursorTimeStore((s) => s.time);
+  // 札と「今に戻す」は、カーソルを動かしたグラフにだけ出す（owner が不明のときは全部に出す）
+  const cursorIsMine = useCursorTimeStore((s) => s.owner === null || s.owner === widget.id);
   const resetCursor = useCursorTimeStore((s) => s.reset);
   const span = bounds.to - bounds.from;
   const shownCursor = shownCursorTime(cursorTime, bounds.from, bounds.to);
@@ -128,10 +130,10 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
       // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
       if (box.width <= 0) return;
       const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-      requestCursorTime(bounds.from + ratio * (bounds.to - bounds.from), (bounds.to - bounds.from) / GRAPH_BUCKETS);
+      requestCursorTime(bounds.from + ratio * (bounds.to - bounds.from), (bounds.to - bounds.from) / GRAPH_BUCKETS, widget.id);
     };
     return { onPointerMove: moveCursor, onPointerDown: moveCursor };
-  }, [bounds]);
+  }, [bounds, widget.id]);
 
   if (ids.length === 0) {
     return <p className="text-sm text-gray-500">センサーが設定されていません（編集で、センサーをこのウィジェットに入れてください）</p>;
@@ -158,14 +160,19 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
           <i className="inline-block h-2 w-2 rounded-full border" style={{ borderColor: INK }} aria-hidden="true" />
           最高・最低
         </span>
-        <span className="rounded-sm px-1.5 font-num font-bold" style={{ background: INK, color: "var(--fe-panel)" }} aria-live="polite">
-          カーソル {formatTickTime(shownCursor, span)}
-        </span>
-        {/* 動かしたあとだけ出る。全グラフのカーソルを、現在位置（右端）に戻す */}
-        {cursorTime !== null && (
-          <button type="button" onClick={resetCursor} className="rounded border px-1.5 font-bold hover:opacity-80" style={{ borderColor: "var(--fe-line)", color: INK }}>
-            今に戻す
-          </button>
+        {/* カーソルの札と「今に戻す」は、動かしたグラフにだけ出す。1 かたまりにして、狭いときも途中で折れて凡例と重ならないようにする */}
+        {cursorIsMine && (
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <span className="rounded-sm px-1.5 font-num font-bold" style={{ background: INK, color: "var(--fe-panel)" }} aria-live="polite">
+              カーソル {formatTickTime(shownCursor, span)}
+            </span>
+            {/* 動かしたあとだけ出る。全グラフのカーソルを、現在位置（右端）に戻す */}
+            {cursorTime !== null && (
+              <button type="button" onClick={resetCursor} className="rounded border px-1.5 font-bold hover:opacity-80" style={{ borderColor: "var(--fe-line)", color: INK }}>
+                今に戻す
+              </button>
+            )}
+          </span>
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">

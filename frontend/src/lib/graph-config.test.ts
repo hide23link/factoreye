@@ -7,6 +7,7 @@ import {
   effectiveBounds,
   effectiveRange,
   graphAxisSides,
+  currentGraphColor,
   graphColor,
   graphSensorIds,
   graphSensorMovePatch,
@@ -47,11 +48,39 @@ describe("graphColor", () => {
     expect(graphColor(graph("a", { colors: ["#111111"] }), 0)).toBe("#111111");
   });
   it("従来の単色（color）を先頭の線に使う", () => {
-    expect(graphColor(graph("a", { color: "#dc2626" }), 0)).toBe("#dc2626");
-    expect(graphColor(graph("a", { color: "#dc2626" }), 1)).toBe(GRAPH_COLORS[1]);
+    expect(graphColor(graph("a", { color: "#123456" }), 0)).toBe("#123456");
+    expect(graphColor(graph("a", { color: "#123456" }), 1)).toBe(GRAPH_COLORS[1]);
   });
-  it("複数センサー比較は従来の並びの色", () => {
-    expect(graphColor({ type: "MultiSensorComparison", config: {} }, 1)).toBe("#dc2626");
+  it("複数センサー比較も、色を選んでいなければ新しい既定の並び", () => {
+    expect(graphColor({ type: "MultiSensorComparison", config: {} }, 1)).toBe(GRAPH_COLORS[1]);
+  });
+  it("旧パレットで保存された色は、対応する新しい色で見せる（データは書き換えない）", () => {
+    expect(graphColor(graph("a", { colors: ["#2563eb", "#ea580c"] }), 1)).toBe("#d6409f");
+    expect(graphColor(graph("a", { color: "#16a34a" }), 0)).toBe("#2fa84f");
+    expect(nextGraphColor("#2563eb")).toBe(GRAPH_COLORS[1]);
+  });
+  it("旧パレット 8 色は、すべて今のパレットの別々の色に置き換わる（2 つが同じ色にならない）", () => {
+    const legacy = ["#2563eb", "#ea580c", "#16a34a", "#9333ea", "#0d9488", "#db2777", "#dc2626", "#6b7280"];
+    const converted = legacy.map(currentGraphColor);
+    expect(new Set(converted).size).toBe(legacy.length);
+    for (const color of converted) expect(GRAPH_COLORS).toContain(color);
+    // 置き換えた色は、もう一度置き換えない（同じ結果になる）
+    expect(converted.map(currentGraphColor)).toEqual(converted);
+  });
+  it("旧色から色を切り替え続けると、今のパレットを一周して戻る", () => {
+    let color = nextGraphColor("#2563eb");
+    const seen: string[] = [];
+    for (let i = 0; i < GRAPH_COLORS.length; i += 1) {
+      seen.push(color);
+      color = nextGraphColor(color);
+    }
+    expect(new Set(seen).size).toBe(GRAPH_COLORS.length);
+    expect(color).toBe(seen[0]);
+  });
+  it("既定の色は、橙・赤（警告・超過の色と紛らわしい）を含まず、どの 2 色も別の色", () => {
+    expect(new Set(GRAPH_COLORS).size).toBe(GRAPH_COLORS.length);
+    expect(GRAPH_COLORS).not.toContain("#ea580c");
+    expect(GRAPH_COLORS).not.toContain("#dc2626");
   });
   it("次の色は一周して戻る", () => {
     expect(nextGraphColor(GRAPH_COLORS[0])).toBe(GRAPH_COLORS[1]);

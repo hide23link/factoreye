@@ -116,7 +116,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   });
   // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）。
   // それ以外は、動かした位置を、全グラフ共有のカーソルの時刻にする（指ならタップ・ドラッグも。1 区間に丸めて、描画 1 回にまとめる）
-  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers);
+  const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers, widget.id);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
     if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
@@ -199,7 +199,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
 
   return (
     <div className="relative flex h-full flex-col">
-      {!linkView && <CursorResetButton />}
+      {!linkView && <CursorResetButton widgetId={widget.id} />}
       {/* リンクの画面は、上にグラフの名前と今の値を出すので、見出しを出さない */}
       {!linkView && (
         <p className="mb-1 text-sm font-medium text-gray-700">

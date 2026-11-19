@@ -57,10 +57,10 @@ export function SharedCursorOverlay({ from, to }: { from: number; to: number }) 
 
 /**
  * カーソルを動かしたあとだけ出る「今に戻す」ボタン（共有の時刻を、現在位置に戻す）。
- * グラフの右上に重ねて置く（親は relative にする）。
+ * グラフの右上に重ねて置く（親は relative にする）。カーソルを動かしたグラフ（widgetId）にだけ出す。
  */
-export function CursorResetButton() {
-  const moved = useCursorTimeStore((s) => s.time !== null);
+export function CursorResetButton({ widgetId }: { widgetId: string }) {
+  const moved = useCursorTimeStore((s) => s.time !== null && (s.owner === null || s.owner === widgetId));
   const reset = useCursorTimeStore((s) => s.reset);
   if (!moved) return null;
   return (

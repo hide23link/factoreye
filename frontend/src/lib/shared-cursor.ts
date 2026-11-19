@@ -17,18 +17,20 @@ export interface ChartEventState {
  * 時刻は、グラフの 1 区間（stepMs）に丸めて、次の描画の 1 回にまとめて入れる。
  * 【引数】enabled = false のとき（リンクの画面）は、元のイベントをそのまま返す。stepMs = グラフの 1 区間の長さ（ミリ秒）。
  * base = 元のイベント（ドラッグで期間を選ぶ onMouseMove など。マウスの移動では、元のイベントも呼ぶ）。
- * 例: <LineChart {...withSharedCursor(true, 60_000, drag.handlers)}>
+ * ownerId = このグラフ（ウィジェット）の ID（「今に戻す」を、動かしたグラフにだけ出すため）。
+ * 例: <LineChart {...withSharedCursor(true, 60_000, drag.handlers, widget.id)}>
  */
 export function withSharedCursor<T extends { onMouseMove?: (state: ChartEventState | undefined) => void }>(
   enabled: boolean,
   stepMs: number,
   base: T,
+  ownerId: string | null = null,
 ): T & { onMouseMove?: (state: ChartEventState | undefined) => void; onClick?: (state: ChartEventState | undefined) => void; onTouchMove?: (state: ChartEventState | undefined) => void } {
   if (!enabled) return base;
   const update = (state: ChartEventState | undefined) => {
     if (state?.activeLabel === undefined) return;
     const time = Number(state.activeLabel);
-    if (Number.isFinite(time)) requestCursorTime(time, stepMs);
+    if (Number.isFinite(time)) requestCursorTime(time, stepMs, ownerId);
   };
   return {
     ...base,

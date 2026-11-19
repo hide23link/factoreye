@@ -11,11 +11,29 @@
 import type { Sensor, Widget, WidgetConfig } from "../types";
 import { resolveRange, type ResolvedRange, type TimeRange } from "./timeRange";
 
-/** 色の選択肢（クリックで順に切り替える）。先頭の青は、センサーグラフの従来の既定色 */
-export const GRAPH_COLORS = ["#2563eb", "#ea580c", "#16a34a", "#9333ea", "#0d9488", "#db2777", "#dc2626", "#6b7280"];
+/**
+ * 色の選択肢（クリックで順に切り替える）。先頭の青は、センサーグラフの従来の既定色の系統。
+ * 隣どうしの色相を大きく離し（青・桃・緑・黄緑・紫・青緑・茶・灰）、暗い背景でも明るい背景でも見分けられる中間の明るさにした。
+ * 橙・赤は、しきい値の警告・超過の色と紛らわしいので入れない。
+ */
+export const GRAPH_COLORS = ["#2f80ed", "#d6409f", "#2fa84f", "#8a9a00", "#8b5cf6", "#0fb5a8", "#b5651d", "#8b95a5"];
 
-// 複数センサー比較が従来使っていた色。色を選んでいない古いウィジェットの見た目を変えないために残す
-const LEGACY_MULTI_PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
+/** 旧パレットで保存された色 → 新しい色（保存済みのウィジェットも、データを書き換えずに新しい色で見せる） */
+const LEGACY_TO_NEW: Record<string, string> = {
+  "#2563eb": "#2f80ed",
+  "#ea580c": "#d6409f",
+  "#16a34a": "#2fa84f",
+  "#9333ea": "#8b5cf6",
+  "#0d9488": "#0fb5a8",
+  "#db2777": "#b5651d",
+  "#dc2626": "#8a9a00",
+  "#6b7280": "#8b95a5",
+};
+
+/** 保存された色を、今のパレットの色に直す（旧パレットの色は対応する新しい色に。それ以外はそのまま） */
+export function currentGraphColor(color: string): string {
+  return LEGACY_TO_NEW[color.toLowerCase()] ?? color;
+}
 
 /** グラフに載せるセンサーの ID（表示順） */
 export function graphSensorIds(widget: Pick<Widget, "type" | "sensorId" | "config">): string[] {
@@ -28,15 +46,15 @@ export function graphSensorIds(widget: Pick<Widget, "type" | "sensorId" | "confi
 /** i 番目の線の色。選んだ色 → 従来の単色（color）→ 既定の並び、の順 */
 export function graphColor(widget: Pick<Widget, "type" | "config">, index: number): string {
   const chosen = widget.config.colors?.[index];
-  if (chosen) return chosen;
-  if (widget.type === "MultiSensorComparison") return LEGACY_MULTI_PALETTE[index % LEGACY_MULTI_PALETTE.length];
-  if (index === 0 && widget.config.color) return widget.config.color;
+  if (chosen) return currentGraphColor(chosen);
+  if (widget.type === "MultiSensorComparison") return GRAPH_COLORS[index % GRAPH_COLORS.length];
+  if (index === 0 && widget.config.color) return currentGraphColor(widget.config.color);
   return GRAPH_COLORS[index % GRAPH_COLORS.length];
 }
 
 /** 次の色（クリックで切り替える） */
 export function nextGraphColor(current: string): string {
-  const i = GRAPH_COLORS.indexOf(current);
+  const i = GRAPH_COLORS.indexOf(currentGraphColor(current));
   return GRAPH_COLORS[(i + 1) % GRAPH_COLORS.length];
 }
 
