@@ -344,12 +344,7 @@ function GraphSettings({ widget, actions }: SectionProps) {
     });
   const moveAt = (index: number, delta: -1 | 1) =>
     void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
-  const recolor = (index: number) =>
-    void actions.patchFromLatest(widget, (latest) => {
-      const colors = graphSensorIds(latest).map((_, i) => graphColor(latest, i));
-      colors[index] = nextGraphColor(colors[index]);
-      return { config: { ...latest.config, colors } };
-    });
+  const recolor = (index: number) => recolorAt(actions, widget, index);
   const axisChange = (key: "yAxisMin" | "yAxisMax" | "yAxisRightMin" | "yAxisRightMax", value: number | null) =>
     changeConfig(actions, widget, { [key]: value ?? undefined });
 
@@ -756,6 +751,18 @@ function ProductionPlanSettings({ widget, actions }: SectionProps) {
   );
 }
 
+/**
+ * index 番目のセンサーの線の色を、次の色にする（色の丸をクリックしたとき。センサーグラフ・複数センサー比較・計器グラフ共通）。
+ * ほかのセンサーの色は、いま見えている色のまま保つ。
+ */
+function recolorAt(actions: Actions, widget: Widget, index: number): void {
+  void actions.patchFromLatest(widget, (latest) => {
+    const colors = graphSensorIds(latest).map((_, i) => graphColor(latest, i));
+    colors[index] = nextGraphColor(colors[index]);
+    return { config: { ...latest.config, colors } };
+  });
+}
+
 /** 計器グラフの設定。センサー（複数。1 センサーが 1 行）と、値の小数の桁（空なら目盛りの間隔から自動）。 */
 function TrendStackSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
@@ -770,11 +777,13 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
 
   return (
     <>
-      <Section title="センサー（複数OK）" note="1 センサーが 1 行になります。上から順に並びます">
+      <Section title="センサー（複数OK）" note="1 センサーが 1 行になります。上から順に並びます。丸い色をクリックすると線の色が変わります">
         <SensorField
           sensorIds={ids}
           multiple
           suited="measure"
+          colorOf={(i) => graphColor(widget, i)}
+          onRecolor={(index) => recolorAt(actions, widget, index)}
           onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
           onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
           onRemove={removeAt}

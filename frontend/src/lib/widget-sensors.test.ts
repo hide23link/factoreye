@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Sensor, Widget } from "../types";
+import { GRAPH_COLORS } from "./graph-config";
 import { acceptsSensor, assignSensor } from "./widget-sensors";
 
 function sensor(id: string, name: string, unit = "℃"): Sensor {
@@ -89,5 +90,17 @@ describe("assignSensor（計器グラフ）", () => {
     expect(assignSensor(widget("TrendStack", "a", { sensorIds: ["a"] }), sensor("a", "A"), "add").ok).toBe(false);
     const replaced = assignSensor(widget("TrendStack", "a", { sensorIds: ["a", "b"] }), sensor("c", "C"), "replace");
     expect(replaced).toMatchObject({ ok: true, sensorId: "c", config: { sensorIds: ["c"] } });
+  });
+});
+
+describe("assignSensor（計器グラフ）の線の色", () => {
+  it("行を足しても、変えた色は保たれ、足した行は既定の色になる", () => {
+    const w = widget("TrendStack", "a", { sensorIds: ["a", "b"], colors: ["#111111", "#222222"] });
+    const added = assignSensor(w, sensor("c", "C"), "add");
+    expect(added).toMatchObject({ ok: true, config: { colors: ["#111111", "#222222", GRAPH_COLORS[2]] } });
+  });
+  it("入れ替えは、新しい 1 行だけで、既定の色になる", () => {
+    const w = widget("TrendStack", "a", { sensorIds: ["a", "b"], colors: ["#111111", "#222222"] });
+    expect(assignSensor(w, sensor("c", "C"), "replace")).toMatchObject({ ok: true, config: { colors: [GRAPH_COLORS[0]] } });
   });
 });

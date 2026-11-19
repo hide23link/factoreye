@@ -28,7 +28,9 @@ export function assignSensor(widget: Widget, sensor: Sensor, mode: AssignMode): 
         return { ok: false, message: `「${sensor.name}」はすでにこの計器グラフにあります` };
       }
       const next = mode === "add" ? [...ids, sensor.id] : [sensor.id];
-      const patch = graphSensorPatch(widget, next, []);
+      // 追加は既存の線の色を保つ（設定で変えた色が既定に戻らないように）。入れ替えは新しい 1 行だけ
+      const keep = mode === "add" ? ids.map((_, i) => i) : [];
+      const patch = graphSensorPatch(widget, next, keep);
       return { ok: true, ...patch, message: mode === "add" ? `「${sensor.name}」を計器グラフに追加しました` : `計器グラフを「${sensor.name}」に入れ替えました` };
     }
     case "TargetStrip": {

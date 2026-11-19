@@ -159,6 +159,44 @@ describe("WidgetSettings: 1つだけ選ぶ欄", () => {
   });
 });
 
+describe("WidgetSettings: 計器グラフ", () => {
+  const trend = widget("TrendStack", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], colors: ["#111111", "#222222"] } });
+
+  it("色の丸をクリックすると、その行の線だけ次の色になる", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={trend} dashboard={dashboardOf(trend)} />);
+
+    await user.click(await screen.findByRole("button", { name: "圧力の線の色を変える" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig().colors).toEqual(["#111111", GRAPH_COLORS[0]]);
+    expect(lastConfig().sensorIds).toEqual(["s1", "s2"]);
+  });
+
+  it("旧パレットの色で保存されていても、クリックすると今のパレットの次の色になる", async () => {
+    const user = userEvent.setup();
+    const legacy = widget("TrendStack", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], colors: ["#2563eb", "#2563eb"] } });
+    renderWithQueryClient(<WidgetSettings widget={legacy} dashboard={dashboardOf(legacy)} />);
+
+    await user.click(await screen.findByRole("button", { name: "温度の線の色を変える" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    // 旧 #2563eb は今の先頭の青として扱い、その次の色になる。もう 1 行は今の色で書き出される
+    expect(lastConfig().colors).toEqual([GRAPH_COLORS[1], GRAPH_COLORS[0]]);
+  });
+
+  it("色を保存していない計器グラフでも、ほかの行の既定の色を書き出して、押した行だけ次の色にする", async () => {
+    const user = userEvent.setup();
+    const plain = widget("TrendStack", { sensorId: "s1", config: { sensorIds: ["s1", "s2"] } });
+    renderWithQueryClient(<WidgetSettings widget={plain} dashboard={dashboardOf(plain)} />);
+
+    await user.click(await screen.findByRole("button", { name: "温度の線の色を変える" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig().colors).toEqual([GRAPH_COLORS[1], GRAPH_COLORS[1]]);
+  });
+});
+
 describe("WidgetSettings: グラフ", () => {
   const graph = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], colors: ["#111111", "#222222"] } });
 
