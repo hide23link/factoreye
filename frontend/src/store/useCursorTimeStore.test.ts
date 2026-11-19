@@ -74,3 +74,33 @@ describe("useCursorTimeStore（全グラフで共有するカーソルの時刻�
     unsubscribe();
   });
 });
+
+describe("useCursorTimeStore の owner（カーソルを動かしたグラフ）", () => {
+  it("最初は null。requestCursorTime は、最後に呼んだグラフの ID を owner にする", () => {
+    expect(useCursorTimeStore.getState().owner).toBeNull();
+    requestCursorTime(1000, 0, "a");
+    requestCursorTime(2000, 0, "b");
+    vi.advanceTimersByTime(20);
+    expect(useCursorTimeStore.getState()).toMatchObject({ time: 2000, owner: "b" });
+  });
+
+  it("同じ時刻でも、動かしたグラフが変われば owner が切り替わる", () => {
+    useCursorTimeStore.getState().setTime(500, "a");
+    useCursorTimeStore.getState().setTime(500, "b");
+    expect(useCursorTimeStore.getState().owner).toBe("b");
+  });
+
+  it("reset で time と owner の両方が null に戻る", () => {
+    useCursorTimeStore.getState().setTime(500, "a");
+    useCursorTimeStore.getState().reset();
+    expect(useCursorTimeStore.getState()).toMatchObject({ time: null, owner: null });
+  });
+
+  it("reset の直前に予約した古い owner は、reset のあとに入らない", () => {
+    requestCursorTime(1000, 0, "a");
+    useCursorTimeStore.getState().reset();
+    vi.advanceTimersByTime(20);
+    expect(useCursorTimeStore.getState()).toMatchObject({ time: null, owner: null });
+  });
+});
+

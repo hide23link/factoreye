@@ -321,6 +321,21 @@ describe("TrendStackWidget（計器グラフ）", () => {
     expect(screen.getAllByText(/^カーソル \d/)).toHaveLength(1);
   });
 
+  it("カーソルを誰も動かしていない間（owner が不明）は、どの計器グラフにも見出しのカーソルの札が出る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA"), sensor("b", "センサーB")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(1, 5)] });
+    renderWithQueryClient(
+      <>
+        <TrendStackWidget widget={{ ...widget(["a"]), id: "w1" }} />
+        <TrendStackWidget widget={{ ...widget(["b"]), id: "w2" }} />
+      </>,
+    );
+    await screen.findAllByText("センサーB");
+    expect(screen.getAllByText(/^カーソル \d/)).toHaveLength(2);
+    // 動かしていないので「今に戻す」は出ない
+    expect(screen.queryByRole("button", { name: "今に戻す" })).not.toBeInTheDocument();
+  });
+
   it("期間が 1 日を超えるときは、時刻の札に日付も付ける（月/日 時:分）", async () => {
     useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 3 * 24 * 60 * 60_000 } });
     vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);

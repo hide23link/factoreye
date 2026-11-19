@@ -7,6 +7,7 @@ import {
   effectiveBounds,
   effectiveRange,
   graphAxisSides,
+  currentGraphColor,
   graphColor,
   graphSensorIds,
   graphSensorMovePatch,
@@ -57,6 +58,24 @@ describe("graphColor", () => {
     expect(graphColor(graph("a", { colors: ["#2563eb", "#ea580c"] }), 1)).toBe("#d6409f");
     expect(graphColor(graph("a", { color: "#16a34a" }), 0)).toBe("#2fa84f");
     expect(nextGraphColor("#2563eb")).toBe(GRAPH_COLORS[1]);
+  });
+  it("旧パレット 8 色は、すべて今のパレットの別々の色に置き換わる（2 つが同じ色にならない）", () => {
+    const legacy = ["#2563eb", "#ea580c", "#16a34a", "#9333ea", "#0d9488", "#db2777", "#dc2626", "#6b7280"];
+    const converted = legacy.map(currentGraphColor);
+    expect(new Set(converted).size).toBe(legacy.length);
+    for (const color of converted) expect(GRAPH_COLORS).toContain(color);
+    // 置き換えた色は、もう一度置き換えない（同じ結果になる）
+    expect(converted.map(currentGraphColor)).toEqual(converted);
+  });
+  it("旧色から色を切り替え続けると、今のパレットを一周して戻る", () => {
+    let color = nextGraphColor("#2563eb");
+    const seen: string[] = [];
+    for (let i = 0; i < GRAPH_COLORS.length; i += 1) {
+      seen.push(color);
+      color = nextGraphColor(color);
+    }
+    expect(new Set(seen).size).toBe(GRAPH_COLORS.length);
+    expect(color).toBe(seen[0]);
   });
   it("既定の色は、橙・赤（警告・超過の色と紛らわしい）を含まず、どの 2 色も別の色", () => {
     expect(new Set(GRAPH_COLORS).size).toBe(GRAPH_COLORS.length);
