@@ -5,6 +5,7 @@ FactorEye バックエンド エントリポイント
 - app/api/*.py: HTTP の API（ルーター）。ここでは include_router で登録するだけ
 - app/ingest_buffer.py: センサー値の受信バッファと、1秒ごとの DB への書き込み（flush_loop）
 - app/purge.py: SaaS の古い測定値の定期削除（purge_loop）
+- app/rollup.py: OSS 版の古い測定値を 1 分にまとめる（rollup_loop。READINGS_ROLLUP_DAYS ≥ 1）
 - app/alarm_engine.py: 測定値を見てアラームを発生・解除する処理
 
 起動方法:
@@ -56,6 +57,7 @@ from app.db.session import engine
 from app.ingest_buffer import flush_loop, flush_once
 from app.purge import purge_loop
 from app.rate_limit import limiter
+from app.rollup import rollup_loop
 from app.validation import handle_input_error
 
 
@@ -89,11 +91,22 @@ async def start_and_stop(app: FastAPI) -> AsyncIterator[None]:
         logger.info("INGEST_DEVICE_TIME=on: 機器が付けた timestamp を、測定値の時刻にします")
     flush_task = asyncio.create_task(flush_loop())
     purge_task = asyncio.create_task(purge_loop())
+    tasks = [flush_task, purge_task]
+    if settings.readings_rollup_days > 0:
+        if settings.auth_mode == AuthMode.MULTI_TENANT:
+            logger.warning("READINGS_ROLLUP_DAYS は SaaS（multi_tenant）では使えません。無視します")
+        else:
+            logger.info(
+                "READINGS_ROLLUP_DAYS=%d: %d 日より古い測定値を、毎日 1 分ごとにまとめます",
+                settings.readings_rollup_days,
+                settings.readings_rollup_days,
+            )
+            tasks.append(asyncio.create_task(rollup_loop()))
     yield
-    flush_task.cancel()
-    purge_task.cancel()
+    for task in tasks:
+        task.cancel()
     # 書き込み中に止めた場合も、値は flush_once がバッファに戻すので、終了を待ってから書く
-    await asyncio.gather(flush_task, purge_task, return_exceptions=True)
+    await asyncio.gather(*tasks, return_exceptions=True)
     try:
         await flush_once()
     except Exception:
