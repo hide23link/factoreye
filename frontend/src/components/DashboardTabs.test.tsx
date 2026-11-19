@@ -10,6 +10,7 @@ import { DashboardTabs } from "./DashboardTabs";
 
 vi.mock("../lib/api", () => ({
   fetchDashboards: vi.fn(),
+  createDashboard: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -27,19 +28,32 @@ beforeEach(() => {
 });
 
 describe("DashboardTabs", () => {
-  it("一覧と全ダッシュボードのタブを並べ、今のタブに印を付ける", async () => {
+  it("全ダッシュボードのタブと、右端の「＋」を並べ、今のタブに印を付ける（一覧のタブは無い）", async () => {
     renderWithQueryClient(<DashboardTabs />);
     const tabs = await screen.findAllByRole("button");
-    expect(tabs.map((t) => t.textContent)).toEqual(["▦ 一覧", "工場A監視", "工場B監視"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["工場A監視", "工場B監視", "＋"]);
     expect(screen.getByRole("button", { name: "工場A監視" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("タブを押すと、そのダッシュボードへ切り替わる。一覧タブで一覧へ", async () => {
+  it("タブを押すと、そのダッシュボードへ切り替わる", async () => {
     renderWithQueryClient(<DashboardTabs />);
     await userEvent.click(await screen.findByRole("button", { name: "工場B監視" }));
     expect(useUiStore.getState().selectedDashboardId).toBe("d2");
-    await userEvent.click(screen.getByRole("button", { name: "▦ 一覧" }));
-    expect(useUiStore.getState().selectedDashboardId).toBeNull();
+  });
+
+  it("「＋」を押すと、空のダッシュボードを作って編集モードで開く", async () => {
+    vi.mocked(api.createDashboard).mockResolvedValue({ ...dashboards[0], id: "d-new", name: "新しいダッシュボード", widgets: [] });
+    renderWithQueryClient(<DashboardTabs />);
+    await userEvent.click(await screen.findByRole("button", { name: "新しいダッシュボード" }));
+    await waitFor(() => expect(api.createDashboard).toHaveBeenCalledWith({ name: "新しいダッシュボード" }));
+    await waitFor(() => expect(useUiStore.getState().selectedDashboardId).toBe("d-new"));
+    expect(useUiStore.getState().openInEditMode).toBe(true);
+  });
+
+  it("パソコンの幅では隠す（左のメニューに名前を並べるため。スマホだけで出す）", async () => {
+    renderWithQueryClient(<DashboardTabs />);
+    const nav = await screen.findByRole("navigation", { name: "ダッシュボードの切り替え" });
+    expect(nav.className).toContain("sm:hidden");
   });
 
   it("編集中は押せず、押しても移らない", async () => {

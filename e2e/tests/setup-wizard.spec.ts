@@ -10,7 +10,7 @@ test("セットアップウィザードでセンサー登録からダッシュ�
 }) => {
   await page.goto("/");
 
-  // ダッシュボード0件時はDashboardListPageのバナーにも「セットアップガイドを始める」ボタンが
+  // ダッシュボード0件時はDashboardHomeの案内にも「セットアップガイドを始める」ボタンが
   // 出るため、ヘッダーnav内に絞ってクリックする（部分一致で2件ヒットするのを避ける）
   await page.locator("nav").getByRole("button", { name: "セットアップガイド" }).click();
   await expect(page.getByRole("heading", { name: "最初のグラフを出すまで" })).toBeVisible();

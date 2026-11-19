@@ -8,7 +8,7 @@ import { expect, test } from "@playwright/test";
 const BLOCKING_IMPACTS = ["critical"];
 
 const pages = [
-  { name: "ダッシュボード一覧", open: async () => {} },
+  { name: "ダッシュボード", open: async () => {} },
   {
     name: "設定",
     open: async (page: import("@playwright/test").Page) => {

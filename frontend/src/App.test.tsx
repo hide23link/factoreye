@@ -73,12 +73,22 @@ describe("App の画面の分け方", () => {
     expect(screen.queryByRole("navigation", { name: "画面の切り替え" })).not.toBeInTheDocument();
   });
 
-  it("リンクが無ければ、前と同じくヘッダー・下のメニューつきの一覧を出す", async () => {
+  it("リンクが無ければ、ヘッダー・下のメニューつきで、ダッシュボード（一覧ではなく、先頭のもの）を開く", async () => {
     renderWithQueryClient(<App />);
 
-    expect(await screen.findByText("ダッシュボード一覧")).toBeInTheDocument();
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    expect(screen.queryByText("ダッシュボード一覧")).not.toBeInTheDocument();
     expect(screen.getByText("FactorEye")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "画面の切り替え" })).toBeInTheDocument();
+  });
+
+  it("左のメニューの「ダッシュボード」の下に、ダッシュボード名が並び、今のものに印が付く", async () => {
+    renderWithQueryClient(<App />);
+
+    const rail = await screen.findByRole("navigation", { name: "メインメニュー" });
+    const list = await within(rail).findByRole("list", { name: "ダッシュボードの切り替え" });
+    expect(within(list).getByRole("button", { name: "ライン1" })).toHaveAttribute("aria-current", "page");
+    expect(within(rail).getByRole("button", { name: "＋ 新しいダッシュボード" })).toBeInTheDocument();
   });
 
   it("左のメニューに全体監視があり、上の帯に警報・注意の表示灯を出す", async () => {

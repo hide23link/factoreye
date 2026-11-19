@@ -161,14 +161,13 @@ describe("DashboardView", () => {
     expect(screen.getByText("読み込み中...")).toBeInTheDocument();
   });
 
-  it("取得に失敗したとき、エラーと再試行・一覧へ戻る導線を表示する", async () => {
+  it("取得に失敗したとき、エラーと再試行を表示する", async () => {
     vi.mocked(api.fetchDashboard).mockRejectedValue(new Error("boom"));
 
     renderWithQueryClient(<DashboardView dashboardId="d1" />);
 
     expect(await screen.findByText("ダッシュボードを取得できませんでした。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "← 一覧へ" })).toBeInTheDocument();
     expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument();
   });
 

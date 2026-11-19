@@ -2,7 +2,7 @@
  * 新しいダッシュボードの名前。既存の名前と重ならないよう、連番を付ける。
  * 「新しいダッシュボード」→「新しいダッシュボード 2」→「新しいダッシュボード 3」…
  *
- * 【誰が使うか】DashboardListPage。
+ * 【誰が使うか】DashboardHome。
  */
 export const NEW_DASHBOARD_NAME = "新しいダッシュボード";
 
