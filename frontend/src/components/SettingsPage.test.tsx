@@ -6,6 +6,7 @@ import { SettingsPage } from "./SettingsPage";
 
 vi.mock("../lib/api", () => ({
   fetchSensors: vi.fn(),
+  fetchDashboards: vi.fn(),
   fetchAlarms: vi.fn(),
   fetchNotificationSettings: vi.fn(),
   fetchWebhookSubscriptions: vi.fn(),
@@ -27,6 +28,16 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "アラームのしきい値" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Webhook連携" })).toBeInTheDocument();
+  });
+
+  it("「ダッシュボード」タブで、新しいダッシュボードを作る欄が出る", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([]);
+    vi.mocked(api.fetchDashboards).mockResolvedValue([]);
+
+    renderWithQueryClient(<SettingsPage />);
+    await userEvent.click(screen.getByRole("button", { name: "ダッシュボード" }));
+
+    expect(await screen.findByRole("button", { name: "作成" })).toBeInTheDocument();
   });
 
   it("OSS 版には「API・取り込み」タブがある", () => {
