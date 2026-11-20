@@ -11,6 +11,7 @@
 #   Secrets:   DR_R2_ACCESS_KEY_ID、DR_R2_SECRET_ACCESS_KEY（factoreye-backup だけに書ける専用のトークン）、DR_R2_ENDPOINT、
 #              DR_SIGNING_KEY（署名の秘密鍵。PEM）
 #   Variables: DR_SIGNING_PUBKEY（署名の公開鍵。PEM。秘密鍵と組か確かめる）
+#   失敗の通知（任意）: Secret DISCORD_WEBHOOK（Discord の Webhook の URL）。無ければ通知しない。
 # 秘密は main への push と手動の実行だけで使われる（他人の PR からは使えない）。
 name: dr-images
 
@@ -140,3 +141,22 @@ jobs:
             if [ "$d" != "$SHA" ] && [ "$d" != "$OLD" ]; then aws s3 rm "s3://$BUCKET/$IMAGES_PREFIX/$d/" --recursive >/dev/null; echo "古い版を消した: $d"; fi
           done
           echo "完了: $IMAGES_PREFIX/latest.json（版 $SHA）"
+
+  # 失敗したら Discord に知らせる（鍵の入れ替えなどで、気づかないまま失敗し続けないように）。
+  # Secret DISCORD_WEBHOOK が無ければ何もしない。
+  notify-failure:
+    needs: publish
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord に失敗を知らせる
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.event.head_commit.message || github.sha }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_WEBHOOK が無いので通知しない"; exit 0; fi
+          TITLE=$(printf '%s' "$COMMIT" | head -n1 | cut -c1-100)
+          MSG=$(printf '⚠️ dr-images が失敗: %s\n%s' "$TITLE" "$RUN_URL")
+          jq -n --arg c "$MSG" '{content: $c}' \
+            | curl -fsS -H 'Content-Type: application/json' -d @- "$WEBHOOK"
