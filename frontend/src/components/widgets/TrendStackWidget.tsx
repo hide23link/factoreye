@@ -24,9 +24,10 @@ import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hoo
 import { useElementSize } from "../../hooks/useElementSize";
 import { useLiveNow } from "../../hooks/useLiveNow";
 import { effectiveRange, graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
-import { resolveRange, type ResolvedRange } from "../../lib/timeRange";
+import { maxRangeForBuild, resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
   CURSOR_LABEL_HEIGHT,
+  CURSOR_NOTE_HEIGHT,
   boxesOverlap,
   describeInterval,
   estimateTextWidth,
@@ -40,6 +41,7 @@ import {
   linePath,
   maxTimeTicks,
   placeCursorLabel,
+  placeCursorNotes,
   placeExtremeLabels,
   placeTimeLabel,
   shownCursorTime,
@@ -61,10 +63,15 @@ import {
   type TrendLimit,
   type TrendPoint,
 } from "../../lib/trend-stack";
+import { compareAvailability, describeCompare, shiftPointsForward, shiftRange, type CompareMode } from "../../lib/compare-range";
+import { useCompareReadings } from "../../hooks/useCompareReadings";
+import { bandAt, computeBands, describeBand, toBandSamples, type AlarmBand } from "../../lib/threshold-bands";
+import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { requestCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Reading, Sensor, Widget } from "../../types";
+import { GraphViewControls } from "./GraphViewControls";
 import { GRAPH_BUCKETS } from "./graph-parts";
 
 // 色は theme.css の意味の色（暗い・明るいで切り替わる）。ただし、正常なときの線・名前は、利用者が選んだ設定色（lineColor）
@@ -98,6 +105,11 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   // 札と「今に戻す」は、カーソルを動かしたグラフにだけ出す（owner が不明のときは全部に出す）
   const cursorIsMine = useCursorTimeStore((s) => s.owner === null || s.owner === widget.id);
   const resetCursor = useCursorTimeStore((s) => s.reset);
+  // 警報の帯を出すか（この端末の設定。見出しで切り替える）
+  const showBands = useGraphViewStore((s) => s.showBands);
+  // 昨日・先週の重ね。保持期間の外になる範囲では、選んでいても出さない（見出しのボタンも押せない）
+  const selectedCompare = useGraphViewStore((s) => s.compare);
+  const compareMode: CompareMode = compareAvailability(selectedCompare, bounds.from, now, maxRangeForBuild()).ok ? selectedCompare : "none";
   const span = bounds.to - bounds.from;
   const shownCursor = shownCursorTime(cursorTime, bounds.from, bounds.to);
   // 時間の軸の目盛りの数は、軸の幅から決める（スマホの狭い幅で、時刻の文字が重ならないように）
@@ -148,18 +160,19 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
         <span className="font-num">
           {formatRangeJst(bounds.from, bounds.to)}&emsp;{describeInterval(span / GRAPH_BUCKETS)}ごと
         </span>
-        <span className="ml-auto inline-flex items-center gap-1">
+        <span className="trend-legend ml-auto inline-flex items-center gap-1">
           <i className="inline-block w-3.5 border-t border-dashed" style={{ borderColor: CYAN }} aria-hidden="true" />
           しきい値
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="trend-legend inline-flex items-center gap-1">
           <i className="inline-block h-0.5 w-3.5" style={{ background: RED }} aria-hidden="true" />
           超過
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="trend-legend inline-flex items-center gap-1">
           <i className="inline-block h-2 w-2 rounded-full border" style={{ borderColor: INK }} aria-hidden="true" />
           最高・最低
         </span>
+        <GraphViewControls rangeFrom={bounds.from} nowMs={now} />
         {/* カーソルの札と「今に戻す」は、動かしたグラフにだけ出す。1 かたまりにして、狭いときも途中で折れて凡例と重ならないようにする */}
         {cursorIsMine && (
           <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
@@ -193,6 +206,8 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
             lineColor={graphColor(widget, index)}
             ticks={ticks}
             pointer={pointer}
+            showBands={showBands}
+            compareMode={compareMode}
           />
         ))}
       </div>
@@ -259,6 +274,10 @@ interface RowProps {
   lineColor: string;
   ticks: number[];
   pointer: PlotPointerHandlers;
+  /** 警報の帯を重ねるか */
+  showBands: boolean;
+  /** 重ねる比較（なし・昨日・先週）。使えない範囲のときは、呼ぶ側が「なし」にして渡す */
+  compareMode: CompareMode;
 }
 
 /**
@@ -267,17 +286,19 @@ interface RowProps {
  * 線・目盛り・しきい値の絵は PlotStatic に分け、カーソルが動くだけでは描き直さない。
  * React.memo で、親の描き直しのうち、この行に関係する値（props）が変わらないものでは、行ごと飛ばす。
  */
-const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, lineColor, ticks, pointer }: RowProps) {
+const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, lineColor, ticks, pointer, showBands, compareMode }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
+  // 比較の線のデータ。同じ間引き API を、範囲をずらして取る（取れなくても、今の線には影響しない）
+  const compareData = useCompareReadings(sensorId, bounds, compareMode, GRAPH_BUCKETS, (bounds.to - bounds.from) / GRAPH_BUCKETS);
   const rowRef = useRef<HTMLDivElement>(null);
   const { height } = useElementSize(rowRef);
   const maxIntervals = height > 0 ? Math.min(7, Math.max(2, Math.floor(height / 22))) : 7;
   const name = sensor?.name ?? "センサー";
   const unit = sensor?.unit ?? "";
   const model = useMemo(
-    () => (data ? buildRowModel({ data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit }) : null),
-    [data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit],
+    () => (data ? buildRowModel({ data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData: compareMode === "none" ? undefined : compareData, compareMode }) : null),
+    [data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode],
   );
 
   if (!data || !model) {
@@ -301,17 +322,24 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
     );
   }
 
-  const { points, stats, limits, scale, now, stale, level, gapMs, color, format, sub, lineD, warningD, criticalD } = model;
+  const { points, stats, limits, scale, now, stale, level, gapMs, color, format, sub, lineD, warningD, criticalD, bands, comparePoints, compareD } = model;
   const span = bounds.to - bounds.from;
 
   const cursorPoint = pointNear(points, cursor, gapMs / 2);
   const cursorText = cursorPoint ? format(cursorPoint.value) : "---";
+  // カーソルが警報の帯の中にあれば、その説明（値の一覧と、グラフの札に添える）。カーソルは 1 区間に丸めるので、半区間の余裕を見る
+  const cursorBand = showBands ? bandAt(bands, cursor, (data.bucketSeconds * 1000) / 2) : null;
+  const bandNote = cursorBand ? { text: describeBand(cursorBand, (ms) => formatTickTime(ms, span), format), color: cursorBand.level === "critical" ? RED : AMBER } : null;
+  // 比較の線のカーソル位置の値（「昨日 62.4（差 +4.1）」）
+  const comparePoint = compareMode === "none" ? null : pointNear(comparePoints, cursor, gapThreshold(comparePoints, data.bucketSeconds * 1000) / 2);
+  const compareNote = comparePoint ? { text: describeCompare(compareMode, comparePoint.value, cursorPoint?.value ?? null, format), color: MUTED } : null;
+  const rowNotes = [bandNote, compareNote].flatMap((note) => (note ? [note] : []));
   const rowBackground = !stale && level === "critical" ? "var(--fe-red-row)" : undefined;
   const nameColor = stale || level !== "normal" ? color : lineColor;
 
   return (
     <div ref={rowRef} className="trend-cell flex min-h-[88px] flex-1 flex-col border-b" style={{ borderColor: "var(--fe-line)", background: rowBackground }}>
-      <CursorValuePublisher widgetId={widgetId} id={sensorId} order={order} name={name} unit={unit} value={cursorText} color={nameColor} />
+      <CursorValuePublisher widgetId={widgetId} id={sensorId} order={order} name={name} unit={unit} value={cursorText} color={nameColor} notes={rowNotes.length > 0 ? rowNotes : undefined} />
       {/* 狭い枠（スマホ）では、左の欄が無いので、行の上に名前・範囲・最高・最低を 1 行で出す（グラフの文字と重ならないように） */}
       <div className="trend-headline items-baseline gap-2 px-1.5 pt-1 text-[11px]">
         <span className="min-w-0 truncate font-bold" style={{ color: nameColor }} title={name}>
@@ -354,6 +382,8 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
               { width: estimateTextWidth(cursorText, 12) + 12, height: CURSOR_LABEL_HEIGHT },
               plot,
             );
+            const notes = rowNotes;
+            const placedNotes = placeCursorNotes(cursorBox, notes.map((note) => estimateTextWidth(note.text, 10) + 8), plot);
             const maxText = stats ? `最高 ${format(stats.max.value)}  ${formatTickTime(stats.max.time, span)}` : "";
             const minText = stats ? `最低 ${format(stats.min.value)}  ${formatTickTime(stats.min.time, span)}` : "";
             const extremes = stats
@@ -368,7 +398,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
                     y: (yPercent(stats.min.value, scale) / 100) * plot.height,
                     width: estimateTextWidth(minText, 10) + 8,
                   },
-                  cursor: cursorBox,
+                  cursor: placedNotes.all,
                   plot,
                 })
               : null;
@@ -383,6 +413,8 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
                   lineColor={lineColor}
                   warningD={warningD}
                   criticalD={criticalD}
+                  bands={showBands ? bands : NO_BANDS}
+                  compareD={compareD}
                   label={describeRow(name, unit, stats, format)}
                 />
                 {stats && extremes && (
@@ -392,6 +424,16 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
                   </>
                 )}
                 <Cursor time={cursor} point={cursorPoint} scale={scale} bounds={bounds} box={cursorBox} text={cursorText} />
+                {notes.map((note, i) => (
+                  <span
+                    key={note.text}
+                    data-testid="cursor-note"
+                    className="pointer-events-none absolute whitespace-nowrap px-1 font-num text-[10px]"
+                    style={{ left: placedNotes.notes[i].left, top: placedNotes.notes[i].top, height: CURSOR_NOTE_HEIGHT, lineHeight: `${CURSOR_NOTE_HEIGHT}px`, background: "var(--fe-panel)", color: note.color }}
+                  >
+                    {note.text}
+                  </span>
+                ))}
               </>
             );
           }}
@@ -437,11 +479,21 @@ interface RowModel {
   lineD: string;
   warningD: string;
   criticalD: string;
+  /** しきい値を超えている区間（警報の帯）。線の色の切り替えと同じ判定 */
+  bands: AlarmBand[];
+  /** 比較の点（今の時刻の位置へ進めたもの）と、その線の道筋。比較しないときは空 */
+  comparePoints: TrendPoint[];
+  compareD: string;
 }
+
+/** 帯を出さないときの空の一覧（毎回新しい配列を作ると、PlotStatic が描き直されるため、同じものを使い回す） */
+const NO_BANDS: AlarmBand[] = [];
+
+type RowData = NonNullable<ReturnType<typeof useDownsampledReadings>["data"]>;
 
 /** 行の重い計算（点・最高最低・目盛り・状態・線の形）。カーソルには依らないので、カーソルが動くたびにはやり直さない */
 function buildRowModel(input: {
-  data: NonNullable<ReturnType<typeof useDownsampledReadings>["data"]>;
+  data: RowData;
   aggregation: Aggregation;
   sensor: Sensor | undefined;
   latest: Reading | undefined;
@@ -450,15 +502,25 @@ function buildRowModel(input: {
   maxIntervals: number;
   decimals: number | undefined;
   unit: string;
+  /** 比較側のデータ（範囲をずらして取ったもの）。比較しない・まだ取れていないときは undefined */
+  compareData: RowData | undefined;
+  compareMode: CompareMode;
 }): RowModel {
-  const { data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit } = input;
+  const { data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode } = input;
   // 区間の中央の時刻は、表示の右端（今）より後にしない（最後の区間は、まだ終わっていないため）
   const points = toPoints(data.buckets, data.bucketSeconds, aggregation, bounds.to);
   const stats = trendStats(data.buckets, data.bucketSeconds, points, bounds.to);
   const limits = sensor ? trendLimits(sensor) : [];
   const limitValues = limits.map((limit) => limit.value);
   // 線が無い行（この期間のデータが無い）でも、最後の値が目盛りに収まるようにする
-  const extra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
+  // 比較の線（今の時刻の位置へ進める。右端は、ずらした分だけ前に切る）
+  const offsetBack = bounds.to - shiftRange(bounds, compareMode).to;
+  const comparePoints = compareData ? shiftPointsForward(toPoints(compareData.buckets, compareData.bucketSeconds, aggregation, bounds.to - offsetBack), compareMode) : [];
+  const compareStats = compareData ? trendStats(compareData.buckets, compareData.bucketSeconds, comparePoints, bounds.to) : null;
+  const compareExtra = compareStats ? [compareStats.min.value, compareStats.max.value] : [];
+  const baseExtra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
+  // 縦軸の範囲は、今日と比較の両方が入るようにそろえる
+  const extra = [...baseExtra, ...compareExtra];
   const scale = niceScale(Math.min(...extra, ...limitValues), Math.max(...extra, ...limitValues), maxIntervals);
   const bucketMs = data.bucketSeconds * 1000;
   const now = nowPoint(stats?.last ?? null, latest, live);
@@ -489,6 +551,10 @@ function buildRowModel(input: {
     lineD: linePath(points, scale, bounds.from, bounds.to, gapMs),
     warningD: overPath(points, (v) => levelOf(v, limits) === "warning", scale, bounds.from, bounds.to),
     criticalD: overPath(points, (v) => levelOf(v, limits) === "critical", scale, bounds.from, bounds.to),
+    // 帯は区間の最高・最低で判定する（線の色の切り替えは線の値。行の「最高」札と食い違わないように）
+    bands: computeBands(toBandSamples(data.buckets, data.bucketSeconds, bounds.to), limits, gapMs),
+    comparePoints,
+    compareD: linePath(comparePoints, scale, bounds.from, bounds.to, gapThreshold(comparePoints, bucketMs)),
   };
 }
 
@@ -505,6 +571,8 @@ const PlotStatic = memo(function PlotStatic({
   lineColor,
   warningD,
   criticalD,
+  bands,
+  compareD,
   label,
 }: {
   scale: AxisScale;
@@ -515,13 +583,18 @@ const PlotStatic = memo(function PlotStatic({
   lineColor: string;
   warningD: string;
   criticalD: string;
+  bands: ReadonlyArray<AlarmBand>;
+  compareD: string;
   label: string;
 }) {
   return (
     <>
       <Grid scale={scale} ticks={ticks} bounds={bounds} />
+      <BandStripes bands={bands} bounds={bounds} />
       <LimitLines limits={limits} scale={scale} />
       <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label={label}>
+        {/* 昨日・先週の線（灰色の点線）。今の線の下に敷く */}
+        {compareD && <path data-testid="compare-line" d={compareD} fill="none" style={{ stroke: MUTED }} strokeWidth={1.4} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
         <path d={lineD} fill="none" style={{ stroke: lineColor }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
         <path d={warningD} fill="none" style={{ stroke: AMBER }} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
         <path d={criticalD} fill="none" style={{ stroke: RED }} strokeWidth={2.6} vectorEffect="non-scaling-stroke" />
@@ -529,6 +602,35 @@ const PlotStatic = memo(function PlotStatic({
     </>
   );
 });
+
+/**
+ * 警報の帯。縦の帯を、塗り（透明度 0.16）と上辺の 3px の線で描く（注意＝橙、警報＝赤）。幅は最低 2px。
+ * 左右の端は、点の時刻（線の色が変わる所）。表示範囲の外へはみ出す分は、グラフの枠で切る。
+ */
+function BandStripes({ bands, bounds }: { bands: ReadonlyArray<AlarmBand>; bounds: ResolvedRange }) {
+  return (
+    <>
+      {bands.map((band) => {
+        const color = band.level === "critical" ? RED : AMBER;
+        const left = xPercent(band.startMs, bounds.from, bounds.to);
+        const width = xPercent(band.endMs, bounds.from, bounds.to) - left;
+        return (
+          <span
+            key={band.startMs}
+            data-testid="threshold-band"
+            data-level={band.level}
+            className="pointer-events-none absolute inset-y-0"
+            style={{ left: `${left}%`, width: `${width}%`, minWidth: 2 }}
+            aria-hidden="true"
+          >
+            <span className="absolute inset-0" style={{ background: color, opacity: 0.16 }} />
+            <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: color }} />
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 /** カーソルの時刻の、この行の値を、警報の欄の下の一覧に渡す（何も描かない）。行が消えたら取り下げる */
 function CursorValuePublisher({
@@ -539,6 +641,7 @@ function CursorValuePublisher({
   unit,
   value,
   color,
+  notes,
 }: {
   widgetId: string;
   id: string;
@@ -547,11 +650,14 @@ function CursorValuePublisher({
   unit: string;
   value: string;
   color: string;
+  notes?: Array<{ text: string; color: string }>;
 }) {
   const setRow = useTrendCursorStore((s) => s.setRow);
+  // notes は毎回新しい配列なので、中身を文字にして、変わったときだけ書き込む
+  const notesKey = JSON.stringify(notes ?? []);
   useEffect(() => {
-    setRow(widgetId, { id, order, name, unit, value, color });
-  }, [widgetId, id, order, name, unit, value, color, setRow]);
+    setRow(widgetId, { id, order, name, unit, value, color, notes: JSON.parse(notesKey) as Array<{ text: string; color: string }> });
+  }, [widgetId, id, order, name, unit, value, color, notesKey, setRow]);
   useEffect(() => () => useTrendCursorStore.getState().removeRow(widgetId, id), [widgetId, id]);
   return null;
 }

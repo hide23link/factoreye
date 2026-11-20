@@ -6,6 +6,7 @@
 import { ReferenceArea, ReferenceLine } from "recharts";
 
 import type { ThresholdBand, ThresholdLine } from "../../lib/graph-config";
+import type { AlarmBand } from "../../lib/threshold-bands";
 
 /** グラフの区間数（表示の横幅に合わせた本数の目安。API の上限は 1000） */
 export const GRAPH_BUCKETS = 500;
@@ -62,6 +63,35 @@ export function renderThresholdBands(bands: ThresholdBand[], ends: { low: number
       fillOpacity={0.12}
       stroke="none"
       ifOverflow="hidden"
+    />
+  ));
+}
+
+/** 警報の帯 1 つの絵。塗り（透明度 0.16）と上辺の 3px の線。幅は最低 2px（1 点だけの帯でも見えるように） */
+function drawAlarmBand({ x, y, width, height }: { x?: number; y?: number; width?: number; height?: number }, color: string) {
+  const left = x ?? 0;
+  const top = y ?? 0;
+  const barWidth = Math.max(2, width ?? 0);
+  return (
+    <g data-testid="threshold-band" pointerEvents="none">
+      <rect x={left} y={top} width={barWidth} height={height ?? 0} style={{ fill: color }} fillOpacity={0.16} />
+      <rect x={left} y={top} width={barWidth} height={3} style={{ fill: color }} />
+    </g>
+  );
+}
+
+/**
+ * 警報の帯（しきい値を超えた時間の縦の帯。注意＝橙、警報＝赤）。recharts のグラフの子として、線より前に並べる。
+ * 左右の端は、表示範囲（from〜to）の中に収める。
+ */
+export function renderAlarmBands(bands: ReadonlyArray<AlarmBand>, from: number, to: number) {
+  return bands.map((band) => (
+    <ReferenceArea
+      key={`alarm-band-${band.startMs}`}
+      x1={Math.max(band.startMs, from)}
+      x2={Math.min(band.endMs, to)}
+      ifOverflow="hidden"
+      shape={(props: { x?: number; y?: number; width?: number; height?: number }) => drawAlarmBand(props, THRESHOLD_COLOR[band.level])}
     />
   ));
 }

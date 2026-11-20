@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fireEvent, renderWithQueryClient, screen } from "../../test/test-utils";
 import { cancelPendingCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
+import { useGraphViewStore } from "../../store/useGraphViewStore";
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Sensor, Widget } from "../../types";
@@ -71,6 +72,7 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
+  useGraphViewStore.setState({ showBands: true, compare: "none" });
   useCursorTimeStore.getState().reset();
   useTrendCursorStore.getState().clearAll();
   useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 60 * 60_000 } });
@@ -400,5 +402,164 @@ describe("TrendStackWidget の色（センサーごとの設定色）", () => {
     await screen.findAllByTitle("外気南 温度");
     expect(nameColors("外気南 温度")).toEqual(expect.arrayContaining(["var(--fe-amb)"]));
     expect(nameColors("外気南 温度")).not.toContain(rgb("#2fa84f"));
+  });
+});
+
+describe("TrendStackWidget の警報の帯", () => {
+  const bandWidgetData = () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2", { thresholdMaxWarning: 800, thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 60,
+      buckets: [bucketAgo(50, 600), bucketAgo(40, 900), bucketAgo(30, 1100), bucketAgo(20, 600), bucketAgo(10, 600)],
+    });
+  };
+
+  it("しきい値を超えた区間に、帯を重ねる（注意は橙、警報は赤）", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    const bands = await screen.findAllByTestId("threshold-band");
+    // 900 と 1100 は連続しているので、1 つの帯。区間内の最悪は警報
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toHaveAttribute("data-level", "critical");
+  });
+
+  it("平均は超えていなくても、区間の最高が警報値なら、帯が出る（行の「最高」札と食い違わない）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2", { thresholdMaxCritical: 1000 })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
+      bucketSeconds: 600,
+      buckets: [bucketAgo(50, 600), bucketAgo(30, 600, 1200, 500), bucketAgo(10, 600)],
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    const bands = await screen.findAllByTestId("threshold-band");
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toHaveAttribute("data-level", "critical");
+    expect(screen.getByText(/最高 1200/)).toBeInTheDocument();
+  });
+
+  it("しきい値が無ければ、帯は出ない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 1100), bucketAgo(20, 1200)] });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    expect(screen.queryByTestId("threshold-band")).not.toBeInTheDocument();
+  });
+
+  it("見出しの「警報の帯」を切ると、帯が消える", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByTestId("threshold-band");
+    fireEvent.click(screen.getByRole("button", { name: "警報の帯を表示する" }));
+    expect(screen.queryByTestId("threshold-band")).not.toBeInTheDocument();
+  });
+
+  it("カーソルが帯の中にあると、値の一覧に「警報 … 最高 …」を出す", async () => {
+    bandWidgetData();
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByTestId("threshold-band");
+    // カーソルを、警報の点（30 分前）に置く
+    useCursorTimeStore.setState({ time: Date.now() - 30 * 60_000 + 30_000, owner: "w1" });
+    await vi.waitFor(() => {
+      const note = useTrendCursorStore.getState().widgets.w1?.rows[0]?.notes?.[0]?.text;
+      expect(note).toMatch(/^警報 \d{2}:\d{2}〜\d{2}:\d{2} 最高 1100$/);
+    });
+    expect(screen.getByTestId("cursor-note")).toHaveTextContent(/^警報 /);
+  });
+});
+
+describe("TrendStackWidget の昨日の重ね", () => {
+  /** 範囲の始め（from）が今から 1 時間より前なら比較側の取得（24 時間ずらしたもの） */
+  const isCompareCall = (from: string) => Date.now() - Date.parse(from) > 20 * 3_600_000;
+
+  it("比較を「昨日」にすると、24 時間ずらした範囲を取り、灰色の点線を重ねる。縦軸は両方が入る", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from)
+        ? { bucketSeconds: 60, buckets: [{ ...bucketAgo(30, 5000), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] }
+        : { bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    expect(await screen.findByTestId("compare-line")).toBeInTheDocument();
+    const calls = vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls;
+    const [today, previous] = [calls.find((c) => !isCompareCall(c[1])), calls.find((c) => isCompareCall(c[1]))];
+    // 比較側の範囲は、今の範囲の 24 時間前（取得の数を増やさないよう、1 区間の長さに切り下げるので、最大で 1 区間（1 分）のずれ）
+    for (const index of [1, 2] as const) {
+      const gap = Date.parse(today![index]) - Date.parse(previous![index]);
+      expect(gap).toBeGreaterThanOrEqual(24 * 3_600_000);
+      expect(gap).toBeLessThan(24 * 3_600_000 + 60_000);
+    }
+    // 縦軸は、比較の値（5000）が入る高さまで伸びる
+    expect(screen.getByText("5000")).toBeInTheDocument();
+  });
+
+  it("比較しない（既定）ときは、比較の取得も線も無い", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 600)] });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument();
+    expect(vi.mocked(api.fetchSensorReadingsDownsampled)).toHaveBeenCalledTimes(1);
+  });
+
+  it("比較側の取得が失敗しても、今日の線は消えない", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) => {
+      if (isCompareCall(from)) throw new Error("boom");
+      return { bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] };
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.some((c) => isCompareCall(c[1]))).toBe(true));
+    expect(screen.queryByText("データを取得できませんでした")).not.toBeInTheDocument();
+    expect(lineStrokes()).toHaveLength(1);
+    expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument();
+  });
+
+  it("カーソルの値の一覧に「昨日 62.4（差 +4.1）」の形で出す", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "温度", { unit: "℃" })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from)
+        ? { bucketSeconds: 60, buckets: [{ ...bucketAgo(0, 62.4), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] }
+        : { bucketSeconds: 60, buckets: [bucketAgo(30, 66.5)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findByTestId("compare-line");
+    useCursorTimeStore.setState({ time: Date.now() - 30 * 60_000 + 30_000, owner: "w1" });
+    await vi.waitFor(() => {
+      const notes = useTrendCursorStore.getState().widgets.w1?.rows[0]?.notes?.map((n) => n.text) ?? [];
+      expect(notes).toEqual([expect.stringMatching(/^昨日 62\.4（差 \+4\.\d）$/)]);
+    });
+  });
+
+  it("昨日から先週に切り替えた直後は、昨日のデータを先週として描かない（空にする）", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation((_id, from) => {
+      const ago = Date.now() - Date.parse(from);
+      // 先週の取得は、返ってこない（取得中のまま）
+      if (ago > 6 * 24 * 3_600_000) return new Promise(() => {});
+      if (isCompareCall(from)) return Promise.resolve({ bucketSeconds: 60, buckets: [{ ...bucketAgo(0, 700), start: new Date(Date.parse(from) + 30 * 60_000).toISOString() }] });
+      return Promise.resolve({ bucketSeconds: 60, buckets: [bucketAgo(30, 600), bucketAgo(10, 620)] });
+    });
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findByTestId("compare-line");
+    fireEvent.click(screen.getByRole("button", { name: "比較: 先週" }));
+    await vi.waitFor(() => expect(screen.queryByTestId("compare-line")).not.toBeInTheDocument());
+  });
+
+  it("比較側は取り直さない。直近の表示で今の線が取り直されても、比較側の取得は増えない（範囲を丸めるため）", async () => {
+    useGraphViewStore.setState({ compare: "yesterday" });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "洋室 CO2")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (_id, from) =>
+      isCompareCall(from) ? { bucketSeconds: 60, buckets: [] } : { bucketSeconds: 60, buckets: [bucketAgo(30, 600)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("洋室 CO2");
+    await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1);
   });
 });

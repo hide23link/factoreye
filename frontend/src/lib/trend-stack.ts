@@ -382,6 +382,38 @@ export function placeCursorLabel(
   return { left: clamp(left, 0, plot.width - size.width), top: clamp(top, 0, plot.height - size.height), width: size.width, height: size.height };
 }
 
+/** カーソルの札に添える注記（警報の帯・昨日との差など）の 1 行の高さ（10px の文字） */
+export const CURSOR_NOTE_HEIGHT = 14;
+
+/**
+ * カーソルの値の札（cursorBox）の下に、注記の札を縦に並べる。下に収まらなければ上に並べる（枠の外へは出さない）。
+ * 左端は札にそろえ、右へはみ出すときは内側へ寄せる。
+ * 戻り値の all は、札と注記をまとめて囲む四角（最高・最低の札が避けるため）。
+ * 例: placeCursorNotes(札{left:100, top:20, h:18}, [120, 90], 枠{400×80}) → 注記 2 つが札の下（top 38・52）に並ぶ
+ */
+export function placeCursorNotes(
+  cursorBox: LabelBox,
+  widths: ReadonlyArray<number>,
+  plot: { width: number; height: number },
+): { notes: LabelBox[]; all: LabelBox } {
+  if (widths.length === 0) return { notes: [], all: cursorBox };
+  const total = widths.length * CURSOR_NOTE_HEIGHT;
+  const below = cursorBox.top + cursorBox.height;
+  const startTop = below + total <= plot.height ? below : clamp(cursorBox.top - total, 0, plot.height - total);
+  const notes = widths.map((width, i) => ({
+    left: clamp(cursorBox.left, 0, plot.width - width),
+    top: startTop + i * CURSOR_NOTE_HEIGHT,
+    width,
+    height: CURSOR_NOTE_HEIGHT,
+  }));
+  const boxes = [cursorBox, ...notes];
+  const left = Math.min(...boxes.map((box) => box.left));
+  const top = Math.min(...boxes.map((box) => box.top));
+  const right = Math.max(...boxes.map((box) => box.left + box.width));
+  const bottom = Math.max(...boxes.map((box) => box.top + box.height));
+  return { notes, all: { left, top, width: right - left, height: bottom - top } };
+}
+
 /** 置いた最高・最低の札。faded が true のときは、どこに置いても重なるので薄くする */
 export interface PlacedLabel {
   box: LabelBox;
