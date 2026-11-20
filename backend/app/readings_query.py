@@ -7,6 +7,10 @@ OSS 版で READINGS_ROLLUP_DAYS を設定すると、古い 1 秒ごとの測定
 
 【約束】1 つの分の測定値は、生の行かまとめた行のどちらか一方にだけある（二重に数えない）。
 設定が 0（まとめない）のときは、まとめた行の表が空なので、答えは今までと同じ。
+読み出しの間もこの約束を守るため、生の行とまとめた行は、どの関数でも 1 つの SQL 文で読む
+（1 つの文は、同じ時点の状態を見る）。2 つの文に分けると、その間に夜のまとめ（生の行を消して
+まとめた行に足す）が確定したとき、同じ分を二重に数える（READ COMMITTED では、文ごとに別の
+時点を見る）。
 【精度】まとめた行は 1 分の粒度なので、期間の端（from・to）が分の途中のときは、最大 1 分ぶんの
 誤差が出る（その分の行を、開始時刻で入れるか入れないかで決める）。
 
@@ -23,7 +27,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, text, true
+from sqlalchemy import func, literal, literal_column, text, true, union_all
+from sqlalchemy import select as sa_select
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -210,19 +215,37 @@ async def sum_and_count(
         fast = await _fast_sum_and_count(session, sensor_id, from_, upper)
         if fast is not None:
             return fast
-    raw_query = select(func.sum(Reading.value), func.count(1)).where(
-        Reading.sensor_id == sensor_id, Reading.recorded_at >= from_
+    # 生の行とまとめた行を、1 つの文で（同じ時点の状態で）読む。モジュールの冒頭を参照
+    raw_part = (
+        sa_select(
+            func.coalesce(func.sum(Reading.value), 0.0).label("total"),
+            func.count(1).label("cnt"),
+        )
+        .where(
+            col(Reading.sensor_id) == sensor_id,
+            col(Reading.recorded_at) >= from_,
+            col(Reading.recorded_at) <= upper,
+        )
+        .subquery("raw_part")
     )
-    rolled_query = select(func.sum(ReadingRollup.sum), func.sum(ReadingRollup.count)).where(
-        ReadingRollup.sensor_id == sensor_id, ReadingRollup.bucket_start >= from_
+    rolled_part = (
+        sa_select(
+            func.coalesce(func.sum(ReadingRollup.sum), 0.0).label("total"),
+            func.coalesce(func.sum(ReadingRollup.count), 0).label("cnt"),
+        )
+        .where(
+            col(ReadingRollup.sensor_id) == sensor_id,
+            col(ReadingRollup.bucket_start) >= from_,
+            col(ReadingRollup.bucket_start) <= upper,
+        )
+        .subquery("rolled_part")
     )
-    if to is not None:
-        raw_query = raw_query.where(Reading.recorded_at <= to)
-        rolled_query = rolled_query.where(ReadingRollup.bucket_start <= to)
-
-    raw_total, raw_count = (await session.exec(raw_query)).one()
-    rolled_total, rolled_count = (await session.exec(rolled_query)).one()
-    return float(raw_total or 0.0) + float(rolled_total or 0.0), raw_count + int(rolled_count or 0)
+    query = sa_select(
+        (raw_part.c.total + rolled_part.c.total).label("total"),
+        (raw_part.c.cnt + rolled_part.c.cnt).label("cnt"),
+    ).select_from(raw_part.join(rolled_part, true()))
+    total, count = (await session.execute(query)).one()
+    return float(total), int(count)
 
 
 def _to_downsampled(from_: datetime, width: float, rows: list[BucketRow]) -> DownsampledReadings:
@@ -304,53 +327,48 @@ async def downsample(
             func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
         )
 
+    # 生の行とまとめた行を、1 つの文で（同じ時点の状態で）読む（UNION ALL）。冒頭を参照。
+    # 列はどちらも (種類・区間・最小・合計・最大・件数)。平均は 合計 ÷ 件数 で出す
     raw_index = index_of(Reading.recorded_at)
-    # 列は 5 つ（区間・最小・平均・最大・件数）。SQLModel の select は 4 つまでの型のため一覧で渡す
-    raw_columns = [
-        raw_index,
-        func.min(Reading.value),
-        func.avg(Reading.value),
-        func.max(Reading.value),
-        func.count(1),
-    ]
-    raw_query = (
-        select(*raw_columns)
+    raw_part = (
+        sa_select(
+            literal("raw").label("kind"),
+            raw_index.label("idx"),
+            func.min(Reading.value).label("mn"),
+            func.sum(Reading.value).label("total"),
+            func.max(Reading.value).label("mx"),
+            func.count(1).label("cnt"),
+        )
         .where(
-            Reading.sensor_id == sensor_id,
-            Reading.recorded_at >= from_,
-            Reading.recorded_at <= to,
+            col(Reading.sensor_id) == sensor_id,
+            col(Reading.recorded_at) >= from_,
+            col(Reading.recorded_at) <= to,
         )
         .group_by(raw_index)
-        .order_by(raw_index)
     )
-    raw_rows: list[BucketRow] = [
-        (int(i), float(mn), float(avg), float(mx), int(count))
-        for i, mn, avg, mx, count in (await session.exec(raw_query)).all()
-    ]
-
     rolled_index = index_of(ReadingRollup.bucket_start)
-    rolled_columns = [
-        rolled_index,
-        func.min(ReadingRollup.min),
-        func.sum(ReadingRollup.sum),
-        func.max(ReadingRollup.max),
-        func.sum(ReadingRollup.count),
-    ]
-    rolled_query = (
-        select(*rolled_columns)
+    rolled_part = (
+        sa_select(
+            literal("rolled").label("kind"),
+            rolled_index.label("idx"),
+            func.min(ReadingRollup.min).label("mn"),
+            func.sum(ReadingRollup.sum).label("total"),
+            func.max(ReadingRollup.max).label("mx"),
+            func.sum(ReadingRollup.count).label("cnt"),
+        )
         .where(
-            ReadingRollup.sensor_id == sensor_id,
-            ReadingRollup.bucket_start >= from_,
-            ReadingRollup.bucket_start <= to,
+            col(ReadingRollup.sensor_id) == sensor_id,
+            col(ReadingRollup.bucket_start) >= from_,
+            col(ReadingRollup.bucket_start) <= to,
         )
         .group_by(rolled_index)
-        .order_by(rolled_index)
     )
-    rolled_rows: list[BucketRow] = [
-        (int(i), float(mn), float(total) / int(count), float(mx), int(count))
-        for i, mn, total, mx, count in (await session.exec(rolled_query)).all()
-    ]
-
+    raw_rows: list[BucketRow] = []
+    rolled_rows: list[BucketRow] = []
+    for kind, i, mn, total, mx, count in await session.execute(union_all(raw_part, rolled_part)):
+        row = (int(i), float(mn), float(total) / int(count), float(mx), int(count))
+        (raw_rows if kind == "raw" else rolled_rows).append(row)
+    raw_rows.sort()  # 区間の番号の順に（merge_bucket_rows は、片方だけのときそのまま返す）
     return _to_downsampled(from_, width, merge_bucket_rows(raw_rows, rolled_rows))
 
 
@@ -363,46 +381,56 @@ async def recent_readings(
 ) -> list[ReadingRead]:
     """新しい順に、limit 件まで（グラフ用の履歴）。
 
-    生の行を先に使い、足りなければまとめた行で埋める。
+    生の行を先に使い、足りなければまとめた行で埋める（生の行のいちばん古い時刻より前の分だけ。
+    生の行が 0 件なら、範囲の全部）。
 
     まとめた行は、1 分の平均（合計 ÷ 件数）を、その分の開始時刻の値として返す。
+    生の行とまとめた行は、1 つの文で（同じ時点の状態で）読む。モジュールの冒頭を参照。
     """
-    raw_query = select(Reading.sensor_id, Reading.value, Reading.recorded_at).where(
-        Reading.sensor_id == sensor_id
-    )
+    raw_bounds: list[Any] = [col(Reading.sensor_id) == sensor_id]
+    rolled_bounds: list[Any] = [col(ReadingRollup.sensor_id) == sensor_id]
     if from_ is not None:
-        raw_query = raw_query.where(Reading.recorded_at >= from_)
+        raw_bounds.append(col(Reading.recorded_at) >= from_)
+        rolled_bounds.append(col(ReadingRollup.bucket_start) >= from_)
     if to is not None:
-        raw_query = raw_query.where(Reading.recorded_at <= to)
-    raw_query = raw_query.order_by(Reading.recorded_at.desc()).limit(limit)  # type: ignore[attr-defined]
-    readings = [ReadingRead.model_validate(row) for row in (await session.exec(raw_query)).all()]
-    if len(readings) >= limit:
-        return readings
+        raw_bounds.append(col(Reading.recorded_at) <= to)
+        rolled_bounds.append(col(ReadingRollup.bucket_start) <= to)
 
-    # 足りない分を、まとめた行から（生の行より古い分だけ）
-    # 列の名前を、ReadingRead の項目名（sensor_id・value・recorded_at）にそろえる
-    rolled_columns: list[Any] = [
-        ReadingRollup.sensor_id,
-        (col(ReadingRollup.sum) / col(ReadingRollup.count)).label("value"),
-        col(ReadingRollup.bucket_start).label("recorded_at"),
-    ]
-    rolled_query = select(*rolled_columns).where(ReadingRollup.sensor_id == sensor_id)
-    if from_ is not None:
-        rolled_query = rolled_query.where(ReadingRollup.bucket_start >= from_)
-    upper = to
-    if readings:
-        oldest_raw = readings[-1].recorded_at
-        upper = oldest_raw if upper is None else min(upper, oldest_raw)
-        rolled_query = rolled_query.where(ReadingRollup.bucket_start < upper)
-    elif upper is not None:
-        rolled_query = rolled_query.where(ReadingRollup.bucket_start <= upper)
-    rolled_query = rolled_query.order_by(col(ReadingRollup.bucket_start).desc()).limit(
-        limit - len(readings)
+    # 1. 生の行の、新しい方から limit 件。列の名前は ReadingRead の項目名にそろえる
+    raw = (
+        sa_select(
+            col(Reading.sensor_id).label("sensor_id"),
+            col(Reading.value).label("value"),
+            col(Reading.recorded_at).label("recorded_at"),
+        )
+        .where(*raw_bounds)
+        .order_by(col(Reading.recorded_at).desc())
+        .limit(limit)
+        .cte("raw")
     )
-    readings.extend(
-        ReadingRead.model_validate(row) for row in (await session.exec(rolled_query)).all()
+    # 2. まとめた行は、生の行が limit 件に足りないときだけ、生の行のいちばん古い時刻より前の分を
+    oldest_raw = sa_select(func.min(raw.c.recorded_at)).scalar_subquery()
+    raw_count = sa_select(func.count()).select_from(raw).scalar_subquery()
+    # 生の行が 0 件のとき（上の端なし）
+    no_upper: Any = literal_column("'infinity'::timestamptz")
+    rolled: Any = (
+        sa_select(
+            col(ReadingRollup.sensor_id).label("sensor_id"),
+            (col(ReadingRollup.sum) / col(ReadingRollup.count)).label("value"),
+            col(ReadingRollup.bucket_start).label("recorded_at"),
+        )
+        .where(
+            *rolled_bounds,
+            raw_count < limit,
+            col(ReadingRollup.bucket_start) < func.coalesce(oldest_raw, no_upper),
+        )
+        .order_by(col(ReadingRollup.bucket_start).desc())
+        .limit(limit)
     )
-    return readings
+    # 生の行はすべて、まとめた行より新しいので、新しい順に並べると生の行が先に来る
+    combined = union_all(sa_select(raw), rolled).subquery("combined")
+    query = sa_select(combined).order_by(combined.c.recorded_at.desc()).limit(limit)
+    return [ReadingRead.model_validate(row) for row in (await session.execute(query)).all()]
 
 
 async def latest_values(
@@ -413,6 +441,7 @@ async def latest_values(
     受信の無いセンサーは含めない。
 
     生の行の最新を先に使い、無ければ（古い分がまとめられて消えているとき）まとめた行の「最後の値」を使う。
+    生の行とまとめた行は、1 つの文で（同じ時点の状態で）読む（LATERAL を 2 つ JOIN する）。
     センサーごとに主キーの索引を後ろから 1 件だけ読む（LATERAL）ので、測定値が何百万件あっても、
     センサーの数に比例する時間で済む。
     """
