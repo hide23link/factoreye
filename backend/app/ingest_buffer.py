@@ -19,7 +19,7 @@ import asyncio
 import logging
 from collections.abc import Coroutine
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -29,6 +29,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.alarm_engine import evaluate_alarms  # しきい値を見て、アラームを発生・解除する
+from app.config import AuthMode, settings
 from app.db.models import (
     AlarmSeverity,
     NotificationSettings,
@@ -38,6 +39,7 @@ from app.db.models import (
     WebhookSubscription,
 )
 from app.db.session import engine
+from app.minute_cache import mark_late_rows  # 遅れて届いた行の分を、1 分の集計の作り直しに回す
 from app.notifications import AlarmNotification, send_alarm_discord  # Discord への通知
 from app.webhooks import send_webhook  # Webhook（外部への通知）の送信
 
@@ -322,6 +324,12 @@ async def _insert_readings(
         logger.info(
             "overwrote %d readings with the same sensor and time (the latest value is kept)",
             replaced,
+        )
+    # 1 分の集計（OSS 版。READINGS_ROLLUP_DAYS が 1 以上）を使うときは、遅れて届いた行の
+    # (センサー・分) を記録する（1 秒ごとの通常の行は対象外なので、通常は何もしない）
+    if settings.readings_rollup_days > 0 and settings.auth_mode != AuthMode.MULTI_TENANT:
+        await mark_late_rows(
+            session, [(p.sensor_id, p.recorded_at) for p in unique], datetime.now(UTC)
         )
     return unique
 

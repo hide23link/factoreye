@@ -11,6 +11,9 @@
 数えない（止まった所は何も起きていない）。何度実行しても、同じ結果になる（冪等）。
 遅れて届いた古い測定値（INGEST_DEVICE_TIME で、機器の時刻を使うとき）は、次の実行で、
 その分のまとめた行に足し込まれる。
+【1 分の集計との関係】直近の分は、生の行から作った 1 分の集計
+（readings_minute。app/minute_cache.py）も持っている。生の行を消すときは、同じトランザクションで、その分の集計をそこから消す（まとめた行に
+足したあとは、そちらが正で、二重に数えない）。センサーの印（finalized_until）も、ここまで進める。
 【対象】self-hosted のセンサー（workspace_id が NULL）だけ。SaaS は app/purge.py の 14 日削除。
 【負荷】1 日分ごとに別のトランザクションで、間に短い休みを入れる（取り込みの邪魔をしない）。
 最初の実行は数百万行になるので、進み具合をログに出す。
@@ -33,6 +36,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.config import settings
 from app.db.models import Sensor
 from app.db.session import engine
+from app.minute_cache import lock_sensor_for_rollup
 
 _logger = logging.getLogger(__name__)
 
@@ -80,6 +84,26 @@ _ROLLUP_WINDOW_SQL = text(
     """
 )
 
+# まとめ終わった範囲の、1 分の集計と「遅れて届いた」記録を消し、センサーの印を進める。
+# 印が無いセンサー（1 分の集計を使っていない）では、何も起きない
+_DROP_MINUTE_CACHE_SQL = text(
+    """
+    DELETE FROM readings_minute
+    WHERE sensor_id = :sensor_id AND bucket_start >= :window_start AND bucket_start < :window_end
+    """
+)
+_DROP_DIRTY_SQL = text(
+    "DELETE FROM readings_dirty_minutes WHERE sensor_id = :sensor_id AND bucket_start < :window_end"
+)
+_ADVANCE_STATE_SQL = text(
+    """
+    UPDATE readings_minute_state
+    SET finalized_until = GREATEST(finalized_until, :window_end),
+        built_until = GREATEST(built_until, :window_end)
+    WHERE sensor_id = :sensor_id
+    """
+)
+
 _OLDEST_RAW_SQL = text(
     "SELECT min(recorded_at) FROM readings WHERE sensor_id = :sensor_id AND recorded_at < :cutoff"
 )
@@ -120,17 +144,14 @@ async def _rollup_sensor(sensor_id: UUID, cutoff: datetime, label: str) -> Rollu
             return result
         window_start = floor_to_minute(oldest)
         window_end = min(window_start + _WINDOW, cutoff)
+        window = {"sensor_id": sensor_id, "window_start": window_start, "window_end": window_end}
         async with AsyncSession(engine) as session:
-            row = (
-                await session.execute(
-                    _ROLLUP_WINDOW_SQL,
-                    {
-                        "sensor_id": sensor_id,
-                        "window_start": window_start,
-                        "window_end": window_end,
-                    },
-                )
-            ).one()
+            # 1 分の集計の作成・作り直しと順番に行う（同じセンサーのロック）
+            await lock_sensor_for_rollup(session, sensor_id)
+            row = (await session.execute(_ROLLUP_WINDOW_SQL, window)).one()
+            await session.execute(_DROP_MINUTE_CACHE_SQL, window)
+            await session.execute(_DROP_DIRTY_SQL, window)
+            await session.execute(_ADVANCE_STATE_SQL, window)
             await session.commit()
         result.deleted_rows += row.deleted
         result.buckets += row.buckets

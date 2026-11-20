@@ -376,6 +376,15 @@ async def import_bundle(
                         f"移行先: {target_version}）。両方を同じ版にそろえてください"
                     )
                 await _import_lines(conn, f, t, counts, with_notifications)
+                # 取り込んだ測定値に合わない、直近の 1 分の集計（生の行から作り直せる控え。
+                # app/minute_cache.py）と印を空にする。作り直しは常駐処理がする
+                # （それまで読み出しは、従来の方法で答える）
+                for cache_table in (
+                    "readings_dirty_minutes",
+                    "readings_minute",
+                    "readings_minute_state",
+                ):
+                    await conn.execute(sa.text(f"DELETE FROM {cache_table}"))
                 if dry_run:
                     raise _DryRunDone
         except _DryRunDone:
