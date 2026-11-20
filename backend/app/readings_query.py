@@ -76,8 +76,12 @@ _FAST_MIN_BUCKET_SECONDS = 120.0
 #   5. readings        : 3 の後ろの端 [max(hi_floor, f), hi]（h より前の分）
 #   6. readings        : h 以後（まだ集計が無い分）
 # 列は (時刻, 最小, 合計, 最大, 件数)。生の行は 1 行ごとに (時刻, 値, 値, 値, 1)。1 つの文なので、
-# 夜のまとめが動いていても、同じ時点の状態で読める。先頭に印の行（kind = 'state'）を付けて、
-# 印が消えていないことを確かめる。
+# 夜のまとめが動いていても、同じ時点の状態で読める。
+# 生の行の 3 つ（4・5・6）は、印を JOIN ではなく (SELECT ... FROM st) の 1 つの値で書く。JOIN の列を
+# 範囲の下端にすると、PostgreSQL が索引の条件にできず、生の行を全部読んでから捨てることがある
+# （7 日×1 秒で約 60 万行、0.36 秒 → 索引だと 9 ms）。
+# 印が無いときは、EXISTS で 0 件にする。
+# 先頭に印の行（kind = 'state'）を付けて、印が消えていないことを確かめる。
 _FAST_SOURCES_SQL = """
     WITH st AS (
         SELECT finalized_until AS f, built_until AS h
@@ -101,18 +105,21 @@ _FAST_SOURCES_SQL = """
           AND m.bucket_start < LEAST(:hi_floor, st.h)
         UNION ALL
         SELECT 'edge_start', x.recorded_at, x.value, x.value, x.value, 1
-        FROM readings x, st
-        WHERE x.sensor_id = :sensor_id AND x.recorded_at >= GREATEST(:lo, st.f)
-          AND x.recorded_at < LEAST(:lo_ceil, st.h)
+        FROM readings x
+        WHERE x.sensor_id = :sensor_id AND EXISTS (SELECT 1 FROM st)
+          AND x.recorded_at >= GREATEST(:lo, (SELECT f FROM st))
+          AND x.recorded_at < LEAST(:lo_ceil, (SELECT h FROM st))
         UNION ALL
         SELECT 'edge_end', x.recorded_at, x.value, x.value, x.value, 1
-        FROM readings x, st
-        WHERE x.sensor_id = :sensor_id AND x.recorded_at >= GREATEST(:hi_floor, st.f)
-          AND x.recorded_at <= :hi AND x.recorded_at < st.h
+        FROM readings x
+        WHERE x.sensor_id = :sensor_id AND EXISTS (SELECT 1 FROM st)
+          AND x.recorded_at >= GREATEST(:hi_floor, (SELECT f FROM st))
+          AND x.recorded_at <= :hi AND x.recorded_at < (SELECT h FROM st)
         UNION ALL
         SELECT 'tail', x.recorded_at, x.value, x.value, x.value, 1
-        FROM readings x, st
-        WHERE x.sensor_id = :sensor_id AND x.recorded_at >= GREATEST(:lo, st.h)
+        FROM readings x
+        WHERE x.sensor_id = :sensor_id AND EXISTS (SELECT 1 FROM st)
+          AND x.recorded_at >= GREATEST(:lo, (SELECT h FROM st))
           AND x.recorded_at <= :hi
     )
 """

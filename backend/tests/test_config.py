@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import DEFAULT_SECRET, AuthMode, IngestAuth, Settings
+from app.config import DB_POOL_TOTAL_MAX, DEFAULT_SECRET, AuthMode, IngestAuth, Settings
 
 
 def _make(
@@ -167,3 +167,16 @@ def test_device_time_is_active_in_saas_too(monkeypatch: pytest.MonkeyPatch) -> N
     assert Settings(_env_file=None).ingest_device_time_active
     monkeypatch.setenv("AUTH_MODE", "multi_tenant")
     assert Settings(_env_file=None).ingest_device_time_active  # SaaS でも、同じ API・同じ規則
+
+
+# ---- DB_POOL_SIZE / DB_MAX_OVERFLOW ----
+
+
+def test_db_pool_total_within_limit_is_accepted() -> None:
+    s = Settings(_env_file=None, db_pool_size=60, db_max_overflow=30)
+    assert s.db_pool_size + s.db_max_overflow == DB_POOL_TOTAL_MAX
+
+
+def test_db_pool_total_over_postgres_limit_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="max_connections"):
+        Settings(_env_file=None, db_pool_size=60, db_max_overflow=31)
