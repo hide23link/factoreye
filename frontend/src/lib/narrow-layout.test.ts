@@ -25,7 +25,7 @@ describe("スマホの縦 1 列の並び", () => {
 
   it("計器は低く、計器グラフは行の数に合わせた高さにする", () => {
     expect(narrowHeightPx(w("t", 1, 1, "TapeGauge"))).toBe(168);
-    expect(narrowHeightPx(w("g", 1, 1, "TrendStack", { sensorIds: ["a", "b", "c"] }))).toBe(56 + 96 * 3);
+    expect(narrowHeightPx(w("g", 1, 1, "TrendStack", { sensorIds: ["a", "b", "c"] }))).toBe(230 + 150 * 3);
     expect(narrowHeightPx(w("s", 1, 1))).toBe(320);
   });
 

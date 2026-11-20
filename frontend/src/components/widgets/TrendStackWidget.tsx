@@ -441,7 +441,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
         <div className="relative min-h-[64px] border-l" style={{ borderColor: "var(--fe-line)" }}>
           {now && (
             <span
-              className="absolute left-1.5 right-1 -translate-y-1/2 rounded-sm border-[1.5px] px-1 py-px text-right font-num text-[15px] font-bold"
+              className="trend-now absolute left-1.5 right-1 -translate-y-1/2 rounded-sm border-[1.5px] px-1 py-px text-right font-num text-[15px] font-bold"
               style={{ top: `${Math.min(PLOT_BOTTOM, Math.max(PLOT_TOP, yPercent(now.value, scale)))}%`, color, borderColor: color, background: "var(--fe-chrome)" }}
             >
               {/* 札の左に、グラフの最後の点を指す小さな左向きの矢印（札と同じ色）。飾りなので読み上げない */}
@@ -727,7 +727,7 @@ function RowSide({
 /** 縦軸の目盛りの数字 */
 function YAxis({ scale, unit }: { scale: AxisScale; unit: string }) {
   return (
-    <div className="relative min-h-[64px] font-num text-[11px]" style={{ color: MUTED }} aria-hidden="true">
+    <div className="trend-yaxis relative min-h-[64px] font-num text-[11px]" style={{ color: MUTED }} aria-hidden="true">
       {/* 縦軸の単位。いちばん上の目盛りの数字と重ならないよう、軸の左上の隅に小さく出す */}
       {unit && (
         <span className="absolute left-1 top-0 text-[9px] leading-none" data-testid="trend-y-unit">

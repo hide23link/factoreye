@@ -10,17 +10,21 @@ import { graphSensorIds } from "./graph-config";
 
 // スマホの縦 1 列で、ウィジェットに与える高さ（px）の基準。種類によっては、中身に合わせて変える（narrowHeightPx）
 const NARROW_DEFAULT_HEIGHT = 320;
+// 計器グラフ（TrendStack）: 見出し（題・期間・警報の帯と比較の切り替え・カーソル札）と時間の軸で約 230px。1 行は、名前の行 20px + グラフ約 130px。
+// 以前は 1 行 96px・見出し 56px で、スマホの実機では見出しだけで埋まり、グラフの線が出なかった
+const TREND_HEADER_PX = 230;
+const TREND_ROW_PX = 150;
 
 /** スマホで並べる順。置いた位置の順（上の段から、同じ段なら左から）。サーバーが返す順（作った順）にしない */
 export function widgetsInReadingOrder(widgets: readonly Widget[]): Widget[] {
   return [...widgets].sort((a, b) => a.gridRow - b.gridRow || a.gridColumn - b.gridColumn);
 }
 
-/** スマホの縦 1 列での、ウィジェットの高さ。計器は低く、計器グラフは行の数に合わせる（1 行 96px + 見出しなど 56px） */
+/** スマホの縦 1 列での、ウィジェットの高さ。計器は低く、計器グラフは行の数に合わせる（1 行 150px + 見出し・切り替え・カーソル札・時間の軸など 230px） */
 export function narrowHeightPx(widget: Widget): number {
   if (widget.type === "TapeGauge") return 168;
   if (widget.type === "DeviceTree") return 200;
-  if (widget.type === "TrendStack") return 56 + 96 * Math.max(1, graphSensorIds(widget).length);
+  if (widget.type === "TrendStack") return TREND_HEADER_PX + TREND_ROW_PX * Math.max(1, graphSensorIds(widget).length);
   // 状態の帯: スマホでは 1 行が「名前・帯・稼働率」の 3 段で約 68px。ほかに目盛り・凡例・注記など約 140px（実機で、4 行 = 約 393px を測った）
   if (widget.type === "StateTimeline") return 140 + 68 * Math.max(1, graphSensorIds(widget).length);
   return NARROW_DEFAULT_HEIGHT;
