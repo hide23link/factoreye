@@ -1,7 +1,7 @@
 /**
  * ダッシュボードのタブ。ヘッダーのすぐ下に 1 行で並べ、押すとそのダッシュボードへ切り替える。スマホだけで出す
  * （パソコンは左のメニューにダッシュボード名を並べる。DashboardNavList）。一覧の画面は無い。
- * 全ダッシュボードを並べ、右端の「＋」で新しいダッシュボードを作る。
+ * 全ダッシュボードを並べる（新しいダッシュボードは、設定の「ダッシュボード」タブから作る。押し間違え防止）。
  * 入りきらないときは折り返さず、横になぞって送る。開いたときは、今のタブが見える位置まで自動で送る。
  * 編集中は薄くして押せなくする（途中で移ると「元に戻す」の履歴が消えるため。「完了」で戻る）。
  * 移っても、今見ている時間範囲（固定の期間も含む）はそのまま使う。
@@ -12,7 +12,6 @@
 import { useEffect, useRef } from "react";
 
 import { useDashboards } from "../hooks/queries";
-import { useCreateDashboard } from "../hooks/useCreateDashboard";
 import { useEditorStore } from "../store/useEditorStore";
 import { keepTimeRangeForNextDashboard } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -30,7 +29,6 @@ export function DashboardTabs() {
   const navRef = useRef<HTMLElement>(null);
   const currentRef = useRef<HTMLButtonElement>(null);
   const idsKey = dashboards?.map((d) => d.id).join(",");
-  const createMutation = useCreateDashboard((dashboards ?? []).map((d) => d.name));
 
   // 今のタブを見える位置まで、横にだけ送る（scrollIntoView はページも縦に動かすので使わない）。
   // 名前の変更などで取り直しただけのときは動かさない（並びと選択が変わったときだけ）
@@ -71,15 +69,6 @@ export function DashboardTabs() {
           </button>
         );
       })}
-      <button
-        type="button"
-        disabled={editing || createMutation.isPending}
-        onClick={() => createMutation.mutate()}
-        aria-label="新しいダッシュボード"
-        className={`${TAB_CLASS} border-transparent text-blue-600 disabled:opacity-50`}
-      >
-        ＋
-      </button>
     </nav>
   );
 }

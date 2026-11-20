@@ -1,6 +1,6 @@
 /**
  * 左のメニュー（パソコン）の「ダッシュボード」の下に並べる、ダッシュボード名の一覧。
- * 名前を押すとそのダッシュボードへ切り替わり、最後に「＋ 新しいダッシュボード」で空のダッシュボードを作って編集モードで開く。
+ * 名前を押すとそのダッシュボードへ切り替わる（新しく作るのは、設定画面の「ダッシュボード」。間違えて押しやすいのでここには置かない）。
  * 今見ているダッシュボードに印を付ける（ほかの画面を見ているときは印を付けない）。
  * 編集中は薄くして押せなくする（途中で移ると「元に戻す」の履歴が消えるため。「完了」で戻る）。
  * 移っても、今見ている時間範囲（固定の期間も含む）はそのまま使う。
@@ -8,8 +8,6 @@
  * 【誰が使うか】App.tsx の SideRail。スマホは使わず、上のタブ（DashboardTabs）で切り替える。
  */
 import { useDashboards } from "../hooks/queries";
-import { useCreateDashboard } from "../hooks/useCreateDashboard";
-import { describeActionError } from "../lib/errors";
 import { useEditorStore } from "../store/useEditorStore";
 import { keepTimeRangeForNextDashboard } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
@@ -22,7 +20,6 @@ export function DashboardNavList() {
   const selectedId = useUiStore((s) => s.selectedDashboardId);
   const selectDashboard = useUiStore((s) => s.selectDashboard);
   const editing = useEditorStore((s) => s.editing);
-  const createMutation = useCreateDashboard((dashboards ?? []).map((d) => d.name));
 
   return (
     <div className={`mb-1 ml-5 flex flex-col border-l border-gray-200 ${editing ? "opacity-40" : ""}`}>
@@ -51,19 +48,6 @@ export function DashboardNavList() {
           );
         })}
       </ul>
-      <button
-        type="button"
-        disabled={editing || createMutation.isPending || !dashboards}
-        onClick={() => createMutation.mutate()}
-        className={`${ITEM_CLASS} text-blue-600 hover:bg-gray-100 disabled:opacity-50`}
-      >
-        ＋ 新しいダッシュボード
-      </button>
-      {createMutation.isError && (
-        <p role="alert" className="px-2.5 py-1 text-xs text-red-600">
-          {describeActionError(createMutation.error, "ダッシュボードの作成")}
-        </p>
-      )}
     </div>
   );
 }

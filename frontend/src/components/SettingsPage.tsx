@@ -1,5 +1,5 @@
 /**
- * 設定画面。左のメニュー（項目をまとまりごとに並べる）で、センサー・アラーム・通知・Webhook・データ移行・表示
+ * 設定画面。左のメニュー（項目をまとまりごとに並べる）で、ダッシュボード・センサー・アラーム・通知・Webhook・データ移行・表示
  * （OSS 版は機器・バックアップ・API・取り込みも）の各パネルを切り替える。スマホでは、メニューが上に並ぶ。
  * 選んでいる項目のパネルだけを描画する（ほかのパネルは作らない＝不要な通信をしない）。
  * 横幅いっぱいに広げ、左の項目の欄だけ固定幅にする（画面刷新モックと同じ）。
@@ -10,6 +10,7 @@ import { useState } from "react";
 
 import { AlarmSettingsPanel } from "./settings/AlarmSettingsPanel";
 import { BackupSettingsPanel } from "./settings/BackupSettingsPanel";
+import { DashboardsSettingsPanel } from "./settings/DashboardsSettingsPanel";
 import { DevicesSettingsPanel } from "./settings/DevicesSettingsPanel";
 import { DisplaySettingsPanel } from "./settings/DisplaySettingsPanel";
 import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
@@ -20,6 +21,7 @@ import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
 
 // 設定画面の項目の種類（値は、下の描画の分岐と対応させる）
 type SettingsTab =
+  | "dashboards"
   | "sensors"
   | "alarms"
   | "notifications"
@@ -45,6 +47,7 @@ const GROUPS: { title: string; items: TabItem[] }[] = [
   {
     title: "計測",
     items: [
+      { value: "dashboards", label: "ダッシュボード" },
       { value: "sensors", label: "センサー" },
       { value: "devices", label: "機器・送信キー", ossOnly: true },
       { value: "alarms", label: "アラームのしきい値" },
@@ -106,6 +109,7 @@ export function SettingsPage() {
       </nav>
 
       <div className="min-w-0 flex-1 rounded border border-gray-200 bg-white p-4">
+        {tab === "dashboards" && <DashboardsSettingsPanel />}
         {tab === "sensors" && <SensorSettingsPanel />}
         {tab === "alarms" && <AlarmSettingsPanel />}
         {tab === "notifications" && <NotificationSettingsPanel />}

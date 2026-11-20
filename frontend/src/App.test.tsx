@@ -88,7 +88,7 @@ describe("App の画面の分け方", () => {
     const rail = await screen.findByRole("navigation", { name: "メインメニュー" });
     const list = await within(rail).findByRole("list", { name: "ダッシュボードの切り替え" });
     expect(within(list).getByRole("button", { name: "ライン1" })).toHaveAttribute("aria-current", "page");
-    expect(within(rail).getByRole("button", { name: "＋ 新しいダッシュボード" })).toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: "＋ 新しいダッシュボード" })).not.toBeInTheDocument();
   });
 
   it("左のメニューに全体監視があり、上の帯に警報・注意の表示灯を出す", async () => {

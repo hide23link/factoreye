@@ -10,7 +10,6 @@ import { DashboardTabs } from "./DashboardTabs";
 
 vi.mock("../lib/api", () => ({
   fetchDashboards: vi.fn(),
-  createDashboard: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -28,10 +27,10 @@ beforeEach(() => {
 });
 
 describe("DashboardTabs", () => {
-  it("全ダッシュボードのタブと、右端の「＋」を並べ、今のタブに印を付ける（一覧のタブは無い）", async () => {
+  it("全ダッシュボードのタブだけを並べ（「＋」は無い）、今のタブに印を付ける", async () => {
     renderWithQueryClient(<DashboardTabs />);
     const tabs = await screen.findAllByRole("button");
-    expect(tabs.map((t) => t.textContent)).toEqual(["工場A監視", "工場B監視", "＋"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["工場A監視", "工場B監視"]);
     expect(screen.getByRole("button", { name: "工場A監視" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -39,15 +38,6 @@ describe("DashboardTabs", () => {
     renderWithQueryClient(<DashboardTabs />);
     await userEvent.click(await screen.findByRole("button", { name: "工場B監視" }));
     expect(useUiStore.getState().selectedDashboardId).toBe("d2");
-  });
-
-  it("「＋」を押すと、空のダッシュボードを作って編集モードで開く", async () => {
-    vi.mocked(api.createDashboard).mockResolvedValue({ ...dashboards[0], id: "d-new", name: "新しいダッシュボード", widgets: [] });
-    renderWithQueryClient(<DashboardTabs />);
-    await userEvent.click(await screen.findByRole("button", { name: "新しいダッシュボード" }));
-    await waitFor(() => expect(api.createDashboard).toHaveBeenCalledWith({ name: "新しいダッシュボード" }));
-    await waitFor(() => expect(useUiStore.getState().selectedDashboardId).toBe("d-new"));
-    expect(useUiStore.getState().openInEditMode).toBe(true);
   });
 
   it("パソコンの幅では隠す（左のメニューに名前を並べるため。スマホだけで出す）", async () => {
