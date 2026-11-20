@@ -36,7 +36,13 @@ from app.minute_cache import (
     settled_horizon,
     top_up_current,
 )
-from app.readings_query import _ceil_minute, downsample, sum_and_count
+from app.readings_query import (
+    _FAST_SOURCES_SQL,
+    _ceil_minute,
+    _fast_params,
+    downsample,
+    sum_and_count,
+)
 from app.rollup import rollup_old_readings
 
 
@@ -315,6 +321,25 @@ async def test_fast_sum_and_count_is_exact_even_for_unaligned_edges(
         fast, legacy = await _fast_and_legacy_sum(monkeypatch, sensor_id, lo, hi)
         assert fast == legacy
         assert fast[1] > 0
+
+
+@pytest.mark.asyncio
+async def test_fast_sources_read_nothing_when_the_sensor_has_no_state(
+    now: datetime, minute_cache_on: None
+) -> None:
+    # 印が無いセンサーは、生の行を 1 行も読まない（印の行も無いので、従来の道に切り替わる）。
+    # 生の行の 3 つの読み出しは (SELECT ... FROM st) の値で範囲を決めるので、印が無いと範囲の下端が
+    # 外れて全部読んでしまう。それを EXISTS で防いでいる
+    sensor_id = await _create_sensor()
+    await _add_readings(sensor_id, _series(now - timedelta(days=2), now, 60))
+    lo, hi = now - timedelta(days=1, seconds=-17), now - timedelta(minutes=20, seconds=-41)
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(_FAST_SOURCES_SQL + "SELECT kind FROM src"), _fast_params(sensor_id, lo, hi)
+            )
+        ).all()
+    assert rows == []
 
 
 @pytest.mark.asyncio

@@ -20,12 +20,15 @@ from app.config import settings
 # 環境変数 DB_POOL_SIZE・DB_MAX_OVERFLOW で変えられる。
 # 1 つの処理で、接続を持ったまま engine から別の接続を取らないこと（同時の処理が多いと、
 # 全員が持ったまま待って止まる。app/readings_query.py の _can_use_fast_path を参照）。
+# pool_pre_ping=True: プールから接続を渡す前に軽い問い合わせで生きているか確かめ、切れていたら
+# つなぎ直す（DB の再起動・接続の切断の直後に、古い接続で数件が 500 になるのを防ぐ）。
 # echo=True（開発時）は、実行される SQL をログに出す
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
+    pool_pre_ping=True,
 )
 
 

@@ -14,6 +14,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 配布物に書かれている既定の秘密値（本番では使えない）
 DEFAULT_SECRET = "change-this-in-production"
+# DB の接続の最大本数（DB_POOL_SIZE + DB_MAX_OVERFLOW）の上限。
+# PostgreSQL の max_connections 100 から、管理用の 3 本と余裕を引いた数
+DB_POOL_TOTAL_MAX = 90
 
 
 def is_placeholder_secret(value: str) -> bool:
@@ -67,9 +70,11 @@ class Settings(BaseSettings):
     # PostgreSQL の接続先。形式: postgresql+asyncpg://ユーザー:パスワード@ホスト:ポート/DB名
     database_url: str = "postgresql+asyncpg://factoreye:password@localhost:5432/factoreye"
     # DB の接続プール（app/db/session.py）。通常に保つ本数と、混雑時に増やせる本数。
-    # 最大 = 2 つの合計（既定 20 本）。PostgreSQL の max_connections（既定 100）を超えないこと
-    db_pool_size: int = Field(default=10, ge=1, le=100)
-    db_max_overflow: int = Field(default=10, ge=0, le=100)
+    # 最大 = 2 つの合計（既定 20 本）。PostgreSQL の max_connections（既定 100、うち 3 本は
+    # 管理用）に収まるよう、合計は DB_POOL_TOTAL_MAX（90）本まで
+    # （_check_db_pool_total が起動時に確かめる）
+    db_pool_size: int = Field(default=10, ge=1, le=90)
+    db_max_overflow: int = Field(default=10, ge=0, le=90)
     # self-hosted の取り込み用の共有キー（X-API-Key ヘッダーと比べる）。本番では必ず変える
     ingest_api_key: str = DEFAULT_SECRET
     # 取り込みの認証（IngestAuth を参照）。"off" にするとキーなしで受け付ける。既定は "key"
@@ -162,6 +167,22 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"{name} が既定値（または CHANGE_ME などのひな形の値）のままです。"
                 "ENVIRONMENT=production では必ず変更してください"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_db_pool_total(self) -> "Settings":
+        """DB_POOL_SIZE + DB_MAX_OVERFLOW（接続の最大本数）が、PostgreSQL の上限に収まるか確かめる。
+
+        PostgreSQL の max_connections は既定 100 本で、うち 3 本は管理用に空けてある。
+        超えると、混雑したときに新しい接続が「too many clients」で断られ、500 エラーになる。
+        """
+        total = self.db_pool_size + self.db_max_overflow
+        if total > DB_POOL_TOTAL_MAX:
+            raise ValueError(
+                f"DB_POOL_SIZE + DB_MAX_OVERFLOW の合計は {DB_POOL_TOTAL_MAX} 以下に"
+                f"してください（今は {total}）。PostgreSQL の max_connections（既定 100）"
+                "を超えないための上限です"
             )
         return self
 
