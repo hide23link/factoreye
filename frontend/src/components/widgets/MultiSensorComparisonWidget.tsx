@@ -71,6 +71,10 @@ import {
 import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
 import { withSharedCursor } from "../../lib/shared-cursor";
 import { CursorResetButton, SharedCursorOverlay } from "./SharedCursor";
+import { LegendTable, type LegendTableItem } from "./LegendTable";
+import { isDimmed, tableCursorTime, toggleSelection, valueAtCursor } from "../../lib/legend-table";
+import { useCursorTimeStore } from "../../store/useCursorTimeStore";
+import { useState } from "react";
 import { GraphValueProbe, GraphValues, type GraphValueItem } from "./GraphValues";
 
 /**
@@ -137,6 +141,10 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   });
   // 右の今の値の札を置く高さ（グラフの中で測る）
   const [valueMeasure, setValueMeasure] = useGraphValueMeasure();
+  // 凡例の表で選んだセンサー（空なら全部表示）。保存しない
+  const [selected, setSelected] = useState<string[]>([]);
+  // 共有のカーソルの時刻（動かしていなければ null。そのときの表の値は最新）
+  const cursorTime = useCursorTimeStore((s) => s.time);
 
   if (sensorIds.length === 0) {
     return <p className="text-sm text-gray-500">比較対象のセンサーが設定されていません</p>;
@@ -226,6 +234,29 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     };
   });
 
+  // 凡例の表（複数センサーのときだけ。リンクの画面・凡例「出さない」・表の設定を切にしたときは出さない。切のときは、元の凡例を位置の設定どおりに出す）
+  const showLegendTable = sensorIds.length >= 2 && !linkView && style.legendPosition !== "off" && widget.config.showLegendTable !== false;
+  const cursorToleranceMs = (2 * (fetchBounds.to - fetchBounds.from)) / GRAPH_BUCKETS;
+  // 表の値は、換算前・埋め草なしの実測の行から取る（0〜100% への換算値や、積み上げのために埋めた値を出さない）
+  const measuredRows = options.axisMode === "normalized" || options.stack !== "none" ? buildRows(inputs, options.aggregation) : rawRows;
+  // 共有のカーソルが、このグラフの表示範囲の外にあるときは、最新の値を出す
+  const tableCursor = tableCursorTime(cursorTime, bounds.from, bounds.to);
+  const lastMeasured = (sensorId: string) => {
+    const row = [...measuredRows].reverse().find((r) => typeof r[sensorId] === "number");
+    return row ? row[sensorId] : undefined;
+  };
+  const legendItems: LegendTableItem[] = sensorIds.map((sensorId, i) => ({
+    sensorId,
+    name: valueItems[i].name,
+    color: valueItems[i].color,
+    unit: valueItems[i].unit,
+    // カーソルがあればその時刻の値（線と同じ実測の行）、なければ最新の値。取れなければ「---」
+    value: tableCursor === null ? (valueItems[i].value ?? lastMeasured(sensorId)) : valueAtCursor(measuredRows, sensorId, tableCursor, cursorToleranceMs),
+    stats: valueItems[i].stats,
+  }));
+  // 選ばれていない線は薄くする
+  const dim = (sensorId: string) => (isDimmed(selected, sensorId) ? 0.15 : 1);
+
   // 3種類のグラフで共通の部品（軸・目盛り・凡例・ドラッグ選択・しきい値の線）
   const parts = [
     style.showGrid ? <CartesianGrid key="grid" strokeDasharray="3 3" /> : null,
@@ -280,8 +311,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         formatter={tooltipValueFormatter}
       />
     ) : null,
-    // リンクの画面は、上の今の値に色の印を出すので、凡例を出さない
-    style.legendPosition === "off" || linkView ? null : (
+    // リンクの画面は、上の今の値に色の印を出すので、凡例を出さない。凡例の表を出すときも、重なるので出さない
+    style.legendPosition === "off" || linkView || showLegendTable ? null : (
       <Legend
         key="legend"
         wrapperStyle={{ fontSize: 10 }}
@@ -310,6 +341,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           dataKey={sensorId}
           name={nameOf(sensorId)}
           fill={color}
+          fillOpacity={dim(sensorId)}
           stackId={stackId}
           isAnimationActive={false}
         />
@@ -328,7 +360,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           dot={style.showPoints}
           fill={color}
           stackId={stackId}
-          fillOpacity={style.fillOpacity}
+          fillOpacity={style.fillOpacity * dim(sensorId)}
+          strokeOpacity={dim(sensorId)}
           isAnimationActive={false}
           connectNulls
         />
@@ -343,6 +376,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         name={nameOf(sensorId)}
         stroke={color}
         strokeWidth={style.lineWidth}
+        strokeOpacity={dim(sensorId)}
         dot={style.showPoints}
         isAnimationActive={false}
         connectNulls
@@ -381,6 +415,15 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           <GraphValues items={valueItems} decimals={widget.config.decimals} measure={valueMeasure} />
         )}
       </div>
+      {showLegendTable && (
+        <LegendTable
+          items={legendItems}
+          selected={selected}
+          onToggle={(id, multi) => setSelected((current) => toggleSelection(current, id, multi))}
+          decimals={widget.config.decimals}
+          atCursor={tableCursor !== null}
+        />
+      )}
     </div>
   );
 }

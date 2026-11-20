@@ -324,6 +324,21 @@ describe("WidgetSettings: グラフ", () => {
     expect(screen.getByRole("radiogroup", { name: "凡例の場所" })).toBeInTheDocument();
   });
 
+  it("凡例の表のチェックは、未設定なら入。センサーが 2 つ以上のときだけ出て、切にすると保存される", async () => {
+    const user = userEvent.setup();
+    const one = widget("SensorGraph", { sensorId: "s1", config: { graphType: "line" } });
+    const { unmount } = renderWithQueryClient(<WidgetSettings widget={one} dashboard={dashboardOf(one)} />);
+    expect(screen.queryByRole("switch", { name: "凡例の表（最小・最大・平均）を表示" })).not.toBeInTheDocument();
+    unmount();
+
+    const many = widget("SensorGraph", { sensorId: "s1", config: { sensorIds: ["s1", "s2"] } });
+    renderWithQueryClient(<WidgetSettings widget={many} dashboard={dashboardOf(many)} />);
+    const toggle = screen.getByRole("switch", { name: "凡例の表（最小・最大・平均）を表示" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    await waitFor(() => expect(lastConfig()).toMatchObject({ showLegendTable: false }));
+  });
+
   it("区間の値と更新間隔を選ぶと、その項目だけ保存される", async () => {
     const user = userEvent.setup();
     const w = widget("SensorGraph", { sensorId: "s1" });
