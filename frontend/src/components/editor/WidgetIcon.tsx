@@ -11,6 +11,7 @@ const PATHS: Record<WidgetType, string[]> = {
   FloorPlan: ["M3 4h18v16H3z", "M3 12h9M12 4v8M12 16h9", "M7 8h.01M16 8h.01M7 16h.01"],
   DeviceTree: ["M9 3h6v4H9z", "M12 7v4M5 11h14M5 11v3M12 11v3M19 11v3", "M3 14h4v4H3zM10 14h4v4h-4zM17 14h4v4h-4z"],
   TapeGauge: ["M3 12h18", "M3 9v6M9 9v6M15 9v6M21 9v6", "M12 3l-2 3h4z"],
+  StateTimeline: ["M3 7h18", "M3 12h18", "M3 17h18", "M3 7h8M15 12h6M8 17h5"],
   TargetStrip: ["M3 7h18", "M3 12h18", "M3 17h18", "M8 5v4M13 10v4M17 15v4"],
   ProductionPlan: ["M3 20h18", "M5 11h3.5v9H5zM10.5 7H14v13h-3.5zM16 13h3.5v7H16z", "M4 6l5-2 4 2 6-3"],
 };

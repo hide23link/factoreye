@@ -114,6 +114,15 @@ export const WIDGET_KINDS: readonly WidgetKind[] = [
     defaultConfig: {},
   },
   {
+    type: "StateTimeline",
+    label: "状態の帯",
+    description: "センサーごとに、稼働・警報・停止・受信なしの時間を色の帯で並べる。稼働率つき",
+    width: 12,
+    height: 6,
+    suitedSensor: null,
+    defaultConfig: {},
+  },
+  {
     type: "TargetStrip",
     label: "達成ストリップ",
     description: "一定の間隔ごとに、目標を満たしたかを緑・赤の帯で見る。受信の確認や、生産の目標に",

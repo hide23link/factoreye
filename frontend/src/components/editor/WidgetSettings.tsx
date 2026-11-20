@@ -137,6 +137,8 @@ function TypeSettings({ widget, actions }: SectionProps) {
       return <ProductionPlanSettings widget={widget} actions={actions} />;
     case "TargetStrip":
       return <TargetStripSettings widget={widget} actions={actions} />;
+    case "StateTimeline":
+      return <StateTimelineSettings widget={widget} actions={actions} />;
     case "TrendStack":
       return <TrendStackSettings widget={widget} actions={actions} />;
     case "FloorPlan":
@@ -766,6 +768,72 @@ function recolorAt(actions: Actions, widget: Widget, index: number): void {
     colors[index] = nextGraphColor(colors[index]);
     return { config: { ...latest.config, colors } };
   });
+}
+
+/**
+ * 状態の帯の設定。センサー（複数。1 センサーが 1 行）と、行ごとの「停止とみなす値」（空欄なら、その行は停止を判定しない）。
+ * 稼働は「値を受信していて、警報でなければ稼働」。停止はこの値を設定した行だけで、その値以下なら停止。
+ */
+function StateTimelineSettings({ widget, actions }: SectionProps) {
+  const { data: sensors } = useSensors();
+  const ids = graphSensorIds(widget);
+  const stops = widget.config.stateStopValues ?? {};
+  const removeAt = (index: number) =>
+    void actions.patchFromLatest(widget, (latest) => {
+      const latestIds = graphSensorIds(latest);
+      const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
+      const patch = graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+      const keptIds = keep.map((i) => latestIds[i]);
+      const kept = Object.fromEntries(Object.entries(latest.config.stateStopValues ?? {}).filter(([id]) => keptIds.includes(id)));
+      return { ...patch, config: { ...patch.config, stateStopValues: kept } };
+    });
+  const moveAt = (index: number, delta: -1 | 1) =>
+    void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+  // 空欄は「停止を判定しない」。最新の設定に重ねて書く（ほかの行の値を巻き戻さないように）
+  const changeStop = (sensorId: string, value: number | null) =>
+    actions.patchFromLatest(widget, (latest) => {
+      const next = { ...(latest.config.stateStopValues ?? {}) };
+      if (value === null) delete next[sensorId];
+      else next[sensorId] = value;
+      return { config: { ...latest.config, stateStopValues: next } };
+    });
+
+  return (
+    <>
+      <Section title="センサー（複数OK）" note="1 センサーが 1 行になります。上から順に並びます">
+        <SensorField
+          sensorIds={ids}
+          multiple
+          suited="state"
+          onAdd={(sensor) => void actions.assign(widget, sensor, "add")}
+          onReplace={(sensor) => void actions.assign(widget, sensor, "replace")}
+          onRemove={removeAt}
+          onMove={moveAt}
+        />
+      </Section>
+      <Section title="停止とみなす値" note="この値以下なら「停止」（灰）にします。空欄の行は、停止を判定しません（受信していて警報でなければ稼働）。しきい値の範囲を超えている区間は、停止ではなく警報として表示します">
+        {ids.length === 0 ? (
+          <p className="text-xs text-gray-500">センサーを入れると、行ごとに設定できます</p>
+        ) : (
+          ids.map((id) => (
+            <div key={id} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-mono text-xs text-gray-700" title={sensors?.find((s) => s.id === id)?.name ?? id}>
+                {sensors?.find((s) => s.id === id)?.name ?? id}
+              </span>
+              <NumberField
+                label={`${sensors?.find((s) => s.id === id)?.name ?? id} の停止とみなす値`}
+                value={stops[id] ?? null}
+                step={1}
+                allowEmpty
+                placeholder="判定しない"
+                onCommit={(v) => void changeStop(id, v)}
+              />
+            </div>
+          ))
+        )}
+      </Section>
+    </>
+  );
 }
 
 /** 計器グラフの設定。センサー（複数。1 センサーが 1 行）と、値の小数の桁（空なら目盛りの間隔から自動）。 */

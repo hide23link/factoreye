@@ -75,6 +75,10 @@ export function DropSurface({
           ? e.shiftKey
             ? "このストリップと入れ替え"
             : "このストリップに追加（Shift で入れ替え）"
+          : widget.type === "StateTimeline"
+            ? e.shiftKey
+              ? "この状態の帯と入れ替え"
+              : "この状態の帯に行を追加（Shift で入れ替え）"
           : widget.type === "TrendStack"
             ? e.shiftKey
               ? "この計器グラフと入れ替え"

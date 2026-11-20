@@ -163,6 +163,8 @@ export type WidgetType =
   | "TargetStrip"
   // 計器グラフ（1 センサー 1 行で縦に並べ、目盛りの数字・しきい値・最高・最低・今の値をきちんと読むグラフ）
   | "TrendStack"
+  // 状態の帯（1 センサー 1 行で、稼働・警報・停止・受信なしを色の帯で並べる）
+  | "StateTimeline"
   // 計器（帯の目盛りと、今の値の印・しきい値・予測）
   | "TapeGauge"
   // 機器の系統図（サーバーとつながる機器の受信の様子）
@@ -265,6 +267,8 @@ export interface WidgetConfig {
   stripTolerant?: boolean;
   // 勤務時間（workStartHour・workEndHour・breakMinutes）の外を対象外にするか。未指定は false
   stripWorkOnly?: boolean;
+  // StateTimeline（状態の帯）用: センサーごとの「停止とみなす値」（センサーID → 値。この値以下なら停止）。載っていない行は停止を判定しない
+  stateStopValues?: Record<string, number>;
 }
 
 /** ダッシュボードに置くウィジェット1つ分（種類・位置・サイズ・設定）。 */

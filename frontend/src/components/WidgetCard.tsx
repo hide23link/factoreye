@@ -36,6 +36,7 @@ const TargetStripWidget = lazyNamed(() => import("./widgets/TargetStripWidget"),
 const FloorPlanWidget = lazyNamed(() => import("./widgets/FloorPlanWidget"), "FloorPlanWidget");
 const DeviceTreeWidget = lazyNamed(() => import("./widgets/DeviceTreeWidget"), "DeviceTreeWidget");
 const TapeGaugeWidget = lazyNamed(() => import("./widgets/TapeGaugeWidget"), "TapeGaugeWidget");
+const StateTimelineWidget = lazyNamed(() => import("./widgets/StateTimelineWidget"), "StateTimelineWidget");
 const TrendStackWidget = lazyNamed(() => import("./widgets/TrendStackWidget"), "TrendStackWidget");
 
 /** ウィジェットの種類（type）に応じて、中身の部品を切り替える。未知の種類は注意文を出す。 */
@@ -59,6 +60,8 @@ function WidgetBody({ widget }: { widget: Widget }) {
       return <TargetStripWidget widget={widget} />;
     case "TrendStack":
       return <TrendStackWidget widget={widget} />;
+    case "StateTimeline":
+      return <StateTimelineWidget widget={widget} />;
     case "TapeGauge":
       return <TapeGaugeWidget widget={widget} />;
     case "DeviceTree":
