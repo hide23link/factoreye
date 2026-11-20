@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     # PostgreSQL の接続先。形式: postgresql+asyncpg://ユーザー:パスワード@ホスト:ポート/DB名
     database_url: str = "postgresql+asyncpg://factoreye:password@localhost:5432/factoreye"
+    # DB の接続プール（app/db/session.py）。通常に保つ本数と、混雑時に増やせる本数。
+    # 最大 = 2 つの合計（既定 20 本）。PostgreSQL の max_connections（既定 100）を超えないこと
+    db_pool_size: int = Field(default=10, ge=1, le=100)
+    db_max_overflow: int = Field(default=10, ge=0, le=100)
     # self-hosted の取り込み用の共有キー（X-API-Key ヘッダーと比べる）。本番では必ず変える
     ingest_api_key: str = DEFAULT_SECRET
     # 取り込みの認証（IngestAuth を参照）。"off" にするとキーなしで受け付ける。既定は "key"

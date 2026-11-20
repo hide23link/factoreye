@@ -5,6 +5,7 @@
 時刻は、テストを始めた時点の「今」（分に切り捨て）を基準にする（取り込みの「遅れて届いた」の判定が
 実際の時計を使うため）。
 """
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 from uuid import UUID, uuid4
@@ -12,6 +13,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from sqlalchemy import func, text
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -611,3 +613,43 @@ async def test_startup_with_setting_zero_empties_the_cache(
     assert await _minute_rows(sensor_id) == 0
     async with AsyncSession(engine) as session:
         assert await load_state(session, sensor_id) is None
+
+
+@pytest.mark.asyncio
+async def test_many_fast_reads_at_once_do_not_wait_for_each_other(
+    monkeypatch: pytest.MonkeyPatch, now: datetime, minute_cache_on: None
+) -> None:
+    """速い道の読み出しが同時に多く来ても、接続プールが詰まらない（2026-11-20 の不具合）。
+
+    以前は、API の session の接続を持ったまま、settle_dirty が別の接続を取りに行ったので、
+    同時の数がプールの本数以上だと、全員が 1 本ずつ持ったまま 2 本目を待ち、プールの待ち時間で
+    失敗した。ここでは、プールを 2 本だけにして、6 つを同時に読む（API と同じく、先にセンサーを
+    読んでから読み出す）。
+    """
+    sensor_id = await _create_sensor()
+    await _add_readings(sensor_id, _series(now - timedelta(days=3), now, 60))
+    await run_tick(now)
+
+    small = create_async_engine(
+        settings.database_url, pool_size=2, max_overflow=0, pool_timeout=3
+    )
+    monkeypatch.setattr(minute_cache, "engine", small)  # settle_dirty も同じ 2 本から取る
+
+    async def read_like_api(index: int) -> int:
+        async with AsyncSession(small) as session:
+            assert await session.get(Sensor, sensor_id) is not None
+            if index % 2 == 0:
+                result = await downsample(session, sensor_id, now - timedelta(days=2), now, 48)
+                return sum(bucket.count for bucket in result.buckets)
+            _, count = await sum_and_count(session, sensor_id, now - timedelta(days=2), now)
+            return count
+
+    try:
+        counts = await asyncio.wait_for(
+            asyncio.gather(*(read_like_api(i) for i in range(6))), timeout=20
+        )
+    finally:
+        await small.dispose()
+
+    assert all(count > 0 for count in counts)
+    assert len(set(counts)) == 1  # グラフと合計・件数の件数が同じ
