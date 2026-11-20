@@ -79,8 +79,15 @@
   display: none;
 }
 @container trend (max-width: 560px) {
+  /* 縦軸の数字（例 1009.3・26.075）と今の値の札（例 26.023）が切れないよう、左右の欄を広げ、文字を小さくする */
   .trend-row {
-    grid-template-columns: 44px minmax(0, 1fr) 72px;
+    grid-template-columns: 56px minmax(0, 1fr) 84px;
+  }
+  .trend-row .trend-now {
+    font-size: 13px;
+  }
+  .trend-row .trend-yaxis {
+    font-size: 10px;
   }
   .trend-side {
     display: none;
