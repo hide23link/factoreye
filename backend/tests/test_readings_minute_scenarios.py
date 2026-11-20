@@ -315,35 +315,105 @@ async def test_reads_during_nightly_rollup_never_double_count(
         assert totals == expected_total
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="既知（PR #38 以前から）: 従来の道は 2 つの文の間に夜のまとめが入ると二重に数える",
-)
+class _RollupAfterFirstStatement(AsyncSession):
+    """最初の SQL 文の直後に、夜のまとめを確定させる session（読み出しの途中で、まとめが入る）。
+
+    生の行とまとめた行を 2 つの文で読むと、2 つ目の文はまとめた後の状態を見るので、
+    同じ分を二重に数える（READ COMMITTED では、文ごとに別の時点を見る）。1 つの文なら、
+    まとめる前の状態だけを見る。exec と execute の両方を差し替える（どちらで読んでも入る）。
+    """
+
+    rollup_now: datetime
+    done = False
+
+    async def _after_statement(self) -> None:
+        if not self.done:
+            self.done = True
+            await rollup_old_readings(7, now=self.rollup_now)
+
+    async def exec(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = await super().exec(*args, **kwargs)
+        await self._after_statement()
+        return result
+
+    async def execute(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = await super().execute(*args, **kwargs)
+        await self._after_statement()
+        return result
+
+
+async def _read_during_rollup(now: datetime, reader):  # type: ignore[no-untyped-def]
+    async with _RollupAfterFirstStatement(engine) as session:
+        session.rollup_now = now
+        result = await reader(session)
+        assert session.done  # まとめが、本当に読み出しの途中で入った
+    return result
+
+
 @pytest.mark.asyncio
 async def test_legacy_path_during_nightly_rollup(
     monkeypatch: pytest.MonkeyPatch, now: datetime
 ) -> None:
-    """従来の道（短い範囲）は、生の行とまとめた行を別の文で読む。その間に夜のまとめが入っても
-    二重に数えないか（READ COMMITTED では、2 つの文は別の時点を見る）。"""
+    """従来の道（短い範囲）の合計・件数は、読み出しの途中で夜のまとめが入っても二重に数えない。"""
     s = await _sensor()
     await _seconds(s, now - timedelta(days=8), now, step=5)
     cut = floor_minute(now - timedelta(days=7))
     lo, hi = cut - timedelta(hours=1), cut + timedelta(hours=1)  # 2 時間 → 従来の道
     expected = await _sum(s, lo, hi)
 
-    class RollupBetween(AsyncSession):
-        calls = 0
-
-        async def exec(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-            result = await super().exec(*args, **kwargs)
-            RollupBetween.calls += 1
-            if RollupBetween.calls == 1:  # 生の行を読んだ直後に、夜のまとめが走る
-                await rollup_old_readings(7, now=now)
-            return result
-
-    async with RollupBetween(engine) as session:
-        got = await sum_and_count(session, s, lo, hi)
+    got = await _read_during_rollup(now, lambda session: sum_and_count(session, s, lo, hi))
     assert (round(got[0], 6), got[1]) == expected
+    assert await _sum(s, lo, hi) == expected  # まとめた後も同じ
+
+
+@pytest.mark.asyncio
+async def test_legacy_graph_during_nightly_rollup(
+    monkeypatch: pytest.MonkeyPatch, now: datetime
+) -> None:
+    """従来の道（短い範囲）のグラフは、読み出しの途中で夜のまとめが入っても二重に数えない。"""
+    s = await _sensor()
+    await _seconds(s, now - timedelta(days=8), now, step=5)
+    cut = floor_minute(now - timedelta(days=7))
+    lo, hi = cut - timedelta(hours=1), cut + timedelta(hours=1)  # 2 時間 → 従来の道
+    expected = _totals(await _graph(s, lo, hi, 60))
+
+    result = await _read_during_rollup(
+        now, lambda session: readings_query.downsample(session, s, lo, hi, 60)
+    )
+    got = [(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.buckets]
+    assert _totals(got) == expected
+    assert _totals(await _graph(s, lo, hi, 60)) == expected  # まとめた後も同じ
+
+
+@pytest.mark.asyncio
+async def test_recent_readings_during_nightly_rollup(
+    monkeypatch: pytest.MonkeyPatch, now: datetime
+) -> None:
+    """履歴（生の行 → 足りなければまとめた行）は、読み出しの途中で夜のまとめが入っても、
+    同じ分を生の行とまとめた行の両方から返さない。
+
+    いちばん古い生の行が分の途中（7 秒）にあると、2 つの文で読んだとき、その分がまとめた行
+    （開始時刻 = 分の頭で、生の行より前）としてもう一度入る。
+    """
+    s = await _sensor()
+    cut = floor_minute(now - timedelta(days=7))
+    lo, hi = cut - timedelta(hours=1), cut + timedelta(hours=1)
+    await _seconds(s, lo + timedelta(seconds=7), hi, step=5)
+
+    async def recent(session: AsyncSession) -> list[tuple[datetime, float]]:
+        rows = await readings_query.recent_readings(session, s, lo, hi, 5000)
+        return [(r.recorded_at, r.value) for r in rows]
+
+    async with AsyncSession(engine) as session:
+        expected = await recent(session)  # まとめる前（生の行だけ）
+    got = await _read_during_rollup(now, recent)
+    assert got == expected
+    # まとめた後は、まとめた分が 1 分 1 件になる（重なりなし・新しい順）
+    async with AsyncSession(engine) as session:
+        after = await recent(session)
+    times = [t for t, _ in after]
+    assert times == sorted(times, reverse=True) and len(set(times)) == len(times)
+    assert sum(1 for t in times if t < cut) == 60
 
 
 # ── 接続プール ─────────────────────────────────────────────────────
