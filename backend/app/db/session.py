@@ -16,10 +16,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.config import settings
 
-# 接続プール: 通常は5本を保ち、混雑時はさらに5本まで増やす（合計最大10本）。
+# 接続プール: 既定は、通常 10 本を保ち、混雑時はさらに 10 本まで増やす（合計最大 20 本）。
+# 環境変数 DB_POOL_SIZE・DB_MAX_OVERFLOW で変えられる。
+# 1 つの処理で、接続を持ったまま engine から別の接続を取らないこと（同時の処理が多いと、
+# 全員が持ったまま待って止まる。app/readings_query.py の _can_use_fast_path を参照）。
 # echo=True（開発時）は、実行される SQL をログに出す
 engine = create_async_engine(
-    settings.database_url, echo=settings.debug, pool_size=5, max_overflow=5
+    settings.database_url,
+    echo=settings.debug,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
 )
 
 

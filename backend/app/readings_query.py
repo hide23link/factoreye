@@ -141,9 +141,17 @@ def _fast_params(sensor_id: UUID, lo: datetime, hi: datetime) -> dict[str, Any]:
 async def _can_use_fast_path(
     session: AsyncSession, sensor_id: UUID, lo: datetime, hi: datetime
 ) -> bool:
-    """速い道を使えるか（設定が有効で、範囲が 10 分以上で、センサーに印がある）。
+    """速い道を使えるか（設定が有効で、範囲が 6 時間以上で、センサーに印がある）。
 
     使えるときは、遅れて届いた行の分を先に作り直しておく（読む答えを、直前の取り込みと合わせる）。
+
+    【接続の数】settle_dirty は、別の接続をもう 1 本使う。API の session の接続を持ったまま
+    それを待つと、同時のリクエストが多いとき（ダッシュボードのグラフが多いとき）に、全員が
+    1 本ずつ持ったまま 2 本目を待ち、プールの待ち時間（30 秒）まで止まる（2026-11-20、Pi）。
+    そこで settle_dirty の前に、session のトランザクションを終わらせて接続をプールへ返す。
+    呼ぶのは読み出しの API だけ（書きかけの変更は無い）なので、commit しても何も書かれない。
+    commit の後、session が先に読んだ物（センサーなど）は期限切れになるので、呼び出し元は
+    この後でそれらの属性を読まないこと（読むと DB へ取りに行き、async では失敗する）。
     """
     if settings.readings_rollup_days <= 0 or hi - lo < _FAST_MIN_RANGE:
         return False
@@ -155,6 +163,7 @@ async def _can_use_fast_path(
     ).first()
     if has_state is None:
         return False
+    await session.commit()  # 接続をプールへ返してから、settle_dirty が別の接続を取る
     await settle_dirty(sensor_id)
     return True
 
