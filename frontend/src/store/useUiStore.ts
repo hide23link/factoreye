@@ -8,6 +8,7 @@ import { create } from "zustand";
 
 import { readGraphLinkFromUrl, type GraphLink } from "../lib/graph-link";
 import { writeLastDashboardId } from "../lib/last-dashboard";
+import { useRefreshStore } from "./useRefreshStore";
 
 // 画面の種類: メイン（ダッシュボード）、全体監視、設定、セットアップガイド
 export type AppView = "main" | "overview" | "settings" | "wizard";
@@ -45,7 +46,11 @@ export const useUiStore = create<UiState>((set) => ({
   graphLink: initialLink.kind === "link" ? initialLink.link : null,
   linkNotFound: initialLink.kind === "broken",
   showLinkNotFound: () => set({ graphLink: null, linkNotFound: true, view: "main", selectedDashboardId: null, kiosk: false }),
-  setKiosk: (kiosk) => set({ kiosk }),
+  setKiosk: (kiosk) => {
+    // キオスクは放置されるので、Off（手動）のままだと更新が止まったままになる。入るときに既定へ戻す
+    if (kiosk) useRefreshStore.getState().leaveOffForKiosk();
+    set({ kiosk });
+  },
   switchDashboard: (id) => {
     writeLastDashboardId(id);
     set({ selectedDashboardId: id, view: "main", openInEditMode: false });

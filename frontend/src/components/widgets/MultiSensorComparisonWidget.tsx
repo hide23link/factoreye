@@ -11,6 +11,8 @@
  * linkView = リンクの画面のときだけ、GraphLinkView が渡す（範囲・今か・タップした時刻。graph-parts の LinkGraphView）。
  */
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
+import { resolveRefetchMs } from "../../lib/refresh-interval";
+import { useRefreshStore } from "../../store/useRefreshStore";
 import type { ReactNode } from "react";
 import {
   Area,
@@ -31,7 +33,7 @@ import {
 import { useLatestReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
 import { buildRows, normalizeRows, rawValueOf, summarizeBuckets } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
@@ -91,7 +93,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   // 直近モードでは、横軸（表示範囲）を設定の間隔（既定 30 秒）ごとに動かす
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
   const options = graphDataOptions(widget.config, sensorIds.length);
-  const now = useNow(options.refreshMs);
+  const now = useLiveNow(options.refreshMs);
   const bounds = linkView?.bounds ?? resolveRange(range, now);
   // リンクの画面では、取得の範囲は表示の範囲と別に決まる（指を動かす間は取り直さない）
   const fetchBounds = linkView?.fetchBounds ?? bounds;
@@ -110,6 +112,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   });
 
   // 範囲・区間数は、ウィジェットの取得と同じ queryKey の形にする（グラフ用の取得を共有する）
+  // 画面の更新間隔の選択（各グラフの設定に従う以外なら、間隔を上書きする）
+  const refreshChoice = useRefreshStore((s) => s.choice);
   const results = useQueries({
     queries: sensorIds.map((sensorId) => ({
       queryKey: [
@@ -126,7 +130,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           new Date(fetchBounds.to).toISOString(),
           GRAPH_BUCKETS,
         ),
-      refetchInterval: live ? options.refreshMs : false,
+      refetchInterval: live ? resolveRefetchMs(refreshChoice, options.refreshMs) : false,
       // 範囲が変わって新しい取得の間も、前のデータを表示し続ける（線が消えて描き直されるのを防ぐ）
       placeholderData: keepPreviousData,
     })),

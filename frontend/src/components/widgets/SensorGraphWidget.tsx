@@ -29,7 +29,7 @@ import {
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useCursorZoom } from "../../hooks/useCursorZoom";
 import { useDragSelect } from "../../hooks/useDragSelect";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import { bucketValue, summarizeBuckets } from "../../lib/graph-series";
 import { formatChartTime } from "../../lib/time";
 import {
@@ -97,7 +97,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で秒が変わるたびに取得のキーが変わり、
   // 取得 → 再描画 → 新しいキー → 取得、の連鎖で毎秒取り直すため、現在時刻は useNow の値を使う
   const options = graphDataOptions(widget.config, 1);
-  const now = useNow(options.refreshMs);
+  const now = useLiveNow(options.refreshMs);
   const bounds = linkView?.bounds ?? resolveRange(range, now);
   // リンクの画面では、取得の範囲は表示の範囲と別に決まる（指を動かす間は取り直さない）
   const fetchBounds = linkView?.fetchBounds ?? bounds;

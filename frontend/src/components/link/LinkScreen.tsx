@@ -13,11 +13,13 @@
  * 時刻の指定のシート（LinkTimeSheet）を開いている間も、グラフの指の操作は受けない（シートの操作とぶつからないように）。
  */
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
+import { resolveRefetchMs } from "../../lib/refresh-interval";
+import { useRefreshStore } from "../../store/useRefreshStore";
 import { useEffect, useRef, useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
 import { useLinkGestures } from "../../hooks/useLinkGestures";
-import { useNow } from "../../hooks/useNow";
+import { useLiveNow } from "../../hooks/useLiveNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
 import { graphColor, graphDataOptions, graphSensorIds } from "../../lib/graph-config";
 import { graphName } from "../../lib/graph-link";
@@ -58,12 +60,14 @@ export const SETTLE_MS = 300;
 function useLinkRows(widget: Widget, bounds: { from: number; to: number }, live: boolean) {
   const sensorIds = graphSensorIds(widget);
   const options = graphDataOptions(widget.config, sensorIds.length);
+  // 画面の更新間隔の選択（各グラフの設定に従う以外なら、間隔を上書きする）
+  const refreshChoice = useRefreshStore((s) => s.choice);
   const results = useQueries({
     queries: sensorIds.map((sensorId) => ({
       queryKey: ["readings-downsampled", sensorId, Math.round(bounds.from / 1000), Math.round(bounds.to / 1000), GRAPH_BUCKETS],
       queryFn: () =>
         fetchSensorReadingsDownsampled(sensorId, new Date(bounds.from).toISOString(), new Date(bounds.to).toISOString(), GRAPH_BUCKETS),
-      refetchInterval: live ? options.refreshMs : false,
+      refetchInterval: live ? resolveRefetchMs(refreshChoice, options.refreshMs) : false,
       placeholderData: keepPreviousData,
     })),
   });
@@ -106,7 +110,7 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
   const sensorIds = graphSensorIds(widget);
   const options = graphDataOptions(widget.config, sensorIds.length);
   // 今を見ている間は、グラフの設定の間隔（既定 30 秒）ごとに範囲を進める（ダッシュボードのグラフと同じ）
-  const now = useNow(options.refreshMs);
+  const now = useLiveNow(options.refreshMs);
   const [period, setPeriod] = useState<LinkPeriod>(() => linkPeriod(rangeMinutes));
   const [cursorTime, setCursorTime] = useState<number | null>(null);
   // 時刻の指定のシートを開いた時刻（閉じているときは null）。近道・押せる日は、この時刻で決める
