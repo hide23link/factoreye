@@ -2,6 +2,7 @@
  * ダッシュボードに置かれた1つのウィジェットの枠。
  * 種類に応じた中身（WidgetBody）を選んで出す。
  *
+ * グラフ系（センサーグラフ・計器グラフ・複数センサー比較）には、右上に「⋮ メニュー」（全画面・表・CSV・リンク）を出す（WidgetMenu）。
  * 編集モードのときだけ、右上に（つかむ目印・設定・複製・削除）を重ねる。クリックで選択され、「設定」ボタンを押すと設定パネルに設定が出る。
  * 編集の前後で、枠の大きさ・中身の位置が変わらないようにする（見出しの帯などを足さない）。
  * 編集中は、中身へのマウス操作（グラフのドラッグ選択など）を止める。クリックを「選択」に使い、移動と競合させないため。
@@ -9,7 +10,7 @@
  * 【誰が使うか】DashboardView.tsx が、ウィジェットの数だけ並べる。
  * 【引数（props）】widget = このウィジェット、dashboard = 属するダッシュボード（どちらも DashboardView が渡す）。
  */
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useCallback, useRef, useState } from "react";
 
 import { useWidgetActions } from "../hooks/useWidgetActions";
 import { lazyNamed } from "../lib/lazyWithRetry";
@@ -17,6 +18,8 @@ import { widgetLabel } from "../lib/widget-catalog";
 import { useEditorStore } from "../store/useEditorStore";
 import type { DashboardDetail, Widget } from "../types";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
+import { WidgetFullscreen } from "./WidgetFullscreen";
+import { WidgetTools } from "./WidgetTools";
 import { AlarmAlertWidget } from "./widgets/AlarmAlertWidget";
 import { ProductionStatusWidget } from "./widgets/ProductionStatusWidget";
 
@@ -67,6 +70,9 @@ function WidgetBody({ widget }: { widget: Widget }) {
   }
 }
 
+/** ⋮ メニュー（全画面・表・CSV・リンク）を出すウィジェットの種類 */
+const MENU_TYPES: ReadonlySet<string> = new Set(["SensorGraph", "TrendStack", "MultiSensorComparison"]);
+
 /** ウィジェットの枠（種類の中身。編集モードでは見出しと操作つき）。 */
 export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: DashboardDetail }) {
   const editing = useEditorStore((s) => s.editing);
@@ -85,9 +91,21 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
   // タイトルの行を、枠の中身の上に置くか（タイトルがあるとき。編集中の入力の場所は、タイトルがないときは重ねて出す）
   const showsTitleLine = title !== "";
 
+  // ⋮ メニュー（グラフ系だけ。取得・メニューの処理は WidgetTools の中。ここでは、枠の形に関わる「表を開いているか」「全画面か」だけ持つ）
+  const hasMenu = MENU_TYPES.has(widget.type);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [tableShown, setTableShown] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const closeFullscreen = useCallback(() => setFullscreen(false), []);
+  // 閉じたあとにフォーカスを戻す先（このカードの ⋮ のボタン）
+  const menuButton = useCallback(() => cardRef.current?.querySelector<HTMLElement>("[data-widget-menu-button]") ?? null, []);
+  // 表を開いているときも、タイトルの行と同じく、枠を縦に並べる（グラフの下に表を置く）
+  const stacked = showsTitleLine || (hasMenu && tableShown);
+
   return (
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- 編集中のカード選択。キーボードは下の onKeyDown（Enter/Space）で対応済み
     <div
+      ref={cardRef}
       data-widget-id={widget.id}
       role="group"
       aria-label={label}
@@ -111,7 +129,10 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
       className={`relative h-full overflow-hidden rounded-lg border bg-white p-3 shadow-sm ${
         editing ? "widget-drag-handle cursor-grab touch-none active:cursor-grabbing" : ""
       } ${editing && selected ? "border-blue-600 outline outline-2 outline-blue-600" : "border-gray-200"} ${
-        showsTitleLine ? "flex flex-col" : ""
+        stacked ? "flex flex-col" : ""
+      } ${
+        // 計器グラフの見出しの行（凡例など）が、右上の ⋮ に隠れないよう、右に空きを作る（タイトルがあるときは、タイトルの行が避けている）
+        hasMenu && widget.type === "TrendStack" && !showsTitleLine ? "[&_.trend-stack>div:first-child]:pr-7" : ""
       }`}
     >
       {titleDraft !== null ? (
@@ -157,18 +178,38 @@ export function WidgetCard({ widget, dashboard }: { widget: Widget; dashboard: D
         </button>
       ) : (
         title && (
-          <p className="mb-1 shrink-0 truncate text-sm font-semibold text-gray-800" title={title}>
+          <p className={`mb-1 shrink-0 truncate text-sm font-semibold text-gray-800 ${hasMenu ? "pr-7" : ""}`} title={title}>
             {title}
           </p>
         )
       )}
-      <div className={`${showsTitleLine ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
+      <div className={`${stacked ? "min-h-0 flex-1" : "h-full"} overflow-hidden ${editing ? "pointer-events-none" : ""}`}>
         <ChunkErrorBoundary>
           <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
-            <WidgetBody widget={widget} />
+            {/* 全画面のあいだは、カードの本体を描かない（同じ本体を 2 つ出すと、共有カーソルなどが書き合うため） */}
+            {fullscreen ? <p className="text-sm text-gray-500">全画面で表示中</p> : <WidgetBody widget={widget} />}
           </Suspense>
         </ChunkErrorBoundary>
       </div>
+      {hasMenu && (
+        <WidgetTools
+          widget={widget}
+          dashboard={dashboard}
+          editing={editing}
+          tableShown={tableShown}
+          onTableShownChange={setTableShown}
+          onFullscreen={() => setFullscreen(true)}
+        />
+      )}
+      {hasMenu && fullscreen && (
+        <WidgetFullscreen label={title || label} onClose={closeFullscreen} returnFocus={menuButton}>
+          <ChunkErrorBoundary>
+            <Suspense fallback={<p className="text-sm text-gray-500">読み込み中...</p>}>
+              <WidgetBody widget={widget} />
+            </Suspense>
+          </ChunkErrorBoundary>
+        </WidgetFullscreen>
+      )}
       {editing && (
         // 編集用の操作は、カードの右上に重ねる（ウィジェットの寸法を変えない）。つかむ目印・設定・複製・削除
         <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white/90 px-0.5 shadow-sm">
