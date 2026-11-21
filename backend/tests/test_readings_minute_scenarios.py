@@ -86,7 +86,7 @@ async def _ingest(sensor_id: UUID, rows: list[tuple[datetime, float]]) -> None:
 async def _graph(sensor_id: UUID, lo: datetime, hi: datetime, buckets: int) -> list[Row]:
     async with AsyncSession(engine) as session:
         result = await downsample(session, sensor_id, lo, hi, buckets)
-    return [(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.buckets]
+    return [(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.to_model().buckets]
 
 
 async def _sum(sensor_id: UUID, lo: datetime, hi: datetime | None) -> tuple[float, int]:
@@ -380,7 +380,7 @@ async def test_legacy_graph_during_nightly_rollup(
     result = await _read_during_rollup(
         now, lambda session: readings_query.downsample(session, s, lo, hi, 60)
     )
-    got = [(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.buckets]
+    got = [(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.to_model().buckets]
     assert _totals(got) == expected
     assert _totals(await _graph(s, lo, hi, 60)) == expected  # まとめた後も同じ
 
@@ -444,8 +444,8 @@ async def test_concurrent_reads_with_late_rows_and_a_small_pool(
             result = await downsample(session, s, now - timedelta(days=2, hours=1), now, 50)
             return (
                 "graph",
-                sum(b.count for b in result.buckets),
-                max(b.max for b in result.buckets),
+                sum(b.count for b in result.to_model().buckets),
+                max(b.max for b in result.to_model().buckets),
             )
 
     try:

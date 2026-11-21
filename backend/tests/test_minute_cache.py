@@ -111,7 +111,8 @@ async def _fast_and_legacy_buckets(
     async def read() -> list[Bucket]:
         async with AsyncSession(engine) as session:
             result = await downsample(session, sensor_id, lo, hi, buckets)
-        return [Bucket(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in result.buckets]
+        graph_buckets = result.to_model().buckets
+        return [Bucket(b.start, b.min, round(b.avg, 9), b.max, b.count) for b in graph_buckets]
 
     monkeypatch.setattr(settings, "readings_rollup_days", 7)
     fast = await read()
@@ -665,7 +666,7 @@ async def test_many_fast_reads_at_once_do_not_wait_for_each_other(
             assert await session.get(Sensor, sensor_id) is not None
             if index % 2 == 0:
                 result = await downsample(session, sensor_id, now - timedelta(days=2), now, 48)
-                return sum(bucket.count for bucket in result.buckets)
+                return sum(bucket.count for bucket in result.to_model().buckets)
             _, count = await sum_and_count(session, sensor_id, now - timedelta(days=2), now)
             return count
 

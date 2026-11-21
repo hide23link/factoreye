@@ -31,6 +31,7 @@ from app import ingest_cache, readings_query
 from app.api.deps import get_current_workspace_id
 from app.api.responses import json_array_body, json_response
 from app.api.updates import apply_update
+from app.bucket_series import BucketSeries, batch_result_json, series_json
 from app.db.models import IngestDevice, Sensor
 from app.db.session import get_session
 from app.schemas import (
@@ -355,7 +356,7 @@ async def get_sensor_readings_downsampled(
     from_: AwareDatetime = Query(..., alias="from"),
     to: AwareDatetime = Query(...),
     buckets: int = Query(default=500, ge=1, le=1000),
-) -> DownsampledReadings:
+) -> Response:
     """グラフ用。from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数を返す。
 
     生データを返すと、長い期間では点が多すぎて重い。区間は表示の幅（ピクセル数）に合わせて
@@ -367,7 +368,9 @@ async def get_sensor_readings_downsampled(
         )
     await _get_active_sensor(session, sensor_id, workspace_id)
 
-    return await readings_query.downsample(session, sensor_id, from_, to, buckets)
+    series = await readings_query.downsample(session, sensor_id, from_, to, buckets)
+    # モデルを経由せず JSON を直接作る（理由は app/bucket_series.py）
+    return Response(content=series_json(series), media_type="application/json")
 
 
 async def _visible_sensor_ids(
@@ -389,7 +392,7 @@ async def get_sensors_readings_downsampled(
     body: DownsampledBatchRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
-) -> DownsampledBatchResponse:
+) -> Response:
     """グラフ用の間引きを、複数センサー分まとめて返す（単体 API と同じ結果）。
 
     送るデータの例（最大 50 件。件ごとに範囲を変えてよい）:
@@ -415,28 +418,31 @@ async def get_sensors_readings_downsampled(
     for item in body.items:
         if item.to > item.from_ and item.sensor_id in visible:
             groups.setdefault((item.from_, item.to, item.buckets), []).append(item.sensor_id)
-    data: dict[tuple[datetime, datetime, int, UUID], DownsampledReadings] = {}
+    data: dict[tuple[datetime, datetime, int, UUID], BucketSeries] = {}
     for (from_, to, buckets), sensor_ids in groups.items():
         read = await readings_query.downsample_many(session, sensor_ids, from_, to, buckets)
         data.update({(from_, to, buckets, sid): value for sid, value in read.items()})
-    results = [_result_of(item, visible, data) for item in body.items]
-    return DownsampledBatchResponse(results=results)
+    results = [_result_json(item, visible, data) for item in body.items]
+    # モデルを経由せず JSON を直接作る（理由は app/bucket_series.py）。OpenAPI は response_model
+    body_json = '{"results":[' + ",".join(results) + "]}"
+    return Response(content=body_json, media_type="application/json")
 
 
-def _result_of(
+def _result_json(
     item: DownsampledBatchItem,
     visible: set[UUID],
-    data: dict[tuple[datetime, datetime, int, UUID], DownsampledReadings],
-) -> DownsampledBatchResult:
-    """1 件の結果。単体 API と同じ順（範囲 → センサー）で、失敗の番号を決める。"""
+    data: dict[tuple[datetime, datetime, int, UUID], BucketSeries],
+) -> str:
+    """1 件の結果の JSON。単体 API と同じ順（範囲 → センサー）で、失敗の番号を決める。"""
     sensor_id = item.sensor_id
     if item.to <= item.from_:
-        return DownsampledBatchResult(
+        failure = DownsampledBatchResult(
             sensor_id=sensor_id, status=status.HTTP_400_BAD_REQUEST, detail="to must be after from"
         )
-    if sensor_id not in visible:
-        return DownsampledBatchResult(
+    elif sensor_id not in visible:
+        failure = DownsampledBatchResult(
             sensor_id=sensor_id, status=status.HTTP_404_NOT_FOUND, detail="sensor not found"
         )
-    value = data[(item.from_, item.to, item.buckets, sensor_id)]
-    return DownsampledBatchResult(sensor_id=sensor_id, status=status.HTTP_200_OK, data=value)
+    else:
+        return batch_result_json(sensor_id, data[(item.from_, item.to, item.buckets, sensor_id)])
+    return failure.model_dump_json(by_alias=True)
