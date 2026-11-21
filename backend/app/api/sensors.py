@@ -9,12 +9,14 @@ SaaS（multi_tenant）では、各 API が「自分のワークスペースの�
 - GET /api/sensors/{sensor_id}/readings              → 測定値の履歴
 - GET /api/sensors/{sensor_id}/readings/aggregate     → 期間の合計と件数
 - GET /api/sensors/{sensor_id}/readings/downsampled   → グラフ用に間引いた値（downsample ＝ 間引き）
+- POST /api/sensors/readings/downsampled → 上の間引きを複数分まとめて 1 回で（最大 50 件）
 
 【引数】session（DB との会話）と workspace_id（SaaS のとき、ログイン中の利用者のワークスペース。
 self-hosted では None）は、呼び出す人が渡すものではない。FastAPI が Depends で自動で渡す。
 """
 import hashlib
 from collections import OrderedDict
+from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -32,6 +34,10 @@ from app.api.updates import apply_update
 from app.db.models import IngestDevice, Sensor
 from app.db.session import get_session
 from app.schemas import (
+    DownsampledBatchItem,
+    DownsampledBatchRequest,
+    DownsampledBatchResponse,
+    DownsampledBatchResult,
     DownsampledReadings,
     ReadingAggregate,
     ReadingListResponse,
@@ -362,3 +368,75 @@ async def get_sensor_readings_downsampled(
     await _get_active_sensor(session, sensor_id, workspace_id)
 
     return await readings_query.downsample(session, sensor_id, from_, to, buckets)
+
+
+async def _visible_sensor_ids(
+    session: AsyncSession, sensor_ids: set[UUID], workspace_id: UUID | None
+) -> set[UUID]:
+    """sensor_ids のうち、存在して見てよいもの（自分のワークスペースのもの）を 1 回の SQL で調べる。
+
+    ID の列だけ読む（センサーのオブジェクトは作らない）ので、あとで commit しても期限切れの
+    属性を読んで失敗することは無い。他人のものと存在しないものは、区別できない（どちらも含まれない）。
+    """
+    query = select(col(Sensor.id)).where(col(Sensor.id).in_(sensor_ids))
+    if workspace_id is not None:
+        query = query.where(col(Sensor.workspace_id) == workspace_id)
+    return set((await session.exec(query)).all())
+
+
+@router.post("/readings/downsampled", response_model=DownsampledBatchResponse)
+async def get_sensors_readings_downsampled(
+    body: DownsampledBatchRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: Annotated[UUID | None, Depends(get_current_workspace_id)],
+) -> DownsampledBatchResponse:
+    """グラフ用の間引きを、複数センサー分まとめて返す（単体 API と同じ結果）。
+
+    送るデータの例（最大 50 件。件ごとに範囲を変えてよい）:
+      {"items": [{"sensorId": "…", "from": "2026-11-14T00:00:00Z",
+                  "to": "2026-11-21T00:00:00Z", "buckets": 500}, …]}
+    返事（items と同じ順）:
+      {"results": [{"sensorId": "…", "status": 200,
+                    "data": {"bucketSeconds": …, "buckets": […]}},
+                   {"sensorId": "…", "status": 404, "detail": "sensor not found"}, …]}
+
+    1 件の失敗（他人・存在しないセンサー、to が from 以前）は、その件だけ 404・400 にして、
+    他の件は返す。GET の単体 API は互換のために残す。
+
+    【読み方】同じ範囲・区間数の件は 1 組にして、複数センサーを 1 つの SQL で読む
+    （readings_query.downsample_many）。範囲が違う組は、組ごとに順に読む。
+    【接続】リクエスト 1 本につき DB の接続は 1 本。組は 1 つずつ順に処理する（同時に動かすと、
+    接続を持ったまま別の接続を待つ形になり、プールが詰まる。_can_use_fast_path を参照）。
+    """
+    wanted = {item.sensor_id for item in body.items}
+    visible = await _visible_sensor_ids(session, wanted, workspace_id)
+    # 同じ範囲・区間数の件を 1 組にして、組ごとに 1 回（複数センサーを 1 つの SQL で）読む
+    groups: dict[tuple[datetime, datetime, int], list[UUID]] = {}
+    for item in body.items:
+        if item.to > item.from_ and item.sensor_id in visible:
+            groups.setdefault((item.from_, item.to, item.buckets), []).append(item.sensor_id)
+    data: dict[tuple[datetime, datetime, int, UUID], DownsampledReadings] = {}
+    for (from_, to, buckets), sensor_ids in groups.items():
+        read = await readings_query.downsample_many(session, sensor_ids, from_, to, buckets)
+        data.update({(from_, to, buckets, sid): value for sid, value in read.items()})
+    results = [_result_of(item, visible, data) for item in body.items]
+    return DownsampledBatchResponse(results=results)
+
+
+def _result_of(
+    item: DownsampledBatchItem,
+    visible: set[UUID],
+    data: dict[tuple[datetime, datetime, int, UUID], DownsampledReadings],
+) -> DownsampledBatchResult:
+    """1 件の結果。単体 API と同じ順（範囲 → センサー）で、失敗の番号を決める。"""
+    sensor_id = item.sensor_id
+    if item.to <= item.from_:
+        return DownsampledBatchResult(
+            sensor_id=sensor_id, status=status.HTTP_400_BAD_REQUEST, detail="to must be after from"
+        )
+    if sensor_id not in visible:
+        return DownsampledBatchResult(
+            sensor_id=sensor_id, status=status.HTTP_404_NOT_FOUND, detail="sensor not found"
+        )
+    value = data[(item.from_, item.to, item.buckets, sensor_id)]
+    return DownsampledBatchResult(sensor_id=sensor_id, status=status.HTTP_200_OK, data=value)

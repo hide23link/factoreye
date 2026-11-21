@@ -6,6 +6,7 @@ import {
   deleteSensor,
   fetchDashboard,
   fetchSensorReadingsAggregate,
+  fetchSensorReadingsDownsampled,
   fetchSensors,
   logout,
 } from "./api";
@@ -190,5 +191,56 @@ describe("ログアウトと認証の更新", () => {
 
     expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
     expect(useAuthStore.getState().accessToken).toBeNull();
+  });
+});
+
+describe("グラフ用の間引きの取得（まとめ API）", () => {
+  it("短い間の複数センサーの取得は、POST 1 回になり、センサーごとの結果が返る", async () => {
+    vi.useFakeTimers();
+    const data = (min: number) => ({ bucketSeconds: 60, buckets: [{ start: "2026-11-21T00:00:00Z", min, avg: min, max: min, count: 1 }] });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          results: [
+            { sensorId: "s1", status: 200, data: data(1) },
+            { sensorId: "s2", status: 404, data: null, detail: "sensor not found" },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = fetchSensorReadingsDownsampled("s1", "2026-11-14T00:00:00.000Z", "2026-11-21T00:00:00.000Z", 500);
+    const second = fetchSensorReadingsDownsampled("s2", "2026-11-14T00:00:00.000Z", "2026-11-21T00:00:00.000Z", 500);
+    const secondOutcome = second.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/sensors/readings/downsampled");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string).items).toEqual([
+      { sensorId: "s1", from: "2026-11-14T00:00:00.000Z", to: "2026-11-21T00:00:00.000Z", buckets: 500 },
+      { sensorId: "s2", from: "2026-11-14T00:00:00.000Z", to: "2026-11-21T00:00:00.000Z", buckets: 500 },
+    ]);
+    expect((await first).buckets[0].min).toBe(1);
+    expect(((await secondOutcome) as ApiError).status).toBe(404);
+    vi.useRealTimers();
+  });
+
+  it("1 センサーだけのときは、今までの単体 API（GET）を呼ぶ", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ bucketSeconds: 60, buckets: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = fetchSensorReadingsDownsampled("only", "2026-11-14T00:00:00.000Z", "2026-11-21T00:00:00.000Z", 500);
+    await vi.advanceTimersByTimeAsync(100);
+    await promise;
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toContain("/api/sensors/only/readings/downsampled?");
+    expect(init?.method).toBeUndefined();
+    vi.useRealTimers();
   });
 });
