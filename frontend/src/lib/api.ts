@@ -32,6 +32,7 @@ import type {
   WidgetType,
 } from "../types";
 import { getStoredRefreshToken, useAuthStore } from "../store/useAuthStore";
+import { createDownsampleBatcher, type DownsampleBatchResult, type DownsampleRequest } from "./downsample-batcher";
 import { ApiError } from "./errors";
 import { normalizeUnit, unitForServer } from "./units";
 
@@ -293,17 +294,38 @@ export interface DownsampledReadings {
   buckets: DownsampledBucket[];
 }
 
-export const fetchSensorReadingsDownsampled = (
-  sensorId: string,
-  from: string,
-  to: string,
-  buckets: number,
-) => {
+/** 単体 API（GET）で、1 センサー分の間引きを取る */
+const fetchDownsampledOne = ({ sensorId, from, to, buckets }: DownsampleRequest) => {
   const params = new URLSearchParams({ from, to, buckets: String(buckets) });
   return request<DownsampledReadings>(
     `/api/sensors/${sensorId}/readings/downsampled?${params.toString()}`,
   );
 };
+
+/** まとめ API（POST）で、複数センサー分の間引きを 1 回で取る。結果は items と同じ順 */
+const fetchDownsampledMany = async (items: DownsampleRequest[]) => {
+  const body = {
+    items: items.map(({ sensorId, from, to, buckets }) => ({ sensorId, from, to, buckets })),
+  };
+  const response = await request<{ results: DownsampleBatchResult[] }>("/api/sensors/readings/downsampled", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return response.results;
+};
+
+// 呼び出し側は 1 センサーずつ呼ぶ。短い間に重なった呼び出しは、まとめ API 1 回になる（downsample-batcher.ts）
+const fetchDownsampledBatched = createDownsampleBatcher({
+  fetchOne: fetchDownsampledOne,
+  fetchMany: fetchDownsampledMany,
+});
+
+export const fetchSensorReadingsDownsampled = (
+  sensorId: string,
+  from: string,
+  to: string,
+  buckets: number,
+) => fetchDownsampledBatched({ sensorId, from, to, buckets });
 
 // ── Alarms ────────────────────────────────────────────────────
 // アラームの一覧と、確認（既読）の操作

@@ -27,8 +27,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, literal, literal_column, text, true, union_all
+from sqlalchemy import any_, func, literal, literal_column, text, true, union_all
 from sqlalchemy import select as sa_select
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -370,6 +372,243 @@ async def downsample(
         (raw_rows if kind == "raw" else rolled_rows).append(row)
     raw_rows.sort()  # 区間の番号の順に（merge_bucket_rows は、片方だけのときそのまま返す）
     return _to_downsampled(from_, width, merge_bucket_rows(raw_rows, rolled_rows))
+
+
+# 複数センサーを 1 つの SQL で読む速い道（_FAST_SOURCES_SQL のセンサー複数版）。
+# 読み出し元の分け方・列は同じで、すべての行に sensor_id が付く。範囲 [lo, hi] は全センサーで共通。
+# 読み出しはすべて LATERAL で「センサーごとに、索引（sensor_id, 時刻）で絞って読む」形にする。
+# 普通の JOIN にすると、PostgreSQL が readings 全体を読んでからセンサーで絞る計画を選び
+# （7 日×12 センサーで 165 万行、約 0.6 秒）、LATERAL なら 10 ms 程度で済む。
+_FAST_SOURCES_MANY_SQL = """
+    WITH st AS (
+        SELECT sensor_id, finalized_until AS f, built_until AS h
+        FROM readings_minute_state WHERE sensor_id = ANY(CAST(:ids AS uuid[]))
+    ), src AS (
+        SELECT sensor_id, 'state' AS kind, f AS t, 0.0 AS mn, 0.0 AS sm, 0.0 AS mx, 0 AS cnt
+        FROM st
+        UNION ALL
+        SELECT st.sensor_id, 'rollup', x.bucket_start, x.min, x.sum, x.max, x.count
+        FROM st CROSS JOIN LATERAL (
+            SELECT bucket_start, min, sum, max, count FROM readings_rollup
+            WHERE sensor_id = st.sensor_id AND bucket_start >= :lo AND bucket_start <= :hi
+              AND bucket_start < st.f
+            OFFSET 0
+        ) x
+        UNION ALL
+        SELECT st.sensor_id, 'late', x.recorded_at, x.value, x.value, x.value, 1
+        FROM st CROSS JOIN LATERAL (
+            SELECT recorded_at, value FROM readings
+            WHERE sensor_id = st.sensor_id AND recorded_at >= :lo AND recorded_at <= :hi
+              AND recorded_at < st.f
+            OFFSET 0
+        ) x
+        UNION ALL
+        SELECT st.sensor_id, 'minute', x.bucket_start, x.min, x.sum, x.max, x.count
+        FROM st CROSS JOIN LATERAL (
+            SELECT bucket_start, min, sum, max, count FROM readings_minute
+            WHERE sensor_id = st.sensor_id AND bucket_start >= GREATEST(:lo_ceil, st.f)
+              AND bucket_start < LEAST(:hi_floor, st.h)
+            OFFSET 0
+        ) x
+        UNION ALL
+        SELECT st.sensor_id, 'edge_start', x.recorded_at, x.value, x.value, x.value, 1
+        FROM st CROSS JOIN LATERAL (
+            SELECT recorded_at, value FROM readings
+            WHERE sensor_id = st.sensor_id
+              AND recorded_at >= GREATEST(:lo, st.f) AND recorded_at < LEAST(:lo_ceil, st.h)
+            OFFSET 0
+        ) x
+        UNION ALL
+        SELECT st.sensor_id, 'edge_end', x.recorded_at, x.value, x.value, x.value, 1
+        FROM st CROSS JOIN LATERAL (
+            SELECT recorded_at, value FROM readings
+            WHERE sensor_id = st.sensor_id
+              AND recorded_at >= GREATEST(:hi_floor, st.f)
+              AND recorded_at <= :hi AND recorded_at < st.h
+            OFFSET 0
+        ) x
+        UNION ALL
+        SELECT st.sensor_id, 'tail', x.recorded_at, x.value, x.value, x.value, 1
+        FROM st CROSS JOIN LATERAL (
+            SELECT recorded_at, value FROM readings
+            WHERE sensor_id = st.sensor_id
+              AND recorded_at >= GREATEST(:lo, st.h) AND recorded_at <= :hi
+            OFFSET 0
+        ) x
+    )
+"""
+
+
+def _rows_by_sensor(rows: Any) -> dict[UUID, list[BucketRow]]:
+    """(sensor_id, 区間, 最小, 合計, 最大, 件数) の行を、センサーごとの区間の集計にする。"""
+    by_sensor: dict[UUID, list[BucketRow]] = {}
+    for sensor_id, index, minimum, total, maximum, count in rows:
+        if index < 0:
+            continue
+        by_sensor.setdefault(sensor_id, []).append(
+            (int(index), float(minimum), float(total) / int(count), float(maximum), int(count))
+        )
+    return by_sensor
+
+
+async def _fast_bucket_rows_many(
+    session: AsyncSession, sensor_ids: list[UUID], lo: datetime, hi: datetime, buckets: int,
+    width: float,
+) -> dict[UUID, list[BucketRow]]:
+    """速い道で、複数センサーの区間ごとの集計を 1 つの SQL で読む。
+
+    印が途中で消えたセンサー（印の行 = 番号 -1 が無い）は、結果に入れない
+    （呼び出し元が従来の道で読む）。
+    印があって測定値が無いセンサーは、空の一覧で入る。
+    """
+    params = {
+        "ids": sensor_ids, "lo": lo, "hi": hi, "lo_ceil": _ceil_minute(lo),
+        "hi_floor": floor_minute(hi), "start_epoch": lo.timestamp(), "width": width,
+        "buckets": buckets,
+    }
+    rows = (
+        await session.execute(
+            text(
+                _FAST_SOURCES_MANY_SQL
+                + """
+                SELECT sensor_id,
+                       CASE WHEN kind = 'state' THEN -1
+                            ELSE least(floor((extract(epoch FROM t) - :start_epoch) / :width),
+                                       :buckets - 1) END AS idx,
+                       min(mn), sum(sm), max(mx), sum(cnt)
+                FROM src GROUP BY 1, 2 ORDER BY 1, 2
+                """
+            ),
+            params,
+        )
+    ).all()
+    with_state = {row[0] for row in rows if row[1] == -1}
+    by_sensor = _rows_by_sensor(rows)
+    return {sensor_id: by_sensor.get(sensor_id, []) for sensor_id in with_state}
+
+
+async def _legacy_bucket_rows_many(
+    session: AsyncSession, sensor_ids: list[UUID], from_: datetime, to: datetime, buckets: int,
+    width: float,
+) -> dict[UUID, list[BucketRow]]:
+    """従来の道で、複数センサーの区間ごとの集計を 1 つの SQL（UNION ALL）で読む。
+
+    downsample と同じ集計を、sensor_id = ANY(...) で複数センサーに広げ、センサーごとに
+    生の行とまとめた行を merge_bucket_rows で合わせる。
+    """
+    ids = literal(sensor_ids, type_=ARRAY(PG_UUID(as_uuid=True)))
+    start_epoch = from_.timestamp()
+
+    def index_of(time_column: Any) -> Any:
+        return func.least(
+            func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
+        )
+
+    raw_index = index_of(Reading.recorded_at)
+    raw_part = (
+        sa_select(
+            literal("raw").label("kind"),
+            col(Reading.sensor_id).label("sensor_id"),
+            raw_index.label("idx"),
+            func.min(Reading.value).label("mn"),
+            func.sum(Reading.value).label("total"),
+            func.max(Reading.value).label("mx"),
+            func.count(1).label("cnt"),
+        )
+        .where(
+            col(Reading.sensor_id) == any_(ids),
+            col(Reading.recorded_at) >= from_,
+            col(Reading.recorded_at) <= to,
+        )
+        .group_by(col(Reading.sensor_id), raw_index)
+    )
+    rolled_index = index_of(ReadingRollup.bucket_start)
+    rolled_part = (
+        sa_select(
+            literal("rolled").label("kind"),
+            col(ReadingRollup.sensor_id).label("sensor_id"),
+            rolled_index.label("idx"),
+            func.min(ReadingRollup.min).label("mn"),
+            func.sum(ReadingRollup.sum).label("total"),
+            func.max(ReadingRollup.max).label("mx"),
+            func.sum(ReadingRollup.count).label("cnt"),
+        )
+        .where(
+            col(ReadingRollup.sensor_id) == any_(ids),
+            col(ReadingRollup.bucket_start) >= from_,
+            col(ReadingRollup.bucket_start) <= to,
+        )
+        .group_by(col(ReadingRollup.sensor_id), rolled_index)
+    )
+    raw: dict[UUID, list[BucketRow]] = {}
+    rolled: dict[UUID, list[BucketRow]] = {}
+    for kind, sensor_id, i, mn, total, mx, count in await session.execute(
+        union_all(raw_part, rolled_part)
+    ):
+        row = (int(i), float(mn), float(total) / int(count), float(mx), int(count))
+        (raw if kind == "raw" else rolled).setdefault(sensor_id, []).append(row)
+    return {
+        sensor_id: merge_bucket_rows(sorted(raw.get(sensor_id, [])), rolled.get(sensor_id, []))
+        for sensor_id in sensor_ids
+    }
+
+
+async def _split_fast_sensors(
+    session: AsyncSession, sensor_ids: list[UUID]
+) -> tuple[list[UUID], list[UUID]]:
+    """速い道の印があるセンサー（と、そのうち遅れた行の記録があるもの）を、1 つの SQL で調べる。"""
+    rows = (
+        await session.execute(
+            text(
+                "SELECT s.sensor_id, EXISTS (SELECT 1 FROM readings_dirty_minutes d "
+                "WHERE d.sensor_id = s.sensor_id) AS dirty "
+                "FROM readings_minute_state s WHERE s.sensor_id = ANY(CAST(:ids AS uuid[]))"
+            ),
+            {"ids": sensor_ids},
+        )
+    ).all()
+    return [row[0] for row in rows], [row[0] for row in rows if row[1]]
+
+
+async def downsample_many(
+    session: AsyncSession, sensor_ids: list[UUID], from_: datetime, to: datetime, buckets: int
+) -> dict[UUID, DownsampledReadings]:
+    """downsample の複数センサー版。同じ範囲・区間数で、センサーごとの結果（単体と同じ値）を返す。
+
+    読み出しの SQL は、速い道が使えるセンサーの組に 1 つ、使えない組に 1 つ
+    （センサーごとには出さない）。
+    速い道の印が途中で消えたセンサーだけは、あとから従来の道の SQL で読む（まれ）。
+
+    【接続】session の接続は 1 本。遅れた行の作り直し（settle_dirty が別の接続を使う）が必要な
+    ときだけ、先に commit して接続をプールへ返す（_can_use_fast_path と同じ理由）。
+    作り直しが要るのは、遅れた行の記録があるセンサーだけ（普通は 0 件）。
+    """
+    width = (to - from_).total_seconds() / buckets
+    wanted = list(dict.fromkeys(sensor_ids))
+    rows_by_sensor: dict[UUID, list[BucketRow]] = {}
+    fast_possible = (
+        settings.readings_rollup_days > 0
+        and width >= _FAST_MIN_BUCKET_SECONDS
+        and to - from_ >= _FAST_MIN_RANGE
+    )
+    if fast_possible:
+        with_state, dirty = await _split_fast_sensors(session, wanted)
+        if dirty:
+            await session.commit()  # 接続をプールへ返してから、settle_dirty が別の接続を取る
+            for sensor_id in dirty:
+                await settle_dirty(sensor_id)
+        if with_state:
+            rows_by_sensor = await _fast_bucket_rows_many(
+                session, with_state, from_, to, buckets, width
+            )
+    rest = [sensor_id for sensor_id in wanted if sensor_id not in rows_by_sensor]
+    if rest:
+        rows_by_sensor.update(
+            await _legacy_bucket_rows_many(session, rest, from_, to, buckets, width)
+        )
+    return {
+        sensor_id: _to_downsampled(from_, width, rows_by_sensor[sensor_id]) for sensor_id in wanted
+    }
 
 
 async def recent_readings(

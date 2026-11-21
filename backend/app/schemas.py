@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
@@ -319,6 +319,44 @@ class DownsampledReadings(CamelModel):
 
     bucket_seconds: float
     buckets: list[DownsampledBucket]
+
+
+# グラフ用の間引きを、1 回のリクエストでまとめて頼むときの、1 回あたりの件数の上限
+MAX_DOWNSAMPLE_BATCH_ITEMS = 50
+
+
+class DownsampledBatchItem(CamelModel):
+    """まとめて頼む間引きの 1 件（1 センサー・1 つの範囲。項目は単体 API の引数と同じ）。"""
+
+    sensor_id: UUID
+    from_: AwareDatetime = Field(alias="from")
+    to: AwareDatetime
+    buckets: int = Field(default=500, ge=1, le=1000)
+
+
+class DownsampledBatchRequest(CamelModel):
+    """POST /api/sensors/readings/downsampled の本文。items は 1〜50 件。"""
+
+    items: list[DownsampledBatchItem] = Field(min_length=1, max_length=MAX_DOWNSAMPLE_BATCH_ITEMS)
+
+
+class DownsampledBatchResult(CamelModel):
+    """1 件の結果。status は単体 API と同じ HTTP の番号（200・400・404）。data は 200 のときだけ。
+
+    1 件の失敗（他人・存在しないセンサー、範囲の誤り）で他の件を失敗にしないため、
+    全体は 200 で返して、件ごとに status を持つ。
+    """
+
+    sensor_id: UUID
+    status: int
+    data: DownsampledReadings | None = None
+    detail: str | None = None
+
+
+class DownsampledBatchResponse(CamelModel):
+    """items と同じ順の結果。"""
+
+    results: list[DownsampledBatchResult]
 
 
 # ──────────────────────────────────────────────────────────────
