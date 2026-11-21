@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DownsampledReadings } from "./api";
-import { BATCH_WINDOW_MS, MAX_BATCH_ITEMS, createDownsampleBatcher, type DownsampleBatchResult, type DownsampleRequest } from "./downsample-batcher";
+import { BATCH_WINDOW_MS, MAX_BATCH_ITEMS, chunkSize, createDownsampleBatcher, type DownsampleBatchResult, type DownsampleRequest } from "./downsample-batcher";
 import { ApiError } from "./errors";
 
 const reading = (seed: number): DownsampledReadings => ({
@@ -120,14 +120,60 @@ describe("createDownsampleBatcher", () => {
     expect(fetchOne).toHaveBeenCalledTimes(4);
   });
 
-  it("50 件を超えたら、50 件ずつのまとめ API に分ける", async () => {
+  it("件数に応じて max(3, ceil(n/4)) 件ずつに分ける", () => {
+    expect([2, 3, 4, 12, 13, 20, 40, 200, 1000].map(chunkSize)).toEqual([3, 3, 3, 3, 4, 5, 10, 50, 50]);
+  });
+
+  it("12 件は 3 件ずつ 4 回に分け、すべて待たずに同時に送り、件ごとに自分の結果を返す", async () => {
+    const releases: Array<() => void> = [];
+    const fetchMany = vi.fn(
+      (items: DownsampleRequest[]) =>
+        new Promise<DownsampleBatchResult[]>((resolve) => {
+          releases.push(() => resolve(ok(items)));
+        }),
+    );
+    const fetch = createDownsampleBatcher({ fetchOne: vi.fn(), fetchMany });
+
+    const names = Array.from({ length: 12 }, (_, i) => "s".repeat(i + 1));
+    const promises = names.map((name) => fetch(req(name)));
+    await vi.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+
+    // どの呼び出しも終わる前に、4 回ぶんがそろって送られている（並列）
+    expect(fetchMany).toHaveBeenCalledTimes(4);
+    expect(fetchMany.mock.calls.map((call) => call[0].length)).toEqual([3, 3, 3, 3]);
+    // 順序: 呼んだ順のまま 3 件ずつ
+    expect(fetchMany.mock.calls.flatMap((call) => call[0].map((i) => i.sensorId))).toEqual(names);
+    releases.reverse().forEach((release) => release()); // 返事が逆順に来ても、呼んだ人ごとに正しく返る
+    const results = await Promise.all(promises);
+    expect(results.map((r) => r.buckets[0].min)).toEqual(names.map((n) => n.length));
+  });
+
+  it("ある 1 回が丸ごと失敗しても、他の回の件は成功し、その回の件だけが失敗する", async () => {
+    const fetchMany = vi.fn(async (items: DownsampleRequest[]) => {
+      if (items.some((i) => i.sensorId === "x1")) throw new ApiError(500, "boom");
+      return ok(items);
+    });
+    const fetch = createDownsampleBatcher({ fetchOne: vi.fn(), fetchMany });
+
+    const names = ["x0", "x1", "x2", "x3", "x4", "x5"]; // 6 件 → 3 件ずつ 2 回
+    const outcomes = names.map((name) => fetch(req(name)).then((r) => r, (e: unknown) => e));
+    await vi.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    const results = await Promise.all(outcomes);
+
+    expect(fetchMany).toHaveBeenCalledTimes(2);
+    results.slice(0, 3).forEach((r) => expect((r as ApiError).status).toBe(500));
+    results.slice(3).forEach((r) => expect((r as DownsampledReadings).bucketSeconds).toBe(60));
+  });
+
+  it("1 回の上限（50 件）を超えない", async () => {
     const fetchMany = vi.fn(async (items: DownsampleRequest[]) => ok(items));
     const fetch = createDownsampleBatcher({ fetchOne: vi.fn(), fetchMany });
 
-    const promises = Array.from({ length: MAX_BATCH_ITEMS + 5 }, (_, i) => fetch(req(`s${i}`)));
+    const promises = Array.from({ length: 400 }, (_, i) => fetch(req(`s${i}`)));
     await vi.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
     await Promise.all(promises);
 
-    expect(fetchMany.mock.calls.map((call) => call[0].length)).toEqual([MAX_BATCH_ITEMS, 5]);
+    expect(Math.max(...fetchMany.mock.calls.map((call) => call[0].length))).toBe(MAX_BATCH_ITEMS);
+    expect(fetchMany.mock.calls.reduce((sum, call) => sum + call[0].length, 0)).toBe(400);
   });
 });

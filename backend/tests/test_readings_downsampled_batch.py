@@ -1,7 +1,9 @@
 """POST /api/sensors/readings/downsampled（間引きの、複数センサーまとめ取得）のテスト。
 
 見ること:
-- 件ごとの結果が、単体の GET .../readings/downsampled と完全に同じ（速い道・従来の道の両方）
+- 件ごとの結果が、単体の GET .../readings/downsampled と同じ（速い道・従来の道の両方）。
+  avg だけは最後の桁の差を許す
+  （足す順で変わりうる）。min・max・count・start・区間数・status は完全一致
 - 上限（50 件）・空・他人のセンサー・存在しないセンサー・範囲の誤りの扱い
 - 接続の持ち方: プールが 1 本だけでも止まらない（接続を持ったまま別の接続を取らない）
 """
@@ -52,14 +54,17 @@ async def _sensor(workspace_id: UUID | None = None) -> UUID:
     return sensor_id
 
 
-async def _seconds(sensor_id: UUID, start: datetime, end: datetime, step: int, seed: int) -> None:
-    """start 以上 end 未満を step 秒ごとに（SQL で一気に入れる）。値は秒と seed で決まる。"""
+async def _seconds(sensor_id: UUID, start: datetime, end: datetime, step: float, seed: int) -> None:
+    """start 以上 end 未満を step 秒ごとに（SQL で一気に入れる）。
+    実データに近づけるため、時刻はマイクロ秒つき（step が整数でない）、値は細かい小数にする。"""
     async with AsyncSession(engine) as session:
         await session.execute(
             text(
                 """
                 INSERT INTO readings (sensor_id, recorded_at, value)
-                SELECT :s, t, ((extract(epoch FROM t)::bigint * 7 + :seed) % 101) - 50.5
+                SELECT :s, t,
+                       sin(extract(epoch FROM t) / 997.0 + :seed) * 37.123456789
+                         + 20.0 + :seed * 0.37
                 FROM generate_series(CAST(:a AS timestamptz),
                                      CAST(:b AS timestamptz) - interval '1 microsecond',
                                      make_interval(secs => :step)) AS t
@@ -89,10 +94,28 @@ async def _single(client: httpx.AsyncClient, item: dict[str, Any]) -> dict[str, 
     return body
 
 
+def _assert_same_data(batch: dict[str, Any], single: dict[str, Any]) -> None:
+    """まとめ取得の 1 件が、単体 API の結果と同じ。avg だけ最後の桁（相対 1e-12）の差を許す。
+
+    avg は 合計 ÷ 件数。DB が足す順は計画で変わりうるので、最後の桁は保証しない。
+    区間数・start・min・max・count・bucketSeconds は完全一致。
+    """
+    assert batch["bucketSeconds"] == single["bucketSeconds"]
+    assert len(batch["buckets"]) == len(single["buckets"])
+    for got, want in zip(batch["buckets"], single["buckets"], strict=True):
+        assert (got["start"], got["min"], got["max"], got["count"]) == (
+            want["start"],
+            want["min"],
+            want["max"],
+            want["count"],
+        )
+        assert got["avg"] == pytest.approx(want["avg"], rel=1e-12)
+
+
 async def _data_sensors(now: datetime, count: int = 4) -> list[UUID]:
     ids = [await _sensor() for _ in range(count)]
     for seed, sensor_id in enumerate(ids):
-        await _seconds(sensor_id, now - timedelta(days=8), now, step=30, seed=seed)
+        await _seconds(sensor_id, now - timedelta(days=8), now, step=30.123457, seed=seed)
     await run_tick(now)
     async with AsyncSession(engine) as session:  # 速い道の印と 1 分の集計ができていること
         count_states = text("SELECT count(*) FROM readings_minute_state")
@@ -108,7 +131,7 @@ async def _data_sensors(now: datetime, count: int = 4) -> list[UUID]:
 async def test_each_result_equals_single_api(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, now: datetime, rollup_days: int
 ) -> None:
-    """速い道（7 日表示・500 区間）も従来の道も、センサーごとに単体 API と完全に同じ。"""
+    """7 日・500 区間で、センサーごとに単体 API と同じ（avg は桁の差を許す）。"""
     ids = await _data_sensors(now)
     monkeypatch.setattr(settings, "readings_rollup_days", rollup_days)
     items = [_item(i, now - timedelta(days=7), now) for i in ids]
@@ -124,7 +147,7 @@ async def test_each_result_equals_single_api(
     for item, result in zip(items, results, strict=True):
         assert result["sensorId"] == item["sensorId"]
         assert result["status"] == 200
-        assert result["data"] == await _single(client, item)
+        _assert_same_data(result["data"], await _single(client, item))
         assert result["data"]["buckets"], "空の結果どうしの比較になっていない"
 
 
@@ -135,8 +158,8 @@ async def test_same_item_twice_gives_same_result(client: httpx.AsyncClient, now:
     resp = await client.post(BATCH_URL, json={"items": [item, item]})
 
     first, second = resp.json()["results"]
-    assert first == second
-    assert first["data"] == await _single(client, item)
+    assert first == second  # 同じ件は 1 回だけ計算して分け合うので、avg も含めて完全に同じ
+    _assert_same_data(first["data"], await _single(client, item))
 
 
 async def test_more_than_50_items_is_rejected(client: httpx.AsyncClient, now: datetime) -> None:
@@ -174,7 +197,7 @@ async def test_missing_sensor_and_bad_range_fail_only_that_item(
     missing_result, good_result, backwards_result = resp.json()["results"]
     assert (missing_result["status"], missing_result["data"]) == (404, None)
     assert good_result["status"] == 200
-    assert good_result["data"] == await _single(client, good)
+    _assert_same_data(good_result["data"], await _single(client, good))
     assert (backwards_result["status"], backwards_result["data"]) == (400, None)
     # 単体 API も同じ番号
     single_missing = await client.get(
@@ -215,7 +238,7 @@ async def test_other_workspace_sensor_is_404_like_missing(
     mine_ws, other_ws = await _workspace(), await _workspace()
     mine, theirs = await _sensor(mine_ws), await _sensor(other_ws)
     for seed, sensor_id in enumerate((mine, theirs)):
-        await _seconds(sensor_id, now - timedelta(hours=3), now, step=20, seed=seed)
+        await _seconds(sensor_id, now - timedelta(hours=3), now, step=20.654321, seed=seed)
     as_workspace(mine_ws)
     lo = now - timedelta(hours=2)
     items = [_item(mine, lo, now, 40), _item(theirs, lo, now, 40)]
@@ -224,7 +247,7 @@ async def test_other_workspace_sensor_is_404_like_missing(
 
     own, foreign = resp.json()["results"]
     assert own["status"] == 200
-    assert own["data"] == await _single(client, items[0])
+    _assert_same_data(own["data"], await _single(client, items[0]))
     assert (foreign["status"], foreign["data"]) == (404, None)
     assert foreign["detail"] == "sensor not found"
     single_foreign = await client.get(
@@ -257,7 +280,8 @@ async def test_batch_finishes_with_a_single_connection_pool(
 
     for resp in responses:
         assert resp.status_code == 200
-        assert [r["data"] for r in resp.json()["results"]] == expected
+        for result, single in zip(resp.json()["results"], expected, strict=True):
+            _assert_same_data(result["data"], single)
 
 
 async def test_mixed_fast_and_legacy_sensors_match_single_api(
@@ -267,7 +291,7 @@ async def test_mixed_fast_and_legacy_sensors_match_single_api(
     センサーごとに単体 API と同じ。遅れて届いた行（作り直しが要る）もある。"""
     with_state = await _data_sensors(now, 3)
     no_state = await _sensor()
-    await _seconds(no_state, now - timedelta(days=8), now, step=30, seed=9)  # 印は作らない
+    await _seconds(no_state, now - timedelta(days=8), now, step=30.123457, seed=9)  # 印は作らない
     empty = await _sensor()
     late_minute = now - timedelta(hours=20)
     async with AsyncSession(engine) as session:  # 遅れた行 + 記録（取り込みと同じ書き方）
@@ -284,7 +308,7 @@ async def test_mixed_fast_and_legacy_sensors_match_single_api(
 
     for item, result in zip(items, resp.json()["results"], strict=True):
         assert result["status"] == 200
-        assert result["data"] == await _single(client, item)
+        _assert_same_data(result["data"], await _single(client, item))
     assert any(b["max"] == 777.0 for b in resp.json()["results"][0]["data"]["buckets"])
     assert resp.json()["results"][-1]["data"]["buckets"] == []
 
