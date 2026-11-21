@@ -27,20 +27,30 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import any_, func, literal, literal_column, text, true, union_all
+from sqlalchemy import (
+    BigInteger,
+    Float,
+    Integer,
+    any_,
+    cast,
+    func,
+    literal,
+    literal_column,
+    text,
+    true,
+    union_all,
+)
 from sqlalchemy import select as sa_select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.bucket_series import BucketRow, BucketSeries
 from app.config import settings
 from app.db.models import Reading, ReadingRollup, Sensor
 from app.minute_cache import floor_minute, settle_dirty
-from app.schemas import DownsampledBucket, DownsampledReadings, ReadingRead
-
-# 区間ごとの集計 1 行: (区間の番号, 最小, 平均, 最大, 件数)
-BucketRow = tuple[int, float, float, float, int]
+from app.schemas import ReadingRead
 
 
 def merge_bucket_rows(raw_rows: list[BucketRow], rolled_rows: list[BucketRow]) -> list[BucketRow]:
@@ -130,6 +140,39 @@ _FAST_SOURCES_SQL = """
           AND x.recorded_at <= :hi
     )
 """
+
+
+# 速い道の SQL の最後の列（区間の番号・最小・平均・最大・件数）。印の行（kind = 'state'）は番号 -1。
+# 平均（合計 ÷ 件数）と型（整数・float）は DB 側でそろえる。Python 側で 1 行ずつ変換すると、
+# 1 リクエスト（約 6,000 行）の CPU の約 1 割になる。印の行は件数 0 なので、平均は NULL（使わない）
+_BUCKET_COLUMNS_SQL = """
+    CAST(CASE WHEN kind = 'state' THEN -1
+              ELSE least(floor((extract(epoch FROM t) - :start_epoch) / :width), :buckets - 1)
+         END AS integer) AS idx,
+    CAST(min(mn) AS float8) AS low,
+    CAST(sum(sm) AS float8) / CAST(NULLIF(sum(cnt), 0) AS float8) AS avg,
+    CAST(max(mx) AS float8) AS high, CAST(sum(cnt) AS bigint) AS cnt
+"""
+
+# 上の区間の行を、1 行にまとめる（センサーごと）: 印があるか、と、区間ごとの値の配列 5 本。
+# 6,000 行を 1 行ずつ受け取ると、SQLAlchemy の行の生成が CPU の約 2 割になる。配列なら、
+# 12 行（センサーの数）で受け取れ、Python のリストへの変換は asyncpg が C で行う。
+# 配列はどれも番号の順で、同じ位置どうしが 1 区間（印の行は番号 -1 なので配列に入れない）
+_BUCKET_ARRAYS_SQL = """
+    bool_or(idx = -1) AS has_state,
+    array_agg(idx ORDER BY idx) FILTER (WHERE idx >= 0) AS idxs,
+    array_agg(low ORDER BY idx) FILTER (WHERE idx >= 0) AS lows,
+    array_agg(avg ORDER BY idx) FILTER (WHERE idx >= 0) AS avgs,
+    array_agg(high ORDER BY idx) FILTER (WHERE idx >= 0) AS highs,
+    array_agg(cnt ORDER BY idx) FILTER (WHERE idx >= 0) AS counts
+"""
+
+
+def _rows_of_arrays(*arrays: list[Any] | None) -> list[BucketRow]:
+    """区間ごとの値の配列 5 本（NULL は区間なし）を、区間ごとの 1 行（BucketRow）にする。"""
+    if arrays[0] is None:
+        return []
+    return list(zip(*arrays, strict=True))
 
 
 def _ceil_minute(moment: datetime) -> datetime:
@@ -250,21 +293,14 @@ async def sum_and_count(
     return float(total), int(count)
 
 
-def _to_downsampled(from_: datetime, width: float, rows: list[BucketRow]) -> DownsampledReadings:
-    """区間ごとの集計（番号・最小・平均・最大・件数）を、API の返す形にする。"""
-    return DownsampledReadings(
-        bucket_seconds=width,
-        buckets=[
-            DownsampledBucket(
-                start=datetime.fromtimestamp(from_.timestamp() + index * width, tz=UTC),
-                min=minimum,
-                avg=avg,
-                max=maximum,
-                count=count,
-            )
-            for index, minimum, avg, maximum, count in rows
-        ],
-    )
+def _average(total: Any, count: Any) -> Any:
+    """従来の道の SQL で、平均（合計 ÷ 件数）を DB 側で出す（理由は _BUCKET_COLUMNS_SQL）。"""
+    return cast(total, Float) / cast(count, Float)
+
+
+def _to_series(from_: datetime, width: float, rows: list[BucketRow]) -> BucketSeries:
+    """区間ごとの集計（番号・最小・平均・最大・件数）に、開始時刻の計算に使う値を付ける。"""
+    return BucketSeries(bucket_seconds=width, start_epoch=from_.timestamp(), rows=rows)
 
 
 async def _fast_bucket_rows(
@@ -281,33 +317,24 @@ async def _fast_bucket_rows(
     """
     params = _fast_params(sensor_id, lo, hi)
     params.update({"start_epoch": lo.timestamp(), "width": width, "buckets": buckets})
-    rows = (
-        await session.execute(
-            text(
-                _FAST_SOURCES_SQL
-                + """
-                SELECT CASE WHEN kind = 'state' THEN -1
-                            ELSE least(floor((extract(epoch FROM t) - :start_epoch) / :width),
-                                       :buckets - 1) END AS idx,
-                       min(mn) AS mn, sum(sm) AS total, max(mx) AS mx, sum(cnt) AS cnt
-                FROM src GROUP BY 1 ORDER BY 1
-                """
-            ),
-            params,
-        )
-    ).all()
-    if not any(int(row.idx) == -1 for row in rows):
-        return None
-    return [
-        (int(row.idx), float(row.mn), float(row.total) / int(row.cnt), float(row.mx), int(row.cnt))
-        for row in rows
-        if int(row.idx) >= 0
-    ]
+    result = await session.execute(
+        text(
+            _FAST_SOURCES_SQL
+            + "SELECT"
+            + _BUCKET_ARRAYS_SQL
+            + "FROM (SELECT"
+            + _BUCKET_COLUMNS_SQL
+            + "FROM src GROUP BY 1) AS buckets"
+        ),
+        params,
+    )
+    has_state, *arrays = result.one()
+    return _rows_of_arrays(*arrays) if has_state else None
 
 
 async def downsample(
     session: AsyncSession, sensor_id: UUID, from_: datetime, to: datetime, buckets: int
-) -> DownsampledReadings:
+) -> BucketSeries:
     """from〜to を buckets 区間に分け、区間ごとの最小・平均・最大・件数を返す（グラフ用）。
 
     区間の幅は (to - from) / buckets、境界は from から等間隔。まとめた行は、開始時刻で区間に入れる
@@ -321,12 +348,15 @@ async def downsample(
     if fast_bucket_width and await _can_use_fast_path(session, sensor_id, from_, to):
         fast_rows = await _fast_bucket_rows(session, sensor_id, from_, to, buckets, width)
         if fast_rows is not None:
-            return _to_downsampled(from_, width, fast_rows)
+            return _to_series(from_, width, fast_rows)
 
     def index_of(time_column: Any) -> Any:
         """区間の番号（0 始まり）。"""
-        return func.least(
-            func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
+        return cast(
+            func.least(
+                func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
+            ),
+            Integer,
         )
 
     # 生の行とまとめた行を、1 つの文で（同じ時点の状態で）読む（UNION ALL）。冒頭を参照。
@@ -337,7 +367,7 @@ async def downsample(
             literal("raw").label("kind"),
             raw_index.label("idx"),
             func.min(Reading.value).label("mn"),
-            func.sum(Reading.value).label("total"),
+            _average(func.sum(Reading.value), func.count(1)).label("avg"),
             func.max(Reading.value).label("mx"),
             func.count(1).label("cnt"),
         )
@@ -354,9 +384,9 @@ async def downsample(
             literal("rolled").label("kind"),
             rolled_index.label("idx"),
             func.min(ReadingRollup.min).label("mn"),
-            func.sum(ReadingRollup.sum).label("total"),
+            _average(func.sum(ReadingRollup.sum), func.sum(ReadingRollup.count)).label("avg"),
             func.max(ReadingRollup.max).label("mx"),
-            func.sum(ReadingRollup.count).label("cnt"),
+            cast(func.sum(ReadingRollup.count), BigInteger).label("cnt"),
         )
         .where(
             col(ReadingRollup.sensor_id) == sensor_id,
@@ -367,11 +397,12 @@ async def downsample(
     )
     raw_rows: list[BucketRow] = []
     rolled_rows: list[BucketRow] = []
-    for kind, i, mn, total, mx, count in await session.execute(union_all(raw_part, rolled_part)):
-        row = (int(i), float(mn), float(total) / int(count), float(mx), int(count))
-        (raw_rows if kind == "raw" else rolled_rows).append(row)
+    for kind, index, low, avg, high, count in await session.execute(
+        union_all(raw_part, rolled_part)
+    ):
+        (raw_rows if kind == "raw" else rolled_rows).append((index, low, avg, high, count))
     raw_rows.sort()  # 区間の番号の順に（merge_bucket_rows は、片方だけのときそのまま返す）
-    return _to_downsampled(from_, width, merge_bucket_rows(raw_rows, rolled_rows))
+    return _to_series(from_, width, merge_bucket_rows(raw_rows, rolled_rows))
 
 
 # 複数センサーを 1 つの SQL で読む速い道（_FAST_SOURCES_SQL のセンサー複数版）。
@@ -439,18 +470,6 @@ _FAST_SOURCES_MANY_SQL = """
 """
 
 
-def _rows_by_sensor(rows: Any) -> dict[UUID, list[BucketRow]]:
-    """(sensor_id, 区間, 最小, 合計, 最大, 件数) の行を、センサーごとの区間の集計にする。"""
-    by_sensor: dict[UUID, list[BucketRow]] = {}
-    for sensor_id, index, minimum, total, maximum, count in rows:
-        if index < 0:
-            continue
-        by_sensor.setdefault(sensor_id, []).append(
-            (int(index), float(minimum), float(total) / int(count), float(maximum), int(count))
-        )
-    return by_sensor
-
-
 async def _fast_bucket_rows_many(
     session: AsyncSession, sensor_ids: list[UUID], lo: datetime, hi: datetime, buckets: int,
     width: float,
@@ -466,25 +485,23 @@ async def _fast_bucket_rows_many(
         "hi_floor": floor_minute(hi), "start_epoch": lo.timestamp(), "width": width,
         "buckets": buckets,
     }
-    rows = (
-        await session.execute(
-            text(
-                _FAST_SOURCES_MANY_SQL
-                + """
-                SELECT sensor_id,
-                       CASE WHEN kind = 'state' THEN -1
-                            ELSE least(floor((extract(epoch FROM t) - :start_epoch) / :width),
-                                       :buckets - 1) END AS idx,
-                       min(mn), sum(sm), max(mx), sum(cnt)
-                FROM src GROUP BY 1, 2 ORDER BY 1, 2
-                """
-            ),
-            params,
-        )
-    ).all()
-    with_state = {row[0] for row in rows if row[1] == -1}
-    by_sensor = _rows_by_sensor(rows)
-    return {sensor_id: by_sensor.get(sensor_id, []) for sensor_id in with_state}
+    result = await session.execute(
+        text(
+            _FAST_SOURCES_MANY_SQL
+            + "SELECT sensor_id,"
+            + _BUCKET_ARRAYS_SQL
+            + "FROM (SELECT sensor_id,"
+            + _BUCKET_COLUMNS_SQL
+            + "FROM src GROUP BY 1, 2) AS buckets GROUP BY sensor_id"
+        ),
+        params,
+    )
+    # 印が途中で消えたセンサーは、行に入らない（印の行は、印のあるセンサーには必ず 1 つある）
+    return {
+        sensor_id: _rows_of_arrays(*arrays)
+        for sensor_id, has_state, *arrays in result
+        if has_state
+    }
 
 
 async def _legacy_bucket_rows_many(
@@ -500,8 +517,11 @@ async def _legacy_bucket_rows_many(
     start_epoch = from_.timestamp()
 
     def index_of(time_column: Any) -> Any:
-        return func.least(
-            func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
+        return cast(
+            func.least(
+                func.floor((func.extract("epoch", time_column) - start_epoch) / width), buckets - 1
+            ),
+            Integer,
         )
 
     raw_index = index_of(Reading.recorded_at)
@@ -511,7 +531,7 @@ async def _legacy_bucket_rows_many(
             col(Reading.sensor_id).label("sensor_id"),
             raw_index.label("idx"),
             func.min(Reading.value).label("mn"),
-            func.sum(Reading.value).label("total"),
+            _average(func.sum(Reading.value), func.count(1)).label("avg"),
             func.max(Reading.value).label("mx"),
             func.count(1).label("cnt"),
         )
@@ -529,9 +549,9 @@ async def _legacy_bucket_rows_many(
             col(ReadingRollup.sensor_id).label("sensor_id"),
             rolled_index.label("idx"),
             func.min(ReadingRollup.min).label("mn"),
-            func.sum(ReadingRollup.sum).label("total"),
+            _average(func.sum(ReadingRollup.sum), func.sum(ReadingRollup.count)).label("avg"),
             func.max(ReadingRollup.max).label("mx"),
-            func.sum(ReadingRollup.count).label("cnt"),
+            cast(func.sum(ReadingRollup.count), BigInteger).label("cnt"),
         )
         .where(
             col(ReadingRollup.sensor_id) == any_(ids),
@@ -542,11 +562,12 @@ async def _legacy_bucket_rows_many(
     )
     raw: dict[UUID, list[BucketRow]] = {}
     rolled: dict[UUID, list[BucketRow]] = {}
-    for kind, sensor_id, i, mn, total, mx, count in await session.execute(
+    for kind, sensor_id, index, low, avg, high, count in await session.execute(
         union_all(raw_part, rolled_part)
     ):
-        row = (int(i), float(mn), float(total) / int(count), float(mx), int(count))
-        (raw if kind == "raw" else rolled).setdefault(sensor_id, []).append(row)
+        (raw if kind == "raw" else rolled).setdefault(sensor_id, []).append(
+            (index, low, avg, high, count)
+        )
     return {
         sensor_id: merge_bucket_rows(sorted(raw.get(sensor_id, [])), rolled.get(sensor_id, []))
         for sensor_id in sensor_ids
@@ -572,7 +593,7 @@ async def _split_fast_sensors(
 
 async def downsample_many(
     session: AsyncSession, sensor_ids: list[UUID], from_: datetime, to: datetime, buckets: int
-) -> dict[UUID, DownsampledReadings]:
+) -> dict[UUID, BucketSeries]:
     """downsample の複数センサー版。同じ範囲・区間数で、センサーごとの結果（単体と同じ値）を返す。
 
     読み出しの SQL は、速い道が使えるセンサーの組に 1 つ、使えない組に 1 つ
@@ -606,9 +627,7 @@ async def downsample_many(
         rows_by_sensor.update(
             await _legacy_bucket_rows_many(session, rest, from_, to, buckets, width)
         )
-    return {
-        sensor_id: _to_downsampled(from_, width, rows_by_sensor[sensor_id]) for sensor_id in wanted
-    }
+    return {sensor_id: _to_series(from_, width, rows_by_sensor[sensor_id]) for sensor_id in wanted}
 
 
 async def recent_readings(

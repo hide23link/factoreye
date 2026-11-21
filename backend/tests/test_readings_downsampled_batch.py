@@ -28,6 +28,8 @@ from app.db.models import Sensor, User, Workspace
 from app.db.session import engine
 from app.main import app
 from app.minute_cache import floor_minute, run_tick
+from app.readings_query import downsample, downsample_many
+from app.schemas import DownsampledBatchResponse, DownsampledBatchResult
 
 BATCH_URL = "/api/sensors/readings/downsampled"
 
@@ -335,3 +337,53 @@ async def test_sql_statements_do_not_grow_with_sensor_count(
     assert resp.status_code == 200
     reads = [s for s in statements if "readings" in s]
     assert len(reads) <= 3, reads  # センサー確認 1 + 印の確認 1 + 読み出し 1
+
+
+async def test_response_text_is_identical_to_model_serialization(
+    client: httpx.AsyncClient, now: datetime
+) -> None:
+    """応答の文字列が、以前の作り方（モデルを作って JSON にする）と 1 文字も違わない。
+
+    成功・範囲の誤り（400）・存在しない（404）が混ざった 1 回のリクエストと、単体の GET で比べる。
+    （同じ DB の状態を同じ SQL で読むので、avg の最後の桁まで一致する）
+    """
+    ids = await _data_sensors(now, 2)
+    lo, hi = now - timedelta(days=7), now
+    items = [_item(ids[0], lo, hi), _item(ids[1], lo, hi), _item(ids[0], hi, lo)]
+    items.append(_item(uuid4(), lo, hi))
+    async with AsyncSession(engine) as session:
+        read = await downsample_many(session, ids, lo, hi, 500)
+        one = await downsample(session, ids[0], lo, hi, 500)
+    expected = DownsampledBatchResponse(
+        results=[
+            DownsampledBatchResult(sensor_id=ids[0], status=200, data=read[ids[0]].to_model()),
+            DownsampledBatchResult(sensor_id=ids[1], status=200, data=read[ids[1]].to_model()),
+            DownsampledBatchResult(sensor_id=ids[0], status=400, detail="to must be after from"),
+            DownsampledBatchResult(
+                sensor_id=UUID(items[3]["sensorId"]), status=404, detail="sensor not found"
+            ),
+        ]
+    ).model_dump_json(by_alias=True)
+
+    resp = await client.post(BATCH_URL, json={"items": items})
+    single = await client.get(
+        f"/api/sensors/{ids[0]}/readings/downsampled",
+        params={"from": lo.isoformat(), "to": hi.isoformat(), "buckets": 500},
+    )
+
+    assert resp.headers["content-type"] == "application/json"
+    assert single.headers["content-type"] == "application/json"
+    assert resp.text == expected
+    assert single.text == one.to_model().model_dump_json(by_alias=True)
+
+
+def test_openapi_still_describes_response_models() -> None:
+    """Response を直接返しても、OpenAPI（仕様書）の応答の型は変わらない。"""
+    paths = app.openapi()["paths"]
+
+    single = paths["/api/sensors/{sensor_id}/readings/downsampled"]["get"]["responses"]["200"]
+    batch = paths[BATCH_URL]["post"]["responses"]["200"]
+    assert single["content"]["application/json"]["schema"]["$ref"].endswith("/DownsampledReadings")
+    assert batch["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/DownsampledBatchResponse"
+    )
