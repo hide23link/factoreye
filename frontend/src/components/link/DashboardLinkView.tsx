@@ -15,7 +15,7 @@
  * 【引数（props）】dashboard = 開くダッシュボード、rangeMinutes = リンクの「直近 ◯ 分」、
  * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止め、先頭の数個だけ出す）。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
 import { useLinkGestures } from "../../hooks/useLinkGestures";
@@ -180,8 +180,27 @@ export function DashboardLinkView({
   const fetchLive = fetchPeriod.endMs === null;
   const linkView: LinkGraphView = { bounds, fetchBounds, live: fetchLive, cursorTime, scrollY: true };
 
+  // 1 グラフ表示へ移る前のスクロール位置。一覧に戻ったとき、同じ位置に戻す
+  const scrollBeforeFocus = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (focusId !== null || scrollBeforeFocus.current === null) return;
+    window.scrollTo(0, scrollBeforeFocus.current);
+    scrollBeforeFocus.current = null;
+  }, [focusId]);
+  // ページ全体のスクロールの端で、ブラウザの引っ張り更新・戻るの動きを起こさない（スクロールするのは html なので、そこに付ける。見本では付けない）
+  useEffect(() => {
+    if (preview) return;
+    const root = document.documentElement;
+    const before = root.style.overscrollBehaviorY;
+    root.style.overscrollBehaviorY = "contain";
+    return () => {
+      root.style.overscrollBehaviorY = before;
+    };
+  }, [preview]);
+
   // 1 グラフ表示へ移るとき、履歴を 1 つ足す（URL は変えない）。画面の戻るボタンでも一覧へ戻れる
   const openFocus = (id: string) => {
+    scrollBeforeFocus.current = window.scrollY;
     try {
       // 履歴の印には、開いたグラフの ID を入れる（印が今のグラフのものかを、戻るときに確かめるため）
       window.history.pushState({ linkFocus: id }, "", window.location.href);
@@ -265,33 +284,35 @@ export function DashboardLinkView({
   }
 
   const widgets = listWidgets(dashboard.widgets).slice(0, preview ? PREVIEW_COUNT : undefined);
+  // 横向き（高さが小さい）のときは、帯を 1 行にする（タイトル・期間のボタン・今に戻る・🕘 を並べる）。見本は縦向きの形に固定
+  const compact = !preview;
   const stepButton = "min-h-8 min-w-9 shrink-0 rounded-full border border-gray-200 bg-white px-3 text-sm font-bold disabled:opacity-60";
 
   return (
     <div
       className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-dvh"}`}
       // ブラウザの拡大・横のスクロールは止め、縦のスクロールだけ受ける（ピンチはこちらで処理する）
-      style={{ touchAction: "pan-y", overscrollBehaviorY: "contain" }}
+      style={{ touchAction: "pan-y" }}
     >
       <header
         className={`z-20 border-b border-gray-200 bg-white pl-[max(0.625rem,env(safe-area-inset-left))] pb-1.5 pr-[max(0.625rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] ${
-          preview ? "" : "sticky top-0"
+          preview ? "" : "sticky top-0 landscape:flex landscape:items-center landscape:gap-2 landscape:pb-1 landscape:pt-[max(0.25rem,env(safe-area-inset-top))]"
         }`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <b className="min-w-0 truncate text-sm" title={dashboard.name}>{dashboard.name}</b>
+        <div className={`flex items-center justify-between gap-2 ${compact ? "landscape:contents" : ""}`}>
+          <b className={`min-w-0 truncate text-sm ${compact ? "landscape:order-1 landscape:max-w-[30%] landscape:shrink-0" : ""}`} title={dashboard.name}>{dashboard.name}</b>
           <button
             type="button"
             ref={timeButton}
             aria-label="時刻を指定"
             disabled={preview}
             onClick={() => setSheetOpenedAt(Date.now())}
-            className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2.5 text-xs tabular-nums text-gray-500"
+            className={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2.5 text-xs tabular-nums text-gray-500 ${compact ? "landscape:order-4" : ""}`}
           >
             {periodLabel(period, now)} 🕘
           </button>
         </div>
-        <div role="group" aria-label="期間" className="mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5">
+        <div role="group" aria-label="期間" className={`mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5 ${compact ? "landscape:order-2 landscape:mt-0 landscape:min-w-0 landscape:flex-1 landscape:pb-0" : ""}`}>
           <button
             type="button"
             aria-label="縮小（期間を 2 倍にする）"
@@ -326,8 +347,8 @@ export function DashboardLinkView({
             );
           })}
         </div>
-        <div className="flex min-h-8 items-center justify-between gap-1.5 text-xs text-gray-500">
-          <span>{statusText(period, now, now)}</span>
+        <div className={`flex min-h-8 items-center justify-between gap-1.5 text-xs text-gray-500 ${compact ? "landscape:order-3 landscape:min-h-0 landscape:shrink-0" : ""}`}>
+          <span className={compact ? "landscape:hidden" : ""}>{statusText(period, now, now)}</span>
           {!isAtLink(period, rangeMinutes) && !preview && (
             <button
               type="button"

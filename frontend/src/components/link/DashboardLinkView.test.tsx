@@ -219,6 +219,28 @@ describe("DashboardLinkView の指の操作", () => {
 });
 
 describe("DashboardLinkView の 1 グラフ表示", () => {
+  it("一覧に戻ったとき、⤢で移る前のスクロール位置に戻す", async () => {
+    const user = userEvent.setup();
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    const open = await screen.findByRole("button", { name: "ライン2 電流 を 1 画面で開く" });
+    Object.defineProperty(window, "scrollY", { value: 300, configurable: true });
+    await user.click(open);
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(scrollTo).toHaveBeenCalledWith(0, 300);
+  });
+
+  it("ページ全体（html）のスクロールの端に overscroll-behavior-y: contain を付け、外れたら戻す", () => {
+    const { unmount } = renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    expect(document.documentElement.style.overscrollBehaviorY).toBe("contain");
+    unmount();
+    expect(document.documentElement.style.overscrollBehaviorY).toBe("");
+  });
+
   it("再読込のあと（履歴に前の印が残っている）は、一覧から始まり、印を消す。そのあと開いて「戻る」で一覧に戻れる", async () => {
     const user = userEvent.setup();
     window.history.replaceState({ linkFocus: "00000000-0000-4000-8000-000000000003" }, "", "/?dashboard=d1&range=30m");
