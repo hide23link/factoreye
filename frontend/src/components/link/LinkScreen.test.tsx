@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { act, fireEvent, renderWithQueryClient, screen } from "../../test/test-utils";
 import type { Sensor, Widget } from "../../types";
-import { LinkScreen, SETTLE_MS } from "./LinkScreen";
+import { SETTLE_MS } from "../../hooks/useLinkView";
+import { LinkScreen } from "./LinkScreen";
 
 vi.mock("../../lib/api", () => ({
   fetchSensors: vi.fn(),

@@ -7,7 +7,7 @@
  * - 左: センサー棚（ドラッグ、または「＋」で追加）
  * - 上のバー: 「＋ ウィジェット」で種類の部品バーを開く（ドラッグ、またはクリックで追加）
  * - 右: 設定パネル（ウィジェットの「⚙」で、そのウィジェットの設定。未選択ならダッシュボードの名前・説明）
- * 閲覧中の「🔗 リンク」で、グラフ 1 つを 1 画面で開くリンクを作る（GraphLinkDialog）。
+ * 閲覧中の「🔗 リンク」で、ダッシュボード全体・グラフ 1 つを 1 画面で開くリンクを作る（GraphLinkDialog）。
  * ウィジェットは、カードをつかんで移動、右下の角・左右と下の端で大きさを変える。設定は、ウィジェット内の「⚙」ボタンで開く。
  * 変更はすぐ保存する。Ctrl/⌘+Z で元に戻す。Delete で選択中のウィジェットを削除（Backspace は誤操作しやすいので使わない）。
  *
@@ -24,7 +24,6 @@ import { useWidgetActions } from "../hooks/useWidgetActions";
 import { GRID_MARGIN, GRID_ROW_HEIGHT, minGridRows } from "../lib/grid-placement";
 import { choosePanelSlot, NARROW_VIEWPORT, type PanelSlot, type ViewRect } from "../lib/panel-placement";
 import { clampWindowSize, isWindowPositionInside, MIN_WINDOW_HEIGHT, WINDOW_WIDTH } from "../lib/window-position";
-import { isGraphWidget } from "../lib/graph-link";
 import { lazyNamed } from "../lib/lazyWithRetry";
 import { useCursorTimeStore } from "../store/useCursorTimeStore";
 import { useEditorStore } from "../store/useEditorStore";
@@ -155,9 +154,8 @@ function LoadedDashboard({
   const switchDashboard = useUiStore((s) => s.switchDashboard);
   const { cycleSeconds, cycleExcluded } = useKioskStore();
   const { data: allDashboards } = useDashboards();
-  // 「リンクを作る」の窓を開いているか。グラフが 1 つも無いダッシュボードでは、ボタンを押せない
+  // 「リンクを作る」の窓を開いているか
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const hasGraph = dashboard.widgets.some(isGraphWidget);
 
   // 操作バー: 上の端のタップで出し、数秒操作がなければ隠す
   const [barShown, setBarShown] = useState(false);
@@ -543,10 +541,9 @@ function LoadedDashboard({
             <>
               <button
                 type="button"
-                disabled={!hasGraph}
-                title={hasGraph ? "グラフを 1 画面で開くリンクを作る" : "グラフがありません"}
+                title="ダッシュボード全体、またはグラフを 1 画面で開くリンクを作る"
                 onClick={() => setLinkDialogOpen(true)}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
               >
                 🔗 リンク
               </button>

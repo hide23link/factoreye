@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Sensor, Widget } from "../types";
-import { buildGraphLinkUrl, clearGraphLinkFromUrl, graphName, isGraphWidget, parseGraphLink } from "./graph-link";
+import {
+  WHOLE_DASHBOARD,
+  buildGraphLinkUrl,
+  clearGraphLinkFromUrl,
+  graphName,
+  isDashboardLink,
+  isGraphWidget,
+  parseGraphLink,
+} from "./graph-link";
 
 function makeWidget(overrides: Partial<Widget> = {}): Widget {
   return {
@@ -98,5 +106,36 @@ describe("isGraphWidget・graphName", () => {
     expect(graphName(makeWidget({ config: { title: "炉の温度" } }), [sensor])).toBe("炉の温度");
     expect(graphName(makeWidget(), [sensor])).toBe("乾燥炉 温度");
     expect(graphName(makeWidget({ sensorId: null }), [sensor])).toBe("グラフ");
+  });
+});
+
+describe("ダッシュボード全体のリンク（graph なし）", () => {
+  it("graph が無く dashboard が正しい ID なら、ダッシュボード全体として読む", () => {
+    const result = parseGraphLink(`?dashboard=${D}&range=60m`);
+    expect(result).toEqual({ kind: "link", link: { dashboardId: D, graphId: WHOLE_DASHBOARD, rangeMinutes: 60 } });
+    expect(result.kind === "link" && isDashboardLink(result.link)).toBe(true);
+    // graph= が空でも同じ
+    expect(parseGraphLink(`?dashboard=${D}&graph=`)).toMatchObject({ kind: "link" });
+  });
+
+  it("range が無ければ 30 分", () => {
+    const result = parseGraphLink(`?dashboard=${D}`);
+    expect(result.kind === "link" && result.link.rangeMinutes).toBe(30);
+  });
+
+  it("dashboard の形がおかしければ壊れたリンク。graph だけ・graph の形がおかしいのも壊れたリンク", () => {
+    expect(parseGraphLink("?dashboard=../sensors")).toEqual({ kind: "broken" });
+    expect(parseGraphLink(`?graph=${G}`)).toEqual({ kind: "broken" });
+    expect(parseGraphLink(`?dashboard=${D}&graph=abc`)).toEqual({ kind: "broken" });
+  });
+
+  it("graph つきのリンクは、今までどおり 1 グラフ", () => {
+    const result = parseGraphLink(`?dashboard=${D}&graph=${G}`);
+    expect(result.kind === "link" && isDashboardLink(result.link)).toBe(false);
+  });
+
+  it("graphId が空なら、graph を付けない URL を作る（順番は dashboard → range）", () => {
+    expect(buildGraphLinkUrl("https://x.example/", D, WHOLE_DASHBOARD, 45)).toBe(`https://x.example/?dashboard=${D}&range=45m`);
+    expect(buildGraphLinkUrl("https://x.example/", D, G, 45)).toBe(`https://x.example/?dashboard=${D}&graph=${G}&range=45m`);
   });
 });

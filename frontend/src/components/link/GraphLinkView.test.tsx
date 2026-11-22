@@ -146,4 +146,33 @@ describe("GraphLinkView", () => {
     expect(await screen.findByText("ダッシュボードを取得できませんでした。")).toBeInTheDocument();
     expect(useUiStore.getState().linkNotFound).toBe(false);
   });
+
+  describe("ダッシュボード全体（graph なし）", () => {
+    const whole = { dashboardId: "d1", graphId: "", rangeMinutes: 30 };
+
+    it("ダッシュボード全体の一覧を出す（グラフが 0 個でも見つからない扱いにしない）", async () => {
+      vi.mocked(api.fetchDashboard).mockResolvedValue(makeDashboard([]));
+      renderWithQueryClient(<GraphLinkView link={whole} />);
+
+      expect(await screen.findByText("ライン1")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "時刻を指定" })).toHaveTextContent("直近 30 分");
+      expect(useUiStore.getState().linkNotFound).toBe(false);
+    });
+
+    it("グラフの名前の部品を並べる", async () => {
+      vi.mocked(api.fetchDashboard).mockResolvedValue(makeDashboard([makeWidget()]));
+      renderWithQueryClient(<GraphLinkView link={whole} />);
+
+      expect(await screen.findByRole("region", { name: "炉の温度" })).toBeInTheDocument();
+    });
+
+    it("ダッシュボードが無い（404）: URL のリンクを消して、黄色の帯を出す", async () => {
+      vi.mocked(api.fetchDashboard).mockRejectedValue(new ApiError(404, "not found"));
+      renderWithQueryClient(<GraphLinkView link={whole} />);
+
+      await waitFor(() => expect(useUiStore.getState().linkNotFound).toBe(true));
+      expect(useUiStore.getState().graphLink).toBeNull();
+      expect(window.location.search).toBe("");
+    });
+  });
 });

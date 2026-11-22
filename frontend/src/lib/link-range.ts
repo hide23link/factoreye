@@ -8,7 +8,7 @@
  *
  * 日付・時刻は端末の時刻で扱う（ダッシュボードのグラフと同じ「表示はブラウザの地域時刻」）。
  *
- * 【誰が使うか】LinkScreen・useLinkGestures（指の操作・期間のボタン）、LinkTimeSheet（時刻の指定のシート）。
+ * 【誰が使うか】LinkScreen・DashboardLinkView・useLinkGestures（指の操作・期間のボタン）、LinkTimeSheet（時刻の指定のシート）。
  */
 
 const MINUTE = 60 * 1000;
@@ -23,6 +23,12 @@ const OSS_PAST_MONTHS = 12;
 
 /** 下の期間のボタン（分）: 30 分・1・3・8・24 時間 */
 export const LINK_CHIPS_MINUTES = [30, 60, 180, 480, 1440] as const;
+
+/** ダッシュボード全体の画面（DashboardLinkView）の上の期間のボタン（分）: 10 分・30 分・1・3・8・24 時間 */
+export const LINK_LIST_CHIPS_MINUTES = [10, 30, 60, 180, 480, 1440] as const;
+
+/** 「＋」「－」のボタン 1 回で変わる長さの倍率（＋は 1/2 に拡大、－は 2 倍に縮小） */
+export const ZOOM_STEP = 2;
 
 /** 画面の期間。endMs = null は「今」（右端が今で、自動で更新する） */
 export interface LinkPeriod {
@@ -92,6 +98,15 @@ export function swipeZoom(start: LinkPeriod, dy: number, now: number, maxMs: num
 export function pinchZoom(start: LinkPeriod, startDistance: number, distance: number, now: number, maxMs: number): LinkPeriod {
   const ratio = Math.max(startDistance, 1) / Math.max(distance, 1);
   return zoomPeriod(start, start.durationMs * ratio, start.endMs === null ? 1 : 0.5, now, maxMs);
+}
+
+/**
+ * 「＋」「－」のボタン: 長さを 1 段（ZOOM_STEP 倍）変える。direction = "in" で拡大（短く）、"out" で縮小（長く）。
+ * 動かさない位置はピンチと同じ（今を見ているときは右端の今、過去を見ているときは真ん中の時刻）。
+ */
+export function stepZoom(period: LinkPeriod, direction: "in" | "out", now: number, maxMs: number): LinkPeriod {
+  const factor = direction === "in" ? 1 / ZOOM_STEP : ZOOM_STEP;
+  return zoomPeriod(period, period.durationMs * factor, period.endMs === null ? 1 : 0.5, now, maxMs);
 }
 
 /**

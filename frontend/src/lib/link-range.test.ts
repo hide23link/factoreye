@@ -24,6 +24,7 @@ import {
   startAtPeriod,
   statusText,
   shiftMonth,
+  stepZoom,
   stepPicked,
   swipeZoom,
   zoomPeriod,
@@ -222,5 +223,25 @@ describe("時刻の指定のシート", () => {
     expect(november.days[2]).toBe(new Date(2026, 10, 3).getTime());
     expect(calendarDays({ year: 2026, month: 1 })).toMatchObject({ blanks: 0 }); // 2026-02-01 は日曜
     expect(calendarDays({ year: 2026, month: 9 }).blanks).toBe(4); // 2026-10-01 は木曜
+  });
+});
+
+describe("「＋」「－」のボタン（1 段ずつ拡大・縮小）", () => {
+  it("＋で長さが半分、－で 2 倍。今を見ているときは右端（今）のまま", () => {
+    expect(stepZoom(linkPeriod(60), "in", NOW, NO_LIMIT)).toEqual({ durationMs: 30 * MINUTE, endMs: null });
+    expect(stepZoom(linkPeriod(60), "out", NOW, NO_LIMIT)).toEqual({ durationMs: 120 * MINUTE, endMs: null });
+  });
+
+  it("過去を見ているときは、真ん中の時刻を動かさない", () => {
+    const past = { durationMs: HOUR, endMs: NOW - 2 * HOUR };
+    const center = past.endMs - past.durationMs / 2;
+    const next = stepZoom(past, "in", NOW, NO_LIMIT);
+    expect(next.durationMs).toBe(30 * MINUTE);
+    expect(next.endMs! - next.durationMs / 2).toBe(center);
+  });
+
+  it("下限（10 分）・上限（7 日）を超えない", () => {
+    expect(stepZoom(linkPeriod(10), "in", NOW, NO_LIMIT).durationMs).toBe(LINK_VIEW_MIN_MS);
+    expect(stepZoom({ durationMs: LINK_VIEW_MAX_MS, endMs: null }, "out", NOW, NO_LIMIT).durationMs).toBe(LINK_VIEW_MAX_MS);
   });
 });
