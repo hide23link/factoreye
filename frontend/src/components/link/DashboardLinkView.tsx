@@ -423,7 +423,9 @@ export function DashboardLinkView({
       <div
         ref={preview ? undefined : gestures.ref}
         {...(preview ? {} : gestures.handlers)}
-        className="grid grid-cols-2 content-start gap-2 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]"
+        // 部品の中の、スクロールできる要素（overflow を持つ要素）も pan-y にする。touch-action は、触れた要素から最も近いスクロール容器までしか祖先と合成されないため、
+        // 中の要素が auto だと、横ドラッグをブラウザが横取りして pointercancel になる（インラインの指定にも勝つよう !important）
+        className="[&_*]:!touch-pan-y grid grid-cols-2 content-start gap-2 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]"
       >
         {widgets.length === 0 && <p className="col-span-2 p-4 text-center text-sm text-gray-500">このダッシュボードには、表示できる部品がありません。</p>}
         {widgets.map((widget) => {

@@ -54,6 +54,12 @@ describe("カードの高さ", () => {
     expect(listHeightCss(widget("f", "FloorPlan", 1, 1), "full", "--hdr", false)).toBe(listHeightCss(widget("f", "FloorPlan", 1, 1), "half", "--hdr", false));
   });
 
+  it("達成ストリップは、センサーの数に合わせた高さ（既定の 320px の空白を作らない）", () => {
+    const strip = (ids: string[]) => ({ ...widget("t", "TargetStrip", 1, 1), config: { sensorIds: ids } });
+    expect(listHeightCss(strip(["a", "b"]), "half", "--hdr", false)).toBe("244px");
+    expect(listHeightCss(strip(["a"]), "half", "--hdr", false)).toBe("192px");
+  });
+
   it("計器グラフは、行の数に合う高さとグラフの高さの大きいほう", () => {
     expect(listHeightCss(widget("t", "TrendStack", 1, 1), "half", "--hdr", false)).toMatch(/^max\(\d+px, max\(240px,/);
   });

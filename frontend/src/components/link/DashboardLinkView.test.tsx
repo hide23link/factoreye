@@ -220,6 +220,14 @@ describe("DashboardLinkView の指の操作", () => {
     }
   });
 
+  it("部品の中のスクロール容器にも pan-y が届くよう、一覧の枠の子孫すべてに pan-y（!important）を当てる。1 グラフ画面・帯には当てない", async () => {
+    const { container } = renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    const region = (await screen.findAllByRole("region"))[0];
+    const list = region.parentElement as HTMLElement;
+    expect(list.className).toContain("[&_*]:!touch-pan-y");
+    expect(container.querySelector("header")?.closest("[class*='[&_*]:!touch-pan-y']")).toBeNull();
+  });
+
   it("横になぞると全グラフの期間（上の表示）が動き、ダブルタップでリンクの設定に戻る。縦では動かない", async () => {
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
     const card = (await screen.findAllByRole("region"))[0];

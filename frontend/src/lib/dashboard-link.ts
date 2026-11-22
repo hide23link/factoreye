@@ -13,6 +13,7 @@
  * 【誰が使うか】DashboardLinkView（一覧の並べ方・カードの高さ）。
  */
 import type { Widget } from "../types";
+import { graphSensorIds } from "./graph-config";
 import { isGraphWidget } from "./graph-link";
 import { narrowHeightPx, widgetsInReadingOrder } from "./narrow-layout";
 
@@ -54,6 +55,8 @@ export function listHeightCss(widget: Widget, size: GraphSize, headerVar: string
   if (widget.type === "TapeGauge") return "168px";
   if (widget.type === "Gauge") return "150px";
   if (isSmallListWidget(widget)) return "120px";
+  // 達成ストリップ: 説明・目盛り・凡例で約 140px、1 センサー（名前の行と帯）で約 52px（既定の 320px だと、下が空白になる）
+  if (widget.type === "TargetStrip") return `${140 + 52 * Math.max(1, graphSensorIds(widget).length)}px`;
   const px = narrowHeightPx(widget);
   return widget.type === "TrendStack" && !preview ? `max(${px}px, ${graphHeightCss(size, headerVar)})` : `${px}px`;
 }
