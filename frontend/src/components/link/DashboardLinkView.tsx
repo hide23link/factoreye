@@ -15,15 +15,17 @@
  * 【引数（props）】dashboard = 開くダッシュボード、rangeMinutes = リンクの「直近 ◯ 分」、
  * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止め、先頭の数個だけ出す）。
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
+import { useElementSize } from "../../hooks/useElementSize";
 import { useLinkGestures } from "../../hooks/useLinkGestures";
 import { useLinkRows, useSettledPeriod, useToast } from "../../hooks/useLinkView";
 import { useLiveNow } from "../../hooks/useLiveNow";
+import { LinkRangeContext } from "../../hooks/useWidgetRange";
 import { graphColor, graphSensorIds } from "../../lib/graph-config";
 import { graphName, isGraphWidget } from "../../lib/graph-link";
-import { listHeightPx, isSmallListWidget, listWidgets } from "../../lib/dashboard-link";
+import { isSmallListWidget, listHeightCss, listWidgets, type GraphSize } from "../../lib/dashboard-link";
 import { nearestValue } from "../../lib/graph-series";
 import {
   DEFAULT_PICKED_MINUTES,
@@ -46,13 +48,19 @@ import {
 import { maxRangeForBuild } from "../../lib/timeRange";
 import type { DashboardDetail, Sensor, Widget } from "../../types";
 import { AlarmAlertWidget } from "../widgets/AlarmAlertWidget";
+import { DeviceTreeWidget } from "../widgets/DeviceTreeWidget";
+import { FloorPlanWidget } from "../widgets/FloorPlanWidget";
 import { GaugeWidget } from "../widgets/GaugeWidget";
 import { formatYTick, type LinkGraphView } from "../widgets/graph-parts";
 import { MultiSensorComparisonWidget } from "../widgets/MultiSensorComparisonWidget";
+import { ProductionPlanWidget } from "../widgets/ProductionPlanWidget";
 import { ProductionStatusWidget } from "../widgets/ProductionStatusWidget";
 import { SensorGraphWidget } from "../widgets/SensorGraphWidget";
+import { StateTimelineWidget } from "../widgets/StateTimelineWidget";
 import { StatValueWidget } from "../widgets/StatValueWidget";
 import { TapeGaugeWidget } from "../widgets/TapeGaugeWidget";
+import { TargetStripWidget } from "../widgets/TargetStripWidget";
+import { TrendStackWidget } from "../widgets/TrendStackWidget";
 import { LinkScreen } from "./LinkScreen";
 import { LinkTimeSheet } from "./LinkTimeSheet";
 
@@ -66,6 +74,10 @@ import { LinkTimeSheet } from "./LinkTimeSheet";
  * これを減らすには、小さい部品の取得も まとめ API に寄せる改修が要る（ウィジェットの取得の作りを変えるため、今回は見送り）。
  */
 const LIVE_REFRESH_MS = 30_000;
+/** 固定の帯の高さを入れる CSS 変数（カードの高さの計算に使う） */
+const HEADER_VAR = "--link-hdr";
+/** 帯の高さを測れる前（初回の描画）の仮の高さ（px） */
+const HEADER_FALLBACK_PX = 140;
 /** 見本（preview）に出す部品の数 */
 const PREVIEW_COUNT = 4;
 /** 指を置いても指の操作にしない所（ボタンの押下を奪わないため） */
@@ -90,6 +102,19 @@ function ListWidgetBody({ widget, linkView }: { widget: Widget; linkView: LinkGr
       return <ProductionStatusWidget widget={widget} />;
     case "AlarmAlert":
       return <AlarmAlertWidget />;
+    // 期間で動く 3 つは、LinkRangeContext（共通の期間）で動く。期間と関係ない 3 つは、そのまま出す
+    case "TrendStack":
+      return <TrendStackWidget widget={widget} />;
+    case "StateTimeline":
+      return <StateTimelineWidget widget={widget} />;
+    case "TargetStrip":
+      return <TargetStripWidget widget={widget} />;
+    case "ProductionPlan":
+      return <ProductionPlanWidget widget={widget} />;
+    case "FloorPlan":
+      return <FloorPlanWidget widget={widget} />;
+    case "DeviceTree":
+      return <DeviceTreeWidget />;
     default:
       return null;
   }
@@ -170,6 +195,13 @@ export function DashboardLinkView({
   const [pickedMinutes, setPickedMinutes] = useState(DEFAULT_PICKED_MINUTES);
   // 1 グラフ表示に移っているグラフの ID（一覧のときは null）。期間は、移っている間も一覧が持つ
   const [focusId, setFocusId] = useState<string | null>(null);
+  // グラフのカードの大きさ（半分 / 全画面）。選んでも保存しない。横向きは高さが小さいので全画面から始める
+  const [size, setSize] = useState<GraphSize>(() =>
+    typeof window.matchMedia === "function" && window.matchMedia("(orientation: landscape)").matches ? "full" : "half",
+  );
+  const headerRef = useRef<HTMLElement>(null);
+  const { height: measuredHeader } = useElementSize(headerRef);
+  const headerPx = measuredHeader > 0 ? measuredHeader : HEADER_FALLBACK_PX;
   const timeButton = useRef<HTMLButtonElement>(null);
   const toast = useToast();
   const maxMs = maxRangeForBuild();
@@ -179,7 +211,19 @@ export function DashboardLinkView({
   const fetchBounds = periodBounds(fetchPeriod, now);
   const fetchLive = fetchPeriod.endMs === null;
   const linkView: LinkGraphView = { bounds, fetchBounds, live: fetchLive, cursorTime, scrollY: true };
+  // 期間で動くウィジェット（計器グラフ・状態の帯・達成ストリップ）に渡す共通の期間。指を離して決まる取得の範囲（値が同じなら同じオブジェクト）
+  const linkRange = useMemo(() => ({ from: fetchBounds.from, to: fetchBounds.to }), [fetchBounds.from, fetchBounds.to]);
 
+  // 全画面のときは、スクロールが 1 枚ずつ止まるようにする（html に付ける。近くまで来たら吸い付く proximity）
+  useEffect(() => {
+    if (preview || size !== "full") return;
+    const root = document.documentElement;
+    const before = root.style.scrollSnapType;
+    root.style.scrollSnapType = "y proximity";
+    return () => {
+      root.style.scrollSnapType = before;
+    };
+  }, [preview, size]);
   // 1 グラフ表示へ移る前のスクロール位置。一覧に戻ったとき、同じ位置に戻す
   const scrollBeforeFocus = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -289,12 +333,14 @@ export function DashboardLinkView({
   const stepButton = "min-h-8 min-w-9 shrink-0 rounded-full border border-gray-200 bg-white px-3 text-sm font-bold disabled:opacity-60";
 
   return (
+    <LinkRangeContext.Provider value={linkRange}>
     <div
       className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-dvh"}`}
       // ブラウザの拡大・横のスクロールは止め、縦のスクロールだけ受ける（ピンチはこちらで処理する）
-      style={{ touchAction: "pan-y" }}
+      style={{ touchAction: "pan-y", [HEADER_VAR]: `${headerPx}px` } as React.CSSProperties}
     >
       <header
+        ref={headerRef}
         className={`z-20 border-b border-gray-200 bg-white pl-[max(0.625rem,env(safe-area-inset-left))] pb-1.5 pr-[max(0.625rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] ${
           preview ? "" : "sticky top-0 landscape:flex landscape:items-center landscape:gap-2 landscape:pb-1 landscape:pt-[max(0.25rem,env(safe-area-inset-top))]"
         }`}
@@ -349,6 +395,20 @@ export function DashboardLinkView({
         </div>
         <div className={`flex min-h-8 items-center justify-between gap-1.5 text-xs text-gray-500 ${compact ? "landscape:order-3 landscape:min-h-0 landscape:shrink-0" : ""}`}>
           <span className={compact ? "landscape:hidden" : ""}>{statusText(period, now, now)}</span>
+          <div role="group" aria-label="グラフの大きさ" className="ml-auto flex shrink-0 gap-1">
+            {(["half", "full"] as const).map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                disabled={preview}
+                aria-pressed={size === choice}
+                onClick={() => setSize(choice)}
+                className={`min-h-8 rounded-full border px-2.5 text-xs ${size === choice ? "border-blue-600 bg-blue-600 font-bold text-white" : "border-gray-200 bg-white"}`}
+              >
+                {choice === "half" ? "半分" : "全画面"}
+              </button>
+            ))}
+          </div>
           {!isAtLink(period, rangeMinutes) && !preview && (
             <button
               type="button"
@@ -375,7 +435,11 @@ export function DashboardLinkView({
               key={widget.id}
               aria-label={graphName(widget, sensors)}
               className={`flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-2 ${span}`}
-              style={{ height: listHeightPx(widget) }}
+              style={{
+                height: listHeightCss(widget, size, HEADER_VAR, preview),
+                // 全画面のときは、スクロールで 1 枚ずつ止まる位置（帯の下）に合わせる
+                ...(isGraphWidget(widget) && size === "full" && !preview ? { scrollSnapAlign: "start", scrollMarginTop: `${headerPx}px` } : {}),
+              }}
             >
               {isGraphWidget(widget) ? (
                 <GraphCard widget={widget} sensors={sensors} linkView={linkView} preview={preview} onOpen={() => openFocus(widget.id)} />
@@ -400,5 +464,6 @@ export function DashboardLinkView({
         <LinkTimeSheet now={sheetOpenedAt} maxMs={maxMs} pickedMinutes={pickedMinutes} onPick={setPickedMinutes} onJump={applyStart} onClose={closeSheet} />
       )}
     </div>
+    </LinkRangeContext.Provider>
   );
 }

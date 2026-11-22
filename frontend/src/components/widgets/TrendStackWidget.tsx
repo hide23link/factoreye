@@ -23,7 +23,8 @@ import { memo, useEffect, useMemo, useRef, type PointerEvent, type ReactNode } f
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useLiveNow } from "../../hooks/useLiveNow";
-import { effectiveRange, graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
+import { useWidgetRange } from "../../hooks/useWidgetRange";
+import { graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
 import { maxRangeForBuild, resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
   CURSOR_LABEL_HEIGHT,
@@ -67,7 +68,6 @@ import { compareAvailability, describeCompare, shiftPointsForward, shiftRange, t
 import { useCompareReadings } from "../../hooks/useCompareReadings";
 import { bandAt, computeBands, describeBand, toBandSamples, type AlarmBand } from "../../lib/threshold-bands";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
-import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import { requestCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Reading, Sensor, Widget } from "../../types";
@@ -92,8 +92,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   // 今の値は、区間の平均ではなく本当の最新の測定値を使う（全センサー分を 1 回で取る。数値ウィジェットと同じ値・同じ色になる）
   const { data: latest } = useLatestReadings();
-  const dashboardRange = useTimeRangeStore((s) => s.range);
-  const range = effectiveRange(widget, dashboardRange);
+  const range = useWidgetRange(widget);
   const options = graphDataOptions(widget.config, 1);
   const now = useLiveNow(options.refreshMs);
   const resolved = resolveRange(range, now);

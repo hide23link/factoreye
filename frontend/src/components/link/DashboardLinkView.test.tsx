@@ -69,12 +69,11 @@ afterEach(() => {
 });
 
 describe("DashboardLinkView の並び", () => {
-  it("置いた位置の順に並べ、平面図・機器ツリーは出さない", async () => {
+  it("置いた位置の順に、すべての種類（平面図・機器ツリーも）を出す", async () => {
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
 
     const names = (await screen.findAllByRole("region")).map((el) => el.getAttribute("aria-label"));
-    expect(names).toEqual(["ライン1 電力", "温度", "ライン2 電流"]);
-    expect(screen.queryByText("平面図")).not.toBeInTheDocument();
+    expect(names).toEqual(["ライン1 電力", "温度", "平面図", "機器ツリー", "ライン2 電流"]);
     expect(screen.getByText("第2工場")).toBeInTheDocument();
   });
 
@@ -87,8 +86,8 @@ describe("DashboardLinkView の並び", () => {
     expect(regions[1].className).not.toContain("col-span-2");
   });
 
-  it("表示できる部品が無いときは、その旨を出す", () => {
-    renderWithQueryClient(<DashboardLinkView dashboard={{ ...dashboard, widgets: [makeWidget("x", { type: "FloorPlan" })] }} rangeMinutes={30} />);
+  it("部品が 1 つも無いときは、その旨を出す", () => {
+    renderWithQueryClient(<DashboardLinkView dashboard={{ ...dashboard, widgets: [] }} rangeMinutes={30} />);
     expect(screen.getByText("このダッシュボードには、表示できる部品がありません。")).toBeInTheDocument();
   });
 });
@@ -155,6 +154,42 @@ describe("DashboardLinkView の期間（全グラフ共通・保存しない）"
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("DashboardLinkView のグラフの大きさ（半分 / 全画面）", () => {
+  const graphCard = () => screen.getAllByRole("region")[0];
+
+  it("既定は半分。「全画面」で帯を除く画面いっぱいになり、「半分」で戻る。ボタンは 32px 以上。保存しない", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+
+    const group = screen.getByRole("group", { name: "グラフの大きさ" });
+    expect(within(group).getByRole("button", { name: "半分" })).toHaveAttribute("aria-pressed", "true");
+    for (const button of within(group).getAllByRole("button")) expect(button.className).toContain("min-h-8");
+    expect(graphCard().style.height).toContain("/ 2");
+
+    await user.click(within(group).getByRole("button", { name: "全画面" }));
+    expect(within(group).getByRole("button", { name: "全画面" })).toHaveAttribute("aria-pressed", "true");
+    expect(graphCard().style.height).not.toContain("/ 2");
+    expect(graphCard().style.height).toContain("100dvh");
+    expect(graphCard().style.scrollSnapAlign).toBe("start");
+    expect(document.documentElement.style.scrollSnapType).toBe("y proximity");
+    expect(localStorage.length).toBe(0);
+    expect(window.location.search).toBe("");
+
+    await user.click(within(group).getByRole("button", { name: "半分" }));
+    expect(graphCard().style.height).toContain("/ 2");
+    expect(document.documentElement.style.scrollSnapType).toBe("");
+  });
+
+  it("グラフ以外（数値）の高さは、大きさの選択で変わらない", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    const stat = screen.getAllByRole("region")[1];
+    const before = stat.style.height;
+    await user.click(screen.getByRole("button", { name: "全画面" }));
+    expect(stat.style.height).toBe(before);
   });
 });
 
@@ -245,7 +280,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     const user = userEvent.setup();
     window.history.replaceState({ linkFocus: "00000000-0000-4000-8000-000000000003" }, "", "/?dashboard=d1&range=30m");
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
-    expect(await screen.findAllByRole("region")).toHaveLength(3);
+    expect(await screen.findAllByRole("region")).toHaveLength(5);
     expect(window.history.state).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
@@ -253,7 +288,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    expect(screen.getAllByRole("region")).toHaveLength(3);
+    expect(screen.getAllByRole("region")).toHaveLength(5);
   });
 
   it("履歴の印が今のグラフのものでないとき（進む・別の履歴）は、戻るで履歴を戻さず、その場で一覧に戻る", async () => {
@@ -263,7 +298,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     // 印が別のグラフのものになった（例: Safari の「進む」で別の項目に来た）
     window.history.replaceState({ linkFocus: "other" }, "", window.location.href);
     await user.click(screen.getByRole("button", { name: "← 戻る" }));
-    expect(screen.getAllByRole("region")).toHaveLength(3);
+    expect(screen.getAllByRole("region")).toHaveLength(5);
   });
 
   it("⤢で 1 グラフの画面へ（URL は変えない）。「戻る」・画面の戻るボタンで一覧へ。期間は一覧が覚えている", async () => {
@@ -281,7 +316,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20)); // history.back() の popstate を待つ
     });
-    expect(screen.getAllByRole("region")).toHaveLength(3);
+    expect(screen.getAllByRole("region")).toHaveLength(5);
     expect(timeButton()).toHaveTextContent("直近 3 時間");
 
     // 画面の戻るボタン（popstate）でも一覧へ
@@ -293,7 +328,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    expect(screen.getAllByRole("region")).toHaveLength(3);
+    expect(screen.getAllByRole("region")).toHaveLength(5);
     expect(window.location.search).toBe("?dashboard=d1&range=30m");
   });
 });

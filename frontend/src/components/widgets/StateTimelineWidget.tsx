@@ -21,7 +21,8 @@ import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useSensors } from "../.
 import { useElementSize } from "../../hooks/useElementSize";
 import { useInView } from "../../hooks/useInView";
 import { useNow } from "../../hooks/useNow";
-import { effectiveRange, graphSensorIds } from "../../lib/graph-config";
+import { useWidgetRange } from "../../hooks/useWidgetRange";
+import { graphSensorIds } from "../../lib/graph-config";
 import {
   buildSegments,
   buildTimelineCells,
@@ -32,7 +33,6 @@ import {
 } from "../../lib/state-timeline";
 import { resolveRange } from "../../lib/timeRange";
 import { formatTickTime, maxTimeTicks, timeTicks, trendLimits, xPercent } from "../../lib/trend-stack";
-import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Sensor, Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 
@@ -142,9 +142,9 @@ const LEGEND: Array<{ label: string; style: React.CSSProperties }> = [
 export function StateTimelineWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const now = useNow(LIVE_CHART_INTERVAL_MS);
-  const dashboardRange = useTimeRangeStore((s) => s.range);
   const ids = graphSensorIds(widget);
-  const resolved = resolveRange(effectiveRange(widget, dashboardRange), now);
+  const range = useWidgetRange(widget);
+  const resolved = resolveRange(range, now);
   const fromMs = resolved.from;
   const toMs = resolved.to;
   const stopValues = widget.config.stateStopValues ?? {};
