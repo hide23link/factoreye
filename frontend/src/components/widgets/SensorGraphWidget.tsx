@@ -67,6 +67,7 @@ import {
   renderThresholdBands,
   renderThresholdLines,
   type LinkGraphView,
+  graphTouchAction,
 } from "./graph-parts";
 import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
 import { withSharedCursor } from "../../lib/shared-cursor";
@@ -277,7 +278,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
         </div>
       )}
       <div className="flex min-h-0 flex-1 gap-1.5">
-      <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
+      <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: graphTouchAction(linkView) }}>
         <ResponsiveContainer width="100%" height="100%">
           {graphType === "bar" ? (
             <BarChart data={chartData} margin={chartMargin} {...pointerHandlers}>

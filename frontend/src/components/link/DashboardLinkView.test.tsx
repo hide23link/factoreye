@@ -2,7 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimeRangeStore } from "../../store/useTimeRangeStore";
-import { act, fireEvent, renderWithQueryClient, screen, within } from "../../test/test-utils";
+import { act, fireEvent, renderWithQueryClient, screen, waitFor, within } from "../../test/test-utils";
 import type { DashboardDetail, Sensor, Widget } from "../../types";
 import { DashboardLinkView } from "./DashboardLinkView";
 import { SETTLE_MS } from "../../hooks/useLinkView";
@@ -112,6 +112,7 @@ describe("DashboardLinkView の期間（全グラフ共通・保存しない）"
 
     expect(screen.queryByRole("button", { name: "今に戻る" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "3 時間" }));
+    expect(screen.getByRole("button", { name: "今に戻る" }).className).toContain("min-h-8");
     expect(timeButton()).toHaveTextContent("直近 3 時間");
     expect(localStorage.getItem("factoreye_time_range")).toBeNull();
     expect(window.location.search).toBe("?dashboard=d1&range=30m");
@@ -163,6 +164,27 @@ describe("DashboardLinkView の指の操作", () => {
     expect((container.firstChild as HTMLElement).style.touchAction).toBe("pan-y");
   });
 
+  it("グラフの枠まで含めて、実効の touch-action が pan-y（グラフの上からも縦にスクロールできる）。ルートだけ見ない", async () => {
+    const { container } = renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    await screen.findAllByRole("region");
+    // グラフの枠（データを読み込んだあとに出る）が、全グラフで出るまで待つ
+    await waitFor(() => expect(container.querySelectorAll("[data-link-graph] [style*='touch-action']")).toHaveLength(2));
+    // touch-action は祖先との積。グラフの枠の中から根まで、none が 1 つも無いこと
+    const boxes = container.querySelectorAll<HTMLElement>("[data-link-graph]");
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) {
+      const touchActions: string[] = [];
+      for (let el: HTMLElement | null = box; el; el = el.parentElement) {
+        if (el.style.touchAction) touchActions.push(el.style.touchAction);
+      }
+      // グラフの枠の中（SensorGraphWidget・MultiSensorComparisonWidget が recharts の外側に付ける要素）も数える
+      box.querySelectorAll<HTMLElement>("*").forEach((el) => el.style.touchAction && touchActions.push(el.style.touchAction));
+      expect(touchActions.length).toBeGreaterThan(1); // 根と、グラフの中の枠の両方に指定がある
+      expect(touchActions).not.toContain("none");
+      expect(touchActions.every((v) => v === "pan-y")).toBe(true);
+    }
+  });
+
   it("横になぞると全グラフの期間（上の表示）が動き、ダブルタップでリンクの設定に戻る。縦では動かない", async () => {
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
     const card = (await screen.findAllByRole("region"))[0];
@@ -197,6 +219,31 @@ describe("DashboardLinkView の指の操作", () => {
 });
 
 describe("DashboardLinkView の 1 グラフ表示", () => {
+  it("再読込のあと（履歴に前の印が残っている）は、一覧から始まり、印を消す。そのあと開いて「戻る」で一覧に戻れる", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({ linkFocus: "00000000-0000-4000-8000-000000000003" }, "", "/?dashboard=d1&range=30m");
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    expect(await screen.findAllByRole("region")).toHaveLength(3);
+    expect(window.history.state).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
+    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getAllByRole("region")).toHaveLength(3);
+  });
+
+  it("履歴の印が今のグラフのものでないとき（進む・別の履歴）は、戻るで履歴を戻さず、その場で一覧に戻る", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    await user.click(await screen.findByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
+    // 印が別のグラフのものになった（例: Safari の「進む」で別の項目に来た）
+    window.history.replaceState({ linkFocus: "other" }, "", window.location.href);
+    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    expect(screen.getAllByRole("region")).toHaveLength(3);
+  });
+
   it("⤢で 1 グラフの画面へ（URL は変えない）。「戻る」・画面の戻るボタンで一覧へ。期間は一覧が覚えている", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?dashboard=d1&range=30m");

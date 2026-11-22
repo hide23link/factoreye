@@ -56,7 +56,15 @@ import { TapeGaugeWidget } from "../widgets/TapeGaugeWidget";
 import { LinkScreen } from "./LinkScreen";
 import { LinkTimeSheet } from "./LinkTimeSheet";
 
-/** グラフの設定の間隔（既定 30 秒）。一覧は、全グラフで 1 つの「今」を進める */
+/**
+ * 「今」を進める間隔（30 秒）。一覧では、グラフごとの設定の間隔（refreshSeconds）は使わず、全グラフで 30 秒に固定する
+ * （画面の更新間隔の選択 useRefreshStore には従う）。
+ *
+ * 要求数の目安: グラフは、同じ範囲・同じセンサーの取得をまとめ API（downsample-batcher）で束ねるので、1 回の更新で POST 数回（グラフが多くても 50 件ずつ）。
+ * 一方、小さい部品（数値・メーター・計器・稼働ステータス）は、既存のウィジェットを再利用しているため、部品ごとに 5 秒間隔で個別に取る（まとめ取得は使っていない）。
+ * 要求数は部品の数に比例し、例えば小さい部品 20 個なら 5 秒あたり約 20 回（毎秒 4 回前後。稼働ステータスは集計の取得が 2 本増える）。
+ * これを減らすには、小さい部品の取得も まとめ API に寄せる改修が要る（ウィジェットの取得の作りを変えるため、今回は見送り）。
+ */
 const LIVE_REFRESH_MS = 30_000;
 /** 見本（preview）に出す部品の数 */
 const PREVIEW_COUNT = 4;
@@ -107,7 +115,7 @@ function GraphCard({
   return (
     <>
       <div className="flex items-center justify-between gap-2">
-        <b className="min-w-0 truncate text-xs text-gray-500">{graphName(widget, sensors)}</b>
+        <b className="min-w-0 truncate text-xs text-gray-500" title={graphName(widget, sensors)}>{graphName(widget, sensors)}</b>
         <button
           type="button"
           data-no-gesture
@@ -139,6 +147,12 @@ function GraphCard({
   );
 }
 
+/** 今の履歴の項目に付いた、1 グラフ表示の印（開いたグラフの ID）。無ければ null */
+function linkFocusMark(): string | null {
+  const mark = (window.history.state as { linkFocus?: unknown } | null)?.linkFocus;
+  return typeof mark === "string" ? mark : null;
+}
+
 export function DashboardLinkView({
   dashboard,
   rangeMinutes,
@@ -164,12 +178,13 @@ export function DashboardLinkView({
   const fetchPeriod = useSettledPeriod(period, holding);
   const fetchBounds = periodBounds(fetchPeriod, now);
   const fetchLive = fetchPeriod.endMs === null;
-  const linkView: LinkGraphView = { bounds, fetchBounds, live: fetchLive, cursorTime };
+  const linkView: LinkGraphView = { bounds, fetchBounds, live: fetchLive, cursorTime, scrollY: true };
 
   // 1 グラフ表示へ移るとき、履歴を 1 つ足す（URL は変えない）。画面の戻るボタンでも一覧へ戻れる
   const openFocus = (id: string) => {
     try {
-      window.history.pushState({ linkFocus: true }, "", window.location.href);
+      // 履歴の印には、開いたグラフの ID を入れる（印が今のグラフのものかを、戻るときに確かめるため）
+      window.history.pushState({ linkFocus: id }, "", window.location.href);
     } catch {
       // 履歴を触れない環境（プレビューなど）でも、画面の切り替えはできる
     }
@@ -177,14 +192,21 @@ export function DashboardLinkView({
   };
   const closeFocus = () => {
     // 足した履歴があれば、戻る（popstate で一覧に戻る）。無ければ、そのまま一覧に戻す
-    if ((window.history.state as { linkFocus?: boolean } | null)?.linkFocus) window.history.back();
+    if (linkFocusMark() === focusId) window.history.back();
     else setFocusId(null);
   };
   useEffect(() => {
     if (preview) return;
-    const onPopState = () => {
-      if (!(window.history.state as { linkFocus?: boolean } | null)?.linkFocus) setFocusId(null);
-    };
+    // 再読込のあとは、前の印が履歴に残っている（画面は一覧から始まる）。残すと、戻るで 1 グラフ画面に入り直してしまうので消す
+    if (linkFocusMark() !== null) {
+      try {
+        window.history.replaceState(null, "", window.location.href);
+      } catch {
+        // 履歴を触れない環境では、そのまま
+      }
+    }
+    // 戻る・進むで、履歴の印に画面を合わせる（印があればそのグラフ、無ければ一覧）
+    const onPopState = () => setFocusId(linkFocusMark());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [preview]);
@@ -247,17 +269,17 @@ export function DashboardLinkView({
 
   return (
     <div
-      className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-screen"}`}
+      className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-dvh"}`}
       // ブラウザの拡大・横のスクロールは止め、縦のスクロールだけ受ける（ピンチはこちらで処理する）
-      style={{ touchAction: "pan-y" }}
+      style={{ touchAction: "pan-y", overscrollBehaviorY: "contain" }}
     >
       <header
-        className={`z-20 border-b border-gray-200 bg-white px-[max(0.625rem,env(safe-area-inset-left))] pb-1.5 pt-[max(0.5rem,env(safe-area-inset-top))] ${
+        className={`z-20 border-b border-gray-200 bg-white pl-[max(0.625rem,env(safe-area-inset-left))] pb-1.5 pr-[max(0.625rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] ${
           preview ? "" : "sticky top-0"
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <b className="min-w-0 truncate text-sm">{dashboard.name}</b>
+          <b className="min-w-0 truncate text-sm" title={dashboard.name}>{dashboard.name}</b>
           <button
             type="button"
             ref={timeButton}
@@ -304,13 +326,13 @@ export function DashboardLinkView({
             );
           })}
         </div>
-        <div className="flex min-h-7 items-center justify-between gap-1.5 text-xs text-gray-500">
+        <div className="flex min-h-8 items-center justify-between gap-1.5 text-xs text-gray-500">
           <span>{statusText(period, now, now)}</span>
           {!isAtLink(period, rangeMinutes) && !preview && (
             <button
               type="button"
               onClick={backToLink}
-              className="min-h-7 rounded-full border border-blue-600 bg-blue-50 px-2.5 text-xs font-bold text-blue-600"
+              className="min-h-8 rounded-full border border-blue-600 bg-blue-50 px-2.5 text-xs font-bold text-blue-600"
             >
               今に戻る
             </button>
@@ -338,7 +360,7 @@ export function DashboardLinkView({
                 <GraphCard widget={widget} sensors={sensors} linkView={linkView} preview={preview} onOpen={() => openFocus(widget.id)} />
               ) : (
                 <>
-                  {title && <p className="mb-1 shrink-0 truncate text-xs font-semibold text-gray-500">{title}</p>}
+                  {title && <p className="mb-1 shrink-0 truncate text-xs font-semibold text-gray-500" title={title}>{title}</p>}
                   <div className="min-h-0 flex-1 overflow-hidden">
                     <ListWidgetBody widget={widget} linkView={linkView} />
                   </div>

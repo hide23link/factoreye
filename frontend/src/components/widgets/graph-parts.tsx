@@ -28,6 +28,13 @@ export interface LinkGraphView {
   live: boolean;
   /** タップした時刻（縦の点線を引く）。無ければ null */
   cursorTime: number | null;
+  /** ダッシュボード全体の一覧のとき true。グラフの枠の touch-action を pan-y にして、グラフの上からも縦にスクロールできるようにする */
+  scrollY?: boolean;
+}
+
+/** グラフの枠の touch-action。リンクの 1 グラフ画面は none（指の操作を全部こちらで受ける）、一覧・ふつうのダッシュボードは pan-y（縦はスクロール） */
+export function graphTouchAction(linkView: LinkGraphView | undefined): "none" | "pan-y" {
+  return linkView && !linkView.scrollY ? "none" : "pan-y";
 }
 
 /** リンクの画面でタップした時刻の、縦の点線。yAxisId は、縦軸が左右 2 つのときに載せる軸 */

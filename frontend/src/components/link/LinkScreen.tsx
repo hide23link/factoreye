@@ -138,7 +138,7 @@ export function LinkScreen({
             ← 戻る
           </button>
         )}
-        <b className="min-w-0 flex-1 truncate text-sm">{graphName(widget, sensors)}</b>
+        <b className="min-w-0 flex-1 truncate text-sm" title={graphName(widget, sensors)}>{graphName(widget, sensors)}</b>
         <button
           type="button"
           ref={timeButton}
