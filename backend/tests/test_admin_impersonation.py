@@ -9,6 +9,7 @@ import jwt
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from helpers import create_user
 from httpx import ASGITransport
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -60,13 +61,8 @@ def _admin_headers() -> dict[str, str]:
 
 
 async def _register(api: httpx.AsyncClient, email: str) -> dict[str, str]:
-    resp = await api.post(
-        "/api/auth/register",
-        json={"email": email, "password": "password123", "workspaceName": "WS"},
-    )
-    assert resp.status_code == 201, resp.text
-    tokens: dict[str, str] = resp.json()
-    return tokens
+    """利用者とトークンを作る（パスキーの登録の流れは、test_passkeys.py で試す）。"""
+    return await create_user(email)
 
 
 async def _user_id(email: str) -> str:

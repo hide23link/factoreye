@@ -8,6 +8,7 @@
 """
 import os
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -93,8 +94,24 @@ class Settings(BaseSettings):
     auth_mode: AuthMode = AuthMode.DISABLED
     # アクセストークンの有効期限（分）。短いほど安全だが、再ログインが増える
     jwt_access_expire_minutes: int = 15
-    # リフレッシュトークンの有効期限（日）。これを過ぎると、再ログインが必要になる
-    jwt_refresh_expire_days: int = 30
+    # リフレッシュトークンの有効期限（日）。これを過ぎると、再ログインが必要になる。
+    # 使うたびに延びる（ローテーション）ので、毎日使う端末は再ログインが要らない。
+    # パスワードを持たず、パスキーでログインし直す方式のため、長めの 180 日にしている
+    jwt_refresh_expire_days: int = 180
+    # パスキー（WebAuthn）の設定（SaaS 版）。パスキーはサイトのドメインに結び付くので、
+    # 本番でドメインを変えると、全員が登録し直しになる。
+    # 空のままなら、FRONTEND_URL の host（rp_id）と origin から決める
+    # （本番は https://factoreye.hide23.link）
+    webauthn_rp_id: str = ""
+    # 画面の origin（スキーム + host[:port]）。空なら FRONTEND_URL から決める
+    webauthn_origin: str = ""
+    # パスキーの登録画面（OS のダイアログ）に出す、サービスの名前
+    webauthn_rp_name: str = "FactorEye"
+    # 確認メールを送る Resend の API キー（送信のみの権限で、factoreye 専用に作る）。
+    # 空なら、メールを送る API は 503 を返す。.env にだけ置き、ログ・画面に出さない
+    resend_api_key: SecretStr = SecretStr("")
+    # メールの送信元（Resend で認証済みのドメインのアドレス）
+    mail_from: str = "FactorEye <noreply@hide23.link>"
     # 管理者トークンはリフレッシュ不可（期限切れ後は再ログイン）。通常ユーザーより短く保つ
     admin_access_expire_minutes: int = 60
     # 管理者が利用者として閲覧するときのトークンの有効期限（分）。リフレッシュ不可。短く保つ
@@ -146,6 +163,19 @@ class Settings(BaseSettings):
     def _normalize_ingest_auth(cls, value: object) -> object:
         """"OFF" や前後の空白でも設定が通るよう、小文字にそろえる（誤字は起動時にエラー）。"""
         return value.strip().lower() if isinstance(value, str) else value
+
+    @property
+    def passkey_rp_id(self) -> str:
+        """パスキーの rp_id（サイトのドメイン）。WEBAUTHN_RP_ID が空なら、FRONTEND_URL の host。"""
+        return self.webauthn_rp_id or (urlsplit(self.frontend_url).hostname or "localhost")
+
+    @property
+    def passkey_origin(self) -> str:
+        """パスキーを受け付ける origin（スキーム + host[:port]）。空なら FRONTEND_URL から作る。"""
+        if self.webauthn_origin:
+            return self.webauthn_origin.rstrip("/")
+        parts = urlsplit(self.frontend_url)
+        return f"{parts.scheme}://{parts.netloc}"
 
     @model_validator(mode="after")
     def _reject_default_secrets_in_production(self) -> "Settings":

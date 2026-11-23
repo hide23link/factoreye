@@ -43,6 +43,8 @@ export interface AdminUserSummary {
   sensorCount: number;
   readingCount: number;
   lastReadingAt: string | null;
+  /** 登録されている端末（パスキー）の数。0 なら、ログインできない状態（リセット後など） */
+  passkeyCount: number;
 }
 
 /** 利用者の詳細に出す、センサー1件分の集計。 */
@@ -70,11 +72,10 @@ export interface ImpersonationResult {
   expiresAt: string;
 }
 
-/** 利用者の修正の入力。送る項目だけ変わる（省略は変えない）。password を送ると、ログインは全て無効になる。 */
+/** 利用者の修正の入力。送る項目だけ変わる（省略は変えない）。 */
 export interface AdminUserUpdate {
   email?: string;
   plan?: "free" | "pro";
-  password?: string;
 }
 
 /**
@@ -122,6 +123,18 @@ export const updateAdminUser = (token: string, userId: string, data: AdminUserUp
   send<AdminUserDetail>(
     `/api/admin/users/${userId}`,
     { method: "PATCH", body: JSON.stringify(data) },
+    token,
+  );
+
+/**
+ * 利用者のリセット: 全端末のログイン（永久ログインを含む）を終了し、再登録リンクを利用者のアドレスへ送る。
+ * メールを送れたときだけ変更が確定する（送れなければ 502 で、何も変えない）。
+ * deletePasskeys が true なら、登録済みのパスキーも消す（端末を失くしたとき）。
+ */
+export const resetAdminUser = (token: string, userId: string, deletePasskeys: boolean) =>
+  send<{ emailSent: boolean }>(
+    `/api/admin/users/${userId}/reset`,
+    { method: "POST", body: JSON.stringify({ deletePasskeys }) },
     token,
   );
 

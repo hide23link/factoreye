@@ -77,14 +77,17 @@ async def verify_password_async(plain: str, hashed: str) -> bool:
     return await run_blocking_auth(verify_password, plain, hashed)
 
 
-def create_access_token(user_id: UUID, workspace_id: UUID) -> str:
-    """利用者のアクセストークン（JWT）を作る。sub=利用者、wid=ワークスペース、exp=期限。"""
+def create_access_token(user_id: UUID, workspace_id: UUID, via: str | None = None) -> str:
+    """利用者のアクセストークン（JWT）を作る。sub=利用者、wid=ワークスペース、exp=期限。
+
+    via は、ログインの方法（"passkey" | "email" | "recover"）。端末（パスキー）の管理を
+    許すかの判断に使う（メールのログインリンクだけで入った状態では、端末の入れ替えを許さない）。
+    """
     expire = datetime.now(UTC) + timedelta(minutes=settings.jwt_access_expire_minutes)
-    return jwt.encode(
-        {"sub": str(user_id), "wid": str(workspace_id), "exp": expire},
-        settings.jwt_secret,
-        algorithm="HS256",
-    )
+    claims: dict[str, object] = {"sub": str(user_id), "wid": str(workspace_id), "exp": expire}
+    if via is not None:
+        claims["via"] = via
+    return jwt.encode(claims, settings.jwt_secret, algorithm="HS256")
 
 
 def create_impersonation_token(

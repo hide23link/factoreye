@@ -37,11 +37,12 @@ from app.api import (
     admin,  # 管理者用の API（利用者の一覧・編集・なりすまし閲覧など）。SaaS 版だけ
     admin_failback,  # 管理者用: 控えが稼いだデータを本番に書き戻す。SaaS 版だけ
     alarms,  # アラームの一覧を見る・確認済みにする
-    auth,  # 登録・ログイン・ログアウト。SaaS 版だけ
+    auth,  # ログイン状態の更新・ログアウト・自分の情報。SaaS 版だけ
     dashboards,  # ダッシュボード（画面）の作成・取得・変更・削除
     devices,  # 機器（機器ごとのキー）の管理。OSS 版だけ
     ingest,  # 機器からの測定値を受け取る（データの入口）
     migration,  # SaaS から OSS（自分のサーバー）へ、データを引っ越す
+    passkeys,  # パスキーでの登録・ログインと、端末の管理。SaaS 版だけ
     readings,  # 測定値の一覧を見る
     runtime_settings,  # 設定ファイル（.env）を画面から見て・変える。OSS 版だけ
     sensors,  # センサーの登録・変更・削除と、そのセンサーの測定値の取得
@@ -204,7 +205,9 @@ app.include_router(webhooks.router)  # /api/settings/webhooks: Webhook の通知
 # Phase 0.5: AUTH_MODE=multi_tenant（SaaS）のときだけ、ログイン・ユーザー・管理者の API を公開する。
 # self-hosted（OSS）では、これらの API は登録されず、404 になる
 if settings.auth_mode == AuthMode.MULTI_TENANT:
-    app.include_router(auth.router)  # /api/auth/*: 登録・ログイン・ログアウト
+    app.include_router(auth.router)  # /api/auth/refresh・logout と /api/me
+    # /api/auth/passkey/*・/api/passkeys: パスキーの登録・ログイン・端末の管理
+    app.include_router(passkeys.router)
     # 管理者API（管理者はテキストファイルで管理。app/admin_accounts.py 参照）
     app.include_router(admin.router)
     app.include_router(admin_failback.router)  # /api/admin/failback/*: 控えからの書き戻し

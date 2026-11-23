@@ -45,7 +45,6 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
 
   const [email, setEmail] = useState("");
   const [plan, setPlan] = useState<"free" | "pro">("free");
-  const [password, setPassword] = useState("");
   const [confirmEmail, setConfirmEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,17 +69,15 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
     onChanged();
   };
 
-  // 保存: 変えた項目だけを送る（変えていない項目は送らない）。パスワードは、入力があるときだけ送る
+  // 保存: 変えた項目だけを送る（変えていない項目は送らない）
   const saveMutation = useMutation({
     mutationFn: () => {
-      const data: { email?: string; plan?: "free" | "pro"; password?: string } = {};
+      const data: { email?: string; plan?: "free" | "pro" } = {};
       if (detail.data && email !== detail.data.email) data.email = email;
       if (detail.data && plan !== detail.data.plan) data.plan = plan;
-      if (password) data.password = password;
       return updateAdminUser(token, userId, data);
     },
     onSuccess: () => {
-      setPassword("");
       setError(null);
       setMessage("保存しました");
       refreshAll();
@@ -121,7 +118,6 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
   });
 
   const canDelete = !!detail.data && confirmEmail === detail.data.email;
-  const passwordTooShort = password.length > 0 && password.length < 8;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
@@ -230,27 +226,11 @@ export function AdminUserModal({ token, userId, onClose, onChanged, onAuthError 
                     <option value="pro">pro</option>
                   </select>
                 </label>
-                <label className="text-sm text-gray-700">
-                  新しいパスワード（変更時のみ）
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
               </div>
-              <p className="mt-2 text-xs text-gray-500">
-                パスワードを変更すると、そのユーザーの既存のログインは全て無効になります。
-              </p>
-              {passwordTooShort && (
-                <p className="mt-2 text-sm text-red-600">パスワードは8文字以上にしてください</p>
-              )}
               <div className="mt-3 flex items-center gap-3">
                 <button
                   type="button"
-                  disabled={saveMutation.isPending || passwordTooShort}
+                  disabled={saveMutation.isPending}
                   onClick={() => saveMutation.mutate()}
                   className="rounded bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
                 >

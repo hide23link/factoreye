@@ -2,6 +2,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from helpers import create_user
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -202,13 +203,9 @@ async def test_purge_refresh_tokens_keeps_other_users_token_usable(client) -> No
         test_app = FastAPI()
         test_app.include_router(auth_module.router)
         async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as c:
-            reg = await c.post("/api/auth/register", json={
-                "email": f"rt-{uuid4().hex[:6]}@example.com",
-                "password": "password123",
-                "workspaceName": "RtWS",
-            })
-            assert reg.status_code == 201
-            refresh_token = reg.json()["refreshToken"]
+            refresh_token = (await create_user(f"rt-{uuid4().hex[:6]}@example.com", "RtWS"))[
+                "refreshToken"
+            ]
 
             async with AsyncSession(engine) as session:
                 u, w = await _create_user_ws(session)
@@ -275,13 +272,9 @@ async def test_sensor_limit_enforced(client) -> None:  # type: ignore[no-untyped
         async with httpx.AsyncClient(
             transport=ASGITransport(app=test_app), base_url="http://test"
         ) as c:
-            reg = await c.post("/api/auth/register", json={
-                "email": f"limit-{uuid4().hex[:6]}@example.com",
-                "password": "password123",
-                "workspaceName": "LimitWS",
-            })
-            assert reg.status_code == 201
-            token = reg.json()["accessToken"]
+            token = (await create_user(f"limit-{uuid4().hex[:6]}@example.com", "LimitWS"))[
+                "accessToken"
+            ]
             headers = {"Authorization": f"Bearer {token}"}
 
             # 10個まで作成

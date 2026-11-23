@@ -1,34 +1,33 @@
 """認証 API（Phase 0.5 / AUTH_MODE=multi_tenant 時のみ main.py でマウント）。
 
 エンドポイント:
-  POST /api/auth/register  → User + Workspace 作成、トークン発行
-  POST /api/auth/login     → 認証、トークン発行
   POST /api/auth/refresh   → リフレッシュトークンでアクセストークン更新
   POST /api/auth/logout    → リフレッシュトークン失効
   GET  /api/me             → 現在のユーザー + ワークスペース情報
 
-【呼ばれ方】画面のログイン・ログアウトが呼ぶ。
-本文は JSON（例: {"email": "...", "password": "..."}）。
-アクセストークンは短い期限（15分）、リフレッシュトークンは長い期限（30日）。詳細は app/auth.py。
+登録とログインは、パスキーで行う（api/passkeys.py）。パスワードは使わない。
+（以前の POST /api/auth/register と /api/auth/login は、パスキー導入で廃止した）
+
+【呼ばれ方】画面のログイン状態の維持・ログアウトが呼ぶ。本文は JSON（例: {"refreshToken": "..."}）。
+アクセストークンは短い期限（15分）、リフレッシュトークンは長い期限（180日。使うたびに延びる）。
+詳細は app/auth.py。
 """
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import EmailStr, Field, field_validator
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import func, select
+from sqlalchemy import update
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth as auth_utils
 from app.config import AuthMode, settings
 from app.db.models import RefreshToken, User, Workspace
 from app.db.session import get_session
-from app.rate_limit import limiter
-from app.schemas import CamelModel, check_password_bytes
+from app.schemas import CamelModel
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -38,32 +37,6 @@ _bearer = HTTPBearer()
 
 
 # ── スキーマ ──────────────────────────────────────────────────
-
-
-def _normalize_email_input(value: object) -> object:
-    """メールの入力を、形式の検証より前に正規化する（前後の空白・大文字小文字）。"""
-    return auth_utils.normalize_email(value) if isinstance(value, str) else value
-
-
-class RegisterRequest(CamelModel):
-    """新規登録の入力。メール・パスワード（8 文字以上）・ワークスペースの名前。"""
-
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=100)
-    workspace_name: str = Field(min_length=1, max_length=100)
-
-    _normalize_email = field_validator("email", mode="before")(_normalize_email_input)
-    # bcrypt は 72 バイトまで。ログインの入力にはかけない（長すぎる場合は 401 にそろえる）
-    _check_password_bytes = field_validator("password")(check_password_bytes)
-
-
-class LoginRequest(CamelModel):
-    """ログインの入力。"""
-
-    email: EmailStr
-    password: str
-
-    _normalize_email = field_validator("email", mode="before")(_normalize_email_input)
 
 
 class TokenResponse(CamelModel):
@@ -91,12 +64,15 @@ class MeResponse(CamelModel):
     workspace_id: UUID
     workspace_name: str
     plan: str
+    # ログインの方法: "passkey" | "email" | "recover"。画面が、端末の管理を出すかの判断に使う
+    # （古いログインや、管理者の閲覧のトークンは None）
+    login_method: str | None = None
 
 
 # ── 内部ヘルパー ──────────────────────────────────────────────
 
 
-def _require_multi_tenant() -> None:
+def require_multi_tenant() -> None:
     """SaaS モードでないなら 501。self-hosted では、認証の API は使えない。"""
     if settings.auth_mode != AuthMode.MULTI_TENANT:
         raise HTTPException(
@@ -110,7 +86,7 @@ async def _get_current_user_workspace(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> tuple[User, Workspace]:
     """アクセストークンから、利用者とワークスペースを取り出す。無効なら 401。"""
-    _require_multi_tenant()
+    require_multi_tenant()
     error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="invalid or expired token",
@@ -137,111 +113,6 @@ async def _get_current_user_workspace(
 # ── エンドポイント ────────────────────────────────────────────
 
 
-# 登録・ログインは、接続元ごとに 1 分あたりの回数を制限する（総当たり・大量登録の防止）
-@router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("10/minute")
-async def register(
-    request: Request,  # slowapi がレート制限キーの取得に使う
-    body: RegisterRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> TokenResponse:
-    """新規登録: 利用者とワークスペースを作り、トークンを返す（1つのトランザクションで）。"""
-    _require_multi_tenant()
-
-    # 重複チェック
-    # 正規化導入前から DB にある、大文字を含むメールとも突き合わせるため lower() で比べる
-    existing = await session.exec(select(User).where(func.lower(User.email) == body.email))
-    if existing.first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already registered")
-
-    try:
-        password_hash = await auth_utils.hash_password_async(body.password)
-        user = User(email=body.email, password_hash=password_hash)
-        session.add(user)
-        await session.flush()  # user.id を確定させてから workspace に使う
-
-        workspace = Workspace(name=body.workspace_name, owner_id=user.id)
-        session.add(workspace)
-        await session.flush()
-
-        # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
-        user_id, workspace_id = user.id, workspace.id
-        raw, token_hash = auth_utils.create_refresh_token()
-        session.add(
-            RefreshToken(
-                user_id=user_id,
-                workspace_id=workspace_id,
-                token_hash=token_hash,
-                expires_at=auth_utils.refresh_token_expiry(),
-            )
-        )
-        await session.commit()
-    except IntegrityError:
-        # 同時登録で、上の事前確認をすり抜けて users.email の一意制約に当たった場合
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="email already registered"
-        ) from None
-
-    return TokenResponse(
-        access_token=auth_utils.create_access_token(user_id, workspace_id),
-        refresh_token=raw,
-    )
-
-
-@router.post("/auth/login", response_model=TokenResponse)
-@limiter.limit("20/minute")
-async def login(
-    request: Request,  # slowapi がレート制限キーの取得に使う
-    body: LoginRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> TokenResponse:
-    """ログイン: メールとパスワードを確かめて、トークンを返す。
-
-    メールが無い場合と、パスワードが違う場合は、同じ文言（同じ 401）で返す。
-    利用者の存在を推測させないため。
-    """
-    _require_multi_tenant()
-
-    result = await session.exec(select(User).where(func.lower(User.email) == body.email))
-    user = result.first()
-    # 未登録でも bcrypt の照合（ダミーのハッシュ）を走らせ、応答時間で登録の有無を推測させない。
-    # 照合は別スレッドで実行する（イベントループを止めない）
-    stored_hash = user.password_hash if user is not None else auth_utils.DUMMY_PASSWORD_HASH
-    password_ok = await auth_utils.verify_password_async(body.password, stored_hash)
-    if user is None or not password_ok:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid email or password",
-        )
-
-    # ユーザーの最初のワークスペースを使う（Phase 0.5: 1ユーザー=1ワークスペース前提）
-    ws_result = await session.exec(select(Workspace).where(Workspace.owner_id == user.id))
-    workspace = ws_result.first()
-    if workspace is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="no workspace found"
-        )
-
-    # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
-    user_id, workspace_id = user.id, workspace.id
-    raw, token_hash = auth_utils.create_refresh_token()
-    session.add(
-        RefreshToken(
-            user_id=user_id,
-            workspace_id=workspace_id,
-            token_hash=token_hash,
-            expires_at=auth_utils.refresh_token_expiry(),
-        )
-    )
-    await session.commit()
-
-    return TokenResponse(
-        access_token=auth_utils.create_access_token(user_id, workspace_id),
-        refresh_token=raw,
-    )
-
-
 @router.post("/auth/refresh", response_model=TokenResponse)
 async def refresh(
     body: RefreshRequest,
@@ -251,7 +122,7 @@ async def refresh(
 
     使ったリフレッシュトークンは、その場で無効にする（ローテーション。盗まれても一度きり）。
     """
-    _require_multi_tenant()
+    require_multi_tenant()
 
     token_hash = auth_utils.hash_refresh_token(body.refresh_token)
     result = await session.exec(
@@ -262,7 +133,10 @@ async def refresh(
     )
     stored = result.first()
 
-    if stored is None or stored.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+    now = datetime.now(UTC)
+    if stored is None or (
+        stored.expires_at is not None and stored.expires_at.replace(tzinfo=UTC) < now
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or expired refresh token",
@@ -270,24 +144,46 @@ async def refresh(
 
     # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
     user_id, workspace_id = stored.user_id, stored.workspace_id
+    login_method = stored.login_method
+    stored_id, permanent = stored.id, stored.expires_at is None
+    series_id, device_name, started_at = stored.series_id, stored.device_name, stored.started_at
 
-    # ローテーション: 古いトークンを失効させ新しいトークンを発行
-    stored.revoked = True
-    session.add(stored)
+    # ローテーション: 古いトークンを失効させ新しいトークンを発行。
+    # 失効は「まだ有効なら」の条件つきの 1 文で行い、同時に 2 回更新されても、片方だけが通る
+    # （有効なトークンが 2 本できない）
+    revoked = await session.execute(
+        update(RefreshToken)
+        .where(col(RefreshToken.id) == stored_id, col(RefreshToken.revoked).is_(False))
+        .values(revoked=True)
+        .returning(col(RefreshToken.id))
+    )
+    if revoked.first() is None:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or expired refresh token",
+        )
 
     raw, new_hash = auth_utils.create_refresh_token()
+    # 永久ログイン（期限なし）の端末は、新しいトークンも期限なしで、端末の情報を引き継ぐ。
+    # 通常のログインは、これまでどおり、新しいトークンから 180 日（使うたびに延びる）
     session.add(
         RefreshToken(
             user_id=user_id,
             workspace_id=workspace_id,
             token_hash=new_hash,
-            expires_at=auth_utils.refresh_token_expiry(),
+            expires_at=None if permanent else auth_utils.refresh_token_expiry(),
+            login_method=login_method,
+            series_id=series_id,
+            device_name=device_name,
+            started_at=started_at,
+            last_used_at=now if series_id is not None else None,
         )
     )
     await session.commit()
 
     return TokenResponse(
-        access_token=auth_utils.create_access_token(user_id, workspace_id),
+        access_token=auth_utils.create_access_token(user_id, workspace_id, via=login_method),
         refresh_token=raw,
     )
 
@@ -298,7 +194,7 @@ async def logout(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """ログアウト: リフレッシュトークンを無効にする。既に無効・存在しなくても、エラーにはしない。"""
-    _require_multi_tenant()
+    require_multi_tenant()
 
     token_hash = auth_utils.hash_refresh_token(body.refresh_token)
     result = await session.exec(
@@ -314,12 +210,16 @@ async def logout(
 @router.get("/me", response_model=MeResponse)
 async def me(
     user_workspace: Annotated[tuple[User, Workspace], Depends(_get_current_user_workspace)],
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
 ) -> MeResponse:
     user, workspace = user_workspace
+    # 上の依存で、トークンは検証済み（ここでは、ログインの方法だけを読む）
+    login_method = auth_utils.decode_access_token(credentials.credentials).get("via")
     return MeResponse(
         user_id=user.id,
         email=user.email,
         workspace_id=workspace.id,
         workspace_name=workspace.name,
         plan=workspace.plan,
+        login_method=login_method,
     )

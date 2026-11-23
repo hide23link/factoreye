@@ -63,7 +63,8 @@ flowchart LR
 - `notification_settings`: Discord Webhook URL（重故障・軽故障）、重故障の再通知
 - `webhook_subscriptions`: イベント種別、送信先、有効/無効
 - `ingest_devices`: 機器ごとのキー（self-hosted のみ）。SHA-256 のハッシュだけを保存
-- `users` / `workspaces` / `refresh_tokens`: 認証（SaaS のみ）
+- `users` / `workspaces` / `refresh_tokens`: 認証（SaaS のみ）。`refresh_tokens.expires_at` が NULL のものは、キオスク用の永久ログイン
+- `passkeys` / `email_tokens` / `auth_challenges`: パスキー認証（SaaS のみ）。パスキーは公開鍵だけを保存し、メールのリンクのトークンはハッシュだけを保存する
 
 テナント列（`workspace_id`）は SaaS で使います（self-hosted は `NULL`）。
 
@@ -95,9 +96,13 @@ flowchart LR
 | GET / PUT | `/api/settings/display` | 画面の明るさの、全員の初期値（`{"defaultTheme": "dark" \| "light" \| "system"}`。SaaS はワークスペースごと） |
 | GET / POST / PUT / DELETE | `/api/settings/webhooks` | Webhook 購読 |
 | GET / POST | `/api/settings/migration/*` | データ移行（§10.1） |
-| POST | `/api/auth/register` `/login` `/refresh` `/logout` | 認証（SaaS） |
-| GET | `/api/me` | 自分の情報（SaaS） |
-| `/api/admin/*` | 管理者 API（SaaS、§10） | 管理者トークン |
+| POST | `/api/auth/refresh` `/logout` | ログイン状態の更新・終了（SaaS） |
+| POST | `/api/auth/email/request` `/email/login-request` `/email/login` | メールのリンク（登録・端末の再登録・ログインリンク）（SaaS、§10） |
+| POST | `/api/auth/passkey/register/begin\|finish` `/login/begin\|finish` | パスキーでの登録・ログイン（SaaS、§10） |
+| GET / POST / PATCH / DELETE | `/api/passkeys` `/api/passkeys/register/begin\|finish` | 端末（パスキー）の管理（SaaS、§10） |
+| GET / POST / DELETE | `/api/sessions/kept` | 永久ログイン（キオスク用）の端末（SaaS、§10） |
+| GET | `/api/me` | 自分の情報とログインの方法（SaaS） |
+| `/api/admin/*` | 管理者 API（SaaS、§10。利用者の「リセット」を含む） | 管理者トークン |
 
 - センサー一覧は `ETag` を返す（`If-None-Match` が一致すれば 304）
 - 版は件数と `updated_at` から作る。作成・更新・削除では、どちらかを必ず変える
@@ -332,9 +337,30 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 
 ## 10. 認証・SaaS モード（`AUTH_MODE=multi_tenant`）
 
-- **認証**: メール + パスワード（bcrypt）+ JWT
-  - アクセストークン 15 分、リフレッシュトークン 30 日（使うたびにローテーション）
+- **認証**: パスキー（WebAuthn）+ JWT。**パスワードは使わない・保存しない**
+  - アクセストークン 15 分、リフレッシュトークン 180 日（使うたびにローテーションして、期限も延びる）
   - データはワークスペース単位で分離する
+  - 検証は py_webauthn に任せ、署名・origin・rp_id・チャレンジ・署名回数の巻き戻しをライブラリが確かめる
+- **登録**: メールアドレスだけ → 確認メールのリンク（24 時間・1 回、`#register=…`）→ この端末にパスキーを登録。
+  **メールを確認するまで、利用者は作らない**。ワークスペース名はメールの @ の前から自動で付ける（設定で変えられる）
+- **ログイン**: 「パスキーでログイン」だけ（discoverable credential。アドレスは聞かず、端末の選択画面でアカウントを選ぶ）
+  - WebAuthn の `user.id` は利用者 ID（UUID）のバイト列、`user.name` はメールアドレス。同じ端末で、アカウントごとのパスキーを別々に持てる（上書きされない）
+- **端末（パスキー）の管理**（設定 → ログイン端末）: 一覧・追加・名前変更・削除。**最後の 1 台は削除できない**（アカウントごとに数える）。1 人 10 台まで
+- **メールのログインリンク**（パスキーが使えない端末用の代わり）: 15 分・1 回（`#login=…`）。ログインだけができ、**パスキーの追加・削除はできない**（403）。
+  端末の管理は、パスキーでログインした状態か、再登録リンク（recover）で入った状態だけ。依頼は、接続元ごとに 1 時間に 3 回、同じアドレスへ 1 時間に 3 通まで。登録済みかどうかは、応答・時間で区別させない
+- **端末を失くしたとき**: メールの再登録リンク（1 時間・1 回、`#recover=…`）から、新しい端末のパスキーを登録する（今のログインは変わらない）
+- **キオスク用の永久ログイン**: 利用者が選んだ端末だけ、リフレッシュトークンを期限なし（`expires_at` が NULL）にできる。
+  ローテーションしても、新しいトークンも期限なしで、端末の情報を引き継ぐ。止めるのは、利用者の「ログインを終了」、ログアウト、管理者のリセット。
+  **リスク: 端末を盗まれると、終了するまで、その人が利用者の全権限を使い続けられる**（選ぶ画面にも書く）。既定は、通常の 180 日のまま
+- **管理者のリセット**（`POST /api/admin/users/{id}/reset`、管理画面の利用者一覧の「リセット」）: リセット前に発行した未使用のリンク（登録・ログイン・再登録）と途中のチャレンジをすべて無効にし、
+  全端末のログイン（永久ログインを含む）を失効させ、再登録リンクを利用者へ送る。登録済みのパスキーも削除するかは、毎回選べる（既定は削除）。
+  **メールの送信を待って結果を返し、送れなかったら何も確定しない（パスキーの削除も取り消す）で 502 を返す**。アドレスごとの 3 通/時の数え方には入れず（第三者が依頼を重ねても止められない）、管理者の接続元ごとの回数の制限（1 分 10 回）と操作ログで守る。古いパスワードのハッシュは NULL にする（パスキーへ移したあとは持たない）。
+  今のアクセストークンは、最長 15 分で切れる。管理者が、利用者のパスキー・データの中身を見ることはない。実行はログに残す
+- **メールの送信**: Resend（`noreply@hide23.link`）。`RESEND_API_KEY` が空なら、メールを送る API は 503。
+  **利用者向けの依頼（登録・再登録・ログインリンク）は、登録の有無を区別させないため、送信に失敗しても、利用者には成功と同じ応答を返す。失敗は運用のログに残す**（管理者のリセットだけは、失敗を管理者に見せる）。
+  依頼は、接続元ごとに 1 時間に 3 回（登録・再登録・ログインリンクとも）、同じアドレスへは 1 時間に 3 通まで。リンクの URL は `#` 以降にトークンを置く（サーバーのアクセスログに残さない）
+- **パスキーはドメイン（`factoreye.hide23.link`）に結び付く**。ドメインを変えると、全員が登録し直しになる（`FRONTEND_URL` の host が rp_id）
+- **既存のパスワードの利用者**: 管理者のリセットで再登録リンクを送り、パスキーへ移す。`/api/auth/register`・`/api/auth/login` は廃止した
 - **Free Tier**
   - センサーは 1 ワークスペース 10 個まで（11 個目は 402）
   - 測定値は 14 日超を毎日 03:00（UTC）に削除（self-hosted は既定で無期限。`READINGS_ROLLUP_DAYS` で、古い分を 1 分にまとめられる）
@@ -429,7 +455,10 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 | `AUTH_MODE` | `disabled` | `multi_tenant` で SaaS |
 | `ADMIN_PASSWORD_HASH` | 空 | 配布版の管理パスワード（bcrypt）。空なら画面から設定変更できない |
 | `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Webhook の社内ネットワーク送信を許可 |
-| `JWT_ACCESS_EXPIRE_MINUTES` / `JWT_REFRESH_EXPIRE_DAYS` | `15` / `30` | トークンの有効期限 |
+| `JWT_ACCESS_EXPIRE_MINUTES` / `JWT_REFRESH_EXPIRE_DAYS` | `15` / `180` | トークンの有効期限（リフレッシュは使うたびに延びる。永久ログインは期限なし） |
+| `RESEND_API_KEY` | 空 | 登録・ログインのメール（Resend）の API キー（送信のみ・factoreye 専用）。SaaS のみ。空ならメールを送る API は 503 |
+| `MAIL_FROM` | `FactorEye <noreply@hide23.link>` | メールの送信元（Resend で認証済みのドメイン）。SaaS のみ |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `WEBAUTHN_RP_NAME` | 空 / 空 / `FactorEye` | パスキーの rp_id と origin。空なら `FRONTEND_URL` から決める。変えると全員が登録し直し。SaaS のみ |
 | `ADMIN_CREDENTIALS_FILE` | `admin/admins.txt` | 管理者アカウントのファイル |
 | `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（変更には再ビルド） |
 
@@ -458,6 +487,10 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 
 ## 13. 既知の制限
 
+- SaaS のパスキー認証
+  - 管理者のリセット・ログアウトのあとも、今のアクセストークン（15 分）は切れるまで使える
+  - メールのログインリンクで入った状態は、端末の管理ができない。再登録リンクで入った状態は、そのログインが続く間、端末の管理ができる
+  - 負荷試験エミュレータ（`loadtest/`）は、SaaS の `/api/auth/register`・`/login` を使っていたため、パスキー導入後はそのままでは動かない（試験用のトークンを渡す方法に直す必要がある）
 - 取り込みの制限は IP 単位
   - ゲートウェイ 1 台に多数のセンサーを束ねると、制限に当たりやすい
 - Webhook は再試行せず、送信待ちが上限を超えると捨てる。DNS rebinding は防ぎきれていない
