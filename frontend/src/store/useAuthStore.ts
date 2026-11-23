@@ -11,6 +11,7 @@
  */
 import { create } from "zustand";
 
+import { resetAccountScopedState } from "../lib/account-reset";
 import { clearImpersonation, type ImpersonationInfo } from "../lib/impersonation";
 import type { MeResponse } from "../types";
 
@@ -42,12 +43,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   impersonation: null,
 
   setAuth: (accessToken, refreshToken, me) => {
+    // 前と別のアカウントになるとき（ログアウトを通らずに切り替わる経路）も、前のデータを残さない。
+    // ページを開き直したときの復元（前の me が無い）や、同じ利用者の再ログインでは、消さない
+    const previous = get().me;
+    if (previous && previous.userId !== me.userId) resetAccountScopedState();
     // localStorage が使えない環境（プライベートブラウズ等）は無視
     try { localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken); } catch { /* noop */ }
     set({ accessToken, me, isInitializing: false, impersonation: null });
   },
 
   setImpersonated: (info, me) => {
+    // 閲覧する利用者のデータに、前のキャッシュ・画面の状態を混ぜない
+    resetAccountScopedState();
     set({ accessToken: info.accessToken, me, isInitializing: false, impersonation: info });
   },
 
@@ -63,6 +70,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } else {
       try { localStorage.removeItem(REFRESH_TOKEN_KEY); } catch { /* noop */ }
     }
+    // ログアウト・強制ログアウト・閲覧の終了のどれでも、前のアカウントのデータを残さない
+    resetAccountScopedState();
     set({ accessToken: null, me: null, isInitializing: false, impersonation: null });
   },
 
