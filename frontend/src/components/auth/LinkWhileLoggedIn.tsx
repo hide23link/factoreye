@@ -3,8 +3,9 @@
  *
  * リンクの処理（パスキーの登録・ログイン）は、今のログインとは別のアカウントのためのことが多い。
  * そのまま進めると、今のアカウントのログインと混ざるので、先にこの画面で確認する。
- * - 「続ける」: 今のログインを終了して、リンクの処理に進む（呼ぶ側が、ログインを終了する）
- * - 「やめる」: リンクを開かずに、今の画面（ダッシュボード）に戻る
+ * - 「続ける」: 今のログインを終了して、リンクの処理（登録する・端末を登録する・ログインする）に進む
+ *   （呼ぶ側が、ログインを終了する。ログインしたまま（キオスク用）の設定も、一緒に終わる）
+ * - 「やめる」: リンクを開かずに、今の画面（ダッシュボード）に戻る（知らないメールのリンクのとき）
  * リンクを開いただけでは、何も終わらない（トークンも、ここでは使わない）。
  *
  * 【誰が使うか】App.tsx が、ログイン中に URL の # にリンクがあるときだけ出す。
@@ -26,6 +27,13 @@ const KIND_LABEL: Record<AuthLinkKind, string> = {
   login: "ログインのリンク",
 };
 
+// 続けたときに行うこと（リンクの種類ごと）
+const KIND_ACTION: Record<AuthLinkKind, string> = {
+  register: "登録する",
+  recover: "端末を登録する",
+  login: "ログインする",
+};
+
 export function LinkWhileLoggedIn({ kind, currentEmail, onContinue, onCancel }: LinkWhileLoggedInProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
@@ -40,7 +48,11 @@ export function LinkWhileLoggedIn({ kind, currentEmail, onContinue, onCancel }: 
           でログイン中です。
         </p>
         <p className="text-sm text-gray-700">
-          続けると、<b>今のログインを終了</b>して、リンクの処理に進みます。別のアカウントのリンクなら、続けてください。
+          続けると、<b>今のログインを終了</b>して、{KIND_ACTION[kind]}ための画面に進みます。
+          別のアカウントのリンクなら、続けてください。知らないメールのリンクなら「やめる」を押してください。
+        </p>
+        <p className="text-xs text-gray-500">
+          この端末が「ログインしたままにする（キオスク用）」の設定なら、続けると、その設定も終わります。
         </p>
         <div className="flex flex-wrap justify-end gap-2">
           <button

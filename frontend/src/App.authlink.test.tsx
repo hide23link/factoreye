@@ -70,16 +70,21 @@ function open(hash: string) {
 
 describe("ログイン中にメールのリンクを開いたとき", () => {
   it.each([
-    ["#recover=abcDEF123456", "端末の再登録のリンク"],
-    ["#register=abcDEF123456", "新規登録のリンク"],
-    ["#login=abcDEF123456", "ログインのリンク"],
-  ])("%s は、ダッシュボードではなく確認の画面を出す（今のアドレスと、ログインを終了することを伝える）", (hash, label) => {
+    ["#recover=abcDEF123456", "端末の再登録のリンク", "端末を登録するための画面"],
+    ["#register=abcDEF123456", "新規登録のリンク", "登録するための画面"],
+    ["#login=abcDEF123456", "ログインのリンク", "ログインするための画面"],
+  ])("%s は、ダッシュボードではなく確認の画面を出す（今のアドレス・終了すること・種類別の行き先・やめる案内）", (hash, label, action) => {
     open(hash);
 
-    expect(screen.getByRole("dialog", { name: "メールのリンクを開こうとしています" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "メールのリンクを開こうとしています" });
+    expect(dialog).toBeInTheDocument();
     expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.getByText("current@example.com")).toBeInTheDocument();
     expect(screen.getByText("今のログインを終了")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(action);
+    // 知らないリンクのときの案内と、キオスク（ログインしたまま）の設定も終わることの注意
+    expect(dialog).toHaveTextContent("知らないメールのリンクなら「やめる」を押してください。");
+    expect(dialog).toHaveTextContent("ログインしたままにする（キオスク用）」の設定なら、続けると、その設定も終わります");
     // 開いただけでは、何も終わらず、リンクも使わない
     expect(useAuthStore.getState().accessToken).toBe("access");
     expect(api.logout).not.toHaveBeenCalled();
