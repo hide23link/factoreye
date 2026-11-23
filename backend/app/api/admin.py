@@ -7,7 +7,8 @@
   GET    /api/admin/overview         → 全体の件数・DB使用量
   GET    /api/admin/users            → 全ユーザーの一覧（センサー数・測定件数・最終測定時刻）
   GET    /api/admin/users/{id}       → ユーザー詳細（ワークスペースのセンサー別状況）
-  PATCH  /api/admin/users/{id}       → メール・プラン・パスワードの修正
+  PATCH  /api/admin/users/{id}       → メール・プランの修正
+  POST   /api/admin/users/{id}/reset → リセット（全端末のログイン終了＋再登録リンクを送る）
   DELETE /api/admin/users/{id}       → ユーザーと関連データを物理削除
   GET    /api/admin/ingest-limit     → 取り込みのレート制限の状態（期限付き解除の有無）
   PUT    /api/admin/ingest-limit     → 期限付きで解除する／解除を止める
@@ -21,15 +22,16 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import EmailStr, Field, field_validator
 from sqlalchemy import delete, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app import admin_accounts, ingest_limit_toggle
+from app import admin_accounts, ingest_limit_toggle, mailer
 from app import auth as auth_utils
+from app import passkey_service as passkeys
 from app.api.deps import require_admin
 from app.config import settings
 from app.db.models import (
@@ -37,6 +39,7 @@ from app.db.models import (
     AlarmStatus,
     Dashboard,
     NotificationSettings,
+    Passkey,
     Reading,
     RefreshToken,
     Sensor,
@@ -46,7 +49,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.rate_limit import limiter
-from app.schemas import CamelModel, check_password_bytes
+from app.schemas import CamelModel
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger(__name__)
@@ -91,6 +94,8 @@ class AdminUserSummary(CamelModel):
     sensor_count: int
     reading_count: int
     last_reading_at: datetime | None
+    # 登録されている端末（パスキー）の数。0 なら、ログインできない状態（リセット後など）
+    passkey_count: int
 
 
 class AdminSensorSummary(CamelModel):
@@ -122,11 +127,18 @@ class AdminUserUpdate(CamelModel):
         return auth_utils.normalize_email(value) if isinstance(value, str) else value
 
     plan: Literal["free", "pro"] | None = None
-    # 指定時はパスワードを再設定し、既存のリフレッシュトークンを全て失効させる
-    password: str | None = Field(default=None, min_length=8, max_length=100)
 
-    # bcrypt は 72 バイトまで（超えたら 422）
-    _check_password_bytes = field_validator("password")(check_password_bytes)
+
+class AdminResetRequest(CamelModel):
+    """利用者のリセットの入力。登録済みのパスキーも消すか（端末を失くしたときの既定は「消す」）。"""
+
+    delete_passkeys: bool = True
+
+
+class AdminResetResult(CamelModel):
+    """リセットの結果。メールは応答のあとに送るので、「送る手配をした」ことだけを返す。"""
+
+    email_queued: bool = True
 
 
 class IngestLimitStatus(CamelModel):
@@ -201,6 +213,16 @@ async def _load_user_summaries(
             if ws_id is not None:
                 reading_stats[ws_id] = (count, last_at)
 
+    passkey_counts: dict[UUID, int] = {}
+    user_ids = [user.id for user, _ in rows]
+    if user_ids:
+        passkey_rows = await session.exec(
+            select(col(Passkey.user_id), func.count(col(Passkey.id)))
+            .where(col(Passkey.user_id).in_(user_ids))
+            .group_by(col(Passkey.user_id))
+        )
+        passkey_counts = {uid: count for uid, count in passkey_rows.all()}
+
     summaries: list[AdminUserSummary] = []
     for user, ws in rows:
         ws_id = ws.id if ws is not None else None
@@ -218,6 +240,7 @@ async def _load_user_summaries(
                 sensor_count=sensor_counts.get(ws_id, 0) if ws_id else 0,
                 reading_count=stat[0],
                 last_reading_at=stat[1],
+                passkey_count=passkey_counts.get(user.id, 0),
             )
         )
     return summaries
@@ -433,10 +456,10 @@ async def update_user(
     admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminUserDetail:
-    """利用者の修正（メール・プラン・パスワード）。
+    """利用者の修正（メール・プラン）。
 
-    - パスワードを変えると、既存のログイン（リフレッシュトークン）をすべて無効にする
     - プランは、その利用者のワークスペースすべてに反映する
+    - ログインのやり直しが必要なときは、パスワードではなく「リセット」（POST .../reset）を使う
     """
     user = await _get_user_or_404(session, user_id)
 
@@ -450,15 +473,6 @@ async def update_user(
         if dup is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
         user.email = body.email
-
-    if body.password is not None:
-        user.password_hash = await auth_utils.hash_password_async(body.password)
-        # 再設定後は既存のログイン（リフレッシュトークン）を全て無効化する
-        tokens = (
-            await session.exec(select(RefreshToken).where(RefreshToken.user_id == user.id))
-        ).all()
-        for rt in tokens:
-            rt.revoked = True
 
     if body.plan is not None:
         workspaces = (
@@ -478,6 +492,51 @@ async def update_user(
         ) from None
     _logger.info("admin %s updated user %s", admin_id, user_id)
     return await get_user(user_id, admin_id, session)
+
+
+@router.post("/users/{user_id}/reset", response_model=AdminResetResult)
+async def reset_user(
+    user_id: UUID,
+    body: AdminResetRequest,
+    background: BackgroundTasks,
+    admin_id: Annotated[str, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminResetResult:
+    """利用者の「リセット」: 端末を失くした・乗っ取りが心配なときに使う。
+
+    - 全端末のログイン（リフレッシュトークン）を失効させる
+      （今のアクセストークンは、最長 15 分で切れる）
+    - 利用者のアドレスへ、端末の再登録のリンク（1 時間・1 回だけ）を送る
+    - 登録済みのパスキーを消す（既定。delete_passkeys=false なら残す）
+    - 古いパスワードのハッシュがあれば、NULL にする（パスキーへ移したあとは、パスワードを持たない）
+    管理者が、利用者のパスキーやデータの中身を見ることはない。実行は、必ずログに残す。
+    """
+    user = await _get_user_or_404(session, user_id)
+    if not mailer.is_mail_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="mail is not configured"
+        )
+    # リンクを先に作る（同じアドレスへの送信が上限なら、何も変えずに 429 で止める）
+    issued = await passkeys.request_email_link(session, user.email, force_recover_for=user.id)
+    if issued is None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many emails to this address; try again in an hour",
+        )
+    raw_token, purpose = issued
+
+    await passkeys.revoke_all_sessions(session, user.id)
+    if body.delete_passkeys:
+        await session.execute(delete(Passkey).where(col(Passkey.user_id) == user.id))
+    user.password_hash = None
+    session.add(user)
+    await session.commit()
+
+    background.add_task(passkeys.deliver_link_mail, user.email, raw_token, purpose)
+    _logger.warning(
+        "admin %s reset user %s (passkeys deleted: %s)", admin_id, user_id, body.delete_passkeys
+    )
+    return AdminResetResult()
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

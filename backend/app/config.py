@@ -100,7 +100,8 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 180
     # パスキー（WebAuthn）の設定（SaaS 版）。パスキーはサイトのドメインに結び付くので、
     # 本番でドメインを変えると、全員が登録し直しになる。
-    # 空のままなら、FRONTEND_URL の host（rp_id）と origin から決める（本番は https://factoreye.hide23.link）
+    # 空のままなら、FRONTEND_URL の host（rp_id）と origin から決める
+    # （本番は https://factoreye.hide23.link）
     webauthn_rp_id: str = ""
     # 画面の origin（スキーム + host[:port]）。空なら FRONTEND_URL から決める
     webauthn_origin: str = ""
@@ -170,7 +171,7 @@ class Settings(BaseSettings):
 
     @property
     def passkey_origin(self) -> str:
-        """パスキーの署名を受け付ける origin（スキーム + host[:port]）。空なら FRONTEND_URL から作る。"""
+        """パスキーを受け付ける origin（スキーム + host[:port]）。空なら FRONTEND_URL から作る。"""
         if self.webauthn_origin:
             return self.webauthn_origin.rstrip("/")
         parts = urlsplit(self.frontend_url)

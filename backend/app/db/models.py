@@ -339,7 +339,8 @@ class User(SQLModel, table=True):
     """利用者（SaaS 版のみ）。
 
     ログインはパスキー（Passkey）で行い、パスワードは持たない。password_hash は、パスキー導入前に
-    パスワードで作った利用者の古い値で、管理者の「リセット」で NULL にする（新しい利用者は最初から NULL）。
+    パスワードで作った利用者の古い値で、管理者の「リセット」で NULL にする
+    （新しい利用者は最初から NULL）。
     """
 
     __tablename__ = "users"
@@ -393,7 +394,9 @@ class RefreshToken(SQLModel, table=True):
 
 
 class Passkey(SQLModel, table=True):
-    """利用者のパスキー（SaaS 版のみ）。1 つのパスキー = 1 つの端末（または、パスワードマネージャーの 1 項目）。
+    """利用者のパスキー（SaaS 版のみ）。
+
+    1 つのパスキー = 1 つの端末（または、パスワードマネージャーの 1 項目）。
 
     保存するのは公開鍵だけ。秘密鍵は端末の中にあり、サーバーには届かない。
     1 人の利用者が複数持てる。1 台の端末に、アカウントごとのパスキーを別々に持てる
@@ -408,7 +411,8 @@ class Passkey(SQLModel, table=True):
     credential_id: str = Field(max_length=1400, unique=True)
     # 公開鍵（COSE 形式のバイト列）
     public_key: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
-    # 端末が数える署名の回数。巻き戻ったら、鍵が複製された疑いがあるので拒否する（0 のままの端末もある）
+    # 端末が数える署名の回数。巻き戻ったら、鍵が複製された疑いがあるので拒否する
+    # （0 のままの端末もある）
     sign_count: int = Field(default=0)
     # 利用者が付ける端末の名前（例: Mac の Chrome）
     name: str = Field(max_length=50)
