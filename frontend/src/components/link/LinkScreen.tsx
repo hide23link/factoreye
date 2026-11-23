@@ -11,7 +11,7 @@
  * DashboardLinkView（ダッシュボード全体の一覧から、カードの ⤢ で 1 グラフを開くとき）。
  * 【引数（props）】widget = 出すグラフのウィジェット、rangeMinutes = リンクの「直近 ◯ 分」、
  * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止める）、
- * onBack = 一覧から開いたときだけ渡す（左上に「戻る」を出し、押すと一覧へ戻る）。
+ * onBack = 一覧から開いたときだけ渡す（左下に丸い「戻る」を浮かべ、押すと一覧へ戻る）。
  * 時刻の指定のシート（LinkTimeSheet）を開いている間も、グラフの指の操作は受けない（シートの操作とぶつからないように）。
  */
 import { useRef, useState } from "react";
@@ -129,15 +129,6 @@ export function LinkScreen({
   return (
     <div className="relative flex h-full select-none flex-col bg-white text-gray-900">
       <div className="flex items-baseline justify-between gap-2 px-3 pb-0.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="-ml-1 min-h-8 shrink-0 rounded-full border border-gray-200 px-2.5 text-xs text-gray-700"
-          >
-            ← 戻る
-          </button>
-        )}
         <b className="min-w-0 flex-1 truncate text-sm" title={graphName(widget, sensors)}>{graphName(widget, sensors)}</b>
         <button
           type="button"
@@ -213,6 +204,19 @@ export function LinkScreen({
           </button>
         )}
       </div>
+      {onBack && (
+        // 親指が届く左下の丸い「戻る」（一覧から開いたときだけ）。下の期間のボタン・状態の行の上に浮かべる
+        <button
+          type="button"
+          aria-label="一覧に戻る"
+          onClick={onBack}
+          className="absolute left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(10rem+env(safe-area-inset-bottom))] z-10 flex h-11 w-11 items-center justify-center rounded-full text-2xl leading-none shadow-md"
+          // 明るい・暗いのどちらでも同じ（半透明の濃い丸に白い矢印）
+          style={{ background: "rgba(17, 24, 39, 0.7)", color: "#fff" }}
+        >
+          ‹
+        </button>
+      )}
       {sheetOpenedAt !== null && (
         <LinkTimeSheet
           now={sheetOpenedAt}

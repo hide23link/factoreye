@@ -12,7 +12,7 @@
  *
  * 【誰が使うか】DashboardLinkView（一覧の並べ方・カードの高さ）。
  */
-import type { Widget } from "../types";
+import type { Sensor, Widget } from "../types";
 import { graphSensorIds } from "./graph-config";
 import { isGraphWidget } from "./graph-link";
 import { narrowHeightPx, widgetsInReadingOrder } from "./narrow-layout";
@@ -55,8 +55,50 @@ export function listHeightCss(widget: Widget, size: GraphSize, headerVar: string
   if (widget.type === "TapeGauge") return "168px";
   if (widget.type === "Gauge") return "150px";
   if (isSmallListWidget(widget)) return "120px";
-  // 達成ストリップ: 説明・目盛り・凡例で約 140px、1 センサー（名前の行と帯）で約 52px（既定の 320px だと、下が空白になる）
-  if (widget.type === "TargetStrip") return `${140 + 52 * Math.max(1, graphSensorIds(widget).length)}px`;
+  // 達成ストリップ: 説明・目盛り・凡例で約 125px、1 センサー（名前の行と帯）で約 52px（既定の 320px だと、下が空白になる）
+  if (widget.type === "TargetStrip") return `${125 + 52 * Math.max(1, graphSensorIds(widget).length)}px`;
   const px = narrowHeightPx(widget);
   return widget.type === "TrendStack" && !preview ? `max(${px}px, ${graphHeightCss(size, headerVar)})` : `${px}px`;
+}
+
+/** 「今の値」タイル 1 つ分 */
+export interface ValueTile {
+  sensorId: string;
+  /** タップで移る先のグラフ（最初にそのセンサーを使うグラフのウィジェット ID） */
+  widgetId: string;
+  /** 名前（グラフの系列名があればそれ、無ければセンサーの名前） */
+  name: string;
+  unit: string;
+}
+
+/** 先頭に出すタイルの数。これを超えるぶんは「ほか N 個の値を見る」で開く */
+export const VALUE_TILE_LIMIT = 6;
+
+/** 今の値をすでに出している部品（数値・メーター・計器・計器グラフの今の値の札）。そのセンサーはタイルにしない */
+const VALUE_WIDGET_TYPES: ReadonlySet<string> = new Set(["StatValue", "Gauge", "TapeGauge", "TrendStack"]);
+
+/**
+ * 一覧の先頭の「今の値」タイル。一覧にあるグラフ（センサーグラフ・複数センサー比較）のセンサーを、並び順に全部。
+ * 同じセンサーは 1 つだけ。今の値を出す部品（数値・メーター・計器・計器グラフ）があるセンサーは出さない（重複させない）。
+ * タイルは「今の値を出す部品が無いグラフ系のセンサー」だけ。0 個になれば、呼ぶ側はタイル欄ごと出さない。
+ */
+export function valueTiles(widgets: readonly Widget[], sensors: readonly Sensor[] | undefined): ValueTile[] {
+  const shown = new Set(
+    widgets.filter((w) => VALUE_WIDGET_TYPES.has(w.type)).flatMap((w) => [...graphSensorIds(w), ...(w.sensorId ? [w.sensorId] : [])]),
+  );
+  const tiles: ValueTile[] = [];
+  for (const widget of listWidgets(widgets).filter(isGraphWidget)) {
+    for (const sensorId of graphSensorIds(widget)) {
+      if (shown.has(sensorId)) continue;
+      shown.add(sensorId);
+      const sensor = sensors?.find((s) => s.id === sensorId);
+      tiles.push({
+        sensorId,
+        widgetId: widget.id,
+        name: widget.config.seriesNames?.[sensorId]?.trim() || sensor?.name || sensorId,
+        unit: sensor?.unit ?? "",
+      });
+    }
+  }
+  return tiles;
 }

@@ -7,7 +7,9 @@ import {
   calendarDays,
   canStartAt,
   chipPeriod,
+  dateText,
   durationText,
+  segText,
   isAtLink,
   jumpText,
   linkPeriod,
@@ -243,5 +245,16 @@ describe("「＋」「－」のボタン（1 段ずつ拡大・縮小）", () =>
   it("下限（10 分）・上限（7 日）を超えない", () => {
     expect(stepZoom(linkPeriod(10), "in", NOW, NO_LIMIT).durationMs).toBe(LINK_VIEW_MIN_MS);
     expect(stepZoom({ durationMs: LINK_VIEW_MAX_MS, endMs: null }, "out", NOW, NO_LIMIT).durationMs).toBe(LINK_VIEW_MAX_MS);
+  });
+});
+
+describe("分節ボタン・日時の文字", () => {
+  it("segText: 10分・1時間・8時間・24時間・7日", () => {
+    expect([10, 60, 480, 1440, 10080].map(segText)).toEqual(["10分", "1時間", "8時間", "24時間", "7日"]);
+  });
+
+  it("dateText: 「11/23(月) 8:38」（端末の時刻）", () => {
+    expect(dateText(new Date(2026, 10, 23, 8, 38).getTime())).toBe("11/23(月) 8:38");
+    expect(dateText(new Date(2026, 0, 3, 14, 5).getTime())).toBe("1/3(土) 14:05");
   });
 });

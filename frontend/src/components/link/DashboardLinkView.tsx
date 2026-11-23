@@ -15,9 +15,10 @@
  * 【引数（props）】dashboard = 開くダッシュボード、rangeMinutes = リンクの「直近 ◯ 分」、
  * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止め、先頭の数個だけ出す）。
  */
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { useSensors } from "../../hooks/queries";
+import { useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useLinkGestures } from "../../hooks/useLinkGestures";
 import { useLinkRows, useSettledPeriod, useToast } from "../../hooks/useLinkView";
@@ -25,14 +26,16 @@ import { useLiveNow } from "../../hooks/useLiveNow";
 import { LinkRangeContext } from "../../hooks/useWidgetRange";
 import { graphColor, graphSensorIds } from "../../lib/graph-config";
 import { graphName, isGraphWidget } from "../../lib/graph-link";
-import { isSmallListWidget, listHeightCss, listWidgets, type GraphSize } from "../../lib/dashboard-link";
+import { VALUE_TILE_LIMIT, isSmallListWidget, listHeightCss, listWidgets, valueTiles, type GraphSize, type ValueTile } from "../../lib/dashboard-link";
+import { classifySeverity } from "../../lib/severity";
+import { useRefreshStore } from "../../store/useRefreshStore";
 import { nearestValue } from "../../lib/graph-series";
 import {
   DEFAULT_PICKED_MINUTES,
   LINK_LIST_CHIPS_MINUTES,
   chipPeriod,
-  chipText,
   clockText,
+  dateText,
   durationText,
   isAtLink,
   isChipActive,
@@ -40,8 +43,8 @@ import {
   linkPeriod,
   periodBounds,
   periodLabel,
+  segText,
   startAtPeriod,
-  statusText,
   stepZoom,
   type LinkPeriod,
 } from "../../lib/link-range";
@@ -139,36 +142,78 @@ function GraphCard({
   const nameOf = (id: string) => widget.config.seriesNames?.[id]?.trim() || sensors?.find((s) => s.id === id)?.name || id;
   return (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <b className="min-w-0 truncate text-xs text-gray-500" title={graphName(widget, sensors)}>{graphName(widget, sensors)}</b>
+      {/* 見出し: 名前（太字）＋⤢。淡い背景の帯に下線 */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-300 bg-gray-100 pl-3 pr-1">
+        <b className="min-w-0 truncate text-sm" title={graphName(widget, sensors)}>
+          {graphName(widget, sensors)}
+        </b>
         <button
           type="button"
           data-no-gesture
           disabled={preview}
           aria-label={`${graphName(widget, sensors)} を 1 画面で開く`}
           onClick={onOpen}
-          className="min-h-8 min-w-8 shrink-0 rounded-full text-sm text-gray-500"
+          className="min-h-9 min-w-9 shrink-0 rounded-full text-base text-gray-500"
         >
           ⤢
         </button>
       </div>
-      <div className="flex min-h-5 flex-wrap gap-x-3 text-xs text-gray-500">
+      {/* 凡例: 色・名前・今の値（タップした時刻があれば、その時刻の値） */}
+      <div className="flex min-h-5 shrink-0 flex-wrap gap-x-3 px-3 pt-1 text-xs text-gray-500">
         {graphSensorIds(widget).map((id, i) => {
           const value = nearestValue(rows, id, valueAt);
           return (
             <span key={id}>
               <i aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-sm align-[1px]" style={{ background: graphColor(widget, i) }} />
               {nameOf(id)} {sensors?.find((s) => s.id === id)?.unit ?? ""}{" "}
-              <b className="text-base tabular-nums text-gray-900">{value === null ? "—" : formatYTick(value)}</b>
+              <b className="text-sm tabular-nums text-gray-900">{value === null ? "—" : formatYTick(value)}</b>
             </span>
           );
         })}
         {linkView.cursorTime !== null && linkView.cursorTime !== undefined && <span>{clockText(linkView.cursorTime)} の値</span>}
       </div>
-      <div data-link-graph className="relative min-h-0 flex-1 [&_:focus]:outline-none">
+      {/* グラフは、左右の余白を詰めて幅いっぱい */}
+      <div data-link-graph className="relative min-h-0 flex-1 px-0.5 [&_:focus]:outline-none">
         <ListWidgetBody widget={widget} linkView={linkView} />
       </div>
     </>
+  );
+}
+
+/**
+ * 先頭の「今の値」タイル（2 列）。小さい名前（2 行まで）・大きい数字（右寄せ・下線・単位）。しきい値を超えていれば橙・赤。
+ * 先頭 VALUE_TILE_LIMIT 個まで。残りは「ほか N 個の値を見る」で開く。タップで、そのグラフのカードへスクロールする。
+ * 値は全センサーの最新値の取得（useLatestReadings。1 回の取得）を使う。グラフの取得は増やさない。
+ */
+function ValueTiles({ tiles, sensors, onPick }: { tiles: ValueTile[]; sensors: Sensor[] | undefined; onPick: (widgetId: string) => void }) {
+  const { data } = useLatestReadings();
+  const [expanded, setExpanded] = useState(false);
+  if (tiles.length === 0) return null;
+  const shown = expanded ? tiles : tiles.slice(0, VALUE_TILE_LIMIT);
+  const hidden = tiles.length - VALUE_TILE_LIMIT;
+  const severityColor = { critical: "text-red-600", warning: "text-amber-600", normal: "text-gray-900" } as const;
+  return (
+    <div role="group" aria-label="今の値" className="grid grid-cols-2 gap-x-3.5 gap-y-1.5 bg-white px-3.5 pb-2.5 pt-1 landscape:grid-cols-4">
+      {shown.map((tile) => {
+        const reading = data?.readings.find((r) => r.sensorId === tile.sensorId);
+        const sensor = sensors?.find((s) => s.id === tile.sensorId);
+        const severity = reading && sensor ? classifySeverity(reading.value, sensor) : "normal";
+        return (
+          <button key={tile.sensorId} type="button" onClick={() => onPick(tile.widgetId)} className="min-w-0 text-left" aria-label={`${tile.name} へ移る`}>
+            <span className="line-clamp-2 min-h-[2.3em] text-[11px] leading-tight text-gray-500">{tile.name}</span>
+            <span className={`block border-b border-gray-300 text-right text-2xl font-bold leading-tight tabular-nums ${severityColor[severity]}`}>
+              {reading ? formatYTick(reading.value) : "—"}
+              <small className="ml-0.5 text-[11px] font-normal text-gray-500">{tile.unit}</small>
+            </span>
+          </button>
+        );
+      })}
+      {hidden > 0 && (
+        <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="col-span-2 min-h-8 text-center text-xs text-blue-600 landscape:col-span-4">
+          {expanded ? "閉じる ▴" : `ほか ${hidden} 個の値を見る ▾`}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -318,6 +363,9 @@ export function DashboardLinkView({
     ignoreTarget: (target) => target instanceof Element && target.closest(NO_GESTURE) !== null,
   });
 
+  const queryClient = useQueryClient();
+  const markManualRefresh = useRefreshStore((s) => s.markManualRefresh);
+
   const focused = focusId ? dashboard.widgets.find((w) => w.id === focusId && isGraphWidget(w)) : undefined;
   if (focused) {
     return (
@@ -328,73 +376,107 @@ export function DashboardLinkView({
   }
 
   const widgets = listWidgets(dashboard.widgets).slice(0, preview ? PREVIEW_COUNT : undefined);
-  // 横向き（高さが小さい）のときは、帯を 1 行にする（タイトル・期間のボタン・今に戻る・🕘 を並べる）。見本は縦向きの形に固定
+  const tiles = valueTiles(widgets, sensors);
+  // 横向き（高さが小さい）のときは、帯を 1 行にする（見本は縦向きの形に固定）
   const compact = !preview;
-  const stepButton = "min-h-8 min-w-9 shrink-0 rounded-full border border-gray-200 bg-white px-3 text-sm font-bold disabled:opacity-60";
+  const toolButton = "min-h-8 shrink-0 rounded-full border px-3 text-xs";
+  const live = period.endMs === null;
+  // タイルのタップ: そのグラフのカードへスムーズにスクロールする（帯の下に止まる）
+  const scrollToCard = (widgetId: string) => {
+    document.querySelector(`[data-widget-id="${widgetId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <LinkRangeContext.Provider value={linkRange}>
-    <div
-      className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-dvh"}`}
-      // ブラウザの拡大・横のスクロールは止め、縦のスクロールだけ受ける（ピンチはこちらで処理する）
-      style={{ touchAction: "pan-y", [HEADER_VAR]: `${headerPx}px` } as React.CSSProperties}
-    >
-      <header
-        ref={headerRef}
-        className={`z-20 border-b border-gray-200 bg-white pl-[max(0.625rem,env(safe-area-inset-left))] pb-1.5 pr-[max(0.625rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] ${
-          preview ? "" : "sticky top-0 landscape:flex landscape:items-center landscape:gap-2 landscape:pb-1 landscape:pt-[max(0.25rem,env(safe-area-inset-top))]"
-        }`}
+      <div
+        className={`select-none bg-gray-50 text-gray-900 ${preview ? "h-full overflow-hidden" : "min-h-dvh"}`}
+        // ブラウザの拡大・横のスクロールは止め、縦のスクロールだけ受ける（ピンチはこちらで処理する）
+        style={{ touchAction: "pan-y", [HEADER_VAR]: `${headerPx}px` } as React.CSSProperties}
       >
-        <div className={`flex items-center justify-between gap-2 ${compact ? "landscape:contents" : ""}`}>
-          <b className={`min-w-0 truncate text-sm ${compact ? "landscape:order-1 landscape:max-w-[30%] landscape:shrink-0" : ""}`} title={dashboard.name}>{dashboard.name}</b>
+        {/* 固定の帯: 青いヘッダー（名前＋更新）と、幅いっぱいの期間の分節ボタン。横向きは 1 行 */}
+        <header ref={headerRef} className={`z-20 border-b border-gray-200 ${preview ? "" : "sticky top-0 landscape:flex landscape:items-stretch"}`}>
+          <div
+            className={`flex items-center justify-between gap-2 bg-blue-600 pb-1.5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-[max(0.375rem,env(safe-area-inset-top))] text-white ${
+              compact ? "landscape:w-[30%] landscape:shrink-0 landscape:py-1" : ""
+            }`}
+          >
+            <b className="min-w-0 truncate text-base" title={dashboard.name}>
+              {dashboard.name}
+            </b>
+            <button
+              type="button"
+              aria-label="更新"
+              disabled={preview}
+              onClick={() => {
+                markManualRefresh();
+                void queryClient.invalidateQueries();
+              }}
+              className="flex min-h-8 shrink-0 items-center gap-1 rounded px-1 text-xs"
+            >
+              <span aria-hidden="true" className="text-lg">↻</span>更新
+            </button>
+          </div>
+          <div className={`bg-white pr-[max(0.625rem,env(safe-area-inset-right))] ${compact ? "landscape:flex landscape:min-w-0 landscape:flex-1 landscape:items-center landscape:gap-2" : ""}`}>
+            <div
+              role="group"
+              aria-label="期間"
+              className={`flex gap-1.5 pb-0.5 pl-2.5 pr-0 pt-2 ${compact ? "landscape:flex-1 landscape:py-1" : ""}`}
+            >
+              {LINK_LIST_CHIPS_MINUTES.map((minutes) => {
+                const active = isChipActive(period, minutes);
+                return (
+                  <button
+                    key={minutes}
+                    type="button"
+                    disabled={preview}
+                    aria-pressed={active}
+                    onClick={() => changePeriod(chipPeriod(period, minutes, now, maxMs))}
+                    className={`min-h-10 min-w-0 flex-1 rounded-md px-0 text-xs ${compact ? "landscape:min-h-8" : ""} ${
+                      active ? "bg-blue-600 font-bold text-white" : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {segText(minutes)}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex min-h-8 items-center justify-between gap-1.5 pl-2.5 text-xs tabular-nums text-gray-500">
+              <span className={`flex-1 text-center ${compact ? "landscape:hidden" : ""}`}>〜 {dateText(bounds.to)}</span>
+              {!isAtLink(period, rangeMinutes) && !preview && (
+                <button
+                  type="button"
+                  onClick={backToLink}
+                  className="min-h-8 shrink-0 rounded-full border border-blue-600 bg-blue-50 px-2.5 text-xs font-bold text-blue-600"
+                >
+                  今に戻る
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+        {/* 今の時刻（過去を見ているときは、その期間）の灰色の帯 */}
+        <p className="mx-2.5 mb-1 mt-2 rounded-sm bg-gray-200 py-0.5 text-center text-xs text-gray-600">
+          {live ? `${dateText(now)} 現在` : `${dateText(bounds.from)} 〜 ${dateText(bounds.to)}`}
+        </p>
+        {!preview && <ValueTiles tiles={tiles} sensors={sensors} onPick={scrollToCard} />}
+        {/* 操作の段（スクロールで流れる）: －／＋・時刻の指定・半分／全画面 */}
+        <div className="flex gap-1.5 overflow-x-auto bg-white px-2.5 pb-2 pt-1">
+          <button type="button" aria-label="縮小（期間を 2 倍にする）" disabled={preview} onClick={() => changePeriod(stepZoom(period, "out", now, maxMs))} className={`${toolButton} min-w-9 border-gray-200 bg-white text-sm font-bold`}>
+            －
+          </button>
+          <button type="button" aria-label="拡大（期間を半分にする）" disabled={preview} onClick={() => changePeriod(stepZoom(period, "in", now, maxMs))} className={`${toolButton} min-w-9 border-gray-200 bg-white text-sm font-bold`}>
+            ＋
+          </button>
           <button
             type="button"
             ref={timeButton}
             aria-label="時刻を指定"
             disabled={preview}
             onClick={() => setSheetOpenedAt(Date.now())}
-            className={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2.5 text-xs tabular-nums text-gray-500 ${compact ? "landscape:order-4" : ""}`}
+            className={`${toolButton} flex items-center gap-1 border-gray-200 tabular-nums text-gray-600`}
           >
             {periodLabel(period, now)} 🕘
           </button>
-        </div>
-        <div role="group" aria-label="期間" className={`mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5 ${compact ? "landscape:order-2 landscape:mt-0 landscape:min-w-0 landscape:flex-1 landscape:pb-0" : ""}`}>
-          <button
-            type="button"
-            aria-label="縮小（期間を 2 倍にする）"
-            disabled={preview}
-            onClick={() => changePeriod(stepZoom(period, "out", now, maxMs))}
-            className={stepButton}
-          >
-            －
-          </button>
-          <button
-            type="button"
-            aria-label="拡大（期間を半分にする）"
-            disabled={preview}
-            onClick={() => changePeriod(stepZoom(period, "in", now, maxMs))}
-            className={stepButton}
-          >
-            ＋
-          </button>
-          {LINK_LIST_CHIPS_MINUTES.map((minutes) => {
-            const active = isChipActive(period, minutes);
-            return (
-              <button
-                key={minutes}
-                type="button"
-                disabled={preview}
-                aria-pressed={active}
-                onClick={() => changePeriod(chipPeriod(period, minutes, now, maxMs))}
-                className={`min-h-8 shrink-0 rounded-full border px-3 text-xs ${active ? "border-blue-600 bg-blue-600 font-bold text-white" : "border-gray-200 bg-white"}`}
-              >
-                {chipText(minutes)}
-              </button>
-            );
-          })}
-        </div>
-        <div className={`flex min-h-8 items-center justify-between gap-1.5 text-xs text-gray-500 ${compact ? "landscape:order-3 landscape:min-h-0 landscape:shrink-0" : ""}`}>
-          <span className={compact ? "landscape:hidden" : ""}>{statusText(period, now, now)}</span>
           <div role="group" aria-label="グラフの大きさ" className="ml-auto flex shrink-0 gap-1">
             {(["half", "full"] as const).map((choice) => (
               <button
@@ -403,69 +485,74 @@ export function DashboardLinkView({
                 disabled={preview}
                 aria-pressed={size === choice}
                 onClick={() => setSize(choice)}
-                className={`min-h-8 rounded-full border px-2.5 text-xs ${size === choice ? "border-blue-600 bg-blue-600 font-bold text-white" : "border-gray-200 bg-white"}`}
+                className={`${toolButton} ${size === choice ? "border-blue-600 font-bold text-blue-600" : "border-gray-200 bg-white text-gray-600"}`}
               >
                 {choice === "half" ? "半分" : "全画面"}
               </button>
             ))}
           </div>
-          {!isAtLink(period, rangeMinutes) && !preview && (
-            <button
-              type="button"
-              onClick={backToLink}
-              className="min-h-8 rounded-full border border-blue-600 bg-blue-50 px-2.5 text-xs font-bold text-blue-600"
-            >
-              今に戻る
-            </button>
-          )}
         </div>
-      </header>
-      <div
-        ref={preview ? undefined : gestures.ref}
-        {...(preview ? {} : gestures.handlers)}
-        // 部品の中の、スクロールできる要素（overflow を持つ要素）も pan-y にする。touch-action は、触れた要素から最も近いスクロール容器までしか祖先と合成されないため、
-        // 中の要素が auto だと、横ドラッグをブラウザが横取りして pointercancel になる（インラインの指定にも勝つよう !important）
-        className="[&_*]:!touch-pan-y grid grid-cols-2 content-start gap-2 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]"
-      >
-        {widgets.length === 0 && <p className="col-span-2 p-4 text-center text-sm text-gray-500">このダッシュボードには、表示できる部品がありません。</p>}
-        {widgets.map((widget) => {
-          // 小さい部品は縦向きで 2 列、それ以外は 1 列を使い切る。横向きは、すべて 2 列（見本は縦向きの形に固定）
-          const span = isSmallListWidget(widget) ? "" : preview ? "col-span-2" : "col-span-2 landscape:col-span-1";
-          const title = widget.config.title?.trim();
-          return (
-            <section
-              key={widget.id}
-              aria-label={graphName(widget, sensors)}
-              className={`flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-2 ${span}`}
-              style={{
-                height: listHeightCss(widget, size, HEADER_VAR, preview),
-                // 全画面のときは、スクロールで 1 枚ずつ止まる位置（帯の下）に合わせる
-                ...(isGraphWidget(widget) && size === "full" && !preview ? { scrollSnapAlign: "start", scrollMarginTop: `${headerPx}px` } : {}),
-              }}
-            >
-              {isGraphWidget(widget) ? (
-                <GraphCard widget={widget} sensors={sensors} linkView={linkView} preview={preview} onOpen={() => openFocus(widget.id)} />
-              ) : (
-                <>
-                  {title && <p className="mb-1 shrink-0 truncate text-xs font-semibold text-gray-500" title={title}>{title}</p>}
-                  <div className="min-h-0 flex-1 overflow-hidden">
-                    <ListWidgetBody widget={widget} linkView={linkView} />
-                  </div>
-                </>
-              )}
-            </section>
-          );
-        })}
+        <div
+          ref={preview ? undefined : gestures.ref}
+          {...(preview ? {} : gestures.handlers)}
+          className="mt-1.5 grid grid-cols-2 content-start gap-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        >
+          {widgets.length === 0 && <p className="col-span-2 p-4 text-center text-sm text-gray-500">このダッシュボードには、表示できる部品がありません。</p>}
+          {widgets.map((widget) => {
+            const graph = isGraphWidget(widget);
+            const small = isSmallListWidget(widget);
+            const treeFrame = widget.type === "DeviceTree";
+            // 小さい部品は縦向きで 2 列、それ以外は 1 列を使い切る。横向きは、すべて 2 列（見本は縦向きの形に固定）
+            const span = small ? "" : preview ? "col-span-2" : "col-span-2 landscape:col-span-1";
+            // グラフ・大きい部品は幅いっぱい（左右の枠・角丸なし）。小さい部品は左右に余白
+            const shape = small ? "mx-2 rounded-lg border p-2" : graph ? "border-y p-0" : "border-y p-2";
+            const title = widget.config.title?.trim();
+            return (
+              <section
+                key={widget.id}
+                data-widget-id={widget.id}
+                aria-label={graphName(widget, sensors)}
+                // 部品の中の、スクロールできる要素（overflow を持つ要素）も pan-y にする。touch-action は、触れた要素から最も近いスクロール容器までしか祖先と合成されないため、
+                // 中の要素が auto だと、横ドラッグをブラウザが横取りして pointercancel になる（インラインの指定にも勝つよう !important）。
+                // 機器の系統図は、枠が横にスクロールできるので pan-x も許し、その枠への指は期間の移動に渡さない（data-no-gesture）
+                {...(treeFrame ? { "data-no-gesture": "" } : {})}
+                className={`flex flex-col overflow-hidden border-gray-200 bg-white ${shape} ${span} ${
+                  treeFrame ? "[&_*]:!touch-pan-x [&_*]:!touch-pan-y" : "[&_*]:!touch-pan-y"
+                }`}
+                style={{
+                  height: listHeightCss(widget, size, HEADER_VAR, preview),
+                  // スクロールで止まる位置は、帯の下（タイルのタップ・全画面のスナップ）
+                  scrollMarginTop: `${headerPx}px`,
+                  ...(graph && size === "full" && !preview ? { scrollSnapAlign: "start" } : {}),
+                }}
+              >
+                {graph ? (
+                  <GraphCard widget={widget} sensors={sensors} linkView={linkView} preview={preview} onOpen={() => openFocus(widget.id)} />
+                ) : (
+                  <>
+                    {title && (
+                      <p className="mb-1 shrink-0 truncate text-xs font-semibold text-gray-500" title={title}>
+                        {title}
+                      </p>
+                    )}
+                    <div className="min-h-0 flex-1 overflow-hidden">
+                      <ListWidgetBody widget={widget} linkView={linkView} />
+                    </div>
+                  </>
+                )}
+              </section>
+            );
+          })}
+        </div>
+        {toast.message && (
+          <div className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-3 py-1 text-xs text-white">
+            {toast.message}
+          </div>
+        )}
+        {sheetOpenedAt !== null && (
+          <LinkTimeSheet now={sheetOpenedAt} maxMs={maxMs} pickedMinutes={pickedMinutes} onPick={setPickedMinutes} onJump={applyStart} onClose={closeSheet} />
+        )}
       </div>
-      {toast.message && (
-        <div className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-3 py-1 text-xs text-white">
-          {toast.message}
-        </div>
-      )}
-      {sheetOpenedAt !== null && (
-        <LinkTimeSheet now={sheetOpenedAt} maxMs={maxMs} pickedMinutes={pickedMinutes} onPick={setPickedMinutes} onJump={applyStart} onClose={closeSheet} />
-      )}
-    </div>
     </LinkRangeContext.Provider>
   );
 }

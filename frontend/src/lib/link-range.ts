@@ -24,8 +24,14 @@ const OSS_PAST_MONTHS = 12;
 /** 下の期間のボタン（分）: 30 分・1・3・8・24 時間 */
 export const LINK_CHIPS_MINUTES = [30, 60, 180, 480, 1440] as const;
 
-/** ダッシュボード全体の画面（DashboardLinkView）の上の期間のボタン（分）: 10 分・30 分・1・3・8・24 時間 */
-export const LINK_LIST_CHIPS_MINUTES = [10, 30, 60, 180, 480, 1440] as const;
+/** ダッシュボード全体の画面（DashboardLinkView）の上の、幅いっぱいの分節ボタン（分）: 10 分・1・8・24 時間・7 日 */
+export const LINK_LIST_CHIPS_MINUTES = [10, 60, 480, 1440, 10080] as const;
+
+/** 分節ボタンの文字（「10分」「1時間」「7日」。幅が狭いので、数字と単位の間は空けない） */
+export function segText(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0 && minutes !== 1440) return `${minutes / 1440}日`;
+  return minutes < 60 ? `${minutes}分` : `${minutes / 60}時間`;
+}
 
 /** 「＋」「－」のボタン 1 回で変わる長さの倍率（＋は 1/2 に拡大、－は 2 倍に縮小） */
 export const ZOOM_STEP = 2;
@@ -152,6 +158,12 @@ export function isChipActive(period: LinkPeriod, minutes: number): boolean {
 export function clockText(ms: number): string {
   const date = new Date(ms);
   return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+/** 日時を「11/23(月) 8:38」の形にする（端末の時刻） */
+export function dateText(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getMonth() + 1}/${date.getDate()}(${"日月火水木金土"[date.getDay()]}) ${clockText(ms)}`;
 }
 
 /** 長さを「30 分」「1.5 時間」「2 日」の形にする */

@@ -10,6 +10,7 @@ import { SETTLE_MS } from "../../hooks/useLinkView";
 vi.mock("../../lib/api", () => ({
   fetchSensors: vi.fn(),
   fetchSensorReadings: vi.fn(),
+  fetchLatestReadings: vi.fn(),
   fetchSensorReadingsDownsampled: vi.fn(),
 }));
 
@@ -55,6 +56,7 @@ const initialRange = useTimeRangeStore.getState().range;
 
 beforeEach(() => {
   vi.mocked(api.fetchSensors).mockResolvedValue([{ id: "s1", name: "電力", unit: "kW" } as Sensor]);
+  vi.mocked(api.fetchLatestReadings).mockResolvedValue({ readings: [{ sensorId: "s1", value: 3.4, recordedAt: new Date().toISOString() }], total: 1 } as never);
   vi.mocked(api.fetchSensorReadings).mockResolvedValue({ readings: [], total: 0 } as never);
   vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({
     bucketSeconds: 60,
@@ -93,15 +95,21 @@ describe("DashboardLinkView の並び", () => {
 });
 
 describe("DashboardLinkView の期間（全グラフ共通・保存しない）", () => {
-  it("リンクの期間で開き、10 分〜24 時間のボタンと ＋／－ がある。高さは 32px 以上（min-h-8）", () => {
+  it("リンクの期間で開き、幅いっぱいの分節ボタン（10分・1時間・8時間・24時間・7日。40px 以上）と、操作の段に ＋／－・半分／全画面がある", () => {
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
 
     expect(timeButton()).toHaveTextContent("直近 30 分");
     const group = screen.getByRole("group", { name: "期間" });
-    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "－", "＋", "10 分", "30 分", "1 時間", "3 時間", "8 時間", "24 時間",
-    ]);
-    for (const button of within(group).getAllByRole("button")) expect(button.className).toContain("min-h-8");
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["10分", "1時間", "8時間", "24時間", "7日"]);
+    for (const button of within(group).getAllByRole("button")) {
+      expect(button.className).toContain("min-h-10");
+      expect(button.className).toContain("flex-1"); // 幅を等分する
+    }
+    // 操作の段（－／＋・時刻の指定）は 32px 以上
+    for (const name of [/^縮小/, /^拡大/, "時刻を指定"]) expect(screen.getByRole("button", { name }).className).toContain("min-h-8");
+    // 青いヘッダー（名前）と、今の日時の帯
+    expect(screen.getByText("第2工場")).toBeInTheDocument();
+    expect(screen.getByText(/\d+\/\d+\(.\) \d+:\d\d 現在/)).toBeInTheDocument();
   });
 
   it("ボタンで変えた期間は保存しない（localStorage・URL・ダッシュボードの期間はそのまま）。「今に戻る」でリンクの設定へ", async () => {
@@ -110,9 +118,9 @@ describe("DashboardLinkView の期間（全グラフ共通・保存しない）"
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
 
     expect(screen.queryByRole("button", { name: "今に戻る" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "3 時間" }));
+    await user.click(screen.getByRole("button", { name: "8時間" }));
     expect(screen.getByRole("button", { name: "今に戻る" }).className).toContain("min-h-8");
-    expect(timeButton()).toHaveTextContent("直近 3 時間");
+    expect(timeButton()).toHaveTextContent("直近 8 時間");
     expect(localStorage.getItem("factoreye_time_range")).toBeNull();
     expect(window.location.search).toBe("?dashboard=d1&range=30m");
     expect(useTimeRangeStore.getState().range).toBe(initialRange);
@@ -220,11 +228,15 @@ describe("DashboardLinkView の指の操作", () => {
     }
   });
 
-  it("部品の中のスクロール容器にも pan-y が届くよう、一覧の枠の子孫すべてに pan-y（!important）を当てる。1 グラフ画面・帯には当てない", async () => {
+  it("部品の中のスクロール容器にも pan-y が届くよう、各部品の枠の子孫すべてに pan-y（!important）を当てる。機器の系統図だけは横にも動かせ、指は期間の移動に渡さない。帯には当てない", async () => {
     const { container } = renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
-    const region = (await screen.findAllByRole("region"))[0];
-    const list = region.parentElement as HTMLElement;
-    expect(list.className).toContain("[&_*]:!touch-pan-y");
+    const regions = await screen.findAllByRole("region");
+    for (const region of regions) {
+      const tree = region.getAttribute("aria-label") === "機器ツリー";
+      expect(region.className).toContain("[&_*]:!touch-pan-y");
+      expect(region.className.includes("[&_*]:!touch-pan-x")).toBe(tree);
+      expect(region.hasAttribute("data-no-gesture")).toBe(tree);
+    }
     expect(container.querySelector("header")?.closest("[class*='[&_*]:!touch-pan-y']")).toBeNull();
   });
 
@@ -270,7 +282,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     Object.defineProperty(window, "scrollY", { value: 300, configurable: true });
     await user.click(open);
     Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
-    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await user.click(screen.getByRole("button", { name: "一覧に戻る" }));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
@@ -292,7 +304,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     expect(window.history.state).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
-    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await user.click(screen.getByRole("button", { name: "一覧に戻る" }));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
@@ -305,7 +317,7 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     await user.click(await screen.findByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
     // 印が別のグラフのものになった（例: Safari の「進む」で別の項目に来た）
     window.history.replaceState({ linkFocus: "other" }, "", window.location.href);
-    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await user.click(screen.getByRole("button", { name: "一覧に戻る" }));
     expect(screen.getAllByRole("region")).toHaveLength(5);
   });
 
@@ -314,22 +326,22 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     window.history.replaceState(null, "", "/?dashboard=d1&range=30m");
     renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
 
-    await user.click(screen.getByRole("button", { name: "3 時間" }));
+    await user.click(screen.getByRole("button", { name: "8時間" }));
     await user.click(await screen.findByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
-    expect(screen.getByRole("button", { name: "← 戻る" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
     expect(screen.getByLabelText(/グラフ。上下になぞると/)).toBeInTheDocument();
     expect(window.location.search).toBe("?dashboard=d1&range=30m");
 
-    await user.click(screen.getByRole("button", { name: "← 戻る" }));
+    await user.click(screen.getByRole("button", { name: "一覧に戻る" }));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20)); // history.back() の popstate を待つ
     });
     expect(screen.getAllByRole("region")).toHaveLength(5);
-    expect(timeButton()).toHaveTextContent("直近 3 時間");
+    expect(timeButton()).toHaveTextContent("直近 8 時間");
 
     // 画面の戻るボタン（popstate）でも一覧へ
     await user.click(screen.getByRole("button", { name: "ライン2 電流 を 1 画面で開く" }));
-    expect(screen.getByRole("button", { name: "← 戻る" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "一覧に戻る" })).toBeInTheDocument();
     act(() => {
       window.history.back();
     });
@@ -338,5 +350,73 @@ describe("DashboardLinkView の 1 グラフ表示", () => {
     });
     expect(screen.getAllByRole("region")).toHaveLength(5);
     expect(window.location.search).toBe("?dashboard=d1&range=30m");
+  });
+});
+
+describe("DashboardLinkView の今の値タイル", () => {
+  const many: Sensor[] = Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, name: `センサー${i}`, unit: "℃" }) as Sensor);
+  const bigDashboard: DashboardDetail = {
+    ...dashboard,
+    widgets: [makeWidget("診断", { sensorId: "m0", config: { title: "診断", sensorIds: many.map((m) => m.id) } })],
+  };
+
+  it("グラフのセンサーを 2 列のタイルで先頭に出し、6 個で打ち切り「ほか N 個の値を見る」で全部開く。値は最新値の取得を使う", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    vi.mocked(api.fetchLatestReadings).mockResolvedValue({
+      readings: [{ sensorId: "m0", value: 21.5, recordedAt: new Date().toISOString() }],
+      total: 1,
+    } as never);
+    renderWithQueryClient(<DashboardLinkView dashboard={bigDashboard} rangeMinutes={30} />);
+
+    const group = await screen.findByRole("group", { name: "今の値" });
+    expect(await within(group).findByText("21.5")).toBeInTheDocument();
+    expect(within(group).getAllByRole("button", { name: /へ移る$/ })).toHaveLength(6);
+    expect(vi.mocked(api.fetchLatestReadings)).toHaveBeenCalledTimes(1);
+
+    await user.click(within(group).getByRole("button", { name: "ほか 2 個の値を見る ▾" }));
+    expect(within(group).getAllByRole("button", { name: /へ移る$/ })).toHaveLength(8);
+    await user.click(within(group).getByRole("button", { name: "閉じる ▴" }));
+    expect(within(group).getAllByRole("button", { name: /へ移る$/ })).toHaveLength(6);
+  });
+
+  it("タイルのタップで、そのグラフのカードへスムーズにスクロールする", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    renderWithQueryClient(<DashboardLinkView dashboard={bigDashboard} rangeMinutes={30} />);
+
+    await user.click(await screen.findByRole("button", { name: "センサー1 へ移る" }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(scrollIntoView.mock.contexts[0]).toBe(document.querySelector('[data-widget-id="診断"]'));
+  });
+
+  it("数値の部品が出しているセンサーはタイルにしない。グラフが無ければタイル自体を出さない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    const stat = makeWidget("数", { type: "StatValue", sensorId: "m0", gridRow: 1 });
+    renderWithQueryClient(<DashboardLinkView dashboard={{ ...bigDashboard, widgets: [stat, ...bigDashboard.widgets] }} rangeMinutes={30} />);
+    const group = await screen.findByRole("group", { name: "今の値" });
+    expect(await within(group).findByRole("button", { name: "センサー1 へ移る" })).toBeInTheDocument();
+    expect(within(group).queryByRole("button", { name: "センサー0 へ移る" })).not.toBeInTheDocument();
+  });
+
+  it("今の値を出す部品（計器・計器グラフ）しか無いダッシュボード（はじめてのダッシュボード）では、タイル欄ごと出さない", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(many);
+    const tape = makeWidget("計器", { type: "TapeGauge", sensorId: "m0", gridRow: 1 });
+    const trend = makeWidget("計器グラフ", { type: "TrendStack", sensorId: "m1", gridRow: 5, config: { sensorIds: ["m1", "m2"] } });
+    renderWithQueryClient(<DashboardLinkView dashboard={{ ...bigDashboard, widgets: [tape, trend] }} rangeMinutes={30} />);
+    await screen.findAllByRole("region");
+    expect(screen.queryByRole("group", { name: "今の値" })).not.toBeInTheDocument();
+  });
+
+  it("1 グラフ表示の左下に、丸い「戻る」（44px）がある", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    await user.click(await screen.findByRole("button", { name: "ライン1 電力 を 1 画面で開く" }));
+    const back = screen.getByRole("button", { name: "一覧に戻る" });
+    expect(back.className).toContain("h-11");
+    expect(back.className).toContain("w-11");
+    expect(back.className).toContain("rounded-full");
   });
 });
