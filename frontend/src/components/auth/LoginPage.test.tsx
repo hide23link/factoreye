@@ -79,6 +79,28 @@ describe("新規登録", () => {
   });
 });
 
+describe("メールの送信が混み合っているとき（1 日の上限）", () => {
+  const busy = () => new ApiError(503, 'POST /api/auth/email/request failed: 503 {"detail":"mail is busy"}');
+  const BUSY_TEXT = "現在メールの送信が混み合っています。しばらくしてからやり直してください。";
+
+  it("新規登録・メールでログイン・端末の再登録のどれでも、同じ文言を出す", async () => {
+    vi.mocked(api.requestEmailLink).mockRejectedValue(busy());
+    vi.mocked(api.requestLoginLink).mockRejectedValue(busy());
+    const user = userEvent.setup();
+    render(<LoginPage onAuthenticated={() => {}} />);
+
+    await user.type(screen.getByLabelText("メールアドレス"), "new@example.com");
+    await user.click(screen.getByRole("button", { name: "確認メールを送る" }));
+    expect(await screen.findByText(BUSY_TEXT)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "ログイン" }));
+    await user.click(screen.getByRole("button", { name: "パスキーが使えない・メールでログイン" }));
+    await user.type(screen.getByLabelText("メールアドレス"), "known@example.com");
+    await user.click(screen.getByRole("button", { name: "ログインのリンクを送る" }));
+    expect(await screen.findByText(BUSY_TEXT)).toBeInTheDocument();
+  });
+});
+
 describe("パスキーでログイン", () => {
   it("押すだけでログインできる（アドレスは聞かない）", async () => {
     vi.mocked(api.beginPasskeyLogin).mockResolvedValue({ challengeId: "c1", options: { challenge: "x" } });
