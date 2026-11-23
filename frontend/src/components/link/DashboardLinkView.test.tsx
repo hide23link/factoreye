@@ -420,3 +420,47 @@ describe("DashboardLinkView の今の値タイル", () => {
     expect(back.className).toContain("rounded-full");
   });
 });
+
+describe("DashboardLinkView の見た目の細部", () => {
+  const sensors8 = Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, name: `センサー${i}`, unit: "℃" }) as Sensor);
+  const big: DashboardDetail = { ...dashboard, widgets: [makeWidget("診断", { config: { title: "診断", sensorIds: sensors8.map((m) => m.id) } })] };
+
+  it("日時・タイルの数字は通常の字体（等幅の tabular-nums にしない。「9: 21」のように空かないため）", async () => {
+    vi.mocked(api.fetchSensors).mockResolvedValue(sensors8);
+    const { container } = renderWithQueryClient(<DashboardLinkView dashboard={big} rangeMinutes={30} />);
+    await screen.findByRole("group", { name: "今の値" });
+    expect(screen.getByText(/現在$/).className).not.toContain("tabular-nums");
+    expect(container.querySelector("header [class*='tabular-nums']")).toBeNull();
+    expect(container.querySelector("[aria-label='今の値'] [class*='tabular-nums']")).toBeNull();
+  });
+
+  it("リンクの長さがどの分節ボタンにも合わない（30 分）とき、期間の行に「直近 30 分」を強調して出す。合うとき（1 時間）は出さない", () => {
+    const { unmount } = renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={30} />);
+    expect(screen.getByRole("banner").querySelector("b.text-blue-600")).toHaveTextContent("直近 30 分");
+    unmount();
+    renderWithQueryClient(<DashboardLinkView dashboard={dashboard} rangeMinutes={60} />);
+    expect(screen.getByRole("banner").querySelector("b.text-blue-600")).toBeNull();
+    expect(screen.getByRole("button", { name: "1時間" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("横向きでは、先頭のタイルを 4 個（1 行）に絞る。「ほか N 個」で全部", async () => {
+    const user = userEvent.setup();
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("landscape"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      vi.mocked(api.fetchSensors).mockResolvedValue(sensors8);
+      renderWithQueryClient(<DashboardLinkView dashboard={big} rangeMinutes={30} />);
+      const group = await screen.findByRole("group", { name: "今の値" });
+      expect(within(group).getAllByRole("button", { name: /へ移る$/ })).toHaveLength(4);
+      await user.click(within(group).getByRole("button", { name: "ほか 4 個の値を見る ▾" }));
+      expect(within(group).getAllByRole("button", { name: /へ移る$/ })).toHaveLength(8);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+});

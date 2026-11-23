@@ -212,7 +212,7 @@ export function LinkScreen({
           onClick={onBack}
           className="absolute left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(10rem+env(safe-area-inset-bottom))] z-10 flex h-11 w-11 items-center justify-center rounded-full text-2xl leading-none shadow-md"
           // 明るい・暗いのどちらでも同じ（半透明の濃い丸に白い矢印）
-          style={{ background: "rgba(17, 24, 39, 0.7)", color: "#fff" }}
+          style={{ background: "rgba(17, 24, 39, 0.7)", color: "#fff", border: "1px solid rgba(255, 255, 255, 0.35)" }}
         >
           ‹
         </button>

@@ -81,6 +81,8 @@ const LIVE_REFRESH_MS = 30_000;
 const HEADER_VAR = "--link-hdr";
 /** 帯の高さを測れる前（初回の描画）の仮の高さ（px） */
 const HEADER_FALLBACK_PX = 140;
+/** 横向きで先頭に出すタイルの数（1 行） */
+const LANDSCAPE_TILE_LIMIT = 4;
 /** 見本（preview）に出す部品の数 */
 const PREVIEW_COUNT = 4;
 /** 指を置いても指の操作にしない所（ボタンの押下を奪わないため） */
@@ -166,7 +168,7 @@ function GraphCard({
             <span key={id}>
               <i aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-sm align-[1px]" style={{ background: graphColor(widget, i) }} />
               {nameOf(id)} {sensors?.find((s) => s.id === id)?.unit ?? ""}{" "}
-              <b className="text-sm tabular-nums text-gray-900">{value === null ? "—" : formatYTick(value)}</b>
+              <b className="text-sm text-gray-900">{value === null ? "—" : formatYTick(value)}</b>
             </span>
           );
         })}
@@ -185,23 +187,38 @@ function GraphCard({
  * 先頭 VALUE_TILE_LIMIT 個まで。残りは「ほか N 個の値を見る」で開く。タップで、そのグラフのカードへスクロールする。
  * 値は全センサーの最新値の取得（useLatestReadings。1 回の取得）を使う。グラフの取得は増やさない。
  */
+/** 横向きか（向きが変わったら追いかける。matchMedia が無い環境では縦向き） */
+function useLandscape(): boolean {
+  const query = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(orientation: landscape)") : null;
+  const [landscape, setLandscape] = useState(query?.matches ?? false);
+  useEffect(() => {
+    if (!query) return;
+    const update = () => setLandscape(query.matches);
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, [query]);
+  return landscape;
+}
+
 function ValueTiles({ tiles, sensors, onPick }: { tiles: ValueTile[]; sensors: Sensor[] | undefined; onPick: (widgetId: string) => void }) {
   const { data } = useLatestReadings();
   const [expanded, setExpanded] = useState(false);
+  // 横向きは高さが小さいので、先頭の 1 行（4 個）だけ。最初の画面にグラフが入るようにする
+  const limit = useLandscape() ? LANDSCAPE_TILE_LIMIT : VALUE_TILE_LIMIT;
   if (tiles.length === 0) return null;
-  const shown = expanded ? tiles : tiles.slice(0, VALUE_TILE_LIMIT);
-  const hidden = tiles.length - VALUE_TILE_LIMIT;
+  const shown = expanded ? tiles : tiles.slice(0, limit);
+  const hidden = tiles.length - limit;
   const severityColor = { critical: "text-red-600", warning: "text-amber-600", normal: "text-gray-900" } as const;
   return (
-    <div role="group" aria-label="今の値" className="grid grid-cols-2 gap-x-3.5 gap-y-1.5 bg-white px-3.5 pb-2.5 pt-1 landscape:grid-cols-4">
+    <div role="group" aria-label="今の値" className="grid grid-cols-2 gap-x-3.5 gap-y-1.5 bg-white px-3.5 pb-2.5 pt-1 landscape:grid-cols-4 landscape:pb-1">
       {shown.map((tile) => {
         const reading = data?.readings.find((r) => r.sensorId === tile.sensorId);
         const sensor = sensors?.find((s) => s.id === tile.sensorId);
         const severity = reading && sensor ? classifySeverity(reading.value, sensor) : "normal";
         return (
           <button key={tile.sensorId} type="button" onClick={() => onPick(tile.widgetId)} className="min-w-0 text-left" aria-label={`${tile.name} へ移る`}>
-            <span className="line-clamp-2 min-h-[2.3em] text-[11px] leading-tight text-gray-500">{tile.name}</span>
-            <span className={`block border-b border-gray-300 text-right text-2xl font-bold leading-tight tabular-nums ${severityColor[severity]}`}>
+            <span className="line-clamp-2 min-h-[2.3em] text-[11px] leading-tight text-gray-500 landscape:line-clamp-1 landscape:min-h-0">{tile.name}</span>
+            <span className={`block border-b border-gray-300 text-right text-2xl font-bold leading-tight landscape:text-xl ${severityColor[severity]}`}>
               {reading ? formatYTick(reading.value) : "—"}
               <small className="ml-0.5 text-[11px] font-normal text-gray-500">{tile.unit}</small>
             </span>
@@ -440,8 +457,11 @@ export function DashboardLinkView({
                 );
               })}
             </div>
-            <div className="flex min-h-8 items-center justify-between gap-1.5 pl-2.5 text-xs tabular-nums text-gray-500">
-              <span className={`flex-1 text-center ${compact ? "landscape:hidden" : ""}`}>〜 {dateText(bounds.to)}</span>
+            <div className="flex min-h-8 items-center justify-between gap-1.5 pl-2.5 text-xs text-gray-500">
+              <span className={`flex-1 text-center ${compact ? "landscape:hidden" : ""}`}>
+                {/* リンクの長さがどのボタンにも合わないとき（例: 30 分）は、長さを青く強調して、今の選択が分かるようにする */}
+                {!LINK_LIST_CHIPS_MINUTES.some((m) => isChipActive(period, m)) && <b className="mr-1.5 text-blue-600">{periodLabel(period, now)}</b>}〜 {dateText(bounds.to)}
+              </span>
               {!isAtLink(period, rangeMinutes) && !preview && (
                 <button
                   type="button"
@@ -473,7 +493,7 @@ export function DashboardLinkView({
             aria-label="時刻を指定"
             disabled={preview}
             onClick={() => setSheetOpenedAt(Date.now())}
-            className={`${toolButton} flex items-center gap-1 border-gray-200 tabular-nums text-gray-600`}
+            className={`${toolButton} flex items-center gap-1 border-gray-200 text-gray-600`}
           >
             {periodLabel(period, now)} 🕘
           </button>
