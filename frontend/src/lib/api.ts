@@ -16,14 +16,18 @@ import type {
   DashboardDetail,
   Device,
   DeviceCreated,
+  KeptSession,
   MeResponse,
   MigrationImportResult,
   MigrationStatus,
   DisplaySettings,
   NotificationSettings,
+  PasskeyBegin,
+  PasskeyItem,
   Reading,
   RuntimeSettings,
   ReadingAggregate,
+  RegisterBegin,
   Sensor,
   WebhookEventType,
   WebhookSubscription,
@@ -151,14 +155,90 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // ── Auth API (Phase 0.5) ──────────────────────────────────────
 // SaaS 版のログイン・登録・利用者の情報（self-hosted では使わない）
 
-export const registerUser = (data: {
-  email: string;
-  password: string;
-  workspaceName: string;
-}) => rawFetch<AuthTokens>("/api/auth/register", { method: "POST", body: JSON.stringify(data) });
+/** メールのリンクを依頼する（登録も、端末を失くしたときの再登録も、同じ入口。応答はどのアドレスも同じ）。 */
+export const requestEmailLink = (email: string) =>
+  rawFetch<{ status: string }>("/api/auth/email/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
 
-export const loginUser = (data: { email: string; password: string }) =>
-  rawFetch<AuthTokens>("/api/auth/login", { method: "POST", body: JSON.stringify(data) });
+/** メールのログインリンクを依頼する（パスキーが使えない端末用。応答はどのアドレスも同じ）。 */
+export const requestLoginLink = (email: string) =>
+  rawFetch<{ status: string }>("/api/auth/email/login-request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+
+/** ログインリンクのトークンでログインする（パスキーの登録は求めない）。 */
+export const loginWithLink = (token: string) =>
+  rawFetch<AuthTokens>("/api/auth/email/login", { method: "POST", body: JSON.stringify({ token }) });
+
+/** 登録・再登録のリンクのトークンから、端末に渡す登録のオプションを得る。 */
+export const beginPasskeyRegistration = (token: string) =>
+  rawFetch<RegisterBegin>("/api/auth/passkey/register/begin", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+
+/** 端末の登録の応答を送る。成功すると、利用者を作って（または端末を足して）ログイン状態にする。 */
+export const finishPasskeyRegistration = (data: {
+  challengeId: string;
+  credential: Record<string, unknown>;
+  deviceName: string;
+}) =>
+  rawFetch<AuthTokens>("/api/auth/passkey/register/finish", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+/** パスキーでのログインを始める（アドレスは聞かない）。 */
+export const beginPasskeyLogin = () =>
+  rawFetch<PasskeyBegin>("/api/auth/passkey/login/begin", { method: "POST" });
+
+/** 端末の署名を送ってログインする。 */
+export const finishPasskeyLogin = (data: {
+  challengeId: string;
+  credential: Record<string, unknown>;
+}) =>
+  rawFetch<AuthTokens>("/api/auth/passkey/login/finish", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+// ── 端末（パスキー）の管理と、永久ログイン（ログイン中） ───────────
+
+export const fetchPasskeys = () => request<PasskeyItem[]>("/api/passkeys");
+
+export const beginAddPasskey = () =>
+  request<PasskeyBegin>("/api/passkeys/register/begin", { method: "POST" });
+
+export const finishAddPasskey = (data: {
+  challengeId: string;
+  credential: Record<string, unknown>;
+  deviceName: string;
+}) =>
+  request<PasskeyItem>("/api/passkeys/register/finish", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const renamePasskey = (id: string, name: string) =>
+  request<PasskeyItem>(`/api/passkeys/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+
+export const deletePasskey = (id: string) =>
+  request<void>(`/api/passkeys/${id}`, { method: "DELETE" });
+
+export const fetchKeptSessions = () => request<KeptSession[]>("/api/sessions/kept");
+
+/** この端末を、ログインしたままにする（キオスク用。今のリフレッシュトークンを期限なしにする）。 */
+export const keepSignedIn = (refreshToken: string, deviceName: string) =>
+  request<KeptSession>("/api/sessions/kept", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken, deviceName }),
+  });
+
+export const endKeptSession = (id: string) =>
+  request<void>(`/api/sessions/kept/${id}`, { method: "DELETE" });
 
 export const refreshTokens = (refreshToken: string) =>
   rawFetch<AuthTokens>("/api/auth/refresh", {

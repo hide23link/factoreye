@@ -15,6 +15,7 @@ import { DevicesSettingsPanel } from "./settings/DevicesSettingsPanel";
 import { DisplaySettingsPanel } from "./settings/DisplaySettingsPanel";
 import { MigrationSettingsPanel } from "./settings/MigrationSettingsPanel";
 import { NotificationSettingsPanel } from "./settings/NotificationSettingsPanel";
+import { PasskeysSettingsPanel } from "./settings/PasskeysSettingsPanel";
 import { RuntimeSettingsPanel } from "./settings/RuntimeSettingsPanel";
 import { SensorSettingsPanel } from "./settings/SensorSettingsPanel";
 import { WebhookSettingsPanel } from "./settings/WebhookSettingsPanel";
@@ -29,6 +30,7 @@ type SettingsTab =
   | "migration"
   | "backup"
   | "devices"
+  | "passkeys"
   | "runtime"
   | "display";
 
@@ -40,6 +42,8 @@ interface TabItem {
   label: string;
   // OSS 版（self-hosted）だけの項目
   ossOnly?: boolean;
+  // SaaS 版だけの項目
+  saasOnly?: boolean;
 }
 
 // メニューのまとまり（見出しと、その中の項目）。項目の名前は、ボタンの名前としてテストでも使う
@@ -69,12 +73,15 @@ const GROUPS: { title: string; items: TabItem[] }[] = [
     ],
   },
   { title: "表示", items: [{ value: "display", label: "画面の明るさ" }] },
+  { title: "アカウント", items: [{ value: "passkeys", label: "ログイン端末", saasOnly: true }] },
 ];
 
 const VISIBLE_GROUPS = GROUPS.map((group) => ({
   ...group,
-  items: group.items.filter((item) => !(item.ossOnly && IS_MULTI_TENANT)),
-}));
+  items: group.items.filter(
+    (item) => !(item.ossOnly && IS_MULTI_TENANT) && !(item.saasOnly && !IS_MULTI_TENANT),
+  ),
+})).filter((group) => group.items.length > 0);
 
 /** 設定画面の本体。初期表示はセンサー。 */
 export function SettingsPage() {
@@ -119,6 +126,7 @@ export function SettingsPage() {
         {tab === "backup" && !IS_MULTI_TENANT && <BackupSettingsPanel />}
         {tab === "runtime" && !IS_MULTI_TENANT && <RuntimeSettingsPanel />}
         {tab === "display" && <DisplaySettingsPanel />}
+        {tab === "passkeys" && IS_MULTI_TENANT && <PasskeysSettingsPanel />}
       </div>
     </div>
   );

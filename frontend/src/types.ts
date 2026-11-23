@@ -23,6 +23,38 @@ export interface MeResponse {
   workspaceId: string;
   workspaceName: string;
   plan: "free" | "pro";
+  /** ログインの方法。メールのログインリンクだけで入った状態（email）では、端末の管理はできない */
+  loginMethod?: "passkey" | "email" | "recover" | null;
+}
+
+/** パスキーの登録・ログインの begin の応答（端末に渡すオプションと、finish に返すチャレンジの ID）。 */
+export interface PasskeyBegin {
+  challengeId: string;
+  options: Record<string, unknown>;
+}
+
+/** メールのリンクからの登録の begin。画面に、どのアドレスか・新規か再登録かを見せる。 */
+export interface RegisterBegin extends PasskeyBegin {
+  email: string;
+  purpose: "register" | "recover";
+}
+
+/** 端末（パスキー）の一覧の 1 行。 */
+export interface PasskeyItem {
+  id: string;
+  name: string;
+  /** 画面が「今の端末」を見分けるのに使う */
+  credentialId: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/** 永久ログイン（キオスク用）の端末の 1 行。 */
+export interface KeptSession {
+  id: string;
+  name: string;
+  startedAt: string;
+  lastUsedAt: string | null;
 }
 
 // ---- Migration (SaaS → OSS) ----

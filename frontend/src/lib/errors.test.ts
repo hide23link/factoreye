@@ -22,15 +22,25 @@ describe("errorStatus", () => {
 
 describe("describeAuthError", () => {
   it("状態コードごとに日本語の文言を返し、生のエラー文を出さない", () => {
-    expect(describeAuthError(new ApiError(401, 'POST /api/auth/login failed: 401 {"detail":"x"}'), "login")).toBe(
-      "メールアドレスまたはパスワードが正しくありません。",
+    expect(describeAuthError(new ApiError(401, 'POST /api/auth/passkey/login/finish failed: 401 {"detail":"x"}'), "login")).toBe(
+      "パスキーを確かめられませんでした。もう一度お試しください。",
     );
     expect(describeAuthError(new ApiError(409, "x"), "register")).toMatch(/すでに登録/);
-    expect(describeAuthError(new ApiError(422, "x"), "register")).toMatch(/8文字以上、72バイト以内/);
-    expect(describeAuthError(new ApiError(429, "x"), "login")).toMatch(/試行回数/);
+    expect(describeAuthError(new ApiError(422, "x"), "request")).toMatch(/メールアドレスの形式/);
+    expect(describeAuthError(new ApiError(429, "x"), "request")).toMatch(/試行回数/);
     expect(describeAuthError(new ApiError(500, "x"), "login")).toMatch(/サーバーで問題/);
     expect(describeAuthError(new TypeError("Failed to fetch"), "login")).toMatch(/接続できませんでした/);
     expect(describeAuthError(new ApiError(401, "POST failed: 401"), "login")).not.toMatch(/POST/);
+  });
+
+  it("リンクの期限切れ・使用済み（410）は、もう一度メールを送るよう案内する", () => {
+    expect(describeAuthError(new ApiError(410, "x"), "link")).toMatch(/期限が切れたか、すでに使われています/);
+    expect(describeAuthError(new ApiError(410, "x"), "register")).toMatch(/もう一度メールを送って/);
+  });
+
+  it("メールを送れない設定（503）は、依頼のときだけ案内する", () => {
+    expect(describeAuthError(new ApiError(503, "x"), "request")).toMatch(/メールを送れない設定/);
+    expect(describeAuthError(new ApiError(503, "x"), "login")).toMatch(/サーバーで問題/);
   });
 });
 

@@ -36,18 +36,27 @@ function commonMessage(status: number | null): string {
   return "処理に失敗しました。もう一度お試しください。";
 }
 
+/** 認証の操作の種類（失敗の文言を、操作に合わせて変える）。 */
+export type AuthAction = "login" | "register" | "request" | "link";
+
 /**
- * ログイン・新規登録の失敗を、利用者向けの文言にする。
- * 401（認証失敗）・409（登録済み）・422（入力の不備）・429（回数超過）・サーバーエラー・通信エラーを区別する。
+ * パスキーでの登録・ログインと、メールのリンクの失敗を、利用者向けの文言にする。
+ * 401（パスキーを確かめられない）・410（リンクの期限切れ・使用済み）・409（すでに登録済み）・
+ * 429（回数超過）・503（メールを送れない）・サーバーエラー・通信エラーを区別する。
  */
-export function describeAuthError(err: unknown, kind: "login" | "register"): string {
+export function describeAuthError(err: unknown, action: AuthAction): string {
   const status = errorStatus(err);
-  if (status === 401) return "メールアドレスまたはパスワードが正しくありません。";
-  if (status === 409) return "このメールアドレスは、すでに登録されています。";
-  if (status === 422) {
-    return kind === "register"
-      ? "入力内容を確認してください（メールアドレスの形式、パスワードは8文字以上、72バイト以内。日本語は24文字まで）。"
-      : "メールアドレスの形式を確認してください。";
+  if (status === 401) return "パスキーを確かめられませんでした。もう一度お試しください。";
+  if (status === 410) {
+    return action === "link"
+      ? "このリンクは、期限が切れたか、すでに使われています。もう一度メールを送ってください。"
+      : "リンクが使えません。もう一度メールを送ってください。";
+  }
+  if (status === 409) return "このメールアドレスまたはパスキーは、すでに登録されています。";
+  if (status === 400) return "登録を確かめられませんでした。もう一度お試しください。";
+  if (status === 422) return "メールアドレスの形式を確認してください。";
+  if (status === 503 && action === "request") {
+    return "メールを送れない設定になっています。管理者に連絡してください。";
   }
   return commonMessage(status);
 }

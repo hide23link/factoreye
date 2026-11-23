@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminApiError, fetchAdminOverview, fetchAdminUsers } from "../../lib/adminApi";
 import type { AdminUserSummary } from "../../lib/adminApi";
 import { FREE_TIER_SENSOR_LIMIT } from "../../lib/freeTier";
+import { AdminResetDialog } from "./AdminResetDialog";
 import { AdminUserModal } from "./AdminUserModal";
 import { FailbackCard } from "./FailbackCard";
 import { R2RestoreCard } from "./R2RestoreCard";
@@ -40,6 +41,8 @@ function formatDateTime(iso: string | null): string {
 export function AdminUsersPage({ token, onAuthError }: Props) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 「リセット」を押した利用者（確認の小窓を出す）
+  const [resetTarget, setResetTarget] = useState<AdminUserSummary | null>(null);
 
   // 概要（件数と DB の使用量）と、利用者の一覧を、それぞれ取得する
   const overview = useQuery({
@@ -118,6 +121,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
               <th className="px-3 py-2">メール</th>
               <th className="px-3 py-2">ワークスペース</th>
               <th className="px-3 py-2">プラン</th>
+              <th className="px-3 py-2">端末</th>
               <th className="px-3 py-2">センサー</th>
               <th className="px-3 py-2">測定件数</th>
               <th className="px-3 py-2">最終測定</th>
@@ -131,6 +135,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
                 <td className="px-3 py-2 text-gray-900">{u.email}</td>
                 <td className="px-3 py-2 text-gray-600">{u.workspaceName ?? "—"}</td>
                 <td className="px-3 py-2 text-gray-600">{u.plan ?? "—"}</td>
+                <td className="px-3 py-2 text-gray-600">{u.passkeyCount}</td>
                 <td className="px-3 py-2 text-gray-600">
                   {u.plan === "free" ? `${u.sensorCount} / ${FREE_TIER_SENSOR_LIMIT}` : u.sensorCount}
                 </td>
@@ -138,6 +143,14 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
                 <td className="px-3 py-2 text-gray-600">{formatDateTime(u.lastReadingAt)}</td>
                 <td className="px-3 py-2 text-gray-600">{formatDateTime(u.createdAt)}</td>
                 <td className="px-3 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setResetTarget(u)}
+                    aria-label={`${u.email} をリセット`}
+                    className="mr-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                  >
+                    リセット
+                  </button>
                   <button
                     type="button"
                     onClick={() => setSelectedId(u.id)}
@@ -150,7 +163,7 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
             ))}
             {users.isSuccess && filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-gray-500">
+                <td colSpan={9} className="px-3 py-6 text-center text-gray-500">
                   該当するユーザーはいません
                 </td>
               </tr>
@@ -159,6 +172,17 @@ export function AdminUsersPage({ token, onAuthError }: Props) {
         </table>
         </div>
       </div>
+
+      {resetTarget && (
+        <AdminResetDialog
+          token={token}
+          userId={resetTarget.id}
+          email={resetTarget.email}
+          onClose={() => setResetTarget(null)}
+          onDone={() => void users.refetch()}
+          onAuthError={onAuthError}
+        />
+      )}
 
       {selectedId && (
         <AdminUserModal

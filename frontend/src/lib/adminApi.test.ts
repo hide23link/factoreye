@@ -8,6 +8,7 @@ import {
   deleteAdminUser,
   fetchAdminUsers,
   previewFailback,
+  resetAdminUser,
 } from "./adminApi";
 
 function mockFetchOnce(status: number, body: unknown) {
@@ -90,5 +91,19 @@ describe("書き戻し API", () => {
     const e3 = await previewFailback("tok", "n").catch((e: unknown) => e);
     expect(adminErrorDetail(e3, "既定")).toBe("既定");
     expect(adminErrorDetail(new Error("x"), "既定")).toBe("既定");
+  });
+});
+
+describe("resetAdminUser", () => {
+  it("POST /api/admin/users/{id}/reset に、パスキー削除の指定を送る", async () => {
+    const fn = mockFetchOnce(200, { emailQueued: true });
+    const result = await resetAdminUser("tok", "u1", false);
+
+    expect(result).toEqual({ emailQueued: true });
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/admin\/users\/u1\/reset$/);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ deletePasskeys: false });
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer tok");
   });
 });
