@@ -19,7 +19,7 @@ class の中の1行 ＝ 1つの列。テーブルを変えたら、alembic の�
 - Dashboard ─ Widget
 - User ─ Workspace（SaaS のみ）。workspace_id が NULL の行は、self-hosted のデータ
 """
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum  # 決まった文字列だけを選べる型（AlarmStatus など）
 from typing import Any
 from uuid import UUID, uuid4  # id に使う、重ならない長い番号
@@ -454,6 +454,26 @@ class EmailToken(SQLModel, table=True):
     # 管理者のリセットが作ったリンク。同じアドレスへの 3 通/時の数え方に入れない
     # （第三者が 3 回依頼して、管理者のリセットを止められないように）
     by_admin: bool = Field(default=False)
+    # 実際にメールの送信を依頼した時刻。登録されていないアドレスに残す「送らないダミー行」は NULL。
+    # 1 日の送信数の上限（一般の依頼だけ）は、これを数える。
+    # 既存の行は NULL（送ったものとして扱わない）
+    mail_sent_at: datetime | None = Field(default=None)
+
+
+class OpsNoticeMark(SQLModel, table=True):
+    """運用者への通知を、その日にもう送ったという印（1 日 1 回に抑える）。
+
+    （日付, 種類）が主キー。先に行を入れられた 1 回だけが、通知を送る。
+    再起動・複数ワーカーでも 1 回になる。
+    日付は UTC の日付（1 日の送信数の数え方と同じ）。
+    """
+
+    __tablename__ = "ops_notice_marks"
+
+    day: date = Field(primary_key=True)
+    # "email_warn"（上限の割合に達した）| "email_limit"（上限に達した）
+    kind: str = Field(primary_key=True, max_length=30)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class AuthChallenge(SQLModel, table=True):

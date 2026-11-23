@@ -15,18 +15,29 @@ HTTP の入口は api/passkeys.py（利用者）と api/admin.py（管理者の�
 """
 import hashlib
 import logging
+import math
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import update
+from sqlalchemy import text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth as auth_utils
-from app import mailer
+from app import mailer, notifications
 from app.config import settings
-from app.db.models import AuthChallenge, EmailToken, Passkey, RefreshToken, User, Workspace
+from app.db.models import (
+    AuthChallenge,
+    EmailToken,
+    OpsNoticeMark,
+    Passkey,
+    RefreshToken,
+    User,
+    Workspace,
+)
+from app.db.session import engine
 from app.webauthn_utils import VerifiedPasskey
 
 _logger = logging.getLogger(__name__)
@@ -106,13 +117,140 @@ async def purge_expired(session: AsyncSession) -> None:
     )
 
 
+class EmailCapReachedError(Exception):
+    """1 日のメール送信数の上限に達した（API は 503。登録の有無によらず、同じ応答にする）。"""
+
+
+# 1 日の送信数の確認と、スロットの確保（送信の印の書き込み）を、同時に 2 つ以上行わないための
+# 排他の鍵（PostgreSQL の advisory lock。トランザクションの終わりで外れる）。
+# 同時の依頼で、上限を超えて送ってしまうのを防ぐ（数える→確保が 1 つずつになる）
+_MAIL_CAP_LOCK_KEY = 7_302_611
+
+# 運用者への通知の種類（ops_notice_marks.kind）
+NOTICE_EMAIL_WARN = "email_warn"
+NOTICE_EMAIL_LIMIT = "email_limit"
+
+
+def _utc_day_start(moment: datetime) -> datetime:
+    """UTC の日付の始まり（その日の 0:00 UTC。日本時間の 9:00）。
+
+    Resend の 1 日の数え方に合わせる想定。
+    """
+    return moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+async def count_general_mail_sent_today(session: AsyncSession) -> int:
+    """今日（UTC）に送った、一般の依頼のメールの数。
+
+    数えるのは、実際に送りを依頼した行（mail_sent_at がある）だけ。登録されていないアドレスの
+    ダミー行（NULL）と、管理者のリセット（by_admin。上限の対象外）は数えない。
+    """
+    day_start = _utc_day_start(_now())
+    return (
+        await session.exec(
+            select(func.count())
+            .select_from(EmailToken)
+            .where(
+                col(EmailToken.mail_sent_at) >= day_start,
+                col(EmailToken.mail_sent_at) < day_start + timedelta(days=1),
+                col(EmailToken.by_admin).is_(False),
+            )
+        )
+    ).one()
+
+
+async def reserve_mail_cap(session: AsyncSession) -> None:
+    """1 日の上限に達していたら、EmailCapReachedError を投げる（上限が 0 以下なら、何もしない）。
+
+    advisory lock を取ってから数えるので、同時の依頼でも、この確認と、あとに続く送信の印の書き込み
+    （同じトランザクション）が 1 つずつ進み、上限を超えない。
+    ロックは、コミット（またはロールバック）で外れる。
+    """
+    if settings.email_daily_limit <= 0:
+        return
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MAIL_CAP_LOCK_KEY})
+    if await count_general_mail_sent_today(session) >= settings.email_daily_limit:
+        await session.rollback()
+        raise EmailCapReachedError
+
+
+def _notice_text(kind: str, sent: int, limit: int) -> str:
+    """運用者への知らせの文面（時刻は日本時間）。"""
+    stamp = notifications.format_jst_stamp(_now())
+    if kind == NOTICE_EMAIL_LIMIT:
+        return (
+            f"FactorEye: 今日のメール送信が上限（{sent} / {limit} 通）に達しました。"
+            "登録・ログインのメールは、日本時間の 9:00（UTC の日付が変わる時刻）まで"
+            f"送れません（{stamp}）"
+        )
+    return f"FactorEye: 今日のメール送信が {sent} / {limit} 通です（{stamp}）"
+
+
+async def notify_email_usage() -> None:
+    """1 日のメール送信数が、上限の割合・上限に達したら、運用者用の Discord へ知らせる。
+
+    それぞれ 1 日 1 回。
+
+    バックグラウンドで呼ぶ（応答を待たせない）。URL が空・上限なしなら、何もしない。
+    「その日に送った」印を DB（ops_notice_marks）に持つので、
+    再起動・複数ワーカーでも 1 日 1 回になる
+    （印を先に入れられた 1 つだけが送る）。通知の送信に失敗しても、メールの送信は止めない。
+    失敗したときは印を戻し、次の依頼のときに、もう一度試す。
+    """
+    limit = settings.email_daily_limit
+    url = settings.ops_discord_webhook_url.get_secret_value()
+    if limit <= 0 or not url:
+        return
+    warn_at = max(1, math.ceil(limit * settings.email_daily_warn_percent / 100))
+    try:
+        async with AsyncSession(engine) as session:
+            sent = await count_general_mail_sent_today(session)
+            day = _utc_day_start(_now()).date()
+            # 割合の通知は、上限と同じ数なら出さない（上限の通知だけにする）
+            thresholds = ((NOTICE_EMAIL_WARN, warn_at), (NOTICE_EMAIL_LIMIT, limit))
+            for kind, threshold in thresholds:
+                if kind == NOTICE_EMAIL_WARN and warn_at >= limit:
+                    continue
+                if sent < threshold or not await _claim_notice(session, day, kind):
+                    continue
+                if not await notifications.send_ops_discord(url, _notice_text(kind, sent, limit)):
+                    await _release_notice(session, day, kind)
+    except Exception:
+        # 通知の失敗（DB を含む）で、メールの送信を止めない
+        _logger.warning("email usage notice failed", exc_info=False)
+
+
+async def _claim_notice(session: AsyncSession, day: date, kind: str) -> bool:
+    """その日の通知の印を入れる。入れられたら True（送ってよい）、すでにあれば False。"""
+    result = await session.execute(
+        pg_insert(OpsNoticeMark)
+        .values(day=day, kind=kind, created_at=_now())
+        .on_conflict_do_nothing()
+        .returning(col(OpsNoticeMark.kind))
+    )
+    claimed = result.first() is not None
+    await session.commit()
+    return claimed
+
+
+async def _release_notice(session: AsyncSession, day: date, kind: str) -> None:
+    """通知を送れなかったとき、印を戻す（次の依頼のときに、もう一度試せるようにする）。"""
+    await session.execute(
+        delete(OpsNoticeMark).where(col(OpsNoticeMark.day) == day, col(OpsNoticeMark.kind) == kind)
+    )
+    await session.commit()
+
+
 async def request_email_link(session: AsyncSession, email: str) -> tuple[str, str] | None:
     """メールのリンクを作る。戻り値は（生のトークン, 種類）。送る回数の上限なら None。
 
     アドレスが未登録なら、これから作る利用者の ID を先に決め（WebAuthn の user.id に使う）、
     登録のリンクにする。登録済みなら、端末の再登録のリンクにする。
+    1 日の送信数の上限に達していたら、アドレスの登録の有無によらず、EmailCapReachedError
+    送る行には、送信の依頼の印（mail_sent_at）を付ける。確認と印の書き込みは、同じトランザクション。
     """
     await purge_expired(session)
+    await reserve_mail_cap(session)
     since = _now() - timedelta(hours=1)
     recent = (
         await session.exec(
@@ -145,6 +283,7 @@ async def request_email_link(session: AsyncSession, email: str) -> tuple[str, st
             user_id=user_id,
             token_hash=_hash_link_token(raw),
             expires_at=_now() + ttl,
+            mail_sent_at=_now(),
         )
     )
     await session.commit()
@@ -160,6 +299,8 @@ async def request_login_link(session: AsyncSession, email: str) -> str | None:
     （上限を超えたら、送らない。応答は同じ）。
     """
     await purge_expired(session)
+    # 上限に達していたら、登録済みかどうかに関わらず、同じ失敗にする（登録の有無を推測させない）
+    await reserve_mail_cap(session)
     since = _now() - timedelta(hours=1)
     recent = (
         await session.exec(
@@ -185,6 +326,8 @@ async def request_login_link(session: AsyncSession, email: str) -> str | None:
             user_id=user.id if user is not None else uuid4(),
             token_hash=_hash_link_token(raw),
             expires_at=_now() + LOGIN_LINK_TTL,
+            # 送らないダミー行（登録されていないアドレス）は、送信数に数えない
+            mail_sent_at=_now() if user is not None else None,
         )
     )
     await session.commit()
@@ -455,6 +598,7 @@ async def prepare_reset(
             token_hash=_hash_link_token(raw),
             expires_at=_now() + RECOVER_LINK_TTL,
             by_admin=True,
+            mail_sent_at=_now(),  # 印は付けるが、by_admin なので、1 日の上限・通知の数には入らない
         )
     )
     await revoke_all_sessions(session, user_id)

@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr = SecretStr("")
     # メールの送信元（Resend で認証済みのドメインのアドレス）
     mail_from: str = "FactorEye <noreply@hide23.link>"
+    # 1 日（UTC の日付）に送れる、一般の依頼（登録・再登録・ログインリンク）のメールの上限。
+    # Resend の無料枠（1 日 100 通）に収めるための歯止め。0 以下は上限なし。
+    # 管理者のリセットは数えない（上限の対象外）。UTC の日付は、日本時間の 9:00 に切り替わる
+    email_daily_limit: int = 60
+    # 運用者へ知らせる割合（%）。上限のこの割合に達したとき、1 日 1 回通知する
+    # （上限に達したときも、別に 1 回）
+    email_daily_warn_percent: int = Field(default=80, ge=1, le=100)
+    # 運用者用の Discord Webhook の URL（メール送信数の通知先）。空なら通知しない。
+    # .env にだけ置き、ログ・画面に出さない
+    ops_discord_webhook_url: SecretStr = SecretStr("")
     # 管理者トークンはリフレッシュ不可（期限切れ後は再ログイン）。通常ユーザーより短く保つ
     admin_access_expire_minutes: int = 60
     # 管理者が利用者として閲覧するときのトークンの有効期限（分）。リフレッシュ不可。短く保つ

@@ -168,6 +168,18 @@ def _fail(code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=code, detail=detail)
 
 
+# 1 日の送信数の上限に達したときの 503 の理由。画面は、この文字で「混み合っています」を出し分ける
+MAIL_BUSY_DETAIL = "mail is busy"
+
+
+def _mail_busy() -> HTTPException:
+    """1 日のメール送信数の上限に達した。登録の有無で、応答（状態・文言・時間）を変えない。
+
+    Retry-After は付けない。
+    """
+    return _fail(status.HTTP_503_SERVICE_UNAVAILABLE, MAIL_BUSY_DETAIL)
+
+
 def _device_name(requested: str) -> str:
     """端末の名前。空なら既定の名前にする（あとから設定で変えられる）。"""
     return (requested or "この端末")[:DEVICE_NAME_MAX]
@@ -255,10 +267,14 @@ async def request_email(
     require_multi_tenant()
     if not mailer.is_mail_configured():
         raise _fail(status.HTTP_503_SERVICE_UNAVAILABLE, "mail is not configured")
-    issued = await service.request_email_link(session, body.email)
+    try:
+        issued = await service.request_email_link(session, body.email)
+    except service.EmailCapReachedError:
+        raise _mail_busy() from None
     if issued is not None:
         raw, purpose = issued
         background.add_task(service.deliver_link_mail, body.email, raw, purpose)
+        background.add_task(service.notify_email_usage)
     return EmailRequestResult()
 
 
@@ -281,9 +297,13 @@ async def request_login_link(
     require_multi_tenant()
     if not mailer.is_mail_configured():
         raise _fail(status.HTTP_503_SERVICE_UNAVAILABLE, "mail is not configured")
-    raw = await service.request_login_link(session, body.email)
+    try:
+        raw = await service.request_login_link(session, body.email)
+    except service.EmailCapReachedError:
+        raise _mail_busy() from None
     if raw is not None:
         background.add_task(service.deliver_link_mail, body.email, raw, service.PURPOSE_LOGIN)
+        background.add_task(service.notify_email_usage)
     return EmailRequestResult()
 
 

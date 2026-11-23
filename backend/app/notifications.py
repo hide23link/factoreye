@@ -103,3 +103,30 @@ async def send_alarm_discord(webhook_url: str, notification: AlarmNotification) 
             redact_url(webhook_url),
             describe_send_error(error),
         )
+
+
+async def send_ops_discord(webhook_url: str, content: str) -> bool:
+    """運用者用の Discord Webhook へ、1 通の知らせを送る。送れたら True、失敗したら False。
+
+    アラームの通知（send_alarm_discord）と同じ検証・同じ送り方（SSRF 対策のため、
+    送信直前に宛先を検証し、リダイレクトを追わない）。失敗しても、例外は外へ出さずログに残すだけにする
+    （メールの送信など、本来の処理を止めないため）。URL はトークンを含む秘密なので、ログに出さない。
+    """
+    try:
+        await assert_webhook_url_allowed(webhook_url)
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            response = await client.post(webhook_url, json={"content": content})
+            response.raise_for_status()
+    except Exception as error:
+        logger.warning(
+            "failed to send ops discord notification to %s: %s",
+            redact_url(webhook_url),
+            describe_send_error(error),
+        )
+        return False
+    return True
+
+
+def format_jst_stamp(moment: datetime) -> str:
+    """運用者への知らせに付ける日本時間の時刻。例: 11-23 20:30 JST"""
+    return f"{moment.astimezone(_JST).strftime('%m-%d %H:%M')} JST"
