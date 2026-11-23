@@ -1,8 +1,9 @@
 /**
- * 「グラフを 1 画面で開くリンク」の URL の読み書き。
+ * 「グラフ 1 つ、またはダッシュボード全体を 1 画面で開くリンク」の URL の読み書き。
  *
  * リンクの形: /?dashboard=<ダッシュボードの ID>&graph=<ウィジェットの ID>&range=<N>m（N は 10〜10080 分）
  * 例: https://<アドレス>/?dashboard=3f8c…&graph=9d41…&range=30m → そのグラフ 1 つを「直近 30 分」で開く
+ * graph を付けない形（/?dashboard=3f8c…&range=30m）は、ダッシュボード全体を縦に並べて開く（DashboardLinkView）。
  *
  * 画面（React）に依存しない関数だけを置く（テストしやすくするため）。
  *
@@ -13,11 +14,19 @@ import { graphSensorIds } from "./graph-config";
 import { widgetLabel } from "./widget-catalog";
 import type { Sensor, Widget } from "../types";
 
-/** リンクで開くグラフ。rangeMinutes は「直近 ◯ 分」 */
+/** graphId がこの値のリンクは、グラフ 1 つではなく「ダッシュボード全体」（URL に graph が無い） */
+export const WHOLE_DASHBOARD = "";
+
+/** リンクで開くグラフ（graphId = WHOLE_DASHBOARD ならダッシュボード全体）。rangeMinutes は「直近 ◯ 分」 */
 export interface GraphLink {
   dashboardId: string;
   graphId: string;
   rangeMinutes: number;
+}
+
+/** ダッシュボード全体を開くリンクか */
+export function isDashboardLink(link: Pick<GraphLink, "graphId">): boolean {
+  return link.graphId === WHOLE_DASHBOARD;
 }
 
 /** URL を読んだ結果。none = リンクではない、broken = ID が片方しか無い・形がおかしい、link = 開けるリンク */
@@ -49,7 +58,9 @@ export function parseGraphLink(search: string): GraphLinkParse {
   const dashboardId = params.get("dashboard")?.trim() ?? "";
   const graphId = params.get("graph")?.trim() ?? "";
   if (!dashboardId && !graphId) return { kind: "none" };
-  if (!UUID_PATTERN.test(dashboardId) || !UUID_PATTERN.test(graphId)) return { kind: "broken" };
+  // graph が無く、dashboard が正しい ID なら、ダッシュボード全体
+  const wholeDashboard = graphId === "" && UUID_PATTERN.test(dashboardId);
+  if (!UUID_PATTERN.test(dashboardId) || (!wholeDashboard && !UUID_PATTERN.test(graphId))) return { kind: "broken" };
   const rangeMinutes = parseLinkMinutes(params.get("range")) ?? LINK_DEFAULT_MINUTES;
   return { kind: "link", link: { dashboardId, graphId, rangeMinutes } };
 }
@@ -63,9 +74,11 @@ export function readGraphLinkFromUrl(): GraphLinkParse {
   }
 }
 
-/** リンクの URL を作る。base は「https://<アドレス>/」の形（ページの origin + パス） */
+/** リンクの URL を作る。base は「https://<アドレス>/」の形（ページの origin + パス）。graphId が空ならダッシュボード全体（graph を付けない） */
 export function buildGraphLinkUrl(base: string, dashboardId: string, graphId: string, minutes: number): string {
-  const params = new URLSearchParams({ dashboard: dashboardId, graph: graphId, range: `${minutes}m` });
+  const params = new URLSearchParams({ dashboard: dashboardId });
+  if (graphId !== WHOLE_DASHBOARD) params.set("graph", graphId);
+  params.set("range", `${minutes}m`);
   return `${base}?${params.toString()}`;
 }
 

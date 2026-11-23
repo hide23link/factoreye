@@ -55,13 +55,32 @@ afterEach(() => {
 });
 
 describe("GraphLinkDialog", () => {
-  it("グラフのウィジェットだけを選べ、既定は先頭のグラフ・直近 30 分", () => {
+  it("先頭に「ダッシュボード全体」（既定）とグラフのウィジェットだけを選べ、直近 30 分", () => {
     renderWithQueryClient(<GraphLinkDialog dashboard={dashboard} onClose={() => {}} />);
 
     expect(screen.getByRole("heading", { name: "リンクを作る（ライン1 稼働）" })).toBeInTheDocument();
     const options = screen.getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(["温度・湿度", "ショット数"]);
+    expect(options).toEqual(["ダッシュボード全体", "温度・湿度", "ショット数"]);
+    // 既定は「ダッシュボード全体」（graph を付けない）
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(linkText()).toBe(`${window.location.origin}/?dashboard=d1&range=30m`);
+  });
+
+  it("グラフが 0 個でも、ダッシュボード全体のリンクを作れる", () => {
+    renderWithQueryClient(<GraphLinkDialog dashboard={{ ...dashboard, widgets: [] }} onClose={() => {}} />);
+
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["ダッシュボード全体"]);
+    expect(linkText()).toBe(`${window.location.origin}/?dashboard=d1&range=30m`);
+  });
+
+  it("グラフを選ぶと graph つきのリンクになり、「ダッシュボード全体」に戻すと graph が消える", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<GraphLinkDialog dashboard={dashboard} onClose={() => {}} />);
+
+    await user.selectOptions(screen.getByRole("combobox"), "w1");
     expect(linkText()).toBe(`${window.location.origin}/?dashboard=d1&graph=w1&range=30m`);
+    await user.selectOptions(screen.getByRole("combobox"), "");
+    expect(linkText()).toBe(`${window.location.origin}/?dashboard=d1&range=30m`);
   });
 
   it("グラフ・直近のボタン・ほかの分数で、リンクの URL を組み立てる", async () => {
@@ -88,7 +107,7 @@ describe("GraphLinkDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "コピー" }));
     expect(await screen.findByText("コピーしました")).toBeInTheDocument();
-    await expect(navigator.clipboard.readText()).resolves.toBe(`${window.location.origin}/?dashboard=d1&graph=w1&range=30m`);
+    await expect(navigator.clipboard.readText()).resolves.toBe(`${window.location.origin}/?dashboard=d1&range=30m`);
   });
 
   it("「閉じる」・Esc で閉じる", async () => {

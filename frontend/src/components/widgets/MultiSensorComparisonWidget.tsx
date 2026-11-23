@@ -67,6 +67,7 @@ import {
   renderThresholdBands,
   renderThresholdLines,
   type LinkGraphView,
+  graphTouchAction,
 } from "./graph-parts";
 import { useGraphValueMeasure } from "../../hooks/useGraphValueMeasure";
 import { withSharedCursor } from "../../lib/shared-cursor";
@@ -390,7 +391,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
       {/* 1 つのセンサーのときだけ、センサーの名前を見出しに出す（複数のときは見出しを出さない） */}
       {sensorIds.length === 1 && !linkView && <p className="mb-1 text-sm font-medium text-gray-700">{nameOf(sensorIds[0])}</p>}
       <div className="flex min-h-0 flex-1 gap-1.5">
-        <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: linkView ? "none" : "pan-y" }}>
+        <div ref={chartRef} className="min-h-0 min-w-0 flex-1 select-none" style={{ touchAction: graphTouchAction(linkView) }}>
           <ResponsiveContainer width="100%" height="100%">
             {graphType === "bar" ? (
               <BarChart data={chartData} margin={chartMargin} stackOffset={percentStack ? "expand" : "none"} {...pointerHandlers}>

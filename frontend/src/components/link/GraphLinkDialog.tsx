@@ -1,16 +1,24 @@
 /**
- * 「リンクを作る」の窓。ダッシュボードのグラフ 1 つと「直近 ◯ 分」を選び、そのグラフを 1 画面で開くリンクをコピーする。
- * 右に「開いたときの画面」の小さな見本を出す（LinkScreen の preview）。
+ * 「リンクを作る」の窓。「ダッシュボード全体」（既定）かグラフ 1 つと「直近 ◯ 分」を選び、それを 1 画面で開くリンクをコピーする。
+ * 右に「開いたときの画面」の小さな見本を出す（グラフ 1 つは LinkScreen、全体は DashboardLinkView の preview）。
  *
- * 【誰が使うか】DashboardView が、見出しの「🔗 リンク」を押したときに出す（グラフが 1 つも無いときは押せない）。
+ * 【誰が使うか】DashboardView が、見出しの「🔗 リンク」を押したときに出す（グラフが 0 個でも、ダッシュボード全体のリンクは作れる）。
  * 【引数（props）】dashboard = 今のダッシュボード、onClose = 「閉じる」・Esc のとき。
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useSensors } from "../../hooks/queries";
-import { buildGraphLinkUrl, graphName, isGraphWidget, LINK_DEFAULT_MINUTES, parseLinkMinutes } from "../../lib/graph-link";
+import {
+  buildGraphLinkUrl,
+  graphName,
+  isGraphWidget,
+  LINK_DEFAULT_MINUTES,
+  parseLinkMinutes,
+  WHOLE_DASHBOARD,
+} from "../../lib/graph-link";
 import type { DashboardDetail } from "../../types";
+import { DashboardLinkView } from "./DashboardLinkView";
 import { LinkScreen } from "./LinkScreen";
 
 /** 「直近」のボタン（分）: 10・30・60 分・3・8 時間 */
@@ -44,7 +52,7 @@ export function GraphLinkDialog({ dashboard, onClose }: { dashboard: DashboardDe
   const titleId = useId();
   const { data: sensors } = useSensors();
   const graphs = dashboard.widgets.filter(isGraphWidget);
-  const [graphId, setGraphId] = useState(graphs[0]?.id ?? "");
+  const [graphId, setGraphId] = useState(WHOLE_DASHBOARD);
   const [minutes, setMinutes] = useState(LINK_DEFAULT_MINUTES);
   // 「ほか ◯ 分」の入力中の文字。正しい分数（10〜10080）のときだけ、リンクに使う
   const [minutesDraft, setMinutesDraft] = useState(String(LINK_DEFAULT_MINUTES));
@@ -104,6 +112,7 @@ export function GraphLinkDialog({ dashboard, onClose }: { dashboard: DashboardDe
               }}
               className="w-full rounded-md border border-gray-200 px-2.5 py-1.5"
             >
+              <option value={WHOLE_DASHBOARD}>ダッシュボード全体</option>
               {graphs.map((w) => (
                 <option key={w.id} value={w.id}>
                   {graphName(w, sensors)}
@@ -165,7 +174,11 @@ export function GraphLinkDialog({ dashboard, onClose }: { dashboard: DashboardDe
         </div>
         <div className="flex flex-col items-center gap-1.5">
           <div aria-hidden="true" className="h-[420px] w-[240px] overflow-hidden rounded-[30px] border-[9px] border-gray-800">
-            {graph && <LinkScreen key={`${graph.id}:${previewMinutes}`} widget={graph} rangeMinutes={previewMinutes} preview />}
+            {graph ? (
+              <LinkScreen key={`${graph.id}:${previewMinutes}`} widget={graph} rangeMinutes={previewMinutes} preview />
+            ) : (
+              <DashboardLinkView key={previewMinutes} dashboard={dashboard} rangeMinutes={previewMinutes} preview />
+            )}
           </div>
           <small className="text-xs text-gray-500">開いたときの画面</small>
         </div>

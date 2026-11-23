@@ -14,9 +14,9 @@
  */
 import { LIVE_CHART_INTERVAL_MS, useDownsampledReadings, useReadingTimes, useSensors } from "../../hooks/queries";
 import { useLiveNow } from "../../hooks/useLiveNow";
-import { effectiveRange, graphSensorIds } from "../../lib/graph-config";
+import { useWidgetRange } from "../../hooks/useWidgetRange";
+import { graphSensorIds } from "../../lib/graph-config";
 import { resolveRange } from "../../lib/timeRange";
-import { useTimeRangeStore } from "../../store/useTimeRangeStore";
 import {
   bucketTarget,
   buildCells,
@@ -166,7 +166,7 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
   const { data: sensors } = useSensors();
   const now = useLiveNow(LIVE_CHART_INTERVAL_MS);
   // 表示期間は、グラフと同じ（ダッシュボードの時間範囲。ウィジェット個別の期間があればそれ）
-  const dashboardRange = useTimeRangeStore((s) => s.range);
+  const widgetRange = useWidgetRange(widget);
   const settings = stripSettingsFromConfig(widget.config);
   const ids = graphSensorIds(widget);
 
@@ -178,7 +178,7 @@ export function TargetStripWidget({ widget }: { widget: Widget }) {
     return <p className="text-sm text-gray-500">読み込み中...</p>;
   }
 
-  const range = resolveRange(effectiveRange(widget, dashboardRange), now);
+  const range = resolveRange(widgetRange, now);
   const window = stripWindow(range, settings.bucketMinutes);
   const need = bucketTarget(settings.hourlyTarget, window.bucketMinutes);
   const Row = settings.judge === "interval" ? IntervalRow : CountRow;

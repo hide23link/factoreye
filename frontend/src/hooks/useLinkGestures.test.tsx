@@ -2,7 +2,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { linkPeriod, type LinkPeriod } from "../lib/link-range";
-import { fireEvent, render, screen } from "../test/test-utils";
+import { act, fireEvent, render, screen } from "../test/test-utils";
 import { useLinkGestures } from "./useLinkGestures";
 
 const MINUTE = 60_000;
@@ -11,7 +11,7 @@ const NOW = new Date(2026, 10, 10, 11, 30).getTime();
 const BOX = { left: 0, top: 0, right: 300, bottom: 300, width: 300, height: 300, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
 
 /** フックを付けた枠。期間は data-* に出す（テストから読むため） */
-function Harness(props: { start?: LinkPeriod; onTap?: (ratio: number) => void; onDoubleTap?: () => void; onEnd?: () => void }) {
+function Harness(props: { scrollY?: boolean; start?: LinkPeriod; onTap?: (ratio: number) => void; onDoubleTap?: () => void; onEnd?: () => void }) {
   const [period, setPeriod] = useState<LinkPeriod>(props.start ?? linkPeriod(60));
   const gestures = useLinkGestures({
     period,
@@ -21,6 +21,7 @@ function Harness(props: { start?: LinkPeriod; onTap?: (ratio: number) => void; o
     onTap: props.onTap ?? (() => {}),
     onDoubleTap: props.onDoubleTap ?? (() => {}),
     onEnd: props.onEnd,
+    scrollY: props.scrollY,
   });
   return (
     <div
@@ -104,5 +105,55 @@ describe("useLinkGestures", () => {
     expect(minutes()).toBeCloseTo(69);
     unmount();
     expect(remove).toHaveBeenCalledWith("wheel", expect.any(Function));
+  });
+});
+
+describe("useLinkGestures（scrollY: 一覧）", () => {
+  it("縦のなぞりは拡大・縮小にしない（スクロールはブラウザに任せる）。横のなぞりは時間を動かす", () => {
+    render(<Harness scrollY />);
+    down(1, 100, 100);
+    move(1, 102, 200);
+    up(1, 102, 200);
+    expect(minutes()).toBe(60);
+    expect(chart().dataset.end).toBe("now");
+
+    down(1, 100, 100);
+    move(1, 160, 102);
+    up(1, 160, 102);
+    expect(chart().dataset.end).not.toBe("now");
+  });
+
+  it("縦のなぞりの後は、タップにならない", () => {
+    const onTap = vi.fn();
+    render(<Harness scrollY onTap={onTap} />);
+    down(1, 100, 100);
+    move(1, 100, 160);
+    up(1, 100, 160);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("2 本指のピンチは拡大・縮小する", () => {
+    render(<Harness scrollY />);
+    down(1, 100, 100);
+    down(2, 140, 100);
+    move(2, 180, 100); // 指の間が 40 → 80 に広がる
+    up(2, 180, 100);
+    up(1, 100, 100);
+    expect(minutes()).toBe(30);
+  });
+
+  it("ふつうのホイールはページのスクロールに任せ（止めない）、Ctrl つきは拡大・縮小する", () => {
+    render(<Harness scrollY />);
+    const plain = new WheelEvent("wheel", { deltaY: 300, cancelable: true, bubbles: true });
+    chart().dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(minutes()).toBe(60);
+
+    const ctrl = new WheelEvent("wheel", { deltaY: 300, ctrlKey: true, cancelable: true, bubbles: true });
+    act(() => {
+      chart().dispatchEvent(ctrl);
+    });
+    expect(ctrl.defaultPrevented).toBe(true);
+    expect(minutes()).toBeGreaterThan(60);
   });
 });

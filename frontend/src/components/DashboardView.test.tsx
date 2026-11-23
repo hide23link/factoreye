@@ -204,14 +204,16 @@ describe("DashboardView", () => {
     expect(await screen.findByText(/まだウィジェットがありません/)).toBeInTheDocument();
   });
 
-  it("グラフが 1 つも無いダッシュボードでは「🔗 リンク」を押せない（グラフがありません）", async () => {
+  it("グラフが 1 つも無いダッシュボードでも「🔗 リンク」を押せる（ダッシュボード全体のリンクは作れる）", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchDashboard).mockResolvedValue({ ...emptyDashboard, widgets: [makeWidget()] });
 
     renderWithQueryClient(<DashboardView dashboardId="d1" />);
 
     const button = await screen.findByRole("button", { name: "🔗 リンク" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("title", "グラフがありません");
+    expect(button).toBeEnabled();
+    await user.click(button);
+    expect(await screen.findByText(/\?dashboard=d1&range=30m$/)).toBeInTheDocument();
   });
 
   it("「🔗 リンク」で、リンクを作る窓を開く", async () => {
@@ -226,7 +228,8 @@ describe("DashboardView", () => {
     await user.click(await screen.findByRole("button", { name: "🔗 リンク" }));
 
     expect(await screen.findByRole("heading", { name: "リンクを作る（工場A）" })).toBeInTheDocument();
-    expect(screen.getByText(/\?dashboard=d1&graph=g1&range=30m$/)).toBeInTheDocument();
+    // 既定は「ダッシュボード全体」（graph なし）
+    expect(screen.getByText(/\?dashboard=d1&range=30m$/)).toBeInTheDocument();
   });
 
   describe("編集モード", () => {

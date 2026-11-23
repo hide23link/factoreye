@@ -7,23 +7,22 @@
  * 期間は 2 つ持つ: 表示の期間（指に合わせて毎回変わる）と、取得の期間（指を離して 0.3 秒たってから表示に合わせる）。
  * 指を動かすたびに読み値を取り直すと、サーバーへの要求が 1 秒に何十回にもなるため。
  *
- * 【誰が使うか】GraphLinkView（リンクで開いたとき。画面いっぱい）と、GraphLinkDialog（開いたときの画面の小さな見本）。
+ * 【誰が使うか】GraphLinkView（リンクで開いたとき。画面いっぱい）、GraphLinkDialog（開いたときの画面の小さな見本）、
+ * DashboardLinkView（ダッシュボード全体の一覧から、カードの ⤢ で 1 グラフを開くとき）。
  * 【引数（props）】widget = 出すグラフのウィジェット、rangeMinutes = リンクの「直近 ◯ 分」、
- * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止める）。
+ * preview = 見本のとき true（指の操作・時刻の指定・ボタンを止める）、
+ * onBack = 一覧から開いたときだけ渡す（左下に丸い「戻る」を浮かべ、押すと一覧へ戻る）。
  * 時刻の指定のシート（LinkTimeSheet）を開いている間も、グラフの指の操作は受けない（シートの操作とぶつからないように）。
  */
-import { keepPreviousData, useQueries } from "@tanstack/react-query";
-import { resolveRefetchMs } from "../../lib/refresh-interval";
-import { useRefreshStore } from "../../store/useRefreshStore";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { useSensors } from "../../hooks/queries";
 import { useLinkGestures } from "../../hooks/useLinkGestures";
+import { useLinkRows, useSettledPeriod, useToast } from "../../hooks/useLinkView";
 import { useLiveNow } from "../../hooks/useLiveNow";
-import { fetchSensorReadingsDownsampled } from "../../lib/api";
 import { graphColor, graphDataOptions, graphSensorIds } from "../../lib/graph-config";
 import { graphName } from "../../lib/graph-link";
-import { buildRows, nearestValue } from "../../lib/graph-series";
+import { nearestValue } from "../../lib/graph-series";
 import {
   DEFAULT_PICKED_MINUTES,
   LINK_CHIPS_MINUTES,
@@ -43,69 +42,22 @@ import {
 } from "../../lib/link-range";
 import { maxRangeForBuild } from "../../lib/timeRange";
 import type { Widget } from "../../types";
-import { GRAPH_BUCKETS, formatYTick } from "../widgets/graph-parts";
+import { formatYTick } from "../widgets/graph-parts";
 import { MultiSensorComparisonWidget } from "../widgets/MultiSensorComparisonWidget";
 import { SensorGraphWidget } from "../widgets/SensorGraphWidget";
 import { LinkTimeSheet } from "./LinkTimeSheet";
 
-/** 短い知らせ（「リンクの設定に戻しました」など）を出す時間（ミリ秒） */
-const TOAST_MS = 900;
-/** 指を離してから、取得の期間を表示に合わせるまでの時間（ミリ秒）。ホイール・続けて押したボタンもまとめて 1 回にする */
-export const SETTLE_MS = 300;
-
-/**
- * グラフと同じ取得（同じ queryKey なので、通信はグラフと共有される）で、時刻ごとの行を作る。今の値・タップした時刻の値に使う。
- * updatedAt は、最後に取れた時刻（状態の行の「11:30 更新」）。
- */
-function useLinkRows(widget: Widget, bounds: { from: number; to: number }, live: boolean) {
-  const sensorIds = graphSensorIds(widget);
-  const options = graphDataOptions(widget.config, sensorIds.length);
-  // 画面の更新間隔の選択（各グラフの設定に従う以外なら、間隔を上書きする）
-  const refreshChoice = useRefreshStore((s) => s.choice);
-  const results = useQueries({
-    queries: sensorIds.map((sensorId) => ({
-      queryKey: ["readings-downsampled", sensorId, Math.round(bounds.from / 1000), Math.round(bounds.to / 1000), GRAPH_BUCKETS],
-      queryFn: () =>
-        fetchSensorReadingsDownsampled(sensorId, new Date(bounds.from).toISOString(), new Date(bounds.to).toISOString(), GRAPH_BUCKETS),
-      refetchInterval: live ? resolveRefetchMs(refreshChoice, options.refreshMs) : false,
-      placeholderData: keepPreviousData,
-    })),
-  });
-  const inputs = sensorIds.flatMap((sensorId, i) => {
-    const data = results[i]?.data;
-    return data ? [{ sensorId, bucketSeconds: data.bucketSeconds, buckets: data.buckets }] : [];
-  });
-  const updatedAt = Math.max(0, ...results.map((r) => r.dataUpdatedAt));
-  return { rows: buildRows(inputs, options.aggregation), updatedAt };
-}
-
-/**
- * 取得に使う期間。指を置いている間（holding）は変えず、離してから SETTLE_MS たって、表示の期間に合わせる。
- */
-function useSettledPeriod(period: LinkPeriod, holding: boolean): LinkPeriod {
-  const [settled, setSettled] = useState(period);
-  useEffect(() => {
-    if (holding) return;
-    const timer = setTimeout(() => setSettled(period), SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [period, holding]);
-  return settled;
-}
-
-/** 短い知らせ。flash で出し、少しして消す */
-function useToast() {
-  const [message, setMessage] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const flash = (text: string) => {
-    setMessage(text);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMessage(null), TOAST_MS);
-  };
-  return { message, flash };
-}
-
-export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: Widget; rangeMinutes: number; preview?: boolean }) {
+export function LinkScreen({
+  widget,
+  rangeMinutes,
+  preview = false,
+  onBack,
+}: {
+  widget: Widget;
+  rangeMinutes: number;
+  preview?: boolean;
+  onBack?: () => void;
+}) {
   const { data: sensors } = useSensors();
   const sensorIds = graphSensorIds(widget);
   const options = graphDataOptions(widget.config, sensorIds.length);
@@ -176,8 +128,8 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
 
   return (
     <div className="relative flex h-full select-none flex-col bg-white text-gray-900">
-      <div className="flex items-baseline justify-between gap-2 px-3 pb-0.5 pt-2.5">
-        <b className="min-w-0 truncate text-sm">{graphName(widget, sensors)}</b>
+      <div className="flex items-baseline justify-between gap-2 px-3 pb-0.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
+        <b className="min-w-0 flex-1 truncate text-sm" title={graphName(widget, sensors)}>{graphName(widget, sensors)}</b>
         <button
           type="button"
           ref={timeButton}
@@ -240,7 +192,7 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
           );
         })}
       </div>
-      <div className="flex min-h-9 items-center justify-between gap-1.5 px-2.5 pb-2.5 text-xs text-gray-500">
+      <div className="flex min-h-9 items-center justify-between gap-1.5 px-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] text-xs text-gray-500">
         <span>{statusText(period, now, updatedAt || now)}</span>
         {!isAtLink(period, rangeMinutes) && !preview && (
           <button
@@ -252,6 +204,19 @@ export function LinkScreen({ widget, rangeMinutes, preview = false }: { widget: 
           </button>
         )}
       </div>
+      {onBack && (
+        // 親指が届く左下の丸い「戻る」（一覧から開いたときだけ）。下の期間のボタン・状態の行の上に浮かべる
+        <button
+          type="button"
+          aria-label="一覧に戻る"
+          onClick={onBack}
+          className="absolute left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(10rem+env(safe-area-inset-bottom))] z-10 flex h-11 w-11 items-center justify-center rounded-full text-2xl leading-none shadow-md"
+          // 明るい・暗いのどちらでも同じ（半透明の濃い丸に白い矢印）
+          style={{ background: "rgba(17, 24, 39, 0.7)", color: "#fff", border: "1px solid rgba(255, 255, 255, 0.35)" }}
+        >
+          ‹
+        </button>
+      )}
       {sheetOpenedAt !== null && (
         <LinkTimeSheet
           now={sheetOpenedAt}

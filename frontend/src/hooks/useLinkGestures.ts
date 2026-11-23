@@ -13,8 +13,13 @@
  * なぞりの状態を消して onEnd を呼ぶ（離した知らせが来ないまま残ると、取得が止まり、次の 1 本指がピンチになるため）。
  * 期間の計算は lib/link-range.ts。このフックは、指の動きを計算に渡すだけ。
  *
- * 【誰が使うか】GraphLinkView のグラフの枠。戻り値の ref と handlers を、枠の要素に付ける。
- * 枠には touch-action: none を付ける（ページのスクロールやブラウザの拡大と、指の操作がぶつからないように）。
+ * scrollY = true（ダッシュボード全体の一覧）のとき: 縦のなぞりはブラウザのスクロールに任せ、上下スワイプの拡大・縮小はしない。
+ * ホイールも、Ctrl（トラックパッドのピンチ）つきのときだけ受ける（ふつうのホイールは、ページをスクロールする）。
+ * plotElement = タップ・ドラッグの位置を測るグラフの要素を選ぶ（一覧で、指を置いたグラフを使うため）。
+ * ignoreTarget = true を返す所（ボタンなど）に置いた指は、受けない（ボタンの押下が奪われないように）。
+ *
+ * 【誰が使うか】LinkScreen（グラフ 1 つ。枠に touch-action: none）と DashboardLinkView（一覧。touch-action: pan-y）。
+ * 戻り値の ref と handlers を、枠の要素に付ける。touch-action は、ページのスクロールやブラウザの拡大と、指の操作がぶつからないように付ける。
  */
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -41,6 +46,12 @@ export interface LinkGestureOptions {
   /** 1 本目の指を置いたとき・すべての指を離したとき */
   onStart?: () => void;
   onEnd?: () => void;
+  /** true なら、縦のなぞりはスクロールに任せる（上下スワイプの拡大・縮小をしない）。ホイールは Ctrl つきだけ */
+  scrollY?: boolean;
+  /** 位置を測るグラフの要素を選ぶ。target = 指を置いた要素、container = 枠。無ければ枠 */
+  plotElement?: (target: EventTarget | null, container: HTMLElement) => HTMLElement;
+  /** true を返す要素に置いた指は受けない */
+  ignoreTarget?: (target: EventTarget | null) => boolean;
 }
 
 /** なぞり始めの状態 */
@@ -96,11 +107,17 @@ export function useLinkGestures(options: LinkGestureOptions) {
     latest.current.onEnd?.();
   }, [disabled]);
 
+  // 位置を測る要素（一覧では、指を置いたグラフ）
+  const plotOf = (target: EventTarget | null, container: HTMLElement) => latest.current.plotElement?.(target, container) ?? container;
+  // なぞっている間の「指を置いたグラフ」
+  const plotTarget = useRef<EventTarget | null>(null);
+
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
-    if (latest.current.disabled) return;
+    if (latest.current.disabled || latest.current.ignoreTarget?.(e.target)) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 1) {
+      plotTarget.current = e.target;
       lastPeriod.current = null;
       latest.current.onStart?.();
     }
@@ -130,8 +147,10 @@ export function useLinkGestures(options: LinkGestureOptions) {
       current.direction = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
       current.moved = true;
     }
-    if (current.direction === "x") change(panPeriod(current.period, dx, plotBox(e.currentTarget).width, now, maxMs), false);
-    if (current.direction === "y") change(swipeZoom(current.period, dy, now, maxMs), true);
+    if (current.direction === "x") {
+      change(panPeriod(current.period, dx, plotBox(plotOf(plotTarget.current, e.currentTarget)).width, now, maxMs), false);
+    }
+    if (current.direction === "y" && !latest.current.scrollY) change(swipeZoom(current.period, dy, now, maxMs), true);
   };
 
   const onPointerEnd = (e: ReactPointerEvent<HTMLElement>) => {
@@ -157,7 +176,7 @@ export function useLinkGestures(options: LinkGestureOptions) {
       return;
     }
     lastTap.current = time;
-    const box = plotBox(e.currentTarget);
+    const box = plotBox(plotOf(plotTarget.current, e.currentTarget));
     latest.current.onTap(Math.min(1, Math.max(0, (e.clientX - box.left) / Math.max(box.width, 1))));
   };
 
@@ -168,10 +187,12 @@ export function useLinkGestures(options: LinkGestureOptions) {
     detach.current = null;
     if (!element) return;
     const listener = (event: WheelEvent) => {
+      // 一覧では、ふつうのホイールはページのスクロール。Ctrl つき（トラックパッドのピンチ）だけ拡大・縮小にする
+      if (latest.current.scrollY && !event.ctrlKey) return;
       event.preventDefault();
       const { period, now, maxMs, onChange, disabled: off } = latest.current;
       if (off) return;
-      const box = plotBox(element);
+      const box = plotBox(plotOf(event.target, element));
       const anchor = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(box.width, 1)));
       const factor = event.deltaY > 0 ? WHEEL_FACTOR : 1 / WHEEL_FACTOR;
       onChange(zoomPeriod(period, period.durationMs * factor, anchor, now, maxMs), true);

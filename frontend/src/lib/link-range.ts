@@ -8,7 +8,7 @@
  *
  * 日付・時刻は端末の時刻で扱う（ダッシュボードのグラフと同じ「表示はブラウザの地域時刻」）。
  *
- * 【誰が使うか】LinkScreen・useLinkGestures（指の操作・期間のボタン）、LinkTimeSheet（時刻の指定のシート）。
+ * 【誰が使うか】LinkScreen・DashboardLinkView・useLinkGestures（指の操作・期間のボタン）、LinkTimeSheet（時刻の指定のシート）。
  */
 
 const MINUTE = 60 * 1000;
@@ -23,6 +23,18 @@ const OSS_PAST_MONTHS = 12;
 
 /** 下の期間のボタン（分）: 30 分・1・3・8・24 時間 */
 export const LINK_CHIPS_MINUTES = [30, 60, 180, 480, 1440] as const;
+
+/** ダッシュボード全体の画面（DashboardLinkView）の上の、幅いっぱいの分節ボタン（分）: 10 分・1・8・24 時間・7 日 */
+export const LINK_LIST_CHIPS_MINUTES = [10, 60, 480, 1440, 10080] as const;
+
+/** 分節ボタンの文字（「10分」「1時間」「7日」。幅が狭いので、数字と単位の間は空けない） */
+export function segText(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0 && minutes !== 1440) return `${minutes / 1440}日`;
+  return minutes < 60 ? `${minutes}分` : `${minutes / 60}時間`;
+}
+
+/** 「＋」「－」のボタン 1 回で変わる長さの倍率（＋は 1/2 に拡大、－は 2 倍に縮小） */
+export const ZOOM_STEP = 2;
 
 /** 画面の期間。endMs = null は「今」（右端が今で、自動で更新する） */
 export interface LinkPeriod {
@@ -95,6 +107,15 @@ export function pinchZoom(start: LinkPeriod, startDistance: number, distance: nu
 }
 
 /**
+ * 「＋」「－」のボタン: 長さを 1 段（ZOOM_STEP 倍）変える。direction = "in" で拡大（短く）、"out" で縮小（長く）。
+ * 動かさない位置はピンチと同じ（今を見ているときは右端の今、過去を見ているときは真ん中の時刻）。
+ */
+export function stepZoom(period: LinkPeriod, direction: "in" | "out", now: number, maxMs: number): LinkPeriod {
+  const factor = direction === "in" ? 1 / ZOOM_STEP : ZOOM_STEP;
+  return zoomPeriod(period, period.durationMs * factor, period.endMs === null ? 1 : 0.5, now, maxMs);
+}
+
+/**
  * 左右ドラッグ: 時間を動かす。右へなぞる（dx > 0）と過去へ。長さは変えない。今より先には行かない。
  * width はグラフの横幅（px）。なぞった幅の割合だけ動かす。
  */
@@ -137,6 +158,12 @@ export function isChipActive(period: LinkPeriod, minutes: number): boolean {
 export function clockText(ms: number): string {
   const date = new Date(ms);
   return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+/** 日時を「11/23(月) 8:38」の形にする（端末の時刻） */
+export function dateText(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getMonth() + 1}/${date.getDate()}(${"日月火水木金土"[date.getDay()]}) ${clockText(ms)}`;
 }
 
 /** 長さを「30 分」「1.5 時間」「2 日」の形にする */
