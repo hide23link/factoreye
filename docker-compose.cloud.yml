@@ -28,6 +28,10 @@ services:
       # CORS 許可オリジン。Cloudflare Tunnel のドメインを設定する
       - FRONTEND_URL=https://${DOMAIN:?DOMAIN を .env に設定してください}
       - AUTH_MODE=multi_tenant
+      # 登録・ログインのメール（Resend）。キーは factoreye 専用（送信のみ・hide23.link 限定）を .env に設定する。
+      # 空のままなら、メールを送る API は 503 を返す。パスキーはドメイン（DOMAIN）に結び付くので、変えると全員が登録し直しになる
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - MAIL_FROM=${MAIL_FROM:-FactorEye <noreply@hide23.link>}
       # 機器が付けた測定時刻（timestamp）を使うか。既定 false。本番では .env で on にする（2026-10-31）
       - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
       # 管理画面の「書き戻し」が呼ぶ、復旧ツール（tools/recovery。同じネットワーク factoreye-cloud に入る）。
