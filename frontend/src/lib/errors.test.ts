@@ -39,8 +39,18 @@ describe("describeAuthError", () => {
   });
 
   it("メールを送れない設定（503）は、依頼のときだけ案内する", () => {
-    expect(describeAuthError(new ApiError(503, "x"), "request")).toMatch(/メールを送れない設定/);
+    expect(describeAuthError(new ApiError(503, 'POST x failed: 503 {"detail":"mail is not configured"}'), "request")).toMatch(
+      /メールを送れない設定/,
+    );
     expect(describeAuthError(new ApiError(503, "x"), "login")).toMatch(/サーバーで問題/);
+  });
+
+  it("メールの 1 日の送信数の上限（503 の mail is busy）は、混み合っていると伝え、設定の問題とは区別する", () => {
+    const busy = new ApiError(503, 'POST /api/auth/email/request failed: 503 {"detail":"mail is busy"}');
+    expect(describeAuthError(busy, "request")).toBe(
+      "現在メールの送信が混み合っています。しばらくしてからやり直してください。",
+    );
+    expect(describeAuthError(busy, "request")).not.toMatch(/管理者に連絡/);
   });
 });
 

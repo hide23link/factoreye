@@ -36,13 +36,18 @@ function commonMessage(status: number | null): string {
   return "処理に失敗しました。もう一度お試しください。";
 }
 
+/** サーバーが、メールの 1 日の送信数の上限に達したときに返す理由（503 の detail）。 */
+const MAIL_BUSY_DETAIL = "mail is busy";
+const MAIL_BUSY_MESSAGE = "現在メールの送信が混み合っています。しばらくしてからやり直してください。";
+
 /** 認証の操作の種類（失敗の文言を、操作に合わせて変える）。 */
 export type AuthAction = "login" | "register" | "request" | "link";
 
 /**
  * パスキーでの登録・ログインと、メールのリンクの失敗を、利用者向けの文言にする。
  * 401（パスキーを確かめられない）・410（リンクの期限切れ・使用済み）・409（すでに登録済み）・
- * 429（回数超過）・503（メールを送れない）・サーバーエラー・通信エラーを区別する。
+ * 429（回数超過）・503（メールを送れない設定、または 1 日の送信数の上限で混み合っている）・
+ * サーバーエラー・通信エラーを区別する。
  */
 export function describeAuthError(err: unknown, action: AuthAction): string {
   const status = errorStatus(err);
@@ -56,6 +61,8 @@ export function describeAuthError(err: unknown, action: AuthAction): string {
   if (status === 400) return "登録を確かめられませんでした。もう一度お試しください。";
   if (status === 422) return "メールアドレスの形式を確認してください。";
   if (status === 503 && action === "request") {
+    // 1 日の送信数の上限（混み合っている）と、メールの設定がない（運用側の問題）を、本文の理由で分ける
+    if (errorDetails(err).includes(MAIL_BUSY_DETAIL)) return MAIL_BUSY_MESSAGE;
     return "メールを送れない設定になっています。管理者に連絡してください。";
   }
   return commonMessage(status);

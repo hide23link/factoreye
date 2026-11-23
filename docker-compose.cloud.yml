@@ -32,6 +32,10 @@ services:
       # 空のままなら、メールを送る API は 503 を返す。パスキーはドメイン（DOMAIN）に結び付くので、変えると全員が登録し直しになる
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - MAIL_FROM=${MAIL_FROM:-FactorEye <noreply@hide23.link>}
+      # メールの 1 日（UTC）の送信数の上限と、運用者への通知（Resend の無料枠 100 通/日に収める）
+      - EMAIL_DAILY_LIMIT=${EMAIL_DAILY_LIMIT:-60}
+      - EMAIL_DAILY_WARN_PERCENT=${EMAIL_DAILY_WARN_PERCENT:-80}
+      - OPS_DISCORD_WEBHOOK_URL=${OPS_DISCORD_WEBHOOK_URL:-}
       # 機器が付けた測定時刻（timestamp）を使うか。既定 false。本番では .env で on にする（2026-10-31）
       - INGEST_DEVICE_TIME=${INGEST_DEVICE_TIME:-false}
       # 管理画面の「書き戻し」が呼ぶ、復旧ツール（tools/recovery。同じネットワーク factoreye-cloud に入る）。
