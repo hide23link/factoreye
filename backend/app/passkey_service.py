@@ -200,9 +200,10 @@ async def create_challenge(
         email_token_id=email_token_id,
         expires_at=_now() + CHALLENGE_TTL,
     )
+    challenge_id = row.id  # commit のあとは ORM の値が読めなくなるので、先に取り出す
     session.add(row)
     await session.commit()
-    return row.id
+    return challenge_id
 
 
 async def take_challenge(session: AsyncSession, challenge_id: UUID, purpose: str) -> AuthChallenge:

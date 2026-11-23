@@ -40,11 +40,12 @@ def _set_multi_tenant() -> Generator[None, None, None]:
 @pytest_asyncio.fixture
 async def auth_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     # main.py の app は AUTH_MODE=disabled でモジュールキャッシュ済みのため、
-    # auth ルーター専用のスタンドアロン app を使う（test_auth.py と同じ方法）
-    from app.api import auth as auth_module
+    # パスキーのルーター専用のスタンドアロン app を使う（test_auth.py と同じ方法）
+    from app.api import passkeys as passkey_module
 
     test_app = FastAPI()
-    test_app.include_router(auth_module.router)
+    test_app.state.limiter = limiter
+    test_app.include_router(passkey_module.router)
     transport = httpx.ASGITransport(app=test_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -60,21 +61,47 @@ async def _limited() -> AsyncGenerator[None, None]:
 
 
 @pytest.mark.asyncio
-async def test_login_is_rate_limited_per_client(
+async def test_login_begin_is_rate_limited_per_client(
     auth_client: httpx.AsyncClient, _limited: None
 ) -> None:
-    body = {"email": "nobody@example.com", "password": "wrong-password"}
     headers = {"cf-connecting-ip": "203.0.113.50"}
 
-    for _ in range(20):
-        r = await auth_client.post("/api/auth/login", json=body, headers=headers)
-        assert r.status_code == 401
+    for _ in range(30):
+        r = await auth_client.post("/api/auth/passkey/login/begin", headers=headers)
+        assert r.status_code == 200
 
-    r = await auth_client.post("/api/auth/login", json=body, headers=headers)
+    r = await auth_client.post("/api/auth/passkey/login/begin", headers=headers)
     assert r.status_code == 429
 
     # 別の利用者（別の接続元）は、影響を受けない
     other = await auth_client.post(
-        "/api/auth/login", json=body, headers={"cf-connecting-ip": "203.0.113.51"}
+        "/api/auth/passkey/login/begin", headers={"cf-connecting-ip": "203.0.113.51"}
     )
-    assert other.status_code == 401
+    assert other.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_email_request_is_rate_limited_per_client(
+    auth_client: httpx.AsyncClient, _limited: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """メールの依頼は、接続元ごとに 1 分 10 回まで（メールの大量送信の防止）。"""
+    from pydantic import SecretStr
+
+    from app import mailer
+
+    async def no_send(**_: object) -> None:
+        return None
+
+    monkeypatch.setattr(mailer, "send_mail", no_send)
+    monkeypatch.setattr(settings, "resend_api_key", SecretStr("re_dummy_key_for_tests"))
+    headers = {"cf-connecting-ip": "203.0.113.60"}
+
+    for i in range(10):
+        body = {"email": f"rate{i}@example.com"}
+        r = await auth_client.post("/api/auth/email/request", json=body, headers=headers)
+        assert r.status_code == 202
+
+    r = await auth_client.post(
+        "/api/auth/email/request", json={"email": "rate-x@example.com"}, headers=headers
+    )
+    assert r.status_code == 429

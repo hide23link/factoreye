@@ -214,17 +214,21 @@ async def register_begin(
     token = await service.find_valid_email_token(session, body.token)
     if token is None:
         raise _fail(status.HTTP_410_GONE, "link is invalid, expired or already used")
-    existing = [] if token.purpose == service.PURPOSE_REGISTER else await service.credential_ids_of(
-        session, token.user_id
+    # commit のあとは ORM の値が読めなくなるので、先に取り出しておく
+    token_id, user_id, email, purpose = token.id, token.user_id, token.email, token.purpose
+    existing = (
+        []
+        if purpose == service.PURPOSE_REGISTER
+        else await service.credential_ids_of(session, user_id)
     )
     options, challenge = webauthn_utils.registration_options(
-        user_id=token.user_id, email=token.email, existing_credential_ids=existing
+        user_id=user_id, email=email, existing_credential_ids=existing
     )
     challenge_id = await service.create_challenge(
-        session, challenge, service.CHALLENGE_REGISTER, email_token_id=token.id
+        session, challenge, service.CHALLENGE_REGISTER, email_token_id=token_id
     )
     return RegisterBeginResponse(
-        challenge_id=challenge_id, options=options, email=token.email, purpose=token.purpose
+        challenge_id=challenge_id, options=options, email=email, purpose=purpose
     )
 
 
@@ -385,11 +389,12 @@ async def add_passkey_finish(
     user: Annotated[User, Depends(_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PasskeyItem:
+    user_id = user.id  # take_challenge が commit するので、ORM の値は先に取り出しておく
     try:
         challenge = await service.take_challenge(session, body.challenge_id, service.CHALLENGE_ADD)
     except service.PasskeyServiceError:
         raise _fail(status.HTTP_400_BAD_REQUEST, "challenge expired or already used") from None
-    if challenge.user_id != user.id:
+    if challenge.user_id != user_id:
         raise _fail(status.HTTP_400_BAD_REQUEST, "challenge expired or already used")
     try:
         verified = webauthn_utils.verify_registration(
@@ -399,8 +404,9 @@ async def add_passkey_finish(
         raise _fail(status.HTTP_400_BAD_REQUEST, "passkey could not be verified") from None
     try:
         passkey = await service.add_passkey(
-            session, user.id, verified, _device_name(body.device_name)
+            session, user_id, verified, _device_name(body.device_name)
         )
+        item = _item(passkey)  # commit のあとは ORM の値が読めなくなるので、先に作る
         await session.commit()
     except service.PasskeyServiceError as exc:
         await session.rollback()
@@ -408,7 +414,7 @@ async def add_passkey_finish(
     except IntegrityError:
         await session.rollback()
         raise _fail(status.HTTP_409_CONFLICT, "passkey already registered") from None
-    return _item(passkey)
+    return item
 
 
 async def _own_passkey(session: AsyncSession, user: User, passkey_id: UUID) -> Passkey:
@@ -429,8 +435,9 @@ async def rename_passkey(
     passkey = await _own_passkey(session, user, passkey_id)
     passkey.name = body.name
     session.add(passkey)
+    item = _item(passkey)  # commit のあとは ORM の値が読めなくなるので、先に作る
     await session.commit()
-    return _item(passkey)
+    return item
 
 
 @router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -440,9 +447,10 @@ async def delete_passkey(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """端末を消す。最後の 1 台は消せない（ログインできなくなるため）。数えるのはアカウントごと。"""
+    user_id = user.id
     passkey = await _own_passkey(session, user, passkey_id)
-    if await service.count_passkeys(session, user.id) <= 1:
+    if await service.count_passkeys(session, user_id) <= 1:
         raise _fail(status.HTTP_409_CONFLICT, "cannot delete the last passkey")
     await session.delete(passkey)
     await session.commit()
-    _logger.info("user %s deleted passkey %s", user.id, passkey_id)
+    _logger.info("user %s deleted passkey %s", user_id, passkey_id)

@@ -517,7 +517,9 @@ async def reset_user(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="mail is not configured"
         )
     # リンクを先に作る（同じアドレスへの送信が上限なら、何も変えずに 429 で止める）
-    issued = await passkeys.request_email_link(session, user.email, force_recover_for=user.id)
+    # commit のあとは ORM の値が読めなくなるので、メールアドレスは先に取り出しておく
+    email = user.email
+    issued = await passkeys.request_email_link(session, email, force_recover_for=user_id)
     if issued is None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -525,14 +527,15 @@ async def reset_user(
         )
     raw_token, purpose = issued
 
-    await passkeys.revoke_all_sessions(session, user.id)
+    await passkeys.revoke_all_sessions(session, user_id)
     if body.delete_passkeys:
-        await session.execute(delete(Passkey).where(col(Passkey.user_id) == user.id))
+        await session.execute(delete(Passkey).where(col(Passkey.user_id) == user_id))
+    user = await _get_user_or_404(session, user_id)
     user.password_hash = None
     session.add(user)
     await session.commit()
 
-    background.add_task(passkeys.deliver_link_mail, user.email, raw_token, purpose)
+    background.add_task(passkeys.deliver_link_mail, email, raw_token, purpose)
     _logger.warning(
         "admin %s reset user %s (passkeys deleted: %s)", admin_id, user_id, body.delete_passkeys
     )

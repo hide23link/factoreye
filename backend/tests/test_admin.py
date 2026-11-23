@@ -20,6 +20,7 @@ from app.config import AuthMode, settings
 from app.db.models import Reading, Sensor, User, Workspace
 from app.db.session import engine
 from app.rate_limit import limiter
+from tests.helpers import create_user
 
 ADMIN_ID = "admin"
 ADMIN_PASSWORD = "adminpass123"
@@ -60,13 +61,8 @@ async def _admin_login(api: httpx.AsyncClient, password: str = ADMIN_PASSWORD) -
 
 
 async def _register(api: httpx.AsyncClient, email: str, workspace: str = "WS") -> dict[str, str]:
-    resp = await api.post(
-        "/api/auth/register",
-        json={"email": email, "password": "password123", "workspaceName": workspace},
-    )
-    assert resp.status_code == 201, resp.text
-    tokens: dict[str, str] = resp.json()
-    return tokens
+    """利用者とトークンを作る（パスキーの登録の流れは、test_passkeys.py で試す）。"""
+    return await create_user(email, workspace)
 
 
 async def _user_id(email: str) -> str:
@@ -152,7 +148,7 @@ async def test_login_wrong_password_and_unknown_id_look_the_same(api: httpx.Asyn
 
 
 async def test_normal_user_cannot_log_in_to_admin(api: httpx.AsyncClient) -> None:
-    # 一般ユーザーのメール・パスワードでは管理者ログインできない（DB ユーザーは管理者ではない）
+    # 一般ユーザーのメールアドレスでは管理者ログインできない（DB ユーザーは管理者ではない）
     await _register(api, "normal@example.com")
     resp = await api.post(
         "/api/admin/login",
@@ -277,25 +273,6 @@ async def test_patch_email_conflict_returns_409(api: httpx.AsyncClient) -> None:
         f"/api/admin/users/{user_id}", headers=headers, json={"email": "b@example.com"}
     )
     assert resp.status_code == 409
-
-
-async def test_password_reset_revokes_refresh_tokens(api: httpx.AsyncClient) -> None:
-    headers = await _admin_login(api)
-    tokens = await _register(api, "reset@example.com")
-    user_id = await _user_id("reset@example.com")
-
-    resp = await api.patch(
-        f"/api/admin/users/{user_id}", headers=headers, json={"password": "brandnew-pass1"}
-    )
-    assert resp.status_code == 200
-    # 既存のリフレッシュトークンは失効している
-    refreshed = await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
-    assert refreshed.status_code == 401
-    # 新しいパスワードでログインできる
-    login = await api.post(
-        "/api/auth/login", json={"email": "reset@example.com", "password": "brandnew-pass1"}
-    )
-    assert login.status_code == 200
 
 
 # ── 削除 ─────────────────────────────────────────────────────

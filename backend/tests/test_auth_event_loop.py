@@ -1,4 +1,4 @@
-"""bcrypt の処理（登録・ログイン・管理者ログイン・パスワード変更）がループを止めない検証。
+"""bcrypt の処理（管理者ログイン）がループを止めない検証。
 
 認証の最中に別のコルーチン（センサーの取り込みや /health の代わり）を動かし、
 その遅れの最大値が、bcrypt 1 回分（コスト係数 12 で約 200ms 以上）より十分小さいことを確かめる。
@@ -70,37 +70,6 @@ async def _max_lag_during(work: Awaitable[httpx.Response]) -> tuple[float, httpx
     return max(lags), resp
 
 
-async def test_register_does_not_block_event_loop(api: httpx.AsyncClient) -> None:
-    lag, resp = await _max_lag_during(
-        api.post(
-            "/api/auth/register",
-            json={"email": "a@example.com", "password": "password123", "workspaceName": "W"},
-        )
-    )
-    assert resp.status_code == 201
-    assert lag < MAX_LAG_SECONDS, f"イベントループが {lag * 1000:.0f}ms 止まった"
-
-
-async def test_login_does_not_block_event_loop(api: httpx.AsyncClient) -> None:
-    await api.post(
-        "/api/auth/register",
-        json={"email": "b@example.com", "password": "password123", "workspaceName": "W"},
-    )
-    lag, resp = await _max_lag_during(
-        api.post("/api/auth/login", json={"email": "b@example.com", "password": "password123"})
-    )
-    assert resp.status_code == 200
-    assert lag < MAX_LAG_SECONDS, f"イベントループが {lag * 1000:.0f}ms 止まった"
-
-
-async def test_login_unknown_email_dummy_check_does_not_block(api: httpx.AsyncClient) -> None:
-    lag, resp = await _max_lag_during(
-        api.post("/api/auth/login", json={"email": "none@example.com", "password": "password123"})
-    )
-    assert resp.status_code == 401
-    assert lag < MAX_LAG_SECONDS, f"イベントループが {lag * 1000:.0f}ms 止まった"
-
-
 async def test_admin_login_does_not_block_event_loop(api: httpx.AsyncClient) -> None:
     lag, resp = await _max_lag_during(
         api.post("/api/admin/login", json={"adminId": "admin", "password": "adminpass123"})
@@ -114,27 +83,6 @@ async def test_admin_login_unknown_id_dummy_check_does_not_block(api: httpx.Asyn
         api.post("/api/admin/login", json={"adminId": "nobody", "password": "adminpass123"})
     )
     assert resp.status_code == 401
-    assert lag < MAX_LAG_SECONDS, f"イベントループが {lag * 1000:.0f}ms 止まった"
-
-
-async def test_admin_password_change_does_not_block_event_loop(api: httpx.AsyncClient) -> None:
-    reg = await api.post(
-        "/api/auth/register",
-        json={"email": "c@example.com", "password": "password123", "workspaceName": "W"},
-    )
-    assert reg.status_code == 201
-    login = await api.post(
-        "/api/admin/login", json={"adminId": "admin", "password": "adminpass123"}
-    )
-    headers = {"Authorization": f"Bearer {login.json()['accessToken']}"}
-    users = await api.get("/api/admin/users", headers=headers)
-    user_id = users.json()[0]["id"]
-    lag, resp = await _max_lag_during(
-        api.patch(
-            f"/api/admin/users/{user_id}", json={"password": "newpassword456"}, headers=headers
-        )
-    )
-    assert resp.status_code == 200, resp.text
     assert lag < MAX_LAG_SECONDS, f"イベントループが {lag * 1000:.0f}ms 止まった"
 
 
