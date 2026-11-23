@@ -16,14 +16,17 @@ import jwt
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from helpers import create_user
 from httpx import ASGITransport
 from pydantic import SecretStr
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from webauthn.helpers import base64url_to_bytes
+from webauthn_fake import TEST_RP_ID, FakeAuthenticator
 
 from app import admin_accounts, mailer
 from app import auth as auth_utils
+from app import purge as purge_module
 from app.api import admin as admin_module
 from app.api import auth as auth_routes
 from app.api import passkeys as passkey_routes
@@ -38,8 +41,6 @@ from app.db.models import (
 )
 from app.db.session import engine
 from app.rate_limit import limiter
-from tests.helpers import create_user
-from tests.webauthn_fake import TEST_RP_ID, FakeAuthenticator
 
 ADMIN_ID = "admin"
 ADMIN_PASSWORD = "adminpass123"
@@ -102,7 +103,7 @@ async def api() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 def _link_of(mail: SentMail) -> tuple[str, str]:
     """メール本文のリンクから（種類, 生のトークン）を取り出す。"""
-    found = re.search(r"/#(register|recover)=([A-Za-z0-9_-]+)", mail.text)
+    found = re.search(r"/#(register|recover|login)=([A-Za-z0-9_-]+)", mail.text)
     assert found, mail.text
     return found.group(1), found.group(2)
 
@@ -403,6 +404,7 @@ async def test_login_with_passkey_needs_no_email_and_issues_180_day_session(
     async with AsyncSession(engine) as session:
         rows = (await session.exec(select(RefreshToken))).all()
         latest = max(rows, key=lambda r: r.created_at)
+        assert latest.expires_at is not None
         remaining = latest.expires_at.replace(tzinfo=UTC) - datetime.now(UTC)
         assert timedelta(days=179) < remaining <= timedelta(days=180)
     refreshed = await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
@@ -427,7 +429,7 @@ async def test_login_rejects_unknown_credential(
     await _signup(api, mails, FakeAuthenticator(), "known@example.com")
     # このサービスに登録していない端末の鍵（サーバーは、この鍵を知らない）
     stranger = FakeAuthenticator()
-    other_options = {
+    other_options: dict[str, object] = {
         "rp": {"id": "localhost", "name": "FactorEye"},
         "user": {"id": "AAAA", "name": "stranger@example.com", "displayName": "s"},
         "challenge": "AAAA",
@@ -892,3 +894,388 @@ def test_rp_id_and_origin_come_from_frontend_url() -> None:
 
 def test_refresh_token_default_is_180_days() -> None:
     assert Settings.model_fields["jwt_refresh_expire_days"].default == 180
+
+
+# ── 9. メールのログインリンク（パスキーが使えない端末のための代わりのログイン）─────
+
+
+async def _request_login_link(api: httpx.AsyncClient, email: str, **kwargs: Any) -> httpx.Response:
+    return await api.post("/api/auth/email/login-request", json={"email": email}, **kwargs)
+
+
+async def _email_login(
+    api: httpx.AsyncClient, mails: list[SentMail], email: str
+) -> dict[str, str]:
+    """ログインリンクを依頼し、メールのリンクでログインして、トークンを返す。"""
+    assert (await _request_login_link(api, email)).status_code == 202
+    purpose, token = _link_of(mails[-1])
+    assert purpose == "login"
+    resp = await api.post("/api/auth/email/login", json={"token": token})
+    assert resp.status_code == 200, resp.text
+    tokens: dict[str, str] = resp.json()
+    return tokens
+
+
+async def test_login_link_signs_in_without_asking_for_a_passkey(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "link@example.com")
+    mails.clear()
+    tokens = await _email_login(api, mails, "link@example.com")
+    # 本文は、日本語と英語の併記。15 分・1 回だけ
+    assert "15 分" in mails[0].text and "15 minutes" in mails[0].text
+    me = (await api.get("/api/me", headers=_auth(tokens))).json()
+    assert me["email"] == "link@example.com"
+    assert me["loginMethod"] == "email"
+    assert len(await _passkeys_of("link@example.com")) == 1  # パスキーは増えない
+    refreshed = await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    assert refreshed.status_code == 200
+
+
+async def test_login_link_expires_after_15_minutes_and_is_single_use(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "once@example.com")
+    await _request_login_link(api, "once@example.com")
+    _, token = _link_of(mails[-1])
+    async with AsyncSession(engine) as session:
+        row = (
+            await session.exec(select(EmailToken).where(col(EmailToken.purpose) == "login"))
+        ).one()
+        lifetime = row.expires_at - row.created_at
+        assert timedelta(minutes=14, seconds=55) < lifetime <= timedelta(minutes=15)
+    assert (await api.post("/api/auth/email/login", json={"token": token})).status_code == 200
+    # 使用済みのリンクは、もう通らない
+    assert (await api.post("/api/auth/email/login", json={"token": token})).status_code == 410
+
+    await _request_login_link(api, "once@example.com")
+    _, late = _link_of(mails[-1])
+    async with AsyncSession(engine) as session:
+        row = (
+            await session.exec(
+                select(EmailToken).where(
+                    col(EmailToken.purpose) == "login", col(EmailToken.used_at).is_(None)
+                )
+            )
+        ).one()
+        row.expires_at = datetime.now(UTC) - timedelta(seconds=1)  # 15 分を超えた
+        session.add(row)
+        await session.commit()
+    assert (await api.post("/api/auth/email/login", json={"token": late})).status_code == 410
+
+
+async def test_login_link_response_is_identical_for_unregistered_address(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "known@example.com")
+    mails.clear()
+    known = await _request_login_link(api, "known@example.com")
+    unknown = await _request_login_link(api, "nobody@example.com")
+    assert (known.status_code, known.json()) == (unknown.status_code, unknown.json())
+    assert known.status_code == 202
+    # 登録済みにだけメールが届く（登録の案内も送らない）
+    assert [m.to for m in mails] == ["known@example.com"]
+    # 登録されていないアドレスでは、利用者も作られない
+    assert [u.email for u in await _users()] == ["known@example.com"]
+
+
+async def test_login_link_limit_is_3_per_address_per_hour_with_same_response(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "busy@example.com")
+    mails.clear()
+    responses = [await _request_login_link(api, "busy@example.com") for _ in range(5)]
+    assert len({(r.status_code, r.text) for r in responses}) == 1
+    # 登録のときの 1 通と合わせて 3 通まで。それ以降は送らない（応答は同じ）
+    assert len(mails) == 2
+    # 登録されていないアドレスも、同じように数える（上限の有無で、登録を推測させない）
+    for _ in range(5):
+        assert (await _request_login_link(api, "ghost@example.com")).status_code == 202
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.exec(
+                select(EmailToken).where(col(EmailToken.email) == "ghost@example.com")
+            )
+        ).all()
+        assert len(rows) == 3
+
+
+async def test_login_link_request_is_limited_per_client_to_3_per_hour(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        headers = {"cf-connecting-ip": "203.0.113.77"}
+        codes = [
+            (await _request_login_link(api, f"p{i}@example.com", headers=headers)).status_code
+            for i in range(4)
+        ]
+        assert codes == [202, 202, 202, 429]
+        other = await _request_login_link(
+            api, "q@example.com", headers={"cf-connecting-ip": "203.0.113.78"}
+        )
+        assert other.status_code == 202  # 別の接続元は影響を受けない
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+async def test_login_link_request_without_mail_configuration_is_503(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    settings.resend_api_key = SecretStr("")
+    assert (await _request_login_link(api, "a@example.com")).status_code == 503
+    assert mails == []
+
+
+async def test_login_link_cannot_register_a_passkey_and_other_links_cannot_log_in(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "kinds@example.com")
+    await _request_login_link(api, "kinds@example.com")
+    _, login_token = _link_of(mails[-1])
+    # ログインリンクでは、パスキーの登録に進めない（recover のリンクだけが許す）
+    assert (
+        await api.post("/api/auth/passkey/register/begin", json={"token": login_token})
+    ).status_code == 410
+    # 逆に、再登録・登録のリンクでは、ログインリンクの口から入れない
+    await _request_link(api, "kinds@example.com")
+    _, recover_token = _link_of(mails[-1])
+    assert (
+        await api.post("/api/auth/email/login", json={"token": recover_token})
+    ).status_code == 410
+    await _request_link(api, "fresh@example.com")
+    _, register_token = _link_of(mails[-1])
+    assert (
+        await api.post("/api/auth/email/login", json={"token": register_token})
+    ).status_code == 410
+    assert len(await _passkeys_of("kinds@example.com")) == 1
+
+
+async def test_login_link_session_cannot_manage_passkeys_but_passkey_session_can(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    device = FakeAuthenticator()
+    passkey_tokens = await _signup(api, mails, device, "mgmt@example.com")
+    mails.clear()
+    email_tokens = await _email_login(api, mails, "mgmt@example.com")
+    key = (await _passkeys_of("mgmt@example.com"))[0]
+
+    headers = _auth(email_tokens)
+    assert (await api.get("/api/passkeys", headers=headers)).status_code == 403
+    assert (await api.post("/api/passkeys/register/begin", headers=headers)).status_code == 403
+    assert (
+        await api.patch(f"/api/passkeys/{key.id}", headers=headers, json={"name": "x"})
+    ).status_code == 403
+    assert (await api.delete(f"/api/passkeys/{key.id}", headers=headers)).status_code == 403
+    # 更新したあとのトークンでも、同じ（ログインの方法を引き継ぐ）
+    refreshed = (
+        await api.post("/api/auth/refresh", json={"refreshToken": email_tokens["refreshToken"]})
+    ).json()
+    assert (await api.get("/api/passkeys", headers=_auth(refreshed))).status_code == 403
+    assert len(await _passkeys_of("mgmt@example.com")) == 1  # 何も変わっていない
+    # パスキーでログインした状態は、管理できる
+    assert (await api.get("/api/passkeys", headers=_auth(passkey_tokens))).status_code == 200
+    login = await _login(api, device, "mgmt@example.com")
+    assert (await api.get("/api/passkeys", headers=_auth(login.json()))).status_code == 200
+
+
+async def test_recover_session_can_manage_passkeys(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "rec@example.com")
+    await _request_link(api, "rec@example.com")
+    _, token = _link_of(mails[-1])
+    finished = await _register_finish(api, token, FakeAuthenticator(), "新しい端末")
+    assert finished.status_code == 200
+    tokens = finished.json()
+    assert (await api.get("/api/me", headers=_auth(tokens))).json()["loginMethod"] == "recover"
+    assert (await api.get("/api/passkeys", headers=_auth(tokens))).status_code == 200
+
+
+# ── 10. キオスク用の永久ログイン ──────────────────────────────
+
+
+async def _keep(
+    api: httpx.AsyncClient, tokens: dict[str, str], name: str = "壁掛けの画面"
+) -> httpx.Response:
+    return await api.post(
+        "/api/sessions/kept",
+        headers=_auth(tokens),
+        json={"refreshToken": tokens["refreshToken"], "deviceName": name},
+    )
+
+
+async def _refresh_rows(user_email: str) -> list[RefreshToken]:
+    async with AsyncSession(engine) as session:
+        user = (await session.exec(select(User).where(User.email == user_email))).one()
+        rows = (
+            await session.exec(select(RefreshToken).where(col(RefreshToken.user_id) == user.id))
+        ).all()
+        return sorted(rows, key=lambda r: r.created_at)
+
+
+async def test_normal_login_keeps_the_180_day_expiry(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    device = FakeAuthenticator()
+    await _signup(api, mails, device, "normal@example.com")
+    await _login(api, device, "normal@example.com")
+    for row in await _refresh_rows("normal@example.com"):
+        assert row.expires_at is not None
+        assert timedelta(days=179) < row.expires_at.replace(tzinfo=UTC) - datetime.now(UTC)
+        assert row.series_id is None and row.device_name is None
+
+
+async def test_keep_signed_in_makes_the_refresh_token_permanent_across_rotations(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "kiosk@example.com")
+    kept = await _keep(api, tokens)
+    assert kept.status_code == 201
+    assert kept.json()["name"] == "壁掛けの画面"
+    series_id = kept.json()["id"]
+
+    current = tokens["refreshToken"]
+    for _ in range(3):  # 何回更新しても、期限なしのまま
+        refreshed = await api.post("/api/auth/refresh", json={"refreshToken": current})
+        assert refreshed.status_code == 200
+        current = refreshed.json()["refreshToken"]
+    active = [r for r in await _refresh_rows("kiosk@example.com") if not r.revoked]
+    assert len(active) == 1
+    assert active[0].expires_at is None  # 新しいトークンも期限なし
+    assert str(active[0].series_id) == series_id  # 端末の識別は変わらない
+    assert active[0].device_name == "壁掛けの画面"
+    assert active[0].started_at is not None and active[0].last_used_at is not None
+
+    listed = (await api.get("/api/sessions/kept", headers=_auth(tokens))).json()
+    assert [(i["id"], i["name"]) for i in listed] == [(series_id, "壁掛けの画面")]
+    assert listed[0]["startedAt"] and listed[0]["lastUsedAt"]
+
+
+async def test_kept_session_can_be_ended_and_then_cannot_refresh(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "end@example.com")
+    series_id = (await _keep(api, tokens)).json()["id"]
+    rotated = (
+        await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    ).json()
+    ended = await api.delete(f"/api/sessions/kept/{series_id}", headers=_auth(tokens))
+    assert ended.status_code == 204
+    assert (
+        await api.post("/api/auth/refresh", json={"refreshToken": rotated["refreshToken"]})
+    ).status_code == 401
+    assert (await api.get("/api/sessions/kept", headers=_auth(tokens))).json() == []
+    again = await api.delete(f"/api/sessions/kept/{series_id}", headers=_auth(tokens))
+    assert again.status_code == 404
+
+
+async def test_kept_session_of_another_user_cannot_be_listed_or_ended(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    a = await _signup(api, mails, FakeAuthenticator(), "a@example.com")
+    b = await _signup(api, mails, FakeAuthenticator(), "b@example.com")
+    series_id = (await _keep(api, a)).json()["id"]
+    assert (await api.get("/api/sessions/kept", headers=_auth(b))).json() == []
+    assert (
+        await api.delete(f"/api/sessions/kept/{series_id}", headers=_auth(b))
+    ).status_code == 404
+    # 他の人のリフレッシュトークンでは、永久ログインにできない
+    stolen = await api.post(
+        "/api/sessions/kept",
+        headers=_auth(b),
+        json={"refreshToken": a["refreshToken"], "deviceName": "x"},
+    )
+    assert stolen.status_code == 400
+    assert len((await api.get("/api/sessions/kept", headers=_auth(a))).json()) == 1
+
+
+async def test_keep_signed_in_rejects_revoked_token_and_works_from_login_link(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "viaemail@example.com")
+    tokens = await _email_login(api, mails, "viaemail@example.com")
+    # メールのログインリンクで入った端末でも、選べる
+    assert (await _keep(api, tokens, "リンクの端末")).status_code == 201
+    rotated = (
+        await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    ).json()
+    # ログインの方法は、永久ログインでも引き継がれる（端末の管理は、まだ許さない）
+    assert (await api.get("/api/passkeys", headers=_auth(rotated))).status_code == 403
+    # 失効済み（ローテーションで使い終えた）トークンは、永久ログインにできない
+    stale = await api.post(
+        "/api/sessions/kept",
+        headers=_auth(rotated),
+        json={"refreshToken": tokens["refreshToken"], "deviceName": "x"},
+    )
+    assert stale.status_code == 400
+
+
+async def test_kept_session_endpoints_need_login_and_are_closed_for_admin_view(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "view@example.com")
+    assert (await api.get("/api/sessions/kept")).status_code in (401, 403)
+    user = (await _users())[0]
+    async with AsyncSession(engine) as session:
+        ws_id = (await session.exec(select(Workspace))).one().id
+    token, _ = auth_utils.create_impersonation_token(user.id, ws_id, "admin")
+    headers = {"Authorization": f"Bearer {token}"}
+    assert (await api.get("/api/sessions/kept", headers=headers)).status_code == 403
+
+
+async def test_admin_reset_revokes_kept_sessions_too(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "wall@example.com")
+    await _keep(api, tokens)
+    kept = (
+        await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    ).json()
+    headers = await _admin_headers(api)
+    user_id = await _user_id("wall@example.com")
+    assert (
+        await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
+    ).status_code == 200
+    assert (
+        await api.post("/api/auth/refresh", json={"refreshToken": kept["refreshToken"]})
+    ).status_code == 401  # 期限なしのログインも終わる
+
+
+async def test_logout_ends_a_kept_session(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "bye@example.com")
+    await _keep(api, tokens)
+    assert (
+        await api.post("/api/auth/logout", json={"refreshToken": tokens["refreshToken"]})
+    ).status_code == 204
+    assert (
+        await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    ).status_code == 401
+
+
+async def test_purge_removes_old_revoked_permanent_tokens_but_not_active_ones(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "purge@example.com")
+    await _keep(api, tokens)
+    current = tokens["refreshToken"]
+    for _ in range(2):
+        current = (
+            await api.post("/api/auth/refresh", json={"refreshToken": current})
+        ).json()["refreshToken"]
+    old = datetime.now(UTC) - timedelta(days=30)
+    async with AsyncSession(engine) as session:
+        for row in (await session.exec(select(RefreshToken))).all():
+            if row.revoked:
+                row.created_at = old  # 失効して 30 日たった行
+                session.add(row)
+        await session.commit()
+    deleted = await purge_module.purge_expired_refresh_tokens()
+    assert deleted >= 2
+    rows = await _refresh_rows("purge@example.com")
+    assert [r.revoked for r in rows] == [False]  # 有効な永久ログインは残る
+    assert rows[0].expires_at is None

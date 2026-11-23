@@ -2,6 +2,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from helpers import create_user
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -9,7 +10,6 @@ from app import purge as purge_module
 from app.db.models import Reading, RefreshToken, Sensor, User, Workspace
 from app.db.session import engine
 from app.purge import purge_expired_refresh_tokens, purge_old_readings
-from tests.helpers import create_user
 
 
 async def _create_sensor(session: AsyncSession, workspace_id: UUID | None = None) -> Sensor:

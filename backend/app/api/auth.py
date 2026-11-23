@@ -63,6 +63,9 @@ class MeResponse(CamelModel):
     workspace_id: UUID
     workspace_name: str
     plan: str
+    # ログインの方法: "passkey" | "email" | "recover"。画面が、端末の管理を出すかの判断に使う
+    # （古いログインや、管理者の閲覧のトークンは None）
+    login_method: str | None = None
 
 
 # ── 内部ヘルパー ──────────────────────────────────────────────
@@ -129,7 +132,10 @@ async def refresh(
     )
     stored = result.first()
 
-    if stored is None or stored.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+    now = datetime.now(UTC)
+    if stored is None or (
+        stored.expires_at is not None and stored.expires_at.replace(tzinfo=UTC) < now
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or expired refresh token",
@@ -137,24 +143,32 @@ async def refresh(
 
     # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
     user_id, workspace_id = stored.user_id, stored.workspace_id
+    login_method = stored.login_method
 
     # ローテーション: 古いトークンを失効させ新しいトークンを発行
     stored.revoked = True
     session.add(stored)
 
     raw, new_hash = auth_utils.create_refresh_token()
+    # 永久ログイン（期限なし）の端末は、新しいトークンも期限なしで、端末の情報を引き継ぐ。
+    # 通常のログインは、これまでどおり、新しいトークンから 180 日（使うたびに延びる）
     session.add(
         RefreshToken(
             user_id=user_id,
             workspace_id=workspace_id,
             token_hash=new_hash,
-            expires_at=auth_utils.refresh_token_expiry(),
+            expires_at=None if stored.expires_at is None else auth_utils.refresh_token_expiry(),
+            login_method=login_method,
+            series_id=stored.series_id,
+            device_name=stored.device_name,
+            started_at=stored.started_at,
+            last_used_at=now if stored.series_id is not None else None,
         )
     )
     await session.commit()
 
     return TokenResponse(
-        access_token=auth_utils.create_access_token(user_id, workspace_id),
+        access_token=auth_utils.create_access_token(user_id, workspace_id, via=login_method),
         refresh_token=raw,
     )
 
@@ -181,12 +195,16 @@ async def logout(
 @router.get("/me", response_model=MeResponse)
 async def me(
     user_workspace: Annotated[tuple[User, Workspace], Depends(_get_current_user_workspace)],
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
 ) -> MeResponse:
     user, workspace = user_workspace
+    # 上の依存で、トークンは検証済み（ここでは、ログインの方法だけを読む）
+    login_method = auth_utils.decode_access_token(credentials.credentials).get("via")
     return MeResponse(
         user_id=user.id,
         email=user.email,
         workspace_id=workspace.id,
         workspace_name=workspace.name,
         plan=workspace.plan,
+        login_method=login_method,
     )

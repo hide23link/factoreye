@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import and_, delete, or_, select, tuple_
 from sqlalchemy.engine import CursorResult
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -88,9 +88,20 @@ async def purge_expired_refresh_tokens() -> int:
     件数が多い場合は、_PURGE_BATCH_SIZE 件ずつ別のトランザクションで消す。
     """
     cutoff = datetime.now(UTC) - timedelta(days=_REFRESH_TOKEN_GRACE_DAYS)
+    # 期限なし（永久ログイン）のトークンは、期限では消えない。ローテーションで失効した古い行は、
+    # 更新のたびに増えるので、猶予を過ぎたものを消す（有効な行・失効して間もない行は残す）
     expired_ids = (
         select(col(RefreshToken.id))
-        .where(col(RefreshToken.expires_at) < cutoff)
+        .where(
+            or_(
+                col(RefreshToken.expires_at) < cutoff,
+                and_(
+                    col(RefreshToken.expires_at).is_(None),
+                    col(RefreshToken.revoked).is_(True),
+                    col(RefreshToken.created_at) < cutoff,
+                ),
+            )
+        )
         .limit(_PURGE_BATCH_SIZE)
     )
     stmt = (

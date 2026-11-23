@@ -9,6 +9,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from helpers import create_user
 from httpx import ASGITransport
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -20,7 +21,6 @@ from app.config import AuthMode, settings
 from app.db.models import Reading, Sensor, User, Workspace
 from app.db.session import engine
 from app.rate_limit import limiter
-from tests.helpers import create_user
 
 ADMIN_ID = "admin"
 ADMIN_PASSWORD = "adminpass123"

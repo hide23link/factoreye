@@ -386,9 +386,21 @@ class RefreshToken(SQLModel, table=True):
     workspace_id: UUID
     # 生トークンは返さずSHA-256ハッシュのみ保存
     token_hash: str = Field(max_length=64, index=True)
-    expires_at: datetime
+    # 期限。NULL は「期限なし」（キオスク用の永久ログイン。利用者が選んだ端末だけ。
+    # ローテーションしても、新しいトークンも期限なし。失効は、ログアウト・管理者のリセット）
+    expires_at: datetime | None = Field(default=None)
     revoked: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
+    # ログインの方法: "passkey" | "email"（メールのログインリンク）| "recover"（再登録リンク）。
+    # ローテーションで引き継ぐ。端末（パスキー）の管理は、passkey と recover のときだけ許す。
+    # NULL は、パスキー導入前のログイン（管理はできない。ログインし直すと変わる）
+    login_method: str | None = Field(default=None, max_length=20)
+    # 永久ログインの端末の情報（通常のログインは、すべて NULL）。
+    # series_id は、ローテーションで行が替わっても変わらない（一覧・終了の指定に使う）
+    series_id: UUID | None = Field(default=None, index=True)
+    device_name: str | None = Field(default=None, max_length=50)
+    started_at: datetime | None = Field(default=None)
+    last_used_at: datetime | None = Field(default=None)
 
     user: User = Relationship(back_populates="refresh_tokens")
 

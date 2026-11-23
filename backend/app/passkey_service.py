@@ -34,6 +34,17 @@ _logger = logging.getLogger(__name__)
 # メールのリンクの種類
 PURPOSE_REGISTER = "register"
 PURPOSE_RECOVER = "recover"
+# パスキーが使えない端末のための、メールのログインリンク。ログインだけができ、パスキーの登録は
+# できない（register・recover のリンクだけが、パスキーの登録を許す）
+PURPOSE_LOGIN = "login"
+
+# ログインの方法（リフレッシュトークン・アクセストークンの via に入れる）
+LOGIN_PASSKEY = "passkey"
+LOGIN_EMAIL = "email"
+LOGIN_RECOVER = "recover"
+# 端末（パスキー）の管理を許すログインの方法。メールのログインリンクだけで入った状態は許さない
+# （メール 1 本で、端末の入れ替えまで奪われないように）
+PASSKEY_MANAGEMENT_METHODS = frozenset({LOGIN_PASSKEY, LOGIN_RECOVER})
 
 # チャレンジの種類
 CHALLENGE_REGISTER = "register"  # メールのリンクから登録する
@@ -42,8 +53,10 @@ CHALLENGE_LOGIN = "login"
 
 REGISTER_LINK_TTL = timedelta(hours=24)
 RECOVER_LINK_TTL = timedelta(hours=1)
+LOGIN_LINK_TTL = timedelta(minutes=15)
 CHALLENGE_TTL = timedelta(minutes=5)
-# 同じアドレスへ、メールを送る回数の上限（1 時間あたり。登録・再登録・管理者のリセットの合計）
+# 同じアドレスへ、メールを送る回数の上限（1 時間あたり。登録・再登録・ログインリンク・
+# 管理者のリセットの合計）
 EMAIL_LINKS_PER_HOUR = 3
 # 1 人が持てるパスキーの数（端末の数）の上限
 MAX_PASSKEYS_PER_USER = 10
@@ -141,31 +154,79 @@ async def request_email_link(
     return raw, purpose
 
 
+async def request_login_link(session: AsyncSession, email: str) -> str | None:
+    """メールのログインリンクを作る。戻り値は、送るべき生のトークン。送らないときは None。
+
+    登録済みのアドレスにだけ、メールを送る。登録されていないアドレスにも、同じ形の行（送らない
+    ダミー。使えない）を残し、回数の数え方・処理の流れ・応答を、登録済みと同じにする
+    （応答や時間の違いで、登録の有無を推測させない）。同じアドレスへは 1 時間に 3 通まで
+    （上限を超えたら、送らない。応答は同じ）。
+    """
+    await purge_expired(session)
+    since = _now() - timedelta(hours=1)
+    recent = (
+        await session.exec(
+            select(func.count())
+            .select_from(EmailToken)
+            .where(col(EmailToken.email) == email, col(EmailToken.created_at) > since)
+        )
+    ).one()
+    if recent >= EMAIL_LINKS_PER_HOUR:
+        await session.commit()
+        return None
+
+    user = (await session.exec(select(User).where(func.lower(User.email) == email))).first()
+    raw = secrets.token_urlsafe(32)
+    session.add(
+        EmailToken(
+            purpose=PURPOSE_LOGIN,
+            email=email,
+            user_id=user.id if user is not None else uuid4(),
+            token_hash=_hash_link_token(raw),
+            expires_at=_now() + LOGIN_LINK_TTL,
+        )
+    )
+    await session.commit()
+    return raw if user is not None else None
+
+
 async def deliver_link_mail(email: str, raw_token: str, purpose: str) -> None:
     """リンクのメールを送る（バックグラウンドで呼ぶ）。失敗してもログだけ残す。
 
     応答を待たせない（送る・送らないで応答時間が変わると、登録の有無を推測されるため）。
     """
     link = build_link(purpose, raw_token)
-    subject, text, html = (
-        mailer.build_register_mail(link)
-        if purpose == PURPOSE_REGISTER
-        else mailer.build_recover_mail(link)
-    )
+    builders = {
+        PURPOSE_REGISTER: mailer.build_register_mail,
+        PURPOSE_RECOVER: mailer.build_recover_mail,
+        PURPOSE_LOGIN: mailer.build_login_mail,
+    }
+    subject, text, html = builders[purpose](link)
     try:
         await mailer.send_mail(to=email, subject=subject, text=text, html=html)
     except (mailer.MailNotConfiguredError, mailer.MailSendError):
         _logger.warning("link mail was not sent (purpose=%s)", purpose)
 
 
-async def find_valid_email_token(session: AsyncSession, raw_token: str) -> EmailToken | None:
-    """生のトークンから、まだ使えるメールのトークン（未使用・期限内）を探す。無ければ None。"""
+async def find_valid_email_token(
+    session: AsyncSession, raw_token: str, purposes: frozenset[str]
+) -> EmailToken | None:
+    """生のトークンから、まだ使えるメールのトークン（未使用・期限内・用途が合う）を探す。
+
+    用途が合わないトークンは、無いのと同じ（None）。例えば、ログインリンク（login）では、
+    パスキーの登録（register・recover の用途）には進めない。
+    """
     token = (
         await session.exec(
             select(EmailToken).where(col(EmailToken.token_hash) == _hash_link_token(raw_token))
         )
     ).first()
-    if token is None or token.used_at is not None or token.expires_at < _now():
+    if (
+        token is None
+        or token.purpose not in purposes
+        or token.used_at is not None
+        or token.expires_at < _now()
+    ):
         return None
     return token
 
@@ -305,10 +366,13 @@ async def workspace_of(session: AsyncSession, user_id: UUID) -> Workspace:
     return workspace
 
 
-def issue_tokens(session: AsyncSession, user_id: UUID, workspace_id: UUID) -> tuple[str, str]:
+def issue_tokens(
+    session: AsyncSession, user_id: UUID, workspace_id: UUID, login_method: str
+) -> tuple[str, str]:
     """ログイン状態を作る。戻り値は（アクセストークン, リフレッシュトークンの生の値）。
 
     リフレッシュトークンは、ハッシュだけを保存する（コミットは呼び出し側）。
+    login_method（passkey | email | recover）は、両方のトークンに入れる（端末の管理の可否に使う）。
     """
     raw, token_hash = auth_utils.create_refresh_token()
     session.add(
@@ -317,9 +381,10 @@ def issue_tokens(session: AsyncSession, user_id: UUID, workspace_id: UUID) -> tu
             workspace_id=workspace_id,
             token_hash=token_hash,
             expires_at=auth_utils.refresh_token_expiry(),
+            login_method=login_method,
         )
     )
-    return auth_utils.create_access_token(user_id, workspace_id), raw
+    return auth_utils.create_access_token(user_id, workspace_id, via=login_method), raw
 
 
 async def revoke_all_sessions(session: AsyncSession, user_id: UUID) -> None:

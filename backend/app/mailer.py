@@ -125,3 +125,38 @@ def build_recover_mail(link: str) -> tuple[str, str, str]:
         "If you didn't request it, ignore this email.</p>"
     )
     return subject, text, html
+
+
+def build_login_mail(link: str) -> tuple[str, str, str]:
+    """メールのログインリンク（パスキーが使えない端末のための代わりのログイン）。
+
+    戻り値は（件名, テキスト, HTML）。リンクは 15 分・1 回だけ有効。
+    """
+    subject = "FactorEye にログインする（メールのリンク）"
+    text = (
+        "メールでのログインが依頼されました。\n"
+        "次のリンクを開くと、ログインできます。\n\n"
+        f"{link}\n\n"
+        "このリンクは 15 分有効で、1 回だけ使えます。"
+        "心当たりがないときは、このメールを無視してください。\n"
+        "なお、このリンクでログインした状態では、端末（パスキー）の追加・削除はできません。\n\n"
+        "---\n"
+        "Someone asked to sign in to FactorEye by email. Open the link above to sign in. "
+        "The link is valid for 15 minutes and can be used once. If you didn't request it, "
+        "ignore this email. Passkey devices cannot be added or removed in a session that was "
+        "started with this link.\n"
+    )
+    html = (
+        "<p>メールでのログインが依頼されました。<br>下のボタンを押すと、ログインできます。</p>"
+        + _button_html(link, "ログインする")
+        + f'<p style="font-size:12px;color:#5d7081;word-break:break-all">ボタンが開けないときは、'
+        f"次の URL をブラウザに貼り付けてください。<br>{escape(link)}</p>"
+        "<p>このリンクは 15 分有効で、1 回だけ使えます。"
+        "心当たりがないときは、このメールを無視してください。<br>"
+        "なお、このリンクでログインした状態では、端末（パスキー）の追加・削除はできません。</p><hr>"
+        '<p style="font-size:13px;color:#4a5b6b">Someone asked to sign in to FactorEye by email. '
+        "Use the button above to sign in. The link is valid for 15 minutes and can be used once. "
+        "If you didn't request it, ignore this email. Passkey devices cannot be added or removed "
+        "in a session that was started with this link.</p>"
+    )
+    return subject, text, html

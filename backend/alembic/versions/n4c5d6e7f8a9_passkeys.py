@@ -5,13 +5,17 @@
  - email_tokens: 登録の確認・端末の再登録に使う、メールのリンクのトークン（ハッシュだけ保存）
  - auth_challenges: 登録・ログインで出す使い捨ての乱数（5 分・1 回だけ）
  - users.password_hash を NULL 可にする（パスキーだけの利用者はパスワードを持たない）
+ - refresh_tokens: expires_at を NULL 可にする（キオスク用の永久ログイン。NULL = 期限なし）、
+   ログイン方法（login_method）・永久ログインの端末の情報（series_id・device_name・started_at・
+   last_used_at）を足す。既存の行は、すべて NULL のまま（期限のある通常のログイン）
 
 既存の利用者の password_hash はそのまま残る。管理者の「リセット」で NULL にして、パスキーへ移す。
 OSS 版（AUTH_MODE=disabled）では使わない表だが、DB の形は同じにしておく（表が空のまま残る）。
 
-【downgrade】3 つの表を消し、password_hash を NOT NULL に戻す。パスワードの無い利用者がいると
-NOT NULL に戻せないので、その場合は失敗する（使えないパスワードのハッシュで埋めない。
-戻すなら、先に利用者を整理する）。パスキー・メールのトークンは消える。
+【downgrade】3 つの表を消し、refresh_tokens の足した列を消して、password_hash・expires_at を
+NOT NULL に戻す。パスワードの無い利用者・期限なしのログインがあると NOT NULL に戻せないので、
+その場合は失敗する（偽の値で埋めない。戻すなら、先に利用者・ログインを整理する）。
+パスキー・メールのトークンは消える。
 
 Revision ID: n4c5d6e7f8a9
 Revises: m3b4c5d6e7f8
@@ -34,6 +38,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.alter_column('users', 'password_hash', existing_type=sa.String(length=200), nullable=True)
+
+    op.alter_column(
+        'refresh_tokens', 'expires_at',
+        existing_type=sqlmodel.sql.sqltypes.UTCDateTime(), nullable=True,
+    )
+    op.add_column(
+        'refresh_tokens',
+        sa.Column('login_method', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=True),
+    )
+    op.add_column('refresh_tokens', sa.Column('series_id', sa.Uuid(), nullable=True))
+    op.add_column(
+        'refresh_tokens',
+        sa.Column('device_name', sqlmodel.sql.sqltypes.AutoString(length=50), nullable=True),
+    )
+    op.add_column(
+        'refresh_tokens',
+        sa.Column('started_at', sqlmodel.sql.sqltypes.UTCDateTime(), nullable=True),
+    )
+    op.add_column(
+        'refresh_tokens',
+        sa.Column('last_used_at', sqlmodel.sql.sqltypes.UTCDateTime(), nullable=True),
+    )
+    op.create_index('ix_refresh_tokens_series_id', 'refresh_tokens', ['series_id'])
 
     op.create_table(
         'passkeys',
@@ -80,6 +107,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index('ix_refresh_tokens_series_id', table_name='refresh_tokens')
+    op.drop_column('refresh_tokens', 'last_used_at')
+    op.drop_column('refresh_tokens', 'started_at')
+    op.drop_column('refresh_tokens', 'device_name')
+    op.drop_column('refresh_tokens', 'series_id')
+    op.drop_column('refresh_tokens', 'login_method')
+    op.alter_column(
+        'refresh_tokens', 'expires_at',
+        existing_type=sqlmodel.sql.sqltypes.UTCDateTime(), nullable=False,
+    )
     op.drop_table('auth_challenges')
     op.drop_index('ix_email_tokens_token_hash', table_name='email_tokens')
     op.drop_index('ix_email_tokens_email', table_name='email_tokens')
