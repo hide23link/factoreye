@@ -25,7 +25,7 @@ from typing import Any
 from uuid import UUID, uuid4  # id に使う、重ならない長い番号
 
 # Index = 検索を速くする索引、JSONB = PostgreSQL の JSON 型（設定を柔軟に保存する）
-from sqlalchemy import Column, Enum, Index, column, func, text
+from sqlalchemy import Column, Enum, Index, LargeBinary, column, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 # Field = 列の細かい指定、Relationship = テーブル同士の関係
@@ -338,7 +338,8 @@ class Widget(SQLModel, table=True):
 class User(SQLModel, table=True):
     """利用者（SaaS 版のみ）。
 
-    パスワードは、bcrypt のハッシュだけを保存する（平文は保存しない）。
+    ログインはパスキー（Passkey）で行い、パスワードは持たない。password_hash は、パスキー導入前に
+    パスワードで作った利用者の古い値で、管理者の「リセット」で NULL にする（新しい利用者は最初から NULL）。
     """
 
     __tablename__ = "users"
@@ -348,7 +349,7 @@ class User(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     email: str = Field(unique=True, max_length=254, index=True)
-    password_hash: str = Field(max_length=200)
+    password_hash: str | None = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=_utcnow)
 
     workspaces: list["Workspace"] = Relationship(back_populates="owner")
@@ -389,6 +390,72 @@ class RefreshToken(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
     user: User = Relationship(back_populates="refresh_tokens")
+
+
+class Passkey(SQLModel, table=True):
+    """利用者のパスキー（SaaS 版のみ）。1 つのパスキー = 1 つの端末（または、パスワードマネージャーの 1 項目）。
+
+    保存するのは公開鍵だけ。秘密鍵は端末の中にあり、サーバーには届かない。
+    1 人の利用者が複数持てる。1 台の端末に、アカウントごとのパスキーを別々に持てる
+    （WebAuthn の user.id を利用者 ID にしてあるため、同じ端末・同じドメインでも上書きされない）。
+    """
+
+    __tablename__ = "passkeys"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
+    # 端末が決める credential ID（base64url の文字列）。ログイン時に、どの鍵かを探す鍵になる
+    credential_id: str = Field(max_length=1400, unique=True)
+    # 公開鍵（COSE 形式のバイト列）
+    public_key: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    # 端末が数える署名の回数。巻き戻ったら、鍵が複製された疑いがあるので拒否する（0 のままの端末もある）
+    sign_count: int = Field(default=0)
+    # 利用者が付ける端末の名前（例: Mac の Chrome）
+    name: str = Field(max_length=50)
+    created_at: datetime = Field(default_factory=_utcnow)
+    last_used_at: datetime | None = Field(default=None)
+
+
+class EmailToken(SQLModel, table=True):
+    """メールで送るリンクのトークン（SaaS 版のみ）。登録の確認と、端末の再登録に使う。
+
+    生のトークンは保存せず、SHA-256 のハッシュだけを保存する（リフレッシュトークンと同じ）。
+    1 回だけ使える（used_at が入る）。登録（register）は、アカウントをまだ作らない
+    ので、user_id には「これから作る利用者の ID」を先に決めて入れる（WebAuthn の user.id に使う）。
+    """
+
+    __tablename__ = "email_tokens"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # "register"（新規登録）| "recover"（端末の再登録。管理者のリセットも同じ）
+    purpose: str = Field(max_length=20)
+    email: str = Field(max_length=254, index=True)
+    user_id: UUID
+    token_hash: str = Field(max_length=64, index=True)
+    expires_at: datetime
+    used_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class AuthChallenge(SQLModel, table=True):
+    """パスキーの登録・ログインで、サーバーが出した使い捨ての乱数（チャレンジ）。
+
+    端末が署名した相手が、この乱数であることを確かめる。有効期限は 5 分、1 回使ったら消す。
+    画面には challenge_id（この行の ID）だけを渡し、乱数そのものはサーバーに残す。
+    """
+
+    __tablename__ = "auth_challenges"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    challenge: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    # "register"（メールのリンクから）| "add"（ログイン中に端末を足す）| "login"
+    purpose: str = Field(max_length=20)
+    # register / add のとき: パスキーを持つことになる利用者の ID（login は無し）
+    user_id: UUID | None = Field(default=None)
+    # register のとき: 使うメールのトークン（finish で使用済みにする）
+    email_token_id: UUID | None = Field(default=None)
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ──────────────────────────────────────────────────────────────
