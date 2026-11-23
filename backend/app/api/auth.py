@@ -19,7 +19,8 @@ from uuid import UUID
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlmodel import select
+from sqlalchemy import update
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth as auth_utils
@@ -144,10 +145,24 @@ async def refresh(
     # commit() 後は ORM 属性が expire するためコミット前にローカル変数へ保存
     user_id, workspace_id = stored.user_id, stored.workspace_id
     login_method = stored.login_method
+    stored_id, permanent = stored.id, stored.expires_at is None
+    series_id, device_name, started_at = stored.series_id, stored.device_name, stored.started_at
 
-    # ローテーション: 古いトークンを失効させ新しいトークンを発行
-    stored.revoked = True
-    session.add(stored)
+    # ローテーション: 古いトークンを失効させ新しいトークンを発行。
+    # 失効は「まだ有効なら」の条件つきの 1 文で行い、同時に 2 回更新されても、片方だけが通る
+    # （有効なトークンが 2 本できない）
+    revoked = await session.execute(
+        update(RefreshToken)
+        .where(col(RefreshToken.id) == stored_id, col(RefreshToken.revoked).is_(False))
+        .values(revoked=True)
+        .returning(col(RefreshToken.id))
+    )
+    if revoked.first() is None:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or expired refresh token",
+        )
 
     raw, new_hash = auth_utils.create_refresh_token()
     # 永久ログイン（期限なし）の端末は、新しいトークンも期限なしで、端末の情報を引き継ぐ。
@@ -157,12 +172,12 @@ async def refresh(
             user_id=user_id,
             workspace_id=workspace_id,
             token_hash=new_hash,
-            expires_at=None if stored.expires_at is None else auth_utils.refresh_token_expiry(),
+            expires_at=None if permanent else auth_utils.refresh_token_expiry(),
             login_method=login_method,
-            series_id=stored.series_id,
-            device_name=stored.device_name,
-            started_at=stored.started_at,
-            last_used_at=now if stored.series_id is not None else None,
+            series_id=series_id,
+            device_name=device_name,
+            started_at=started_at,
+            last_used_at=now if series_id is not None else None,
         )
     )
     await session.commit()

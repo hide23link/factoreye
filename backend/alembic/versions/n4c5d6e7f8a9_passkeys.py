@@ -88,6 +88,7 @@ def upgrade() -> None:
         sa.Column('expires_at', sqlmodel.sql.sqltypes.UTCDateTime(), nullable=False),
         sa.Column('used_at', sqlmodel.sql.sqltypes.UTCDateTime(), nullable=True),
         sa.Column('created_at', sqlmodel.sql.sqltypes.UTCDateTime(), nullable=False),
+        sa.Column('by_admin', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.PrimaryKeyConstraint('id'),
     )
     op.create_index('ix_email_tokens_email', 'email_tokens', ['email'])

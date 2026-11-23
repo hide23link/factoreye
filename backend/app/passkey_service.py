@@ -106,12 +106,9 @@ async def purge_expired(session: AsyncSession) -> None:
     )
 
 
-async def request_email_link(
-    session: AsyncSession, email: str, *, force_recover_for: UUID | None = None
-) -> tuple[str, str] | None:
+async def request_email_link(session: AsyncSession, email: str) -> tuple[str, str] | None:
     """メールのリンクを作る。戻り値は（生のトークン, 種類）。送る回数の上限なら None。
 
-    force_recover_for は管理者のリセット用: 指定した利用者への再登録のリンクにする。
     アドレスが未登録なら、これから作る利用者の ID を先に決め（WebAuthn の user.id に使う）、
     登録のリンクにする。登録済みなら、端末の再登録のリンクにする。
     """
@@ -121,19 +118,19 @@ async def request_email_link(
         await session.exec(
             select(func.count())
             .select_from(EmailToken)
-            .where(col(EmailToken.email) == email, col(EmailToken.created_at) > since)
+            .where(
+                col(EmailToken.email) == email,
+                col(EmailToken.created_at) > since,
+                col(EmailToken.by_admin).is_(False),
+            )
         )
     ).one()
     if recent >= EMAIL_LINKS_PER_HOUR:
         await session.commit()
         return None
 
-    user_id: UUID | None = force_recover_for
-    if user_id is None:
-        existing = (
-            await session.exec(select(User).where(func.lower(User.email) == email))
-        ).first()
-        user_id = existing.id if existing is not None else None
+    existing = (await session.exec(select(User).where(func.lower(User.email) == email))).first()
+    user_id: UUID | None = existing.id if existing is not None else None
 
     if user_id is not None:
         purpose, ttl = PURPOSE_RECOVER, RECOVER_LINK_TTL
@@ -168,7 +165,11 @@ async def request_login_link(session: AsyncSession, email: str) -> str | None:
         await session.exec(
             select(func.count())
             .select_from(EmailToken)
-            .where(col(EmailToken.email) == email, col(EmailToken.created_at) > since)
+            .where(
+                col(EmailToken.email) == email,
+                col(EmailToken.created_at) > since,
+                col(EmailToken.by_admin).is_(False),
+            )
         )
     ).one()
     if recent >= EMAIL_LINKS_PER_HOUR:
@@ -190,10 +191,10 @@ async def request_login_link(session: AsyncSession, email: str) -> str | None:
     return raw if user is not None else None
 
 
-async def deliver_link_mail(email: str, raw_token: str, purpose: str) -> None:
-    """リンクのメールを送る（バックグラウンドで呼ぶ）。失敗してもログだけ残す。
+async def send_link_mail(email: str, raw_token: str, purpose: str) -> None:
+    """リンクのメールを送る。失敗したら、mailer の例外（未設定・送信失敗）を投げる。
 
-    応答を待たせない（送る・送らないで応答時間が変わると、登録の有無を推測されるため）。
+    管理者のリセットは、これを待って、失敗を管理者に見せる。
     """
     link = build_link(purpose, raw_token)
     builders = {
@@ -202,8 +203,17 @@ async def deliver_link_mail(email: str, raw_token: str, purpose: str) -> None:
         PURPOSE_LOGIN: mailer.build_login_mail,
     }
     subject, text, html = builders[purpose](link)
+    await mailer.send_mail(to=email, subject=subject, text=text, html=html)
+
+
+async def deliver_link_mail(email: str, raw_token: str, purpose: str) -> None:
+    """リンクのメールを送る（利用者向けの依頼で、バックグラウンドで呼ぶ）。失敗は、ログに残すだけ。
+
+    登録の有無を区別させないため、送信に失敗しても、利用者には成功と同じ応答を返す
+    （失敗は運用のログに残す）。応答を待たせないのも、同じ理由（応答時間でも推測させない）。
+    """
     try:
-        await mailer.send_mail(to=email, subject=subject, text=text, html=html)
+        await send_link_mail(email, raw_token, purpose)
     except (mailer.MailNotConfiguredError, mailer.MailSendError):
         _logger.warning("link mail was not sent (purpose=%s)", purpose)
 
@@ -232,10 +242,14 @@ async def find_valid_email_token(
 
 
 async def mark_email_token_used(session: AsyncSession, token_id: UUID) -> bool:
-    """メールのトークンを使用済みにする。すでに使われていたら False（同時の二重使用を防ぐ）。"""
+    """メールのトークンを使用済みにする。使用済み・期限切れなら False（同時の二重使用も防ぐ）。"""
     result = await session.execute(
         update(EmailToken)
-        .where(col(EmailToken.id) == token_id, col(EmailToken.used_at).is_(None))
+        .where(
+            col(EmailToken.id) == token_id,
+            col(EmailToken.used_at).is_(None),
+            col(EmailToken.expires_at) > _now(),  # 期限を過ぎていたら、使えない
+        )
         .values(used_at=_now())
         .returning(col(EmailToken.id))
     )
@@ -394,3 +408,58 @@ async def revoke_all_sessions(session: AsyncSession, user_id: UUID) -> None:
         .where(col(RefreshToken.user_id) == user_id, col(RefreshToken.revoked).is_(False))
         .values(revoked=True)
     )
+
+
+async def invalidate_pending_links(session: AsyncSession, user_id: UUID, email: str) -> None:
+    """その利用者（ID またはメールアドレス）の、使っていないリンクとチャレンジを、すべて無効にする。
+
+    管理者のリセットで、リセット前に発行したリンク（登録・ログイン・再登録のすべて）や、
+    途中の登録のチャレンジが、リセット後に使われないようにする（コミットは呼び出し側）。
+    """
+    now = _now()
+    stale = await session.execute(
+        update(EmailToken)
+        .where(
+            col(EmailToken.used_at).is_(None),
+            (col(EmailToken.user_id) == user_id) | (col(EmailToken.email) == email),
+        )
+        .values(used_at=now)
+        .returning(col(EmailToken.id))
+    )
+    token_ids = [row[0] for row in stale.all()]
+    condition = col(AuthChallenge.user_id) == user_id
+    if token_ids:
+        condition = condition | col(AuthChallenge.email_token_id).in_(token_ids)
+    await session.execute(delete(AuthChallenge).where(condition))
+
+
+async def prepare_reset(
+    session: AsyncSession, user: User, *, delete_passkeys: bool
+) -> str:
+    """管理者のリセットの変更を、すべて同じトランザクションに積む。戻り値は、新しい再登録リンクの生のトークン。
+
+    コミットは呼び出し側（メールを送れたときだけ確定する。送れなければ、何も変えない）:
+     - 古い未使用のリンク・チャレンジを無効にする（リセット前のリンクを、リセット後に使えなくする）
+     - 新しい再登録リンク（1 時間）を作る。同じアドレスへの 3 通/時の数え方に入れない（by_admin）
+     - 全端末のログイン（永久ログインを含む）を失効させる
+     - 登録済みのパスキーを消す（delete_passkeys のとき）。古いパスワードのハッシュを NULL にする
+    """
+    user_id, email = user.id, user.email
+    await invalidate_pending_links(session, user_id, email)
+    raw = secrets.token_urlsafe(32)
+    session.add(
+        EmailToken(
+            purpose=PURPOSE_RECOVER,
+            email=email,
+            user_id=user_id,
+            token_hash=_hash_link_token(raw),
+            expires_at=_now() + RECOVER_LINK_TTL,
+            by_admin=True,
+        )
+    )
+    await revoke_all_sessions(session, user_id)
+    if delete_passkeys:
+        await session.execute(delete(Passkey).where(col(Passkey.user_id) == user_id))
+    user.password_hash = None
+    session.add(user)
+    return raw

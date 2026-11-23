@@ -96,10 +96,10 @@ describe("書き戻し API", () => {
 
 describe("resetAdminUser", () => {
   it("POST /api/admin/users/{id}/reset に、パスキー削除の指定を送る", async () => {
-    const fn = mockFetchOnce(200, { emailQueued: true });
+    const fn = mockFetchOnce(200, { emailSent: true });
     const result = await resetAdminUser("tok", "u1", false);
 
-    expect(result).toEqual({ emailQueued: true });
+    expect(result).toEqual({ emailSent: true });
     const [url, init] = fn.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(/\/api\/admin\/users\/u1\/reset$/);
     expect(init.method).toBe("POST");

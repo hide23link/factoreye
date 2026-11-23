@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import EmailStr, Field, field_validator
 from sqlalchemy import delete, func, text
 from sqlalchemy.exc import IntegrityError
@@ -136,9 +136,9 @@ class AdminResetRequest(CamelModel):
 
 
 class AdminResetResult(CamelModel):
-    """リセットの結果。メールは応答のあとに送るので、「送る手配をした」ことだけを返す。"""
+    """リセットの結果。メールを送れたときだけ、変更を確定して、これを返す。"""
 
-    email_queued: bool = True
+    email_sent: bool = True
 
 
 class IngestLimitStatus(CamelModel):
@@ -495,51 +495,53 @@ async def update_user(
 
 
 @router.post("/users/{user_id}/reset", response_model=AdminResetResult)
+@limiter.limit("10/minute")
 async def reset_user(
+    request: Request,  # slowapi がレート制限キーの取得に使う
     user_id: UUID,
     body: AdminResetRequest,
-    background: BackgroundTasks,
     admin_id: Annotated[str, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminResetResult:
     """利用者の「リセット」: 端末を失くした・乗っ取りが心配なときに使う。
 
-    - 全端末のログイン（リフレッシュトークン）を失効させる
-      （今のアクセストークンは、最長 15 分で切れる）
+    - 古い未使用のリンク（登録・ログイン・再登録）とチャレンジを、すべて無効にする
+    - 全端末のログイン（リフレッシュトークン）を失効させる（永久ログインを含む）。
+      今のアクセストークンは、最長 15 分で切れる
     - 利用者のアドレスへ、端末の再登録のリンク（1 時間・1 回だけ）を送る
     - 登録済みのパスキーを消す（既定。delete_passkeys=false なら残す）
     - 古いパスワードのハッシュがあれば、NULL にする（パスキーへ移したあとは、パスワードを持たない）
     管理者が、利用者のパスキーやデータの中身を見ることはない。実行は、必ずログに残す。
+
+    **メールの送信を待って、結果を返す**（利用者向けの依頼と違い、失敗を隠さない）。
+    送れなかったときは、上の変更をすべて取り消し（パスキーの削除も確定しない）、502 を返す。
+    管理者が、同じ操作を、もう一度行える。アドレスごとの 3 通/時の数え方には入れない
+    （第三者が依頼を重ねても、リセットを止められない）。代わりに、管理者の接続元ごとの回数の制限と、
+    操作ログで守る。
     """
     user = await _get_user_or_404(session, user_id)
     if not mailer.is_mail_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="mail is not configured"
         )
-    # リンクを先に作る（同じアドレスへの送信が上限なら、何も変えずに 429 で止める）
-    # commit のあとは ORM の値が読めなくなるので、メールアドレスは先に取り出しておく
     email = user.email
-    issued = await passkeys.request_email_link(session, email, force_recover_for=user_id)
-    if issued is None:
+    # 変更は、同じトランザクションに積むだけ（まだ確定しない）
+    raw_token = await passkeys.prepare_reset(session, user, delete_passkeys=body.delete_passkeys)
+    try:
+        await passkeys.send_link_mail(email, raw_token, passkeys.PURPOSE_RECOVER)
+    except (mailer.MailNotConfiguredError, mailer.MailSendError):
+        # 送れなかった: 何も変えない（リンク・ログイン・パスキーはそのまま）
+        await session.rollback()
+        _logger.warning("admin %s reset of user %s failed: mail was not sent", admin_id, user_id)
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="too many emails to this address; try again in an hour",
-        )
-    raw_token, purpose = issued
-
-    await passkeys.revoke_all_sessions(session, user_id)
-    if body.delete_passkeys:
-        await session.execute(delete(Passkey).where(col(Passkey.user_id) == user_id))
-    user = await _get_user_or_404(session, user_id)
-    user.password_hash = None
-    session.add(user)
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="mail could not be sent; nothing was changed",
+        ) from None
     await session.commit()
-
-    background.add_task(passkeys.deliver_link_mail, email, raw_token, purpose)
     _logger.warning(
         "admin %s reset user %s (passkeys deleted: %s)", admin_id, user_id, body.delete_passkeys
     )
-    return AdminResetResult()
+    return AdminResetResult(email_sent=True)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

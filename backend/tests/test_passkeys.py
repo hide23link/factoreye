@@ -3,6 +3,7 @@
 端末は tests/webauthn_fake.py のソフトウェアの端末で、本物の署名を作る。サーバーの検証
 （py_webauthn）はモックにしない。メールの送信（Resend）だけを差し替えて、送った内容を捕まえる。
 """
+import asyncio
 import re
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
@@ -744,7 +745,7 @@ async def test_admin_reset_revokes_sessions_deletes_passkeys_and_sends_link(
 
     resp = await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
     assert resp.status_code == 200
-    assert resp.json() == {"emailQueued": True}
+    assert resp.json() == {"emailSent": True}
 
     # 全端末のログインが終わる
     assert (
@@ -831,19 +832,179 @@ async def test_admin_reset_changes_nothing_when_mail_is_not_configured(
     assert len(await _passkeys_of("nomail@example.com")) == 1  # 何も消えていない
 
 
-async def test_admin_reset_changes_nothing_when_email_limit_is_reached(
+async def test_admin_reset_ignores_the_per_address_email_limit(
     api: httpx.AsyncClient, mails: list[SentMail]
 ) -> None:
+    """第三者が 3 回依頼して上限に達しても、管理者のリセットは止められない。"""
     await _signup(api, mails, FakeAuthenticator(), "limit@example.com")
     for _ in range(2):  # 登録の 1 通と合わせて 3 通
         await _request_link(api, "limit@example.com")
+    mails.clear()
+    assert len(await _passkeys_of("limit@example.com")) == 1
     headers = await _admin_headers(api)
     user_id = await _user_id("limit@example.com")
     resp = await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
-    assert resp.status_code == 429
-    assert len(await _passkeys_of("limit@example.com")) == 1
+    assert resp.status_code == 200
+    assert [m.to for m in mails] == ["limit@example.com"]  # 送られた
+    assert await _passkeys_of("limit@example.com") == []
 
 
+async def test_admin_reset_link_is_not_counted_in_the_address_limit(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    """リセットのメールは、利用者自身の依頼の数（1 時間 3 通）に入らない。"""
+    await _signup(api, mails, FakeAuthenticator(), "own@example.com")  # 1 通
+    headers = await _admin_headers(api)
+    user_id = await _user_id("own@example.com")
+    for _ in range(3):  # 何回リセットしても…
+        assert (
+            await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
+        ).status_code == 200
+    mails.clear()
+    # 利用者の依頼は、あと 2 通まで送れる（リセット分は数えない）
+    for _ in range(3):
+        await _request_link(api, "own@example.com")
+    assert len(mails) == 2
+
+
+async def test_admin_reset_failure_to_send_changes_nothing_and_says_so(
+    api: httpx.AsyncClient, mails: list[SentMail], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """メールを送れなかったら、パスキーの削除も含めて何も確定せず、502 で管理者に伝える。"""
+    device = FakeAuthenticator()
+    tokens = await _signup(api, mails, device, "fail@example.com")
+    await _request_link(api, "fail@example.com")
+    _, old_link = _link_of(mails[-1])  # リセット前に発行した、使えるリンク
+
+    async def boom(**_: object) -> None:
+        raise mailer.MailSendError("down")
+
+    monkeypatch.setattr(mailer, "send_mail", boom)
+    headers = await _admin_headers(api)
+    user_id = await _user_id("fail@example.com")
+    resp = await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "mail could not be sent; nothing was changed"
+    # 何も変わっていない: パスキー・ログイン・古いリンクがそのまま使える
+    assert len(await _passkeys_of("fail@example.com")) == 1
+    assert (await _login(api, device, "fail@example.com")).status_code == 200
+    assert (
+        await api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    ).status_code == 200
+    assert (
+        await api.post("/api/auth/passkey/register/begin", json={"token": old_link})
+    ).status_code == 200
+    async with AsyncSession(engine) as session:
+        by_admin = (
+            await session.exec(select(EmailToken).where(col(EmailToken.by_admin).is_(True)))
+        ).all()
+        assert by_admin == []  # 送れなかった再登録リンクは残らない
+
+
+async def test_admin_reset_invalidates_links_issued_before_it(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    """リセット前に発行したリンク（再登録・ログイン・登録）と途中のチャレンジは、リセット後に使えない。"""
+    await _signup(api, mails, FakeAuthenticator(), "stale@example.com")
+    await _request_link(api, "stale@example.com")
+    _, recover_old = _link_of(mails[-1])
+    await _request_login_link(api, "stale@example.com")
+    _, login_old = _link_of(mails[-1])
+    # 登録のリンク（同じアドレスの、別の利用者として作られる予定のもの）も、アドレスで無効にする
+    async with AsyncSession(engine) as session:
+        session.add(
+            EmailToken(
+                purpose="register",
+                email="stale@example.com",
+                user_id=UUID(int=1),
+                token_hash=auth_utils.hash_refresh_token("register-old-token-value"),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        await session.commit()
+    # 途中の登録（begin 済み、finish はこれから）
+    begin = (
+        await api.post("/api/auth/passkey/register/begin", json={"token": recover_old})
+    ).json()
+    pending = FakeAuthenticator().create(begin["options"])
+
+    headers = await _admin_headers(api)
+    user_id = await _user_id("stale@example.com")
+    mails.clear()
+    assert (
+        await api.post(f"/api/admin/users/{user_id}/reset", headers=headers, json={})
+    ).status_code == 200
+
+    assert (
+        await api.post("/api/auth/passkey/register/begin", json={"token": recover_old})
+    ).status_code == 410
+    old_register = {"token": "register-old-token-value"}
+    stale = await api.post("/api/auth/passkey/register/begin", json=old_register)
+    assert stale.status_code == 410
+    assert (await api.post("/api/auth/email/login", json={"token": login_old})).status_code == 410
+    finish = await api.post(
+        "/api/auth/passkey/register/finish",
+        json={"challengeId": begin["challengeId"], "credential": pending, "deviceName": "x"},
+    )
+    assert finish.status_code == 400  # 途中のチャレンジも消えている
+    assert await _passkeys_of("stale@example.com") == []
+    # 新しいリンク（リセットのメール）だけが使える
+    _, fresh = _link_of(mails[0])
+    assert (await _register_finish(api, fresh, FakeAuthenticator())).status_code == 200
+
+
+async def test_admin_reset_is_limited_per_client(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "many@example.com")
+    headers = await _admin_headers(api)
+    user_id = await _user_id("many@example.com")
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        codes = [
+            (
+                await api.post(
+                    f"/api/admin/users/{user_id}/reset",
+                    headers={**headers, "cf-connecting-ip": "203.0.113.90"},
+                    json={"deletePasskeys": False},
+                )
+            ).status_code
+            for _ in range(11)
+        ]
+        assert codes[:10] == [200] * 10
+        assert codes[10] == 429
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+async def test_email_request_is_limited_to_3_per_hour_per_client(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        headers = {"cf-connecting-ip": "203.0.113.91"}
+        codes = [
+            (
+                await api.post(
+                    "/api/auth/email/request", json={"email": f"q{i}@example.com"}, headers=headers
+                )
+            ).status_code
+            for i in range(4)
+        ]
+        assert codes == [202, 202, 202, 429]
+        other = await api.post(
+            "/api/auth/email/request",
+            json={"email": "z@example.com"},
+            headers={"cf-connecting-ip": "203.0.113.92"},
+        )
+        assert other.status_code == 202
+    finally:
+        limiter.enabled = False
+        limiter.reset()
 async def test_admin_user_list_shows_passkey_count_and_no_password_field(
     api: httpx.AsyncClient, mails: list[SentMail]
 ) -> None:
@@ -1279,3 +1440,125 @@ async def test_purge_removes_old_revoked_permanent_tokens_but_not_active_ones(
     rows = await _refresh_rows("purge@example.com")
     assert [r.revoked for r in rows] == [False]  # 有効な永久ログインは残る
     assert rows[0].expires_at is None
+
+
+# ── 11. 同時実行・検証の細部 ──────────────────────────────────
+
+
+async def test_concurrent_refresh_with_the_same_token_makes_only_one_valid_token(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "race@example.com")
+    results = await asyncio.gather(
+        *[
+            api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+            for _ in range(4)
+        ]
+    )
+    assert sorted(r.status_code for r in results) == [200, 401, 401, 401]
+    active = [r for r in await _refresh_rows("race@example.com") if not r.revoked]
+    assert len(active) == 1  # 有効なトークンは 1 本だけ
+
+
+async def test_concurrent_refresh_of_a_kept_session_keeps_a_single_permanent_token(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    tokens = await _signup(api, mails, FakeAuthenticator(), "kiosk-race@example.com")
+    await _keep(api, tokens)
+    results = await asyncio.gather(
+        *[
+            api.post("/api/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+            for _ in range(4)
+        ]
+    )
+    assert sorted(r.status_code for r in results) == [200, 401, 401, 401]
+    active = [r for r in await _refresh_rows("kiosk-race@example.com") if not r.revoked]
+    assert len(active) == 1
+    assert active[0].expires_at is None  # 期限なしのまま
+
+
+async def test_login_without_user_verification_is_rejected(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    device = FakeAuthenticator()
+    await _signup(api, mails, device, "uv@example.com")
+    resp = await _login(api, device, "uv@example.com", user_verified=False)
+    assert resp.status_code == 401
+
+
+async def test_registration_without_user_verification_is_rejected(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _request_link(api, "nouv@example.com")
+    _, token = _link_of(mails[-1])
+    begin = (await api.post("/api/auth/passkey/register/begin", json={"token": token})).json()
+    resp = await api.post(
+        "/api/auth/passkey/register/finish",
+        json={
+            "challengeId": begin["challengeId"],
+            "credential": FakeAuthenticator().create(begin["options"], user_verified=False),
+            "deviceName": "x",
+        },
+    )
+    assert resp.status_code == 400
+    assert await _users() == []
+
+
+async def test_login_with_a_response_for_another_rp_id_is_rejected(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    device = FakeAuthenticator()
+    await _signup(api, mails, device, "rp@example.com")
+    # rpIdHash が、別のサイト向けのもの（フィッシングサイトで作らせた署名の使い回し）
+    resp = await _login(api, device, "rp@example.com", rp_id_for_hash="evil.example")
+    assert resp.status_code == 401
+
+
+async def test_register_finish_rechecks_the_link_expiry(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    """begin のあとに、リンクの期限が過ぎたら、finish は通らない。"""
+    await _request_link(api, "late@example.com")
+    _, token = _link_of(mails[-1])
+    begin = (await api.post("/api/auth/passkey/register/begin", json={"token": token})).json()
+    async with AsyncSession(engine) as session:
+        row = (await session.exec(select(EmailToken))).one()
+        row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.add(row)
+        await session.commit()
+    resp = await api.post(
+        "/api/auth/passkey/register/finish",
+        json={
+            "challengeId": begin["challengeId"],
+            "credential": FakeAuthenticator().create(begin["options"]),
+            "deviceName": "x",
+        },
+    )
+    assert resp.status_code == 410
+    assert await _users() == []
+
+
+async def test_recover_finish_requires_the_link_email_to_match_the_user(
+    api: httpx.AsyncClient, mails: list[SentMail]
+) -> None:
+    await _signup(api, mails, FakeAuthenticator(), "owner@example.com")
+    await _request_link(api, "owner@example.com")
+    _, token = _link_of(mails[-1])
+    begin = (await api.post("/api/auth/passkey/register/begin", json={"token": token})).json()
+    async with AsyncSession(engine) as session:
+        row = (
+            await session.exec(select(EmailToken).where(col(EmailToken.purpose) == "recover"))
+        ).one()
+        row.email = "someone-else@example.com"  # リンクのアドレスと、利用者のアドレスが食い違う
+        session.add(row)
+        await session.commit()
+    resp = await api.post(
+        "/api/auth/passkey/register/finish",
+        json={
+            "challengeId": begin["challengeId"],
+            "credential": FakeAuthenticator().create(begin["options"]),
+            "deviceName": "x",
+        },
+    )
+    assert resp.status_code == 410
+    assert len(await _passkeys_of("owner@example.com")) == 1

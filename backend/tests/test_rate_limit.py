@@ -84,7 +84,7 @@ async def test_login_begin_is_rate_limited_per_client(
 async def test_email_request_is_rate_limited_per_client(
     auth_client: httpx.AsyncClient, _limited: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """メールの依頼は、接続元ごとに 1 分 10 回まで（メールの大量送信の防止）。"""
+    """メールの依頼は、接続元ごとに 1 時間 3 回まで（1 分 10 回も併用。メールの大量送信の防止）。"""
     from pydantic import SecretStr
 
     from app import mailer
@@ -96,7 +96,7 @@ async def test_email_request_is_rate_limited_per_client(
     monkeypatch.setattr(settings, "resend_api_key", SecretStr("re_dummy_key_for_tests"))
     headers = {"cf-connecting-ip": "203.0.113.60"}
 
-    for i in range(10):
+    for i in range(3):
         body = {"email": f"rate{i}@example.com"}
         r = await auth_client.post("/api/auth/email/request", json=body, headers=headers)
         assert r.status_code == 202

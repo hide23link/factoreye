@@ -48,7 +48,9 @@ class FakeAuthenticator:
     # （rp_id, user.id）→ 鍵。同じ組に 2 回登録すると上書きされる
     store: dict[tuple[str, bytes], StoredCredential] = field(default_factory=dict)
 
-    def create(self, options: dict[str, object]) -> dict[str, object]:
+    def create(
+        self, options: dict[str, object], *, user_verified: bool = True
+    ) -> dict[str, object]:
         """サーバーの登録オプションから、登録の応答を作る（credentials.create の結果）。"""
         rp = options["rp"]
         user = options["user"]
@@ -71,7 +73,13 @@ class FakeAuthenticator:
         )
         auth_data = (
             hashlib.sha256(rp_id.encode()).digest()
-            + bytes([_FLAG_USER_PRESENT | _FLAG_USER_VERIFIED | _FLAG_ATTESTED_CREDENTIAL_DATA])
+            + bytes(
+                [
+                    _FLAG_USER_PRESENT
+                    | (_FLAG_USER_VERIFIED if user_verified else 0)
+                    | _FLAG_ATTESTED_CREDENTIAL_DATA
+                ]
+            )
             + struct.pack(">I", 0)
             + bytes(16)  # aaguid
             + struct.pack(">H", len(credential_id))
@@ -114,6 +122,8 @@ class FakeAuthenticator:
         tamper_signature: bool = False,
         wrong_user_handle: bytes | None = None,
         sign_count: int | None = None,
+        user_verified: bool = True,
+        rp_id_for_hash: str | None = None,
     ) -> dict[str, object]:
         """ログインの応答を作る（navigator.credentials.get の結果）。
 
@@ -124,10 +134,11 @@ class FakeAuthenticator:
         cred = matches[0]
         cred.sign_count = sign_count if sign_count is not None else cred.sign_count + 1
 
-        rp_id = str(options["rpId"])
+        # rp_id_for_hash は、別のサイト（rp_id）向けに作った応答を真似るための指定
+        rp_id = rp_id_for_hash or str(options["rpId"])
         auth_data = (
             hashlib.sha256(rp_id.encode()).digest()
-            + bytes([_FLAG_USER_PRESENT | _FLAG_USER_VERIFIED])
+            + bytes([_FLAG_USER_PRESENT | (_FLAG_USER_VERIFIED if user_verified else 0)])
             + struct.pack(">I", cred.sign_count)
         )
         client_data = json.dumps(

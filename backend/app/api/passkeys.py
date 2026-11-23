@@ -237,6 +237,7 @@ def _item(passkey: Passkey) -> PasskeyItem:
 
 @router.post("/auth/email/request", response_model=EmailRequestResult, status_code=202)
 @limiter.limit("10/minute")
+@limiter.limit("3/hour")
 async def request_email(
     request: Request,  # slowapi がレート制限キーの取得に使う
     body: EmailRequest,
@@ -246,8 +247,10 @@ async def request_email(
     """登録・端末の再登録のメールを送る。
 
     アドレスが登録済みかどうかで中身（登録 / 再登録）は変わるが、応答はいつも同じ。
-    同じアドレスへは 1 時間に 3 回まで（超えたら送らないが、応答は同じ）。
-    メールの送信は応答のあとに行う（応答時間でも、登録の有無を推測させない）。
+    依頼は、接続元ごとに 1 時間に 3 回まで（login-request と同じ）、
+    同じアドレスへは 1 時間に 3 通まで（超えたら送らないが、応答は同じ）。
+    メールの送信は応答のあとに行う（応答時間でも、登録の有無を推測させない）。送信に失敗しても、
+    登録の有無を区別させないため、利用者には成功と同じ応答を返す（失敗は運用のログに残す）。
     """
     require_multi_tenant()
     if not mailer.is_mail_configured():
@@ -379,6 +382,7 @@ async def register_finish(
     if (
         token is None
         or token.used_at is not None
+        or token.expires_at < datetime.now(UTC)  # begin のあとに、期限を過ぎていた
         or token.purpose not in (service.PURPOSE_REGISTER, service.PURPOSE_RECOVER)
     ):
         raise _fail(status.HTTP_410_GONE, "link is invalid, expired or already used")
@@ -400,7 +404,9 @@ async def register_finish(
             user_id = created_user.id
         else:
             existing_user = await session.get(User, token.user_id)
-            if existing_user is None:
+            # リンクのメールアドレスと、利用者のメールアドレスが同じことも確かめる
+            owner_email = auth_utils.normalize_email(existing_user.email) if existing_user else None
+            if existing_user is None or owner_email != token.email:
                 raise service.PasskeyServiceError("user not found")
             user_id = existing_user.id
             await service.add_passkey(session, user_id, verified, name)

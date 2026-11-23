@@ -31,7 +31,7 @@ describe("AdminResetDialog（管理者のリセット）", () => {
   });
 
   it("実行すると、パスキー削除ありで API を呼び、結果を出す", async () => {
-    vi.mocked(adminApi.resetAdminUser).mockResolvedValue({ emailQueued: true });
+    vi.mocked(adminApi.resetAdminUser).mockResolvedValue({ emailSent: true });
     const user = userEvent.setup();
     const props = setup();
 
@@ -43,7 +43,7 @@ describe("AdminResetDialog（管理者のリセット）", () => {
   });
 
   it("パスキーを残す選択もできる", async () => {
-    vi.mocked(adminApi.resetAdminUser).mockResolvedValue({ emailQueued: true });
+    vi.mocked(adminApi.resetAdminUser).mockResolvedValue({ emailSent: true });
     const user = userEvent.setup();
     setup();
 
@@ -63,7 +63,7 @@ describe("AdminResetDialog（管理者のリセット）", () => {
     expect(adminApi.resetAdminUser).not.toHaveBeenCalled();
   });
 
-  it("メールを送れない（503）・上限（429）のときは、何も変更していないと伝える", async () => {
+  it("メールを送れない（503）・送信の失敗（502）・回数の制限（429）のときは、分かる文言を出す", async () => {
     vi.mocked(adminApi.resetAdminUser).mockRejectedValueOnce(new AdminApiError(503, "x"));
     const user = userEvent.setup();
     setup();
@@ -71,9 +71,13 @@ describe("AdminResetDialog（管理者のリセット）", () => {
     await user.click(screen.getByRole("button", { name: "リセットを実行" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("何も変更していません");
 
+    vi.mocked(adminApi.resetAdminUser).mockRejectedValueOnce(new AdminApiError(502, "x"));
+    await user.click(screen.getByRole("button", { name: "リセットを実行" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("パスキーも消していません"));
+
     vi.mocked(adminApi.resetAdminUser).mockRejectedValueOnce(new AdminApiError(429, "x"));
     await user.click(screen.getByRole("button", { name: "リセットを実行" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("1 時間に 3 通"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("リセットを行いすぎました"));
   });
 
   it("管理者トークンが失効（401）していたら、ログインし直させる", async () => {

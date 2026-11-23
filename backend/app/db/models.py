@@ -451,6 +451,9 @@ class EmailToken(SQLModel, table=True):
     expires_at: datetime
     used_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
+    # 管理者のリセットが作ったリンク。同じアドレスへの 3 通/時の数え方に入れない
+    # （第三者が 3 回依頼して、管理者のリセットを止められないように）
+    by_admin: bool = Field(default=False)
 
 
 class AuthChallenge(SQLModel, table=True):

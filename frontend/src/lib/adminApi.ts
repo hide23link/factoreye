@@ -128,10 +128,11 @@ export const updateAdminUser = (token: string, userId: string, data: AdminUserUp
 
 /**
  * 利用者のリセット: 全端末のログイン（永久ログインを含む）を終了し、再登録リンクを利用者のアドレスへ送る。
+ * メールを送れたときだけ変更が確定する（送れなければ 502 で、何も変えない）。
  * deletePasskeys が true なら、登録済みのパスキーも消す（端末を失くしたとき）。
  */
 export const resetAdminUser = (token: string, userId: string, deletePasskeys: boolean) =>
-  send<{ emailQueued: boolean }>(
+  send<{ emailSent: boolean }>(
     `/api/admin/users/${userId}/reset`,
     { method: "POST", body: JSON.stringify({ deletePasskeys }) },
     token,

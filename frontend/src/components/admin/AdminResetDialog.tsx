@@ -26,7 +26,8 @@ interface Props {
 function describeResetError(err: unknown): string {
   if (err instanceof AdminApiError) {
     if (err.status === 503) return "メールを送れない設定です（RESEND_API_KEY が未設定）。何も変更していません。";
-    if (err.status === 429) return "同じアドレスへのメールが上限（1 時間に 3 通）です。しばらく待ってください。何も変更していません。";
+    if (err.status === 502) return "メールを送れませんでした（送信サービスの障害の可能性があります）。何も変更していません（パスキーも消していません）。もう一度お試しください。";
+    if (err.status === 429) return "短時間にリセットを行いすぎました。しばらく待ってから、もう一度お試しください。";
     if (err.status === 404) return "利用者が見つかりません。一覧を読み込み直してください。";
   }
   return "リセットに失敗しました。もう一度お試しください。";
