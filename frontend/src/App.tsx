@@ -13,8 +13,9 @@
  * スマホは下のメニュー。色は theme.css（画面の明るさは 設定 › 表示）。
  * リンク（?dashboard=…&graph=…&range=…m）で開いたときは、ヘッダー・メニューを出さず、そのグラフ 1 つの画面（GraphLinkView）を出す。
  */
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 
+import { LinkWhileLoggedIn } from "./components/auth/LinkWhileLoggedIn";
 import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardHome, LinkNotFoundNotice } from "./components/DashboardHome";
 import { DashboardNavList } from "./components/DashboardNavList";
@@ -23,6 +24,7 @@ import { NewSensorNotice } from "./components/NewSensorNotice";
 import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
 import { fetchMe, logout, refreshTokens } from "./lib/api";
+import { clearAuthLinkFromUrl, parseAuthLinkHash } from "./lib/auth-link";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { countDevicesAndSensors } from "./lib/overview";
@@ -427,6 +429,10 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
 function App() {
   const { accessToken, isInitializing, setInitializing, setAuth, setImpersonated, clearAuth } =
     useAuthStore();
+  const me = useAuthStore((s) => s.me);
+  const impersonating = useAuthStore((s) => s.impersonation !== null);
+  // 「やめる」でリンクを消したあとに、画面を描き直すための印
+  const [, setLinkDismissed] = useState(false);
 
   // 画面の明るさ（設定 › 表示）を付け、「端末に合わせる」のときは端末の設定の変化を追いかける
   useEffect(() => startThemeWatch(), []);
@@ -493,7 +499,29 @@ function App() {
     );
   }
 
-  // multi-tenant かつ未認証 → ログインページ
+  // メールのリンク（登録・再登録・ログイン）で開かれたか。URL の # から毎回読む。
+  // リンクの処理が終わると、LinkLanding が # を消すので、そのあとは null に戻る
+  const authLink = IS_MULTI_TENANT ? parseAuthLinkHash(window.location.hash) : null;
+
+  // すでにログイン中にリンクを開いたとき（別のアカウントのリンクのことが多い）:
+  // 今のログインを混ぜないよう、先に確認する。「続ける」を押したときだけ、今のログインを終了する
+  // （リンクを開いただけでは、何も終わらない。logout は、この端末のログインを消し、サーバーのトークンも失効させる）。
+  // 管理者が利用者として閲覧中のタブは、対象外
+  if (IS_MULTI_TENANT && accessToken && authLink && !impersonating) {
+    return (
+      <LinkWhileLoggedIn
+        kind={authLink.kind}
+        currentEmail={me?.email ?? ""}
+        onContinue={() => void logout()}
+        onCancel={() => {
+          clearAuthLinkFromUrl();
+          setLinkDismissed(true);
+        }}
+      />
+    );
+  }
+
+  // multi-tenant かつ未認証 → ログインページ（リンクで開かれたときは、リンクの画面を出す）
   if (IS_MULTI_TENANT && !accessToken) {
     return <LoginPage onAuthenticated={() => {}} />;
   }
