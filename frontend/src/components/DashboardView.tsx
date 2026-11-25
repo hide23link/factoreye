@@ -28,7 +28,7 @@ import { lazyNamed } from "../lib/lazyWithRetry";
 import { useCursorTimeStore } from "../store/useCursorTimeStore";
 import { useEditorStore } from "../store/useEditorStore";
 import { useKioskStore } from "../store/useKioskStore";
-import { initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
+import { followBrowserBack, initTimeRangeFromUrl, resetTimeRange } from "../store/useTimeRangeStore";
 import { useUiStore } from "../store/useUiStore";
 import type { DashboardDetail, Widget } from "../types";
 import { groupNarrowWidgets, narrowHeightPx, widgetsInReadingOrder } from "../lib/narrow-layout";
@@ -90,9 +90,12 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
   useEffect(() => {
     initTimeRangeFromUrl();
+    // 拡大・移動のあと、ブラウザの「戻る」で 1 つ前の範囲に戻す
+    const stopFollowingBack = followBrowserBack();
     // 開くときも、グラフのカーソルを「今」から始める（ほかの画面で動かした時刻が、共有の時刻に残っていても引き継がない）
     useCursorTimeStore.getState().reset();
     return () => {
+      stopFollowingBack();
       resetTimeRange();
       // グラフのカーソルも「今」に戻す（次に開いたときは、現在位置から）
       useCursorTimeStore.getState().reset();

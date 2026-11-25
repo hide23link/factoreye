@@ -134,4 +134,18 @@ describe("TimeRangeControls", () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
+
+  it("前へ・後ろへ・＋・－ は、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる）。期間のボタンは積まない", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<TimeRangeControls />);
+    const before = window.history.length;
+
+    await user.click(screen.getByRole("button", { name: "直近 6 時間" }));
+    expect(window.history.length).toBe(before);
+    await user.click(screen.getByRole("button", { name: "前へ" }));
+    await user.click(screen.getByRole("button", { name: "拡大" }));
+    await user.click(screen.getByRole("button", { name: "縮小" }));
+    await user.click(screen.getByRole("button", { name: "後ろへ" }));
+    expect(window.history.length).toBe(before + 4);
+  });
 });

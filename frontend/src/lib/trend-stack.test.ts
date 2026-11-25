@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import type { GraphRow } from "./graph-series";
+
 import {
+  breakAtGaps,
+  formatCursorTime,
+  seriesLineRows,
+  softAxisValues,
   formatTick,
   formatTrendValue,
   gapThreshold,
@@ -321,5 +327,83 @@ describe("カーソルの時刻（全グラフで共有）", () => {
     expect(placeTimeLabel(5, 50, 400).left).toBe(0);
     const right = placeTimeLabel(399, 50, 400);
     expect(right.left + right.width).toBe(400);
+  });
+});
+
+describe("breakAtGaps・seriesLineRows（受信が止まった所の線を切る。ふつうのグラフ・複数のグラフ）", () => {
+  const MINUTE = 60_000;
+  const rows = (minutes: number[]) => minutes.map((m) => ({ time: m * MINUTE, value: m as number | null }));
+
+  it("点の間が区間 2.5 個分より空いた所の真ん中に、値の無い行を 1 つ入れる", () => {
+    const result = breakAtGaps(rows([0, 1, 2, 3, 10, 11]), MINUTE, (time) => ({ time, value: null }));
+    expect(result.map((row) => row.value)).toEqual([0, 1, 2, 3, null, 10, 11]);
+    expect(result[4].time).toBe(6.5 * MINUTE);
+  });
+
+  it("止まっていなければ、行はそのまま（入れない）", () => {
+    expect(breakAtGaps(rows([0, 1, 2, 3]), MINUTE, (time) => ({ time, value: null })).map((row) => row.value)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("送る間隔が区間より長い機器（3 分ごと）は、間隔の 3 倍までは切らない（計器グラフの gapThreshold と同じ）", () => {
+    expect(breakAtGaps(rows([0, 3, 6, 9]), MINUTE, (time) => ({ time, value: null })).map((row) => row.value)).toEqual([0, 3, 6, 9]);
+    expect(breakAtGaps(rows([0, 3, 6, 9, 30]), MINUTE, (time) => ({ time, value: null })).map((row) => row.value)).toEqual([0, 3, 6, 9, null, 30]);
+  });
+
+  it("seriesLineRows: そのセンサーの値がある行だけを取り出し、止まった所に null の行を入れる（ほかのセンサーの行は入れない）", () => {
+    const graphRows: GraphRow[] = [
+      { time: 0, a: 1, b: 5 },
+      { time: MINUTE, a: 2 },
+      { time: 2 * MINUTE, a: 3, b: 6 },
+      { time: 3 * MINUTE, b: 6 },
+      { time: 10 * MINUTE, a: 4, b: 7 },
+    ];
+    expect(seriesLineRows(graphRows, "a", MINUTE)).toEqual([
+      { time: 0, a: 1, b: 5 },
+      { time: MINUTE, a: 2 },
+      { time: 2 * MINUTE, a: 3, b: 6 },
+      { time: 6 * MINUTE, a: null },
+      { time: 10 * MINUTE, a: 4, b: 7 },
+    ]);
+  });
+});
+
+describe("formatCursorTime（カーソルの札の時刻）", () => {
+  const time = new Date(2026, 10, 25, 10, 41, 23).getTime();
+
+  it("点の間隔が 1 分より短い（拡大した）ときは、秒まで出す", () => {
+    expect(formatCursorTime(time, 15 * 60_000, 1_800)).toBe("10:41:23");
+    expect(formatCursorTime(time, 6 * 3_600_000, 43_200)).toBe("10:41:23");
+  });
+
+  it("点の間隔が 1 分以上なら、今までどおり時:分（目盛りと同じ形）", () => {
+    expect(formatCursorTime(time, 24 * 3_600_000, 172_800)).toBe("10:41");
+    expect(formatCursorTime(time, 500 * 60_000, 60_000)).toBe("10:41");
+    expect(formatCursorTime(time, 3 * 24 * 3_600_000, 518_400)).toBe("11/25 10:41");
+  });
+});
+
+describe("softAxisValues（縦軸の目安。データがはみ出したら広げる）", () => {
+  it("データが目安の中なら、目安の両端を目盛りに含める", () => {
+    expect(softAxisValues([1012.1, 1012.6], 1000, 1025)).toEqual([1000, 1025]);
+  });
+
+  it("データが目安からはみ出しても、目安は入れる（はみ出した分は、データそのものが軸を広げる。線は切らない）", () => {
+    expect(softAxisValues([1020, 1030], 1000, 1025)).toEqual([1000, 1025]);
+    const values = [1020, 1030];
+    const soft = softAxisValues(values, 1000, 1025);
+    expect([Math.min(...values, ...soft), Math.max(...values, ...soft)]).toEqual([1000, 1030]);
+  });
+
+  it("片方だけの目安も使える", () => {
+    expect(softAxisValues([20, 25], 0, undefined)).toEqual([0]);
+    expect(softAxisValues([20, 25], undefined, 50)).toEqual([50]);
+  });
+
+  it("少しはみ出しただけ（目安の幅より近い）なら使う。大きく離れた行（単位の違うセンサー）には使わない。目安が無いときも何も足さない", () => {
+    expect(softAxisValues([1012, 1013], 1000, 1010)).toEqual([1000, 1010]);
+    expect(softAxisValues([24, 26], 1000, 1025)).toEqual([]);
+    expect(softAxisValues([1012, 1013], undefined, 50)).toEqual([]);
+    expect(softAxisValues([24, 26], undefined, undefined)).toEqual([]);
+    expect(softAxisValues([], 0, 10)).toEqual([]);
   });
 });

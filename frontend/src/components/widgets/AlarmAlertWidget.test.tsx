@@ -195,7 +195,8 @@ describe("AlarmAlertWidget", () => {
 
     expect(await screen.findByText("洋室 CO2")).toBeInTheDocument();
     expect(screen.getByText("561")).toBeInTheDocument();
-    expect(screen.getByText("07:02")).toBeInTheDocument();
+    // 計器グラフが 1 時間の表示（点の間隔 7.2 秒）なので、カーソルの札と同じく秒まで出す
+    expect(screen.getByText("07:02:00")).toBeInTheDocument();
     expect(screen.getByText("色の意味")).toBeInTheDocument();
     expect(screen.getByText(/水色\s*しきい値/)).toBeInTheDocument();
   });

@@ -6,11 +6,11 @@
  * - 横: 表示範囲の始め＝0%、終わり＝100%
  * - 縦: 縦軸の上端＝PLOT_TOP%、下端＝PLOT_BOTTOM%（上下に少し余白を残し、線が枠に貼り付かないようにする）
  *
- * 【誰が使うか】components/widgets/TrendStackWidget.tsx。
+ * 【誰が使うか】components/widgets/TrendStackWidget.tsx。線を切る判定（gapThreshold・breakAtGaps）は、ふつうのグラフ・複数のグラフも使う。
  */
 import type { DownsampledBucket } from "./api";
 import type { Aggregation } from "./graph-config";
-import { bucketValue } from "./graph-series";
+import { bucketValue, type GraphRow } from "./graph-series";
 
 export const PLOT_TOP = 8;
 export const PLOT_BOTTOM = 92;
@@ -181,6 +181,35 @@ export function gapThreshold(points: ReadonlyArray<TrendPoint>, bucketMs: number
   return Math.max(typical * 3, bucketMs * 2.5);
 }
 
+/**
+ * Recharts のグラフで、受信が止まった所の線を切るために、値の無い行を入れる（計器グラフの linePath と同じ判定）。
+ * 点の間が gapThreshold より空いた所の真ん中に、emptyRow の行を 1 つ入れる。Recharts の線・面は、値が null の行で切れる。
+ * 例: 1 分ごとの点で 10:20〜10:39 が無い → 10:19 と 10:40 の間（10:29.5）に値の無い行が入り、線が 2 つに分かれる。
+ */
+export function breakAtGaps<Row extends { time: number }>(rows: ReadonlyArray<Row>, bucketMs: number, emptyRow: (time: number) => Row): Row[] {
+  const gapMs = gapThreshold(rows.map((row) => ({ time: row.time, value: 0 })), bucketMs);
+  const result: Row[] = [];
+  rows.forEach((row, i) => {
+    const previous = rows[i - 1];
+    if (previous && row.time - previous.time > gapMs) result.push(emptyRow((previous.time + row.time) / 2));
+    result.push(row);
+  });
+  return result;
+}
+
+/** 線を切るために値の無い行（null）も入る、グラフの行 */
+export type GraphLineRow = { time: number } & Record<string, number | null>;
+
+/**
+ * 複数のグラフの、1 センサー分の線の行。そのセンサーの値がある行だけを取り出し、受信が止まった所には値の無い行を入れる。
+ * 複数のグラフは、センサーごとに点の時刻がそろわない（ほかのセンサーだけの行が間に入る）ため、共通の行のままでは
+ * 自分の点だけをつなぐ connectNulls が要り、止まった所も直線でつながる。線ごとにこの行を渡して切る。
+ */
+export function seriesLineRows(rows: ReadonlyArray<GraphRow>, sensorId: string, bucketMs: number): GraphLineRow[] {
+  const own: GraphLineRow[] = rows.filter((row) => typeof row[sensorId] === "number");
+  return breakAtGaps(own, bucketMs, (time) => ({ time, [sensorId]: null }));
+}
+
 /** しきい値を超えている部分だけの道筋（超えている点が続く所をつなぐ）。超えていなければ空 */
 export function overPath(
   points: ReadonlyArray<TrendPoint>,
@@ -258,6 +287,35 @@ export function formatTickTime(time: number, spanMs: number): string {
   const date = new Date(time);
   const hhmm = date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
   return spanMs > 26 * 3_600_000 ? `${date.getMonth() + 1}/${date.getDate()} ${hhmm}` : hhmm;
+}
+
+/**
+ * カーソルの札の時刻。点の間隔（区間の幅 bucketMs）が 1 分より短いとき（拡大したとき）だけ、秒まで出す（例: 10:41:23）。
+ * それ以外は目盛りと同じ形（formatTickTime。例: 10:41）。目盛りの文字は変えない。
+ */
+export function formatCursorTime(time: number, spanMs: number, bucketMs: number): string {
+  if (bucketMs >= 60_000) return formatTickTime(time, spanMs);
+  const date = new Date(time);
+  const text = date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return spanMs > 26 * 3_600_000 ? `${date.getMonth() + 1}/${date.getDate()} ${text}` : text;
+}
+
+/**
+ * 縦軸の範囲の目安（ウィジェットの設定の yAxisMin・yAxisMax）のうち、この行の目盛りに含める値。
+ * 目安は soft（Grafana の Soft min/max と同じ）: 目安の範囲で描き、データがはみ出したら、その分だけ広げる（線は切らない）。
+ * ただし、データが目安から大きく離れている行（単位の違うセンサーなど）には使わない。目安は計器グラフの全行に共通のため
+ * （例: 1000〜1025 hPa の目安を 25 ℃ の行に使うと、軸が 25〜1025 になり、線が潰れる）。
+ * 「大きく離れている」は、両方あるときは目安の幅より遠いこと、片方だけのときは、データがすべてその外にあること。
+ * 例: softAxisValues([1012.1, 1012.6], 1000, 1025) → [1000, 1025]、([1012, 1013], 1000, 1010) → [1000, 1010]（2 だけ外。広げる）、
+ *     ([24, 26], 1000, 1025) → []
+ */
+export function softAxisValues(dataValues: ReadonlyArray<number>, min: number | undefined, max: number | undefined): number[] {
+  if (dataValues.length === 0) return [];
+  // データが目安の範囲から離れている長さ（重なっていれば 0）
+  const distance = Math.max(0, (min ?? -Infinity) - Math.max(...dataValues), Math.min(...dataValues) - (max ?? Infinity));
+  const width = min !== undefined && max !== undefined ? max - min : 0;
+  if (distance > width) return [];
+  return [min, max].filter((value): value is number => value !== undefined);
 }
 
 /**

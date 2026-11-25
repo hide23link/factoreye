@@ -54,6 +54,8 @@ function presetKeyOf(range: TimeRange): string | null {
 export function TimeRangeControls({ className = "mb-3" }: { className?: string } = {}) {
   const range = useTimeRangeStore((s) => s.range);
   const setRange = useTimeRangeStore((s) => s.setRange);
+  // ◀ ▶ ＋ － は、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる）
+  const pushRange = useTimeRangeStore((s) => s.pushRange);
   // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
   // 再描画の合図（30 秒ごと）。計算に使う時刻は、操作の時点の現在時刻にする
   useLiveNow(LIVE_CHART_INTERVAL_MS);
@@ -92,7 +94,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
         <button
           type="button"
           aria-label="前へ"
-          onClick={() => setRange(panRange(range, -1, now, maxMs))}
+          onClick={() => pushRange(panRange(range, -1, now, maxMs))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           ◀
@@ -119,7 +121,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
         <button
           type="button"
           aria-label="後ろへ"
-          onClick={() => setRange(panRange(range, 1, now, maxMs))}
+          onClick={() => pushRange(panRange(range, 1, now, maxMs))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           ▶
@@ -128,7 +130,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
           <button
             type="button"
             aria-label="縮小"
-            onClick={() => setRange(zoomRange(range, 2, now, maxMs))}
+            onClick={() => pushRange(zoomRange(range, 2, now, maxMs))}
             className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
           >
             －
@@ -136,7 +138,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
           <button
             type="button"
             aria-label="拡大"
-            onClick={() => setRange(zoomRange(range, 0.5, now, maxMs))}
+            onClick={() => pushRange(zoomRange(range, 0.5, now, maxMs))}
             className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
           >
             ＋

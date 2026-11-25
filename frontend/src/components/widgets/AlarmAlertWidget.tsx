@@ -13,7 +13,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAlarms, useSensors } from "../../hooks/queries";
 import { acknowledgeAlarm } from "../../lib/api";
 import { describeActionError } from "../../lib/errors";
-import { formatTickTime } from "../../lib/trend-stack";
+import { formatCursorTime } from "../../lib/trend-stack";
+import { GRAPH_BUCKETS } from "./graph-parts";
 import { firstTrendCursor, useTrendCursorStore } from "../../store/useTrendCursorStore";
 import { ErrorNotice } from "../ErrorNotice";
 
@@ -201,7 +202,8 @@ function CursorValues() {
     // 欄の高さの 3 分の 2 まで。値の行が多いときは、値の一覧だけスクロールし、色の意味は切れない
     <div className="flex max-h-[66%] shrink-0 flex-col">
       <p className="shrink-0 border-y px-2.5 py-1.5 text-[11px] font-bold tracking-wider text-gray-500" style={{ borderColor: "var(--fe-line)" }}>
-        カーソル <span className="font-num">{formatTickTime(time, spanMs)}</span> の値
+        {/* 計器グラフのカーソルの札と同じ形（拡大して点の間隔が 1 分より短いときは、秒まで） */}
+        カーソル <span className="font-num">{formatCursorTime(time, spanMs, spanMs / GRAPH_BUCKETS)}</span> の値
       </p>
       <ul className="min-h-0 overflow-y-auto px-2.5 py-1">
         {rows.map((row) => (

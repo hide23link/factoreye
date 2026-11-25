@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   absoluteRange,
+  axisDragRange,
   describeRange,
   fromSearchParams,
   maxRangeMs,
@@ -203,5 +204,30 @@ describe("fromSearchParams（SaaS の上限）", () => {
   it("self-hosted では、丸めない", () => {
     vi.stubEnv("VITE_AUTH_MODE", "disabled");
     expect(fromSearchParams("?range=30d")).toEqual({ mode: "relative", durationMs: 30 * 24 * HOUR });
+  });
+});
+
+describe("axisDragRange（時刻の軸のドラッグで左右に移動）", () => {
+  it("右へドラッグすると過去へ動く。幅は変えない（幅 600px の軸を 60px → 幅の 1/10）", () => {
+    expect(axisDragRange({ from: NOW - 2 * HOUR, to: NOW - HOUR }, false, 60, 600, NOW, UNLIMITED)).toEqual({
+      mode: "absolute",
+      from: NOW - 2 * HOUR - 6 * MINUTE,
+      to: NOW - HOUR - 6 * MINUTE,
+    });
+  });
+
+  it("直近の表示から右へドラッグすると、固定の範囲になる", () => {
+    expect(axisDragRange({ from: NOW - HOUR, to: NOW }, true, 300, 600, NOW, UNLIMITED)).toEqual({ mode: "absolute", from: NOW - 90 * MINUTE, to: NOW - 30 * MINUTE });
+  });
+
+  it("今より先へは行かない。今に届いたら直近の表示（右端が今）に戻る", () => {
+    expect(axisDragRange({ from: NOW - 2 * HOUR, to: NOW - HOUR }, false, -1200, 600, NOW, UNLIMITED)).toEqual({ mode: "relative", durationMs: HOUR });
+    expect(axisDragRange({ from: NOW - HOUR, to: NOW }, true, -60, 600, NOW, UNLIMITED)).toEqual({ mode: "relative", durationMs: HOUR });
+  });
+
+  it("SaaS の保持期間（14 日）より前へは行かない", () => {
+    const DAY = 24 * HOUR;
+    const next = axisDragRange({ from: NOW - HOUR, to: NOW }, true, 600 * 1000, 600, NOW, 14 * DAY);
+    expect(next).toEqual({ mode: "absolute", from: NOW - 14 * DAY, to: NOW - 14 * DAY + HOUR });
   });
 });

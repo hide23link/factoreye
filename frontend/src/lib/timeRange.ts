@@ -6,8 +6,9 @@
  *
  * 画面（React）に依存しない純粋な関数だけを置く。テストしやすくするため。
  *
- * 【誰が使うか】useTimeRangeStore.ts、TimeRangeControls.tsx、グラフ系の2つのウィジェット。
+ * 【誰が使うか】useTimeRangeStore.ts、TimeRangeControls.tsx、グラフ系のウィジェット（ふつうのグラフ・複数のグラフ・計器グラフ）。
  */
+import { panPeriod } from "./link-range";
 
 export type TimeRange =
   | { mode: "relative"; durationMs: number }
@@ -130,6 +131,19 @@ export function zoomAround(
     nextTo = now;
   }
   return clampToMax({ mode: "absolute", from: nextFrom, to: nextTo }, maxMs);
+}
+
+/**
+ * 時刻の軸を横にドラッグしたときの範囲（Grafana 12.4 の軸のドラッグと同じ）。幅は変えず、右へ dx px ずらすと過去へ動く。
+ * 計算はリンクの画面の左右ドラッグ（panPeriod）と同じ。今より先へは行かず、今に届いたら直近モード（右端が今）にする。
+ * start = ドラッグを始めたときの範囲、live = そのとき直近モードだったか、width = 軸の幅（px）。
+ * 例: 10:00〜11:00 の固定の範囲で、幅 600px の軸を右へ 60px → 09:54〜10:54
+ */
+export function axisDragRange(start: ResolvedRange, live: boolean, dx: number, width: number, now: number, maxMs: number): TimeRange {
+  const period = { durationMs: start.to - start.from, endMs: live ? null : start.to };
+  const next = panPeriod(period, dx, width, now, maxMs);
+  if (next.endMs === null) return { mode: "relative", durationMs: next.durationMs };
+  return { mode: "absolute", from: next.endMs - next.durationMs, to: next.endMs };
 }
 
 /** 「今に戻る」: 幅はそのままで、右端を現在時刻にした直近モードにする */

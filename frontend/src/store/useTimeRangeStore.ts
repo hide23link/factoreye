@@ -3,6 +3,8 @@
  *
  * - 範囲はダッシュボードに 1 つ。SensorGraph と MultiSensorComparison は、この範囲に従う
  * - 範囲は URL（?range=1h / ?from=…&to=…）に反映する。リンクで同じ表示を開ける
+ * - 拡大・移動（グラフのドラッグ・ホイール・ダブルクリック・時刻の軸のドラッグ、上部の ＋ － ◀ ▶）は、ブラウザの履歴に 1 つ積む（pushRange）。
+ *   ブラウザの「戻る」で 1 つ前の範囲に戻れる（followBrowserBack が URL から範囲を読み直す）。期間の選択・「今」などは履歴を増やさない（setRange）
  * - 範囲はダッシュボードの設定（サーバー側）には保存しないが、最後に見ていた「直近」の範囲は
  *   この端末の localStorage に残す（固定の期間は残さない）。次に開いたとき、URL に指定が無ければそれを使う
  *   （毎回「直近 1 時間」に戻ると不便、という利用者の要望のため）
@@ -20,6 +22,8 @@ interface TimeRangeState {
   range: TimeRange;
   /** 範囲を変える。URL と localStorage も同じ内容に書き換える（URL の履歴は増やさない） */
   setRange: (range: TimeRange) => void;
+  /** 範囲を変え、ブラウザの履歴に 1 つ積む（「戻る」で今の範囲に戻れる）。拡大・移動の操作で使う */
+  pushRange: (range: TimeRange) => void;
 }
 
 function isValidTimeRange(value: unknown): value is TimeRange {
@@ -63,20 +67,30 @@ function rangeQueryOf(search: string): string {
   return ["range", "from", "to"].map((key) => `${key}=${params.get(key) ?? ""}`).join("&");
 }
 
-/** 範囲の部分だけを、URL のクエリに書き換える（ほかのクエリは残す） */
-function writeUrl(range: TimeRange) {
+/** このタブで URL に書いた範囲として覚える（再読み込みのとき、固定の期間を使ってよいかの判定に使う） */
+function rememberUrlRange(search: string) {
+  try {
+    sessionStorage.setItem(SESSION_URL_KEY, rangeQueryOf(search));
+  } catch {
+    // 覚えられなくても、URL の書き換えはできている
+  }
+}
+
+/**
+ * 範囲の部分だけを、URL のクエリに書き換える（ほかのクエリは残す）。
+ * history = "replace" は今の履歴を書き換え、"push" は履歴を 1 つ積む（「戻る」で前の範囲に戻れる）
+ */
+function writeUrl(range: TimeRange, history: "replace" | "push" = "replace") {
   try {
     const url = new URL(window.location.href);
     url.searchParams.delete("range");
     url.searchParams.delete("from");
     url.searchParams.delete("to");
     toSearchParams(range).forEach((value, key) => url.searchParams.set(key, value));
-    window.history.replaceState(null, "", url.toString());
-    try {
-      sessionStorage.setItem(SESSION_URL_KEY, rangeQueryOf(url.search));
-    } catch {
-      // 覚えられなくても、URL の書き換えはできている
-    }
+    // 同じ範囲のまま（拡大の上限に当たったなど）は、履歴を積まない（「戻る」を押しても画面が変わらない履歴になるため）
+    if (history === "push" && url.toString() !== window.location.href) window.history.pushState(null, "", url.toString());
+    else window.history.replaceState(null, "", url.toString());
+    rememberUrlRange(url.search);
   } catch {
     // URL を書き換えられない環境（プレビューなど）では、画面の状態だけを使う
   }
@@ -95,16 +109,48 @@ function clearUrl() {
   }
 }
 
+/** 範囲を画面の状態・URL・localStorage に書く（setRange と pushRange の共通） */
+function applyRange(set: (state: Pick<TimeRangeState, "range">) => void, range: TimeRange, history: "replace" | "push") {
+  set({ range });
+  writeUrl(range, history);
+  // 保存するのは「直近」の範囲だけ。固定の期間（開始〜終了の日時）を残すと、次に開いたとき
+  // 過去の日時のままデータが無く、グラフが空になる
+  if (range.mode === "relative") writeStoredRange(range);
+}
+
 export const useTimeRangeStore = create<TimeRangeState>()((set) => ({
   range: DEFAULT_RANGE,
-  setRange: (range) => {
-    set({ range });
-    writeUrl(range);
-    // 保存するのは「直近」の範囲だけ。固定の期間（開始〜終了の日時）を残すと、次に開いたとき
-    // 過去の日時のままデータが無く、グラフが空になる
-    if (range.mode === "relative") writeStoredRange(range);
-  },
+  setRange: (range) => applyRange(set, range, "replace"),
+  pushRange: (range) => applyRange(set, range, "push"),
 }));
+
+// ホイールを続けて回したときは、履歴を 1 つにまとめる（1 目盛りごとに積むと、「戻る」を何回も押すことになるため）
+const WHEEL_MERGE_MS = 800;
+let lastWheelAt = 0;
+
+/** Ctrl（⌘）＋ホイールでの拡大・縮小。回し始めだけ履歴を積み、続けて回している間は書き換える */
+export function setRangeByWheel(range: TimeRange) {
+  const now = Date.now();
+  const store = useTimeRangeStore.getState();
+  if (now - lastWheelAt > WHEEL_MERGE_MS) store.pushRange(range);
+  else store.setRange(range);
+  lastWheelAt = now;
+}
+
+/**
+ * ブラウザの「戻る」「進む」で、URL の範囲を画面に戻す（pushRange で積んだ履歴をたどる）。
+ * URL に範囲が無い（ダッシュボードを開いたときの履歴）ときは、開いたときと同じく、最後に見ていた範囲か既定にする。
+ * 戻り値は、登録を外す関数（ダッシュボードを閉じるときに呼ぶ）。
+ */
+export function followBrowserBack(): () => void {
+  const onPopState = () => {
+    const range = fromSearchParams(window.location.search) ?? readStoredRange() ?? DEFAULT_RANGE;
+    useTimeRangeStore.setState({ range });
+    rememberUrlRange(window.location.search);
+  };
+  window.addEventListener("popstate", onPopState);
+  return () => window.removeEventListener("popstate", onPopState);
+}
 
 // タブで別のダッシュボードへ移るとき、今の範囲（固定の期間も含む）を次の画面へ引き継ぐための控え
 let carriedRange: TimeRange | null = null;

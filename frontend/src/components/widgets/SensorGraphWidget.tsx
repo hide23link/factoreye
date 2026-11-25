@@ -52,9 +52,9 @@ import {
 import { compareAvailability, compareName, compareOffsetMs, describeCompare, type CompareMode } from "../../lib/compare-range";
 import { useCompareReadings } from "../../hooks/useCompareReadings";
 import { bandAt, computeBands, describeBand, toBandSamples } from "../../lib/threshold-bands";
-import { gapThreshold, pointNear, trendLimits, type TrendPoint } from "../../lib/trend-stack";
+import { breakAtGaps, gapThreshold, pointNear, trendLimits, type TrendPoint } from "../../lib/trend-stack";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
-import { useTimeRangeStore } from "../../store/useTimeRangeStore";
+import { setRangeByWheel, useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import { ErrorNotice } from "../ErrorNotice";
 import { useCoarsePointer } from "../../hooks/useCoarsePointer";
@@ -96,7 +96,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   // 右の「今の値」に使う、全センサーの最新の測定値（1 回の取得で、ほかのウィジェットと共有）
   const { data: latest } = useLatestReadings();
   const dashboardRange = useTimeRangeStore((s) => s.range);
-  const setRange = useTimeRangeStore((s) => s.setRange);
+  // 拡大は、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる）
+  const pushRange = useTimeRangeStore((s) => s.pushRange);
   // ウィジェット固有の期間があればそれを使う（固有の期間のときは、ドラッグでの拡大はしない）
   const range = effectiveRange(widget, dashboardRange);
   // リンクの画面では、期間の操作はリンクの画面が受ける（ダッシュボードの期間を変えない）
@@ -120,14 +121,14 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
   const coarse = useCoarsePointer();
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
-    if (next && !hasOwnRange) setRange(next);
+    if (next && !hasOwnRange) pushRange(next);
   });
   // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）。
   // それ以外は、動かした位置を、全グラフ共有のカーソルの時刻にする（指ならタップ・ドラッグも。1 区間に丸めて、描画 1 回にまとめる）
   const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers, widget.id);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
-    if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
+    if (!hasOwnRange) setRangeByWheel(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
   });
   const sensor = sensors?.find((s) => s.id === widget.sensorId);
   // 右の今の値の札を置く高さ（グラフの中で測る）
@@ -162,6 +163,8 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     time: new Date(b.start).getTime() + halfBucketMs,
     value: bucketValue(b, options.aggregation),
   }));
+  // グラフに渡す行。受信が止まった所には値の無い行を入れて、線を切る（計器グラフと同じ判定。止まったのを直線で隠さない）
+  const lineRows = breakAtGaps<{ time: number; value: number | null }>(chartData, halfBucketMs * 2, (time) => ({ time, value: null }));
 
   // 比較の線の点（今の時刻の位置へ進める）。今の線とは別のデータ（Line の data）で重ねるので、今の線の欠測の見え方は変わらない
   const compareOffset = compareOffsetMs(compareMode);
@@ -169,13 +172,12 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
     compareMode !== "none" && compareData
       ? compareData.buckets.map((b) => ({ time: new Date(b.start).getTime() + compareOffset + halfBucketMs, value: bucketValue(b, options.aggregation) }))
       : [];
-  // 欠測（区間 2.5 個分より離れた点の間）には空の行を入れて、比較の線もつなげない
-  const compareRows: Array<{ time: number; compare?: number }> = [];
-  comparePoints.forEach((point, i) => {
-    const previous = comparePoints[i - 1];
-    if (previous && point.time - previous.time > halfBucketMs * 5) compareRows.push({ time: previous.time + halfBucketMs });
-    compareRows.push({ time: point.time, compare: point.value });
-  });
+  // 欠測には値の無い行を入れて、比較の線もつなげない（今の線と同じ判定）
+  const compareRows = breakAtGaps<{ time: number; compare: number | null }>(
+    comparePoints.map((point) => ({ time: point.time, compare: point.value })),
+    halfBucketMs * 2,
+    (time) => ({ time, compare: null }),
+  );
   const compareLabel = compareName(compareMode);
   const compareLine =
     compareMode === "none" ? null : (
@@ -295,7 +297,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </BarChart>
           ) : graphType === "area" ? (
-            <AreaChart data={chartData} margin={chartMargin} {...pointerHandlers}>
+            <AreaChart data={lineRows} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />
@@ -320,7 +322,7 @@ function SingleSensorGraph({ widget, linkView }: { widget: Widget; linkView?: Li
               {valueProbe}
             </AreaChart>
           ) : (
-            <LineChart data={chartData} margin={chartMargin} {...pointerHandlers}>
+            <LineChart data={lineRows} margin={chartMargin} {...pointerHandlers}>
               {style.showGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis {...xAxisProps} />
               <YAxis domain={yDomain} width={44} tick={{ fontSize: 10 }} tickFormatter={formatYTick} label={yAxisLabel} />

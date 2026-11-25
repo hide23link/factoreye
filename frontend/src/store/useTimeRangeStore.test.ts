@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_RANGE } from "../lib/timeRange";
-import { initTimeRangeFromUrl, resetTimeRange, useTimeRangeStore } from "./useTimeRangeStore";
+import { followBrowserBack, initTimeRangeFromUrl, resetTimeRange, setRangeByWheel, useTimeRangeStore } from "./useTimeRangeStore";
 
 const TIME_RANGE_KEY = "factoreye_time_range";
 
@@ -117,5 +117,88 @@ describe("useTimeRangeStore の永続化", () => {
     initTimeRangeFromUrl();
 
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 });
+  });
+});
+
+describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲に戻る）", () => {
+  const HOUR = 60 * 60 * 1000;
+  const zoomed = { mode: "absolute" as const, from: Date.parse("2026-11-25T00:00:00Z"), to: Date.parse("2026-11-25T01:00:00Z") };
+  const zoomedMore = { mode: "absolute" as const, from: Date.parse("2026-11-25T00:15:00Z"), to: Date.parse("2026-11-25T00:45:00Z") };
+  let stop: () => void = () => {};
+
+  /** 「戻る」を押して、popstate が届くまで待つ（jsdom では非同期に届く） */
+  async function pressBack() {
+    const before = window.location.search;
+    window.history.back();
+    await vi.waitFor(() => expect(window.location.search).not.toBe(before));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  beforeEach(() => {
+    stop = followBrowserBack();
+  });
+
+  afterEach(() => {
+    stop();
+  });
+
+  it("pushRange は履歴を 1 つ積み、setRange は積まない", () => {
+    const length = window.history.length;
+    useTimeRangeStore.getState().setRange({ mode: "relative", durationMs: 6 * HOUR });
+    expect(window.history.length).toBe(length);
+    useTimeRangeStore.getState().pushRange(zoomed);
+    expect(window.history.length).toBe(length + 1);
+    expect(window.location.search).toContain("from=");
+  });
+
+  it("拡大を 2 回したあと「戻る」を押すと、1 つ前の範囲、もう 1 回で最初の範囲に戻る", async () => {
+    useTimeRangeStore.getState().setRange({ mode: "relative", durationMs: 6 * HOUR });
+    useTimeRangeStore.getState().pushRange(zoomed);
+    useTimeRangeStore.getState().pushRange(zoomedMore);
+
+    await pressBack();
+    expect(useTimeRangeStore.getState().range).toEqual(zoomed);
+    await pressBack();
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * HOUR });
+  });
+
+  it("URL に範囲が無い履歴（ダッシュボードを開いたとき）に戻ったら、最後に見ていた直近の範囲にする", async () => {
+    localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 24 * HOUR }));
+    useTimeRangeStore.getState().pushRange(zoomed);
+
+    await pressBack();
+    expect(window.location.search).toBe("");
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 24 * HOUR });
+  });
+
+  it("同じ範囲を pushRange しても、履歴は増やさない（拡大の上限に当たったときなど）", () => {
+    useTimeRangeStore.getState().pushRange(zoomed);
+    const length = window.history.length;
+    useTimeRangeStore.getState().pushRange(zoomed);
+    expect(window.history.length).toBe(length);
+  });
+
+  it("ホイールを続けて回したときは、履歴を 1 つにまとめる（間があいたら、また積む）", () => {
+    const now = vi.spyOn(Date, "now");
+    const length = window.history.length;
+    now.mockReturnValue(1_000_000);
+    setRangeByWheel(zoomed);
+    now.mockReturnValue(1_000_200);
+    setRangeByWheel(zoomedMore);
+    expect(window.history.length).toBe(length + 1);
+    expect(useTimeRangeStore.getState().range).toEqual(zoomedMore);
+    now.mockReturnValue(1_005_000);
+    setRangeByWheel(zoomed);
+    expect(window.history.length).toBe(length + 2);
+    now.mockRestore();
+  });
+
+  it("ダッシュボードを閉じた後（登録を外した後）は、「戻る」で範囲を変えない", async () => {
+    useTimeRangeStore.getState().pushRange(zoomed);
+    useTimeRangeStore.getState().pushRange(zoomedMore);
+    stop();
+
+    await pressBack();
+    expect(useTimeRangeStore.getState().range).toEqual(zoomedMore);
   });
 });

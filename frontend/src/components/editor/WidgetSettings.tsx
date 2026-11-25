@@ -836,7 +836,7 @@ function StateTimelineSettings({ widget, actions }: SectionProps) {
   );
 }
 
-/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）と、値の小数の桁（空なら目盛りの間隔から自動）。 */
+/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）、値の小数の桁（空なら目盛りの間隔から自動）、縦軸の目安（空なら自動）。 */
 function TrendStackSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const removeAt = (index: number) =>
@@ -873,6 +873,19 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
           unit="桁"
           onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? undefined })}
         />
+      </Section>
+      {/* ふつうのグラフの「縦軸の最小・最大」と同じ設定（yAxisMin・yAxisMax）。計器グラフでは目安として使う（softAxisValues） */}
+      <Section title="縦軸の目安" note="空欄なら自動。値がはみ出したら広げます。目安から大きく離れた行（単位の違うセンサー）は自動のままです">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最小
+            <NumberField label="縦軸の目安の最小" value={widget.config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { yAxisMin: v ?? undefined })} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            最大
+            <NumberField label="縦軸の目安の最大" value={widget.config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { yAxisMax: v ?? undefined })} />
+          </label>
+        </div>
       </Section>
     </>
   );

@@ -151,7 +151,8 @@ describe("TrendStackWidget（計器グラフ）", () => {
     await screen.findAllByText("センサーA");
     // 見出しに、期間と、カーソルの時刻
     expect(screen.getByText("推移 1H")).toBeInTheDocument();
-    expect(screen.getByText(/^カーソル \d{2}:\d{2}$/)).toBeInTheDocument();
+    // 1 時間の表示は点の間隔が 7.2 秒（1 分より短い）なので、秒まで出す
+    expect(screen.getByText(/^カーソル \d{2}:\d{2}:\d{2}$/)).toBeInTheDocument();
     // 時刻と、行ごとの値（カーソルの位置にデータが無いので「---」）を、この計器グラフ（w1）の分として store に出している
     await vi.waitFor(() => expect(useTrendCursorStore.getState().widgets.w1?.rows.map((row) => row.name)).toEqual(["センサーA", "センサーB"]));
     expect(useTrendCursorStore.getState().widgets.w1?.time).toBeDefined();
@@ -236,6 +237,9 @@ describe("TrendStackWidget（計器グラフ）", () => {
   });
 
   /** 今の時刻の「時:分」（分の変わり目をまたいでも通るよう、1 分前も許す） */
+  /** 時刻の札の「時:分」（1 時間の表示では秒まで出るので、比べるのは時:分だけ） */
+  const labelMinutes = () => (screen.getByTestId("cursor-time-label").textContent ?? "").slice(0, 5);
+
   const clockNow = () => {
     const text = (ms: number) => new Date(ms).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
     return [text(Date.now()), text(Date.now() - 60_000)];
@@ -257,8 +261,8 @@ describe("TrendStackWidget（計器グラフ）", () => {
 
     // 共有の時刻は null（利用者が動かしていない）。見出しの札と、時間の軸の行の札が、どちらも今の時刻
     expect(useCursorTimeStore.getState().time).toBeNull();
-    expect(clockNow()).toContain(screen.getByTestId("cursor-time-label").textContent);
-    expect(screen.getByText(/^カーソル \d{2}:\d{2}$/).textContent).toBe(`カーソル ${screen.getByTestId("cursor-time-label").textContent}`);
+    expect(clockNow()).toContain(labelMinutes());
+    expect(screen.getByText(/^カーソル \d{2}:\d{2}:\d{2}$/).textContent).toBe(`カーソル ${screen.getByTestId("cursor-time-label").textContent}`);
     // 動かしていないので、「今に戻す」は出ない
     expect(screen.queryByRole("button", { name: "今に戻す" })).not.toBeInTheDocument();
   });
@@ -276,7 +280,7 @@ describe("TrendStackWidget（計器グラフ）", () => {
     await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
     const oneHourAgo = new Date(Date.now() - 60 * 60_000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
     const oneHourAgoBefore = new Date(Date.now() - 61 * 60_000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-    expect([oneHourAgo, oneHourAgoBefore]).toContain(screen.getByTestId("cursor-time-label").textContent);
+    expect([oneHourAgo, oneHourAgoBefore]).toContain(labelMinutes());
 
     // マウスが外れても、その位置に残る（勝手に今へ戻さない）
     fireEvent.pointerLeave(plot);
@@ -285,7 +289,7 @@ describe("TrendStackWidget（計器グラフ）", () => {
     // 「今に戻す」で、現在位置（右端）に戻る
     fireEvent.click(screen.getByRole("button", { name: "今に戻す" }));
     expect(useCursorTimeStore.getState().time).toBeNull();
-    expect(clockNow()).toContain(screen.getByTestId("cursor-time-label").textContent);
+    expect(clockNow()).toContain(labelMinutes());
   });
 
   it("指でタップしたとき（pointerdown）も、その位置にカーソルが動く", async () => {
@@ -561,5 +565,205 @@ describe("TrendStackWidget の昨日の重ね", () => {
     await vi.waitFor(() => expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(vi.mocked(api.fetchSensorReadingsDownsampled).mock.calls.filter((c) => isCompareCall(c[1]))).toHaveLength(1);
+  });
+});
+
+describe("TrendStackWidget のマウスでの時間の操作（拡大・縮小・移動）", () => {
+  const HOUR = 60 * 60_000;
+  const box = (width: number) => () => ({ left: 0, top: 0, width, height: 80, right: width, bottom: 80, x: 0, y: 0, toJSON: () => ({}) });
+
+  /** グラフの上の枠（幅 600px として測れたことにする） */
+  const plotOf = () => {
+    const plot = screen.getAllByRole("img", { name: /の推移/ })[0].parentElement as HTMLElement;
+    plot.getBoundingClientRect = box(600);
+    return plot;
+  };
+  /** 下の時刻の軸（幅 600px） */
+  const axisOf = () => {
+    const axis = screen.getByTestId("trend-time-axis");
+    axis.getBoundingClientRect = box(600);
+    return axis;
+  };
+  const mouse = { pointerType: "mouse", button: 0, pointerId: 1 };
+  const range = () => useTimeRangeStore.getState().range;
+  const spanOf = () => {
+    const current = range();
+    return current.mode === "absolute" ? current.to - current.from : current.durationMs;
+  };
+
+  async function renderPressure(config: Widget["config"] = {}) {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 60, buckets: [bucketAgo(30, 5), bucketAgo(1, 6)] });
+    renderWithQueryClient(<TrendStackWidget widget={{ ...widget(["a"]), config: { sensorIds: ["a"], ...config } }} />);
+    await screen.findAllByText("センサーA");
+  }
+
+  it("押したまま横に動かすと水色の帯で範囲を選び、離すとその範囲に拡大する（履歴に 1 つ積む）", async () => {
+    await renderPressure();
+    const plot = plotOf();
+    const historyBefore = window.history.length;
+
+    fireEvent.pointerDown(plot, { ...mouse, clientX: 100 });
+    fireEvent.pointerMove(plot, { ...mouse, clientX: 400 });
+    expect(await screen.findByTestId("zoom-selection")).toBeInTheDocument();
+    fireEvent.pointerUp(plot, { ...mouse, clientX: 400 });
+
+    // 600px のうち 100〜400px ＝ 1 時間の 1/6〜4/6（30 分の幅）
+    expect(range().mode).toBe("absolute");
+    expect(Math.abs(spanOf() - 30 * 60_000)).toBeLessThan(2_000);
+    expect(window.history.length).toBe(historyBefore + 1);
+    expect(screen.queryByTestId("zoom-selection")).not.toBeInTheDocument();
+  });
+
+  it("6px 未満のドラッグは、ただのクリック（範囲は変えない。カーソルだけ動く）", async () => {
+    await renderPressure();
+    const plot = plotOf();
+
+    fireEvent.pointerDown(plot, { ...mouse, clientX: 100 });
+    fireEvent.pointerMove(plot, { ...mouse, clientX: 104 });
+    fireEvent.pointerUp(plot, { ...mouse, clientX: 104 });
+
+    expect(range()).toEqual({ mode: "relative", durationMs: HOUR });
+    expect(screen.queryByTestId("zoom-selection")).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
+  });
+
+  it("指でなぞったときは、今までどおりカーソルが動くだけ（範囲は変えない）", async () => {
+    await renderPressure();
+    const plot = plotOf();
+    const touch = { pointerType: "touch", button: 0, pointerId: 2 };
+
+    fireEvent.pointerDown(plot, { ...touch, clientX: 100 });
+    fireEvent.pointerMove(plot, { ...touch, clientX: 400 });
+    fireEvent.pointerUp(plot, { ...touch, clientX: 400 });
+    fireEvent.doubleClick(plot, { clientX: 400 });
+
+    expect(range()).toEqual({ mode: "relative", durationMs: HOUR });
+    expect(screen.queryByTestId("zoom-selection")).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(useCursorTimeStore.getState().time).not.toBeNull());
+  });
+
+  it("ダブルクリックで、その位置を中心に 2 倍に縮小する（右端は今より先にしない）", async () => {
+    await renderPressure();
+    const plot = plotOf();
+    const historyBefore = window.history.length;
+
+    fireEvent.pointerDown(plot, { ...mouse, clientX: 300 });
+    fireEvent.pointerUp(plot, { ...mouse, clientX: 300 });
+    fireEvent.doubleClick(plot, { clientX: 300 });
+
+    expect(range().mode).toBe("absolute");
+    expect(Math.abs(spanOf() - 2 * HOUR)).toBeLessThan(2_000);
+    expect(window.history.length).toBe(historyBefore + 1);
+  });
+
+  it("Ctrl＋ホイールで、マウスの位置を中心に拡大する", async () => {
+    await renderPressure();
+    const plot = plotOf();
+
+    fireEvent.pointerMove(plot, { ...mouse, clientX: 300 });
+    fireEvent.wheel(plot, { ctrlKey: true, deltaY: -100 });
+
+    expect(range().mode).toBe("absolute");
+    expect(Math.abs(spanOf() - 0.8 * HOUR)).toBeLessThan(2_000);
+  });
+
+  it("下の時刻の軸を右へドラッグすると、幅はそのままで過去へ動く。ドラッグ 1 回で履歴は 1 つだけ", async () => {
+    await renderPressure();
+    const axis = axisOf();
+    const historyBefore = window.history.length;
+    const toBefore = Date.now();
+
+    fireEvent.pointerDown(axis, { ...mouse, clientX: 300 });
+    fireEvent.pointerMove(axis, { ...mouse, clientX: 330 });
+    fireEvent.pointerMove(axis, { ...mouse, clientX: 360 });
+    fireEvent.pointerUp(axis, { ...mouse, clientX: 360 });
+
+    // 60px ＝ 幅 600px の 1/10 ＝ 6 分だけ過去へ
+    const current = range();
+    expect(current.mode).toBe("absolute");
+    expect(Math.abs(spanOf() - HOUR)).toBeLessThan(2_000);
+    if (current.mode === "absolute") expect(Math.abs(toBefore - 6 * 60_000 - current.to)).toBeLessThan(40_000);
+    expect(window.history.length).toBe(historyBefore + 1);
+  });
+
+  it("ウィジェット固有の期間のときは、ドラッグ・ダブルクリック・軸のドラッグで、ダッシュボードの期間を変えない", async () => {
+    await renderPressure({ rangeHours: 6 });
+    const plot = plotOf();
+
+    fireEvent.pointerDown(plot, { ...mouse, clientX: 100 });
+    fireEvent.pointerMove(plot, { ...mouse, clientX: 400 });
+    fireEvent.pointerUp(plot, { ...mouse, clientX: 400 });
+    fireEvent.doubleClick(plot, { clientX: 300 });
+    const axis = axisOf();
+    fireEvent.pointerDown(axis, { ...mouse, clientX: 300 });
+    fireEvent.pointerMove(axis, { ...mouse, clientX: 400 });
+    fireEvent.pointerUp(axis, { ...mouse, clientX: 400 });
+
+    expect(range()).toEqual({ mode: "relative", durationMs: HOUR });
+    expect(screen.queryByTestId("zoom-selection")).not.toBeInTheDocument();
+  });
+});
+
+describe("TrendStackWidget のカーソルの札の時刻（点の間隔が 1 分より短いときだけ秒まで）", () => {
+  it("24 時間の表示（点の間隔 約 3 分）は、今までどおり時:分", async () => {
+    useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 24 * 60 * 60_000 } });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 180, buckets: [bucketAgo(10, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+
+    expect(screen.getByTestId("cursor-time-label").textContent).toMatch(/^\d{2}:\d{2}$/);
+    expect(screen.getByText(/^カーソル \d{2}:\d{2}$/)).toBeInTheDocument();
+  });
+
+  it("15 分の表示（点の間隔 1.8 秒）は、時:分:秒", async () => {
+    useTimeRangeStore.setState({ range: { mode: "relative", durationMs: 15 * 60_000 } });
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("a", "センサーA")]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockResolvedValue({ bucketSeconds: 2, buckets: [bucketAgo(1, 5)] });
+
+    renderWithQueryClient(<TrendStackWidget widget={widget(["a"])} />);
+    await screen.findAllByText("センサーA");
+
+    expect(screen.getByTestId("cursor-time-label").textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+});
+
+describe("TrendStackWidget の縦軸の目安（yAxisMin・yAxisMax。soft）", () => {
+  /** 行の縦軸の目盛りの数字 */
+  const yTicks = (rowIndex: number) =>
+    Array.from(document.querySelectorAll(".trend-yaxis")[rowIndex].querySelectorAll("span.absolute.right-1\\.5")).map((el) => el.textContent);
+
+  async function renderRows(config: Widget["config"]) {
+    vi.mocked(api.fetchSensors).mockResolvedValue([sensor("p", "気圧", { unit: "hPa" }), sensor("t", "温度", { unit: "℃" })]);
+    vi.mocked(api.fetchSensorReadingsDownsampled).mockImplementation(async (id) =>
+      id === "p"
+        ? { bucketSeconds: 60, buckets: [bucketAgo(30, 1012.2), bucketAgo(20, 1012.5), bucketAgo(2, 1012.3)] }
+        : { bucketSeconds: 60, buckets: [bucketAgo(30, 24), bucketAgo(2, 26)] },
+    );
+    renderWithQueryClient(<TrendStackWidget widget={{ ...widget(["p", "t"]), config: { sensorIds: ["p", "t"], ...config } }} />);
+    await screen.findAllByText("温度");
+    await vi.waitFor(() => expect(yTicks(0).length).toBeGreaterThan(0));
+  }
+
+  it("目安が無いときは、今までどおり自動（小さな揺れに合わせた細かい目盛り）", async () => {
+    await renderRows({});
+    expect(yTicks(0)).not.toContain("1000");
+    expect(yTicks(0)).not.toContain("1025");
+  });
+
+  it("目安（1000〜1025）があれば、その範囲で描く。範囲と重ならない行（温度）は自動のまま", async () => {
+    await renderRows({ yAxisMin: 1000, yAxisMax: 1025 });
+    // 目盛りは、目安の両端に少し余白をとった切りのよい数（例: 995〜1030 を 5 ごと）
+    await vi.waitFor(() => expect(Number(yTicks(0)[0])).toBeLessThanOrEqual(1000));
+    expect(Number(yTicks(0).at(-1))).toBeGreaterThanOrEqual(1025);
+    expect(yTicks(1).every((tick) => Number(tick) < 100)).toBe(true);
+  });
+
+  it("データが目安からはみ出したら、軸を広げる（線は切らない）", async () => {
+    await renderRows({ yAxisMin: 1000, yAxisMax: 1010 });
+    await vi.waitFor(() => expect(Number(yTicks(0)[0])).toBeLessThanOrEqual(1000));
+    expect(Number(yTicks(0).at(-1))).toBeGreaterThanOrEqual(1012.5);
   });
 });
