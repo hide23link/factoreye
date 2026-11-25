@@ -6,7 +6,7 @@
 curl -fsSL https://raw.githubusercontent.com/hide23link/factoreye/main/install/install.sh | sudo bash
 ```
 
-もう一度実行すると、データと設定を残したまま更新します（更新前に自動でバックアップを取ります）。
+公開済みの最新の版（`latest`。v1.1.0 以降）が入ります。もう一度実行するか `./factoreye.sh update` で、データと設定を残したまま最新の版に更新します（更新前に自動でバックアップを取ります）。版を固定したいときは、`config/.env` の `FACTOREYE_VERSION` を `1.1.0` のように書きます（先頭に `v` を付けない）。版ごとの変更は [`CHANGELOG.md`](../CHANGELOG.md) にあります。
 
 | やりたいこと | 方法 |
 |---|---|
