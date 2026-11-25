@@ -1,8 +1,8 @@
 #!/bin/bash
 # WAL-G の設定（walg.env）を作る。R2 の鍵（専用バケット factoreye-db だけの Object Read & Write）が入ったファイルから、
 # walg.env.example の 3 行（Access Key ID・Secret・エンドポイント）を埋めて、権限 600 で書く。鍵は、画面に出さない。
-# 鍵のファイル（Docker の --env-file の形式。AWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY、AWS_ENDPOINT_URL）は、Mac の ~/api.env の FE_DB_R2_* から作り、
-#   本番の /opt/factoreye/walg/r2.env に、権限 600 で置く（例: Mac から  bash -c '. ~/apienv.sh; apienv_section FE_DB_R2_' | ssh factoreye 'umask 077; mkdir -p /opt/factoreye/walg; cat > /opt/factoreye/walg/r2.env' ）
+# 鍵のファイル（Docker の --env-file の形式。AWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY、AWS_ENDPOINT_URL の 3 行）は、
+#   運用者が手元のパスワード管理などから作り、サーバーの /opt/factoreye/walg/r2.env に、権限 600 で置く（鍵は画面やログに出さない）
 # 使い方: sudo infra/walg/make-conf.sh          （すでにあるときは、上書きしない。FORCE=1 で上書き）
 # 環境変数: R2_ENV（鍵のファイル。既定 /opt/factoreye/walg/r2.env）、CONF_DIR（出力先。既定 /opt/factoreye/walg）
 set -euo pipefail

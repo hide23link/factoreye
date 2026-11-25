@@ -56,3 +56,17 @@ cd e2e && npm ci && npx playwright install --with-deps chromium && npm test
 ```
 
 E2E は chromium が必須で、firefox・webkit・スマホ画面（mobile-chrome）は互換性の確認用です（失敗してもマージは止まりません）。ブラウザを指定して実行するには `npx playwright test --project=firefox` のようにします。`tests/a11y.spec.ts` は axe-core で主要画面を検査し、致命的（critical）な違反があると失敗します。
+
+詳しい手順と注意は [`e2e/README.md`](../e2e/README.md) にあります。
+
+## 実機のデータで画面を確かめる（任意）
+
+動いている FactorEye（ラズパイなど）の DB から、手元の Docker の DB へ、設定と測定値を読み取りだけで写せます（`tools/pi-sync/pi-sync.sh`）。接続先は人ごとに違うので、`--pi user@host` か環境変数 `PI_SSH` で必ず渡します（ssh の鍵で入れること）。
+
+```bash
+docker compose up -d postgres backend
+tools/pi-sync/pi-sync.sh --pi user@raspberrypi.local --days 2            # 直近 2 日分を 1 回写す
+tools/pi-sync/pi-sync.sh --pi user@raspberrypi.local --follow            # 写したあと、5 秒ごとに足し続ける
+```
+
+元の DB には書き込みません。機器キーのハッシュ・通知・Webhook・ユーザーは持ち込みません。両方の DB の版（Alembic）がそろっている必要があります。詳しくは `--help` を見てください。

@@ -159,7 +159,7 @@ class Reading(SQLModel, table=True):
     # 主キーは (sensor_id, recorded_at)。測定値は「どのセンサーの、いつの値か」で決まるので、
     # 連番の id と、時系列範囲検索 `WHERE sensor_id = ? AND recorded_at BETWEEN ? AND ?` 用の索引を
     # 別々に持たず、主キーの索引 1 本で兼ねる（容量が約 4 割減り、書き込みも速い。
-    # 実測は docs/decisions.md（readings の主キーを統合）、TimescaleDB を見送った経緯も同じ）。
+    # 2026-10 の実測による。TimescaleDB は使わない）。
     # 同じセンサーで同じ時刻の値は持てない。取り込みは、1 回の送信内の値の時刻を
     # マイクロ秒ずつずらして一意にする（app/api/ingest.py）。
 

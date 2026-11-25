@@ -2,7 +2,7 @@
 
 ## 対象
 
-`main` の最新版のみをサポートします。
+最新のリリース（[リリース一覧](https://github.com/hide23link/factoreye/releases)）と `main` の最新版をサポートします。
 
 ## 脆弱性の報告
 

@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # ラズパイの DB から、ローカルの Docker の DB へ、実データ（設定と測定値）を取り込む（開発用・読み取りだけ）。
 #
-# 使い方（リポジトリのどこからでも）:
-#   tools/pi-sync/pi-sync.sh                 # 1 回だけ追いつく（初回は直近 1 日分）
+# 使い方（リポジトリのどこからでも。接続先は --pi か環境変数 PI_SSH で必ず渡す）:
+#   tools/pi-sync/pi-sync.sh --pi user@raspberrypi.local   # 1 回だけ追いつく（初回は直近 1 日分）
+#   PI_SSH=user@raspberrypi.local tools/pi-sync/pi-sync.sh  # 環境変数で渡しても同じ
 #   tools/pi-sync/pi-sync.sh --days 7        # 初回に取り込む日数（1〜30）
 #   tools/pi-sync/pi-sync.sh --follow [秒]   # 追いついたあと、数秒ごとに新しい分を足し続ける（Ctrl+C で終了）
 #   tools/pi-sync/pi-sync.sh --reset-config  # 機器・センサー・ダッシュボードを、ラズパイの内容で丸ごと置き換える
 #   tools/pi-sync/pi-sync.sh --status        # ラズパイとローカルの件数・最新時刻だけ見る
 #
-# 環境変数（接続先が変わるとき）:
-#   PI_SSH        ssh の接続先（既定 hide@192.168.0.62。Tailscale なら hide@<Tailscale の名前> など）
+# 接続先（どちらか必須。両方あれば --pi が優先）:
+#   --pi <ユーザー@ホスト>  ssh の接続先（例: user@raspberrypi.local、user@<Tailscale の名前>）
+#   PI_SSH        同上を環境変数で渡すとき
+# 環境変数（任意）:
 #   PI_CONTAINER  ラズパイの Postgres のコンテナ名（既定 factoreye-postgres-1）
 #
 # 安全のため:
@@ -20,7 +23,7 @@
 # - ローカルの測定値は、取り込む日数より古い分を消す（ローカルの DB が大きくならないように）。
 set -euo pipefail
 
-PI_SSH="${PI_SSH:-hide@192.168.0.62}"
+PI_SSH="${PI_SSH:-}"
 PI_CONTAINER="${PI_CONTAINER:-factoreye-postgres-1}"
 DAYS=1
 FOLLOW=""
@@ -31,6 +34,7 @@ CONFIG_TABLES="ingest_devices sensors dashboards widgets alarms"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --pi) PI_SSH="${2:-}"; shift; [ $# -gt 0 ] && shift ;;
     --days) DAYS="${2:-}"; shift 2 ;;
     --follow)
       FOLLOW=5
@@ -38,10 +42,14 @@ while [ $# -gt 0 ]; do
       shift ;;
     --reset-config) RESET_CONFIG=1; shift ;;
     --status) STATUS_ONLY=1; shift ;;
-    -h|--help) sed -n 2,22p "$0"; exit 0 ;;
+    -h|--help) sed -n 2,23p "$0"; exit 0 ;;
     *) echo "不明な引数: $1（--help で使い方）" >&2; exit 2 ;;
   esac
 done
+# 接続先は人ごとに違うので、既定値を持たない（書いておくと、使う人の環境と合わないまま ssh してしまう）
+if [ -z "$PI_SSH" ]; then
+  echo "ラズパイの接続先が指定されていません。--pi user@host か、環境変数 PI_SSH=user@host で渡してください（--help で使い方）" >&2; exit 2
+fi
 if ! [[ "$DAYS" =~ ^[0-9]+$ ]] || [ "$DAYS" -lt 1 ] || [ "$DAYS" -gt 30 ]; then
   echo "--days は 1〜30 の整数で指定してください（指定: ${DAYS}）" >&2; exit 2
 fi
