@@ -167,13 +167,17 @@ function rangeInUrl(): TimeRange {
  * - 開いているダッシュボードの履歴なら、URL の範囲を読み直す
  * - ダッシュボードの外（設定など）や、別のダッシュボードを見ているときに、ダッシュボードの履歴に戻ったら、
  *   openDashboard でそのダッシュボードを開く（範囲は、開くときに URL から読む）
- * - 印の無い履歴（ほかの画面・アプリの外）は、何もしない
+ * - 印の無い履歴は、何もしない。ただしダッシュボードを見ているときは、今の範囲をその履歴に書き直す（「進む」で URL の範囲が消えないように）
  * 戻り値は、登録を外す関数。
  */
 export function followBrowserBack(openDashboard: (dashboardId: string) => void): () => void {
   const onPopState = (event: PopStateEvent) => {
     const dashboardId = dashboardOfMark(event.state);
-    if (dashboardId === null) return;
+    if (dashboardId === null) {
+      // ダッシュボードを見ているまま、印の無い履歴（出たときに積んだもの）へ「進む」で来たときは、今の範囲を書き直す（URL から範囲が消えないように）
+      if (openDashboardId !== null) writeUrl(useTimeRangeStore.getState().range, "replace");
+      return;
+    }
     // このタブで書いた範囲なので、開くとき（initTimeRangeFromUrl）に固定の期間も使ってよい
     rememberUrlRange(window.location.search);
     if (dashboardId === openDashboardId) useTimeRangeStore.setState({ range: rangeInUrl() });
@@ -187,12 +191,15 @@ export function followBrowserBack(openDashboard: (dashboardId: string) => void):
 let carriedRange: TimeRange | null = null;
 
 /**
- * タブで別のダッシュボードへ移る直前に呼ぶ: 今の範囲を、次に開くダッシュボードでもそのまま使う。
+ * タブ・左の一覧で、別のダッシュボードへ移る直前に呼ぶ: 今の範囲を、次に開くダッシュボードでもそのまま使う。
+ * あわせて、ブラウザの履歴を 1 つ積む（「戻る」1 回で前のダッシュボードへ帰れるように。leaveDashboardInHistory）。
  * （移ると画面が作り直され、閉じる側の resetTimeRange が URL の範囲を消すため、ここで控えておく）
  * 控えは、次の画面を開いた後に消す。すぐに消さないのは、開発時の StrictMode が「開く→閉じる→開く」と 2 回開くため
  */
 export function keepTimeRangeForNextDashboard() {
   carriedRange = useTimeRangeStore.getState().range;
+  // 今のダッシュボードの履歴を残し、次のダッシュボード用の履歴を 1 つ積む（「戻る」1 回で、出る直前の範囲の前のダッシュボードへ帰るため）
+  leaveDashboardInHistory();
   setTimeout(() => {
     carriedRange = null;
   }, 0);
@@ -242,7 +249,8 @@ function writtenInThisTab(): boolean {
  * ダッシュボードから、ほかの画面（設定・全体監視など）へ移る直前に呼ぶ: 範囲と印の無い履歴を 1 つ積む。
  * 今の履歴（出る直前の範囲と印）を残すので、ほかの画面で「戻る」を 1 回押すと、出る直前の範囲でダッシュボードへ帰る。
  * （ほかの画面は URL を変えず履歴も積まないので、積まないと「戻る」でアプリの外へ出たり、1 つ前の範囲へ帰ったりする）
- * タブでの切り替え・キオスクの自動切り替え・「戻る」で移るときは呼ばない（次のダッシュボードが今の履歴を書き換える・履歴が増え続けるため）。
+ * 利用者がタブ・左の一覧でダッシュボードを切り替えるときも呼ぶ（keepTimeRangeForNextDashboard から。積んだ履歴は次のダッシュボードが書き換える）。
+ * キオスクの自動切り替え・「戻る」で移るときは呼ばない（壁の画面で履歴が増え続ける・今の履歴は移った先のものであるため）。
  * ダッシュボードを開いていなければ、何もしない。
  */
 export function leaveDashboardInHistory() {
