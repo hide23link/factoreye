@@ -239,3 +239,91 @@ describe("ブラウザの「戻る」とダッシュボード", () => {
     expect(useUiStore.getState().selectedDashboardId).not.toBe("deleted");
   });
 });
+
+describe("ダッシュボードを切り替えた後の「戻る」", () => {
+  const HOUR = 60 * 60 * 1000;
+  /** 名前とグラフの題名だけが違うダッシュボード */
+  const board = (id: string, name: string): DashboardDetail => ({
+    ...dashboard,
+    id,
+    name,
+    widgets: [{ ...graph, id: `w-${id}`, dashboardId: id, config: { title: `${name}のグラフ` } }],
+  });
+  const boards = [board("d1", "ライン1"), board("d2", "ライン2"), board("d3", "ライン3")];
+
+  beforeEach(() => {
+    vi.mocked(api.fetchDashboards).mockResolvedValue(boards);
+    vi.mocked(api.fetchDashboard).mockImplementation(async (id) => boards.find((b) => b.id === id) ?? boards[0]);
+    useUiStore.setState({ selectedDashboardId: "d1" });
+  });
+
+  afterEach(() => {
+    localStorage.removeItem("factoreye_time_range");
+  });
+
+  /** 左の一覧で、ダッシュボードを切り替える */
+  async function switchTo(name: string) {
+    const list = await within(screen.getByRole("navigation", { name: "メインメニュー" })).findByRole("list", { name: "ダッシュボードの切り替え" });
+    act(() => within(list).getByRole("button", { name }).click());
+    expect(await screen.findByText(`${name}のグラフ`)).toBeInTheDocument();
+  }
+
+  it("A を（範囲を変えずに）B へ切り替え →「戻る」1 回で A に帰る（アプリの外へ出ない）", async () => {
+    localStorage.setItem("factoreye_time_range", JSON.stringify({ mode: "relative", durationMs: 6 * HOUR }));
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    const urlOfA = window.location.href;
+    await switchTo("ライン2");
+
+    act(() => window.history.back());
+
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    expect(useUiStore.getState().selectedDashboardId).toBe("d1");
+    expect(window.location.href).toBe(urlOfA);
+  });
+
+  it("A → B → C と切り替え →「戻る」で B、もう 1 回で A（出る直前の 24 時間）に帰る", async () => {
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    act(() => useTimeRangeStore.getState().pushRange({ mode: "relative", durationMs: 24 * HOUR }));
+    await switchTo("ライン2");
+    await switchTo("ライン3");
+
+    act(() => window.history.back());
+    expect(await screen.findByText("ライン2のグラフ")).toBeInTheDocument();
+    expect(useUiStore.getState().selectedDashboardId).toBe("d2");
+
+    act(() => window.history.back());
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    expect(useUiStore.getState().selectedDashboardId).toBe("d1");
+    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 24 * HOUR }));
+  });
+
+  it("B で範囲を変えていたら、B の中の範囲の履歴をたどってから A へ帰る", async () => {
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    await switchTo("ライン2");
+    act(() => useTimeRangeStore.getState().pushRange({ mode: "relative", durationMs: 12 * HOUR }));
+
+    act(() => window.history.back());
+    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).not.toEqual({ mode: "relative", durationMs: 12 * HOUR }));
+    expect(screen.getByText("ライン2のグラフ")).toBeInTheDocument();
+
+    act(() => window.history.back());
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+  });
+
+  it("全体監視から帰った後に「進む」を押しても、URL の範囲は消えない", async () => {
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    act(() => within(screen.getByRole("navigation", { name: "メインメニュー" })).getByRole("button", { name: "全体監視" }).click());
+    await vi.waitFor(() => expect(screen.queryByText("ライン1のグラフ")).not.toBeInTheDocument());
+    act(() => window.history.back());
+    expect(await screen.findByText("ライン1のグラフ")).toBeInTheDocument();
+    const search = window.location.search;
+
+    act(() => window.history.forward());
+    await vi.waitFor(() => expect(window.history.state).toEqual({ factoreyeDashboard: "d1" }));
+    expect(window.location.search).toBe(search);
+  });
+});
