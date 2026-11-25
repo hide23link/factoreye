@@ -120,26 +120,35 @@ describe("useTimeRangeStore の永続化", () => {
   });
 });
 
-describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲に戻る）", () => {
+describe("範囲の履歴（ブラウザの「戻る」で前の範囲に戻る）", () => {
   const HOUR = 60 * 60 * 1000;
   const zoomed = { mode: "absolute" as const, from: Date.parse("2026-11-25T00:00:00Z"), to: Date.parse("2026-11-25T01:00:00Z") };
   const zoomedMore = { mode: "absolute" as const, from: Date.parse("2026-11-25T00:15:00Z"), to: Date.parse("2026-11-25T00:45:00Z") };
+  const zoomedMost = { mode: "absolute" as const, from: Date.parse("2026-11-25T00:20:00Z"), to: Date.parse("2026-11-25T00:30:00Z") };
+  // 「戻る」でダッシュボードを開いた記録。開くときは、画面（DashboardView）と同じく initTimeRangeFromUrl を呼ぶ
+  let opened: string[] = [];
   let stop: () => void = () => {};
 
   /** 「戻る」を押して、popstate が届くまで待つ（jsdom では非同期に届く） */
   async function pressBack() {
-    const before = window.location.search;
+    const before = window.location.href;
     window.history.back();
-    await vi.waitFor(() => expect(window.location.search).not.toBe(before));
+    await vi.waitFor(() => expect(window.location.href).not.toBe(before));
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   beforeEach(() => {
-    stop = followBrowserBack();
+    opened = [];
+    stop = followBrowserBack((dashboardId) => {
+      opened.push(dashboardId);
+      initTimeRangeFromUrl(dashboardId);
+    });
+    initTimeRangeFromUrl("d1");
   });
 
   afterEach(() => {
     stop();
+    resetTimeRange("d1");
   });
 
   it("pushRange は履歴を 1 つ積み、setRange は積まない", () => {
@@ -151,7 +160,7 @@ describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲�
     expect(window.location.search).toContain("from=");
   });
 
-  it("拡大を 2 回したあと「戻る」を押すと、1 つ前の範囲、もう 1 回で最初の範囲に戻る", async () => {
+  it("拡大を 2 回したあと「戻る」を押すと、1 つ前の範囲、もう 1 回で最初の範囲に戻る（ダッシュボードは開き直さない）", async () => {
     useTimeRangeStore.getState().setRange({ mode: "relative", durationMs: 6 * HOUR });
     useTimeRangeStore.getState().pushRange(zoomed);
     useTimeRangeStore.getState().pushRange(zoomedMore);
@@ -160,6 +169,7 @@ describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲�
     expect(useTimeRangeStore.getState().range).toEqual(zoomed);
     await pressBack();
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * HOUR });
+    expect(opened).toEqual([]);
   });
 
   it("URL に範囲が無い履歴（ダッシュボードを開いたとき）に戻ったら、最後に見ていた直近の範囲にする", async () => {
@@ -169,6 +179,34 @@ describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲�
     await pressBack();
     expect(window.location.search).toBe("");
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 24 * HOUR });
+  });
+
+  it("開く→3 回拡大→別の画面へ→「戻る」1 回で、ダッシュボードに帰る（範囲は 2 回目の拡大）", async () => {
+    useTimeRangeStore.getState().pushRange(zoomed);
+    useTimeRangeStore.getState().pushRange(zoomedMore);
+    useTimeRangeStore.getState().pushRange(zoomedMost);
+    // 設定などの画面へ移る（画面の切り替えは URL を変えない。ダッシュボードを閉じる）
+    resetTimeRange("d1");
+    expect(window.location.search).toBe("");
+
+    await pressBack();
+    expect(opened).toEqual(["d1"]);
+    expect(useTimeRangeStore.getState().range).toEqual(zoomedMore);
+  });
+
+  it("別のダッシュボード（d2）へ移った後の「戻る」は、d1 を開き直し、d1 の範囲にする", async () => {
+    useTimeRangeStore.getState().pushRange(zoomed);
+    useTimeRangeStore.getState().pushRange(zoomedMore);
+    // d2 へ移る（d1 を閉じて d2 を開く）
+    resetTimeRange("d1");
+    initTimeRangeFromUrl("d2");
+
+    await pressBack();
+    // 画面では、d2 を閉じてから d1 を開く。移った先の履歴（d1 の範囲）は消さない
+    resetTimeRange("d2");
+    initTimeRangeFromUrl("d1");
+    expect(opened).toEqual(["d1"]);
+    expect(useTimeRangeStore.getState().range).toEqual(zoomed);
   });
 
   it("同じ範囲を pushRange しても、履歴は増やさない（拡大の上限に当たったときなど）", () => {
@@ -193,12 +231,10 @@ describe("拡大・移動の履歴（ブラウザの「戻る」で前の範囲�
     now.mockRestore();
   });
 
-  it("ダッシュボードを閉じた後（登録を外した後）は、「戻る」で範囲を変えない", async () => {
-    useTimeRangeStore.getState().pushRange(zoomed);
-    useTimeRangeStore.getState().pushRange(zoomedMore);
-    stop();
-
+  it("印の無い履歴（アプリのほかの画面）に戻っても、何もしない", async () => {
+    window.history.replaceState(null, "", "/dashboards/1?other=1");
+    window.history.pushState(null, "", "/dashboards/1?other=2");
     await pressBack();
-    expect(useTimeRangeStore.getState().range).toEqual(zoomedMore);
+    expect(opened).toEqual([]);
   });
 });

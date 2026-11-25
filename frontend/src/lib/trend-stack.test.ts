@@ -6,7 +6,6 @@ import {
   breakAtGaps,
   formatCursorTime,
   seriesLineRows,
-  softAxisValues,
   formatTick,
   formatTrendValue,
   gapThreshold,
@@ -370,40 +369,15 @@ describe("breakAtGaps・seriesLineRows（受信が止まった所の線を切る
 describe("formatCursorTime（カーソルの札の時刻）", () => {
   const time = new Date(2026, 10, 25, 10, 41, 23).getTime();
 
-  it("点の間隔が 1 分より短い（拡大した）ときは、秒まで出す", () => {
-    expect(formatCursorTime(time, 15 * 60_000, 1_800)).toBe("10:41:23");
-    expect(formatCursorTime(time, 6 * 3_600_000, 43_200)).toBe("10:41:23");
+  it("表示範囲が 1 時間より短い（拡大した）ときだけ、秒まで出す", () => {
+    expect(formatCursorTime(time, 15 * 60_000)).toBe("10:41:23");
+    expect(formatCursorTime(time, 59 * 60_000)).toBe("10:41:23");
   });
 
-  it("点の間隔が 1 分以上なら、今までどおり時:分（目盛りと同じ形）", () => {
-    expect(formatCursorTime(time, 24 * 3_600_000, 172_800)).toBe("10:41");
-    expect(formatCursorTime(time, 500 * 60_000, 60_000)).toBe("10:41");
-    expect(formatCursorTime(time, 3 * 24 * 3_600_000, 518_400)).toBe("11/25 10:41");
-  });
-});
-
-describe("softAxisValues（縦軸の目安。データがはみ出したら広げる）", () => {
-  it("データが目安の中なら、目安の両端を目盛りに含める", () => {
-    expect(softAxisValues([1012.1, 1012.6], 1000, 1025)).toEqual([1000, 1025]);
-  });
-
-  it("データが目安からはみ出しても、目安は入れる（はみ出した分は、データそのものが軸を広げる。線は切らない）", () => {
-    expect(softAxisValues([1020, 1030], 1000, 1025)).toEqual([1000, 1025]);
-    const values = [1020, 1030];
-    const soft = softAxisValues(values, 1000, 1025);
-    expect([Math.min(...values, ...soft), Math.max(...values, ...soft)]).toEqual([1000, 1030]);
-  });
-
-  it("片方だけの目安も使える", () => {
-    expect(softAxisValues([20, 25], 0, undefined)).toEqual([0]);
-    expect(softAxisValues([20, 25], undefined, 50)).toEqual([50]);
-  });
-
-  it("少しはみ出しただけ（目安の幅より近い）なら使う。大きく離れた行（単位の違うセンサー）には使わない。目安が無いときも何も足さない", () => {
-    expect(softAxisValues([1012, 1013], 1000, 1010)).toEqual([1000, 1010]);
-    expect(softAxisValues([24, 26], 1000, 1025)).toEqual([]);
-    expect(softAxisValues([1012, 1013], undefined, 50)).toEqual([]);
-    expect(softAxisValues([24, 26], undefined, undefined)).toEqual([]);
-    expect(softAxisValues([], 0, 10)).toEqual([]);
+  it("1 時間ちょうど・6 時間・24 時間は、今までどおり時:分（1 日を超えると日付つき）", () => {
+    expect(formatCursorTime(time, 60 * 60_000)).toBe("10:41");
+    expect(formatCursorTime(time, 6 * 3_600_000)).toBe("10:41");
+    expect(formatCursorTime(time, 24 * 3_600_000)).toBe("10:41");
+    expect(formatCursorTime(time, 3 * 24 * 3_600_000)).toBe("11/25 10:41");
   });
 });

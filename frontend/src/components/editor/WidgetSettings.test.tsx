@@ -196,14 +196,16 @@ describe("WidgetSettings: 計器グラフ", () => {
     expect(lastConfig().colors).toEqual([GRAPH_COLORS[1], GRAPH_COLORS[1]]);
   });
 
-  it("縦軸の目安（最小・最大）を入れると、ふつうのグラフと同じ yAxisMin・yAxisMax に保存する", async () => {
+  it("行ごとの縦軸の最小・最大を入れると、その行（センサー）の分だけ rowAxisRanges に保存する", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<WidgetSettings widget={trend} dashboard={dashboardOf(trend)} />);
 
-    await user.type(await screen.findByRole("spinbutton", { name: "縦軸の目安の最小" }), "1000{Enter}");
+    await user.type(await screen.findByRole("spinbutton", { name: "圧力の縦軸の最小" }), "1000{Enter}");
 
     await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
-    expect(lastConfig().yAxisMin).toBe(1000);
+    expect(lastConfig().rowAxisRanges).toEqual({ s2: { min: 1000 } });
+    // 1 組の欄（縦軸の目安）は無い
+    expect(screen.queryByRole("spinbutton", { name: /縦軸の目安/ })).not.toBeInTheDocument();
   });
 });
 

@@ -135,17 +135,19 @@ describe("TimeRangeControls", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("前へ・後ろへ・＋・－ は、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる）。期間のボタンは積まない", async () => {
+  it("期間のボタン・前へ・後ろへ・＋・－・今 は、どれもブラウザの履歴に積む（「戻る」で前の範囲に戻れる）", async () => {
     const user = userEvent.setup();
+    // ほかの試験が URL に書いた範囲を消してから始める（同じ URL への変更は、履歴を積まないため）
+    window.history.replaceState(null, "", "/");
     renderWithQueryClient(<TimeRangeControls />);
     const before = window.history.length;
 
     await user.click(screen.getByRole("button", { name: "直近 6 時間" }));
-    expect(window.history.length).toBe(before);
     await user.click(screen.getByRole("button", { name: "前へ" }));
     await user.click(screen.getByRole("button", { name: "拡大" }));
     await user.click(screen.getByRole("button", { name: "縮小" }));
     await user.click(screen.getByRole("button", { name: "後ろへ" }));
-    expect(window.history.length).toBe(before + 4);
+    await user.click(screen.getByRole("button", { name: "今に戻る" }));
+    expect(window.history.length).toBe(before + 6);
   });
 });

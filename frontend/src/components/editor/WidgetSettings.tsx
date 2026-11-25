@@ -29,6 +29,7 @@ import {
   type Aggregation,
   type AxisMode,
   type LegendPosition,
+  setRowAxisRange,
   type LineShape,
   type StackMode,
   type ThresholdMode,
@@ -836,7 +837,7 @@ function StateTimelineSettings({ widget, actions }: SectionProps) {
   );
 }
 
-/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）、値の小数の桁（空なら目盛りの間隔から自動）、縦軸の目安（空なら自動）。 */
+/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）、値の小数の桁（空なら目盛りの間隔から自動）、行ごとの縦軸の最小・最大（空なら自動）。 */
 function TrendStackSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const removeAt = (index: number) =>
@@ -847,6 +848,12 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
     });
   const moveAt = (index: number, delta: -1 | 1) =>
     void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+  const { data: sensors } = useSensors();
+  const nameOfSensor = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  const rowRanges = widget.config.rowAxisRanges;
+  // 最新のウィジェットの一覧に書き足す（続けて入力したとき、前の行の入力を古い表示で上書きしないため）
+  const changeRowAxis = (id: string, side: "min" | "max", value: number | null) =>
+    void actions.patchFromLatest(widget, (latest) => ({ config: { ...latest.config, rowAxisRanges: setRowAxisRange(latest.config.rowAxisRanges, id, side, value) } }));
 
   return (
     <>
@@ -874,17 +881,17 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
           onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? undefined })}
         />
       </Section>
-      {/* ふつうのグラフの「縦軸の最小・最大」と同じ設定（yAxisMin・yAxisMax）。計器グラフでは目安として使う（softAxisValues） */}
-      <Section title="縦軸の目安" note="空欄なら自動。値がはみ出したら広げます。目安から大きく離れた行（単位の違うセンサー）は自動のままです">
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-1 text-xs text-gray-500">
-            最小
-            <NumberField label="縦軸の目安の最小" value={widget.config.yAxisMin ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { yAxisMin: v ?? undefined })} />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-gray-500">
-            最大
-            <NumberField label="縦軸の目安の最大" value={widget.config.yAxisMax ?? null} allowEmpty placeholder="自動" onCommit={(v) => void changeConfig(actions, widget, { yAxisMax: v ?? undefined })} />
-          </label>
+      <Section title="縦軸（行ごと）" note="空欄の行は自動。値を入れた行は、その範囲で描き、値がはみ出したら広げます">
+        <div className="flex flex-col gap-2">
+          {ids.map((id) => (
+            <div key={id} className="grid grid-cols-[1fr_5.5rem_5.5rem] items-center gap-2 text-xs text-gray-500">
+              <span className="truncate" title={nameOfSensor(id)}>
+                {nameOfSensor(id)}
+              </span>
+              <NumberField label={`${nameOfSensor(id)}の縦軸の最小`} value={rowRanges?.[id]?.min ?? null} allowEmpty placeholder="最小" onCommit={(v) => changeRowAxis(id, "min", v)} />
+              <NumberField label={`${nameOfSensor(id)}の縦軸の最大`} value={rowRanges?.[id]?.max ?? null} allowEmpty placeholder="最大" onCommit={(v) => changeRowAxis(id, "max", v)} />
+            </div>
+          ))}
         </div>
       </Section>
     </>

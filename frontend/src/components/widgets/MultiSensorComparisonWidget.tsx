@@ -336,7 +336,9 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   // 5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
   const ownRows = (sensorId: string, i: number) => {
     if (stackId) return {};
-    const bucketMs = (results[i]?.data?.bucketSeconds ?? 0) * 1000 || (fetchBounds.to - fetchBounds.from) / GRAPH_BUCKETS;
+    // 区間の幅は、そのセンサーの取得結果から。まだ取れていなければ、表示範囲を区間の数で割った幅
+    const data = results[i]?.data;
+    const bucketMs = data ? data.bucketSeconds * 1000 : (fetchBounds.to - fetchBounds.from) / GRAPH_BUCKETS;
     return { data: seriesLineRows(chartData, sensorId, bucketMs), connectNulls: false };
   };
   const series = sensorIds.map((sensorId, i) => {

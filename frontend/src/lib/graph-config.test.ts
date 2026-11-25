@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Widget } from "../types";
 import { DEFAULT_RANGE } from "./timeRange";
 import {
+  setRowAxisRange,
   GRAPH_COLORS,
   effectiveBounds,
   effectiveRange,
@@ -454,5 +455,17 @@ describe("graphSensorMovePatch", () => {
     expect(graphSensorMovePatch(widget, 0, -1)).toBeNull();
     expect(graphSensorMovePatch(widget, 2, 1)).toBeNull();
     expect(graphSensorMovePatch(widget, 5, -1)).toBeNull();
+  });
+});
+
+describe("setRowAxisRange（計器グラフの行ごとの縦軸）", () => {
+  it("行の最小・最大を足し、ほかの行は残す", () => {
+    expect(setRowAxisRange(undefined, "s1", "min", 1000)).toEqual({ s1: { min: 1000 } });
+    expect(setRowAxisRange({ s1: { min: 1000 }, s2: { max: 50 } }, "s1", "max", 1025)).toEqual({ s1: { min: 1000, max: 1025 }, s2: { max: 50 } });
+  });
+
+  it("空欄にした側は消し、両方空になった行は一覧から消す（自動に戻る）", () => {
+    expect(setRowAxisRange({ s1: { min: 1000, max: 1025 } }, "s1", "min", null)).toEqual({ s1: { max: 1025 } });
+    expect(setRowAxisRange({ s1: { max: 1025 }, s2: { min: 0 } }, "s1", "max", null)).toEqual({ s2: { min: 0 } });
   });
 });

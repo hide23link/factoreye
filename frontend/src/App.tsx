@@ -30,6 +30,7 @@ import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { countDevicesAndSensors } from "./lib/overview";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
+import { followBrowserBack } from "./store/useTimeRangeStore";
 import { startThemeWatch, useThemeStore } from "./store/useThemeStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
@@ -377,6 +378,8 @@ function OverviewCounts() {
 function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashboardId: string | null }) {
   // 画面表示モード（キオスク）では、メニューと上の帯を隠す
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
+  // ブラウザの「戻る」で、グラフの範囲の履歴をたどる。ダッシュボードの外（設定など）から戻ったときは、そのダッシュボードを開く
+  useEffect(() => followBrowserBack((dashboardId) => useUiStore.getState().selectDashboard(dashboardId)), []);
 
   return (
     <div className="flex min-h-screen bg-gray-50 text-gray-900">
