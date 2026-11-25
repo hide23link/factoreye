@@ -239,6 +239,26 @@ function writtenInThisTab(): boolean {
 }
 
 /**
+ * ダッシュボードから、ほかの画面（設定・全体監視など）へ移る直前に呼ぶ: 範囲と印の無い履歴を 1 つ積む。
+ * 今の履歴（出る直前の範囲と印）を残すので、ほかの画面で「戻る」を 1 回押すと、出る直前の範囲でダッシュボードへ帰る。
+ * （ほかの画面は URL を変えず履歴も積まないので、積まないと「戻る」でアプリの外へ出たり、1 つ前の範囲へ帰ったりする）
+ * タブでの切り替え・キオスクの自動切り替え・「戻る」で移るときは呼ばない（次のダッシュボードが今の履歴を書き換える・履歴が増え続けるため）。
+ * ダッシュボードを開いていなければ、何もしない。
+ */
+export function leaveDashboardInHistory() {
+  if (openDashboardId === null) return;
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("range");
+    url.searchParams.delete("from");
+    url.searchParams.delete("to");
+    window.history.pushState(null, "", url.toString());
+  } catch {
+    // 履歴を触れない環境では、「戻る」でダッシュボードへ帰れないだけ
+  }
+}
+
+/**
  * ダッシュボードを閉じるとき: 画面の状態は既定に戻し、URL の範囲と印も消す。
  * localStorage の値は消さない（次に開いたとき、そこから復元するため）。
  * ただし「戻る」で別のダッシュボードの履歴に移って閉じるときは、今の履歴（移った先のもの）を消さない

@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { readGraphLinkFromUrl, type GraphLink } from "../lib/graph-link";
 import { writeLastDashboardId } from "../lib/last-dashboard";
 import { useRefreshStore } from "./useRefreshStore";
+import { leaveDashboardInHistory } from "./useTimeRangeStore";
 
 // 画面の種類: メイン（ダッシュボード）、全体監視、設定、セットアップガイド
 export type AppView = "main" | "overview" | "settings" | "wizard";
@@ -38,7 +39,7 @@ interface UiState {
 // ページを開いたときの URL。リンクなら、そのグラフの画面から始める（SaaS はログインの後も URL が残るので、同じ画面になる）
 const initialLink = readGraphLinkFromUrl();
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   view: "main",
   selectedDashboardId: null,
   openInEditMode: false,
@@ -55,7 +56,11 @@ export const useUiStore = create<UiState>((set) => ({
     writeLastDashboardId(id);
     set({ selectedDashboardId: id, view: "main", openInEditMode: false });
   },
-  setView: (view) => set({ view, kiosk: false, linkNotFound: false }),
+  setView: (view) => {
+    // ダッシュボードからほかの画面へ移るときは、履歴を 1 つ積む（「戻る」1 回で、出る直前の範囲のダッシュボードへ帰るため）
+    if (get().view === "main" && view !== "main") leaveDashboardInHistory();
+    set({ view, kiosk: false, linkNotFound: false });
+  },
   // ダッシュボードを選ぶ操作は常にメイン画面に戻る（設定/ウィザードから選択した場合も含む）
   // null は「選んでいない」状態に戻す（消したときなど）。DashboardHome が、最後に見たもの（無ければ先頭）を開く
   selectDashboard: (id, options) => {
