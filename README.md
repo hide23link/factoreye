@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/hide23link/factoreye/main/install/i
 公開済みの最新の版（v1.1.0 以降。[リリース](https://github.com/hide23link/factoreye/releases)・[変更履歴](CHANGELOG.md)）が入ります。
 
 1. 表示された URL をブラウザで開く（管理パスワードは一度しか出ないので控える）
-2. 左のメニュー（スマホは下のメニューの「ガイド」）の「セットアップガイド」に沿って、センサーを登録する
+2. 左のメニュー（スマホは下のメニュー）の「セットアップガイド」に沿って、センサーを登録する
 3. センサー側に [`clients/`](clients/) のライブラリかサンプルをコピーして、値を送る
 
 Mac / Windows（Docker Desktop）や、設定・更新・削除の方法は [`install/README.md`](install/README.md) を参照してください。
