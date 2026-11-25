@@ -844,7 +844,11 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
     void actions.patchFromLatest(widget, (latest) => {
       const latestIds = graphSensorIds(latest);
       const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
-      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+      const patch = graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+      // 外したセンサーの縦軸の最小・最大も消す（同じセンサーを入れ直したとき、前の値が戻ってこないように）
+      const rowAxisRanges = { ...latest.config.rowAxisRanges };
+      delete rowAxisRanges[latestIds[index]];
+      return { ...patch, config: { ...patch.config, rowAxisRanges } };
     });
   const moveAt = (index: number, delta: -1 | 1) =>
     void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});

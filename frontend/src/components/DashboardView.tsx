@@ -88,6 +88,8 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
 
   // 表示時間範囲: 開いたとき URL（あれば）、無ければ最後に見ていた範囲（localStorage）から読み、
   // 閉じたら画面の状態は既定に戻して URL からも消す（localStorage は残す）
+  // 開発時（StrictMode）は、この効果が「開く→閉じる→開く」と 2 回動く。そのため開発時だけ、「戻る」でここへ帰ったときの範囲が
+  // 最後に見ていた直近の範囲になる（1 回目の後始末で URL を消すため）。本番では 1 回だけ動き、帰った先の範囲になる
   useEffect(() => {
     initTimeRangeFromUrl(dashboardId);
     // 開くときも、グラフのカーソルを「今」から始める（ほかの画面で動かした時刻が、共有の時刻に残っていても引き継がない）

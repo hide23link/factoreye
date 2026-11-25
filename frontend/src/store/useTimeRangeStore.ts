@@ -204,7 +204,7 @@ export function keepTimeRangeForNextDashboard() {
  * ただし固定の期間（開始〜終了）は、このタブで書いたもの（再読み込み）だけを使う。ホーム画面のショートカットや
  * 新しいタブで開いた URL に残っていた固定の期間は、古い日時のままグラフが空になるので使わず、URL からも消す。
  * 無ければ、この端末で最後に見ていた範囲（localStorage）を使う。どちらも無ければ既定（直近 1 時間）。
- * dashboardId は開くダッシュボード。今の履歴に、このダッシュボードの印を付ける（出た後の「戻る」で帰れるように）。
+ * 決めた範囲は、今の履歴の URL に書く（例: ?range=6h）。dashboardId は開くダッシュボードで、その印も付ける（出た後の「戻る」で帰れるように）。
  */
 export function initTimeRangeFromUrl(dashboardId: string | null = null) {
   openDashboardId = dashboardId;
@@ -222,17 +222,11 @@ export function initTimeRangeFromUrl(dashboardId: string | null = null) {
   } catch {
     fromUrl = null;
   }
-  useTimeRangeStore.setState({ range: fromUrl ?? readStoredRange() ?? DEFAULT_RANGE });
-  markCurrentEntry();
-}
-
-/** 今の履歴に、開いているダッシュボードの印を付ける（URL は変えない） */
-function markCurrentEntry() {
-  try {
-    window.history.replaceState(historyMark(), "", window.location.href);
-  } catch {
-    // 履歴を触れない環境では、「戻る」でダッシュボードへ帰れないだけ
-  }
+  const range = fromUrl ?? readStoredRange() ?? DEFAULT_RANGE;
+  useTimeRangeStore.setState({ range });
+  // 開いたときの範囲も、今の履歴の URL に書く（印も付く）。書かないと、範囲を変えてから「戻る」で開いたときの履歴に戻ったとき、
+  // URL に範囲が無く、変えた後の範囲（localStorage）を読んでしまう（例: 6 時間で開く → 24 時間 → 戻る で 24 時間のまま）
+  writeUrl(range, "replace");
 }
 
 /** 今の URL の範囲が、このタブで書いたものか */

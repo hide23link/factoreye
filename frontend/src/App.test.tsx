@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { useThemeStore } from "./store/useThemeStore";
+import { useTimeRangeStore } from "./store/useTimeRangeStore";
 import { useUiStore } from "./store/useUiStore";
 import { renderWithQueryClient, screen, within } from "./test/test-utils";
 import type { DashboardDetail, Widget } from "./types";
@@ -158,5 +159,45 @@ describe("App の画面の分け方", () => {
 
     act(() => useUiStore.setState({ kiosk: false }));
     await vi.waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
+  });
+});
+
+describe("ブラウザの「戻る」とダッシュボード", () => {
+  const HOUR = 60 * 60 * 1000;
+  const NOW = Date.now();
+  const zoom = (hoursAgo: number) => ({ mode: "absolute" as const, from: NOW - hoursAgo * HOUR, to: NOW - (hoursAgo - 1) * HOUR });
+
+  it("開く→3 回拡大→全体監視へ→「戻る」1 回で、ダッシュボードに帰る", async () => {
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    act(() => {
+      useTimeRangeStore.getState().pushRange(zoom(5));
+      useTimeRangeStore.getState().pushRange(zoom(4));
+      useTimeRangeStore.getState().pushRange(zoom(3));
+    });
+
+    const rail = screen.getByRole("navigation", { name: "メインメニュー" });
+    act(() => within(rail).getByRole("button", { name: "全体監視" }).click());
+    await vi.waitFor(() => expect(screen.queryByText("炉の温度")).not.toBeInTheDocument());
+
+    act(() => window.history.back());
+
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    expect(useUiStore.getState().view).toBe("main");
+    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).toEqual(zoom(4)));
+  });
+
+  it("一覧に無い（消した）ダッシュボードの履歴に戻ったときは、何もしない（見つからない画面にしない）", async () => {
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    const rail = screen.getByRole("navigation", { name: "メインメニュー" });
+    act(() => within(rail).getByRole("button", { name: "全体監視" }).click());
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { factoreyeDashboard: "deleted" } }));
+    });
+
+    expect(useUiStore.getState().view).toBe("overview");
+    expect(useUiStore.getState().selectedDashboardId).not.toBe("deleted");
   });
 });

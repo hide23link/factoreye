@@ -63,14 +63,14 @@ describe("useTimeRangeStore の永続化", () => {
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 15 * 60 * 1000 });
   });
 
-  it("ホーム画面のショートカットなどで開いた URL の固定の期間は使わず、URL からも消して、最後の直近の範囲で開く", () => {
+  it("ホーム画面のショートカットなどで開いた URL の固定の期間は使わず、URL の固定の期間を消して、最後の直近の範囲で開く（URL はその範囲に書き換える）", () => {
     localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 }));
     setUrl("?from=2026-11-02T03:51:00.000Z&to=2026-11-02T04:06:00.000Z");
 
     initTimeRangeFromUrl();
 
     expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * 60 * 60 * 1000 });
-    expect(window.location.search).toBe("");
+    expect(window.location.search).toBe("?range=6h");
   });
 
   it("同じタブで選んだ固定の期間は、再読み込みしても URL から復元する", () => {
@@ -172,7 +172,26 @@ describe("範囲の履歴（ブラウザの「戻る」で前の範囲に戻る�
     expect(opened).toEqual([]);
   });
 
-  it("URL に範囲が無い履歴（ダッシュボードを開いたとき）に戻ったら、最後に見ていた直近の範囲にする", async () => {
+  it("開いたときの範囲を、今の履歴の URL に書く（印も付ける）", () => {
+    expect(window.location.search).toBe("?range=1h");
+    expect(window.history.state).toEqual({ factoreyeDashboard: "d1" });
+  });
+
+  it("6 時間で開く → 24 時間 → 「戻る」で 6 時間に戻る（直近の範囲どうしでも、開いたときの範囲へ戻れる）", async () => {
+    resetTimeRange("d1");
+    localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 6 * HOUR }));
+    initTimeRangeFromUrl("d1");
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * HOUR });
+
+    useTimeRangeStore.getState().pushRange({ mode: "relative", durationMs: 24 * HOUR });
+    await pressBack();
+
+    expect(window.location.search).toBe("?range=6h");
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * HOUR });
+  });
+
+  it("URL に範囲が無い履歴（以前の版で開いた履歴など）に戻ったら、最後に見ていた直近の範囲にする", async () => {
+    window.history.replaceState({ factoreyeDashboard: "d1" }, "", "/dashboards/1");
     localStorage.setItem(TIME_RANGE_KEY, JSON.stringify({ mode: "relative", durationMs: 24 * HOUR }));
     useTimeRangeStore.getState().pushRange(zoomed);
 
