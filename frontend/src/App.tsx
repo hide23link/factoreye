@@ -24,7 +24,7 @@ import { DashboardTabs } from "./components/DashboardTabs";
 import { NewSensorNotice } from "./components/NewSensorNotice";
 import { useAlarms, useDisplaySettings, useSensors } from "./hooks/queries";
 import { useNow } from "./hooks/useNow";
-import { fetchMe, logout, refreshTokens } from "./lib/api";
+import { fetchDashboards, fetchMe, logout, refreshTokens } from "./lib/api";
 import { clearAuthLinkFromUrl, parseAuthLinkHash } from "./lib/auth-link";
 import { clearGraphLinkFromUrl } from "./lib/graph-link";
 import { clearImpersonation, readImpersonation } from "./lib/impersonation";
@@ -381,14 +381,18 @@ function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashb
   // 画面表示モード（キオスク）では、メニューと上の帯を隠す
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
   // ブラウザの「戻る」で、グラフの範囲の履歴をたどる。ダッシュボードの外（設定など）から戻ったときは、そのダッシュボードを開く。
-  // 一覧に無い（消した・別の利用者の）ダッシュボードの履歴なら、何もしない（見つからない画面にしない）
+  // 一覧に無い（消した・別の利用者の）ダッシュボードの履歴なら、何もしない（見つからない画面にしない）。一覧を取れないときも開かない
   const queryClient = useQueryClient();
   useEffect(
     () =>
       followBrowserBack((dashboardId) => {
-        const dashboards = queryClient.getQueryData<Dashboard[]>(["dashboards"]);
-        if (dashboards && !dashboards.some((dashboard) => dashboard.id === dashboardId)) return;
-        useUiStore.getState().selectDashboard(dashboardId);
+        // 一覧は、取得済みならそれを使い、消えていれば（ほかの画面に長くいたなど）取り直してから確かめる。取れなければ開かない
+        void queryClient
+          .ensureQueryData<Dashboard[]>({ queryKey: ["dashboards"], queryFn: fetchDashboards })
+          .then((dashboards) => {
+            if (dashboards.some((dashboard) => dashboard.id === dashboardId)) useUiStore.getState().selectDashboard(dashboardId);
+          })
+          .catch(() => undefined);
       }),
     [queryClient],
   );

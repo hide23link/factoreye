@@ -72,6 +72,9 @@ const bucketAgo = (minutesAgo: number, value: number, max = value, min = value) 
 });
 
 beforeEach(() => {
+  // 時計を分の途中に止める（試験の途中で分が変わると、「時:分」の比べ方が揺れるため。止めるのは Date だけで、タイマーは本物）
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-25T03:30:20.000Z"));
   useGraphViewStore.setState({ showBands: true, compare: "none" });
   useCursorTimeStore.getState().reset();
   useTrendCursorStore.getState().clearAll();
@@ -80,6 +83,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cancelPendingCursorTime();
   vi.restoreAllMocks();
 });

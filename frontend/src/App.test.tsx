@@ -165,9 +165,48 @@ describe("App の画面の分け方", () => {
 describe("ブラウザの「戻る」とダッシュボード", () => {
   const HOUR = 60 * 60 * 1000;
   const NOW = Date.now();
+
+  afterEach(() => {
+    localStorage.removeItem("factoreye_time_range");
+  });
   const zoom = (hoursAgo: number) => ({ mode: "absolute" as const, from: NOW - hoursAgo * HOUR, to: NOW - (hoursAgo - 1) * HOUR });
 
-  it("開く→3 回拡大→全体監視へ→「戻る」1 回で、ダッシュボードに帰る", async () => {
+  /** 左のメニューで、ほかの画面へ移る */
+  async function goTo(name: string, gone = "炉の温度") {
+    const rail = screen.getByRole("navigation", { name: "メインメニュー" });
+    act(() => within(rail).getByRole("button", { name }).click());
+    await vi.waitFor(() => expect(screen.queryByText(gone)).not.toBeInTheDocument());
+  }
+
+  it("開く→（範囲を変えずに）全体監視へ→「戻る」1 回で、ダッシュボードに帰る（アプリの外へ出ない）", async () => {
+    localStorage.setItem("factoreye_time_range", JSON.stringify({ mode: "relative", durationMs: 6 * HOUR }));
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    const urlBefore = window.location.href;
+    await goTo("全体監視");
+
+    act(() => window.history.back());
+
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    expect(window.location.href).toBe(urlBefore);
+    expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 6 * HOUR });
+  });
+
+  it("6 時間 → 24 時間 → 全体監視へ →「戻る」1 回で、出る直前の 24 時間で帰る", async () => {
+    localStorage.setItem("factoreye_time_range", JSON.stringify({ mode: "relative", durationMs: 6 * HOUR }));
+    renderWithQueryClient(<App />);
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    act(() => useTimeRangeStore.getState().pushRange({ mode: "relative", durationMs: 24 * HOUR }));
+    await goTo("全体監視");
+
+    act(() => window.history.back());
+
+    expect(await screen.findByText("炉の温度")).toBeInTheDocument();
+    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).toEqual({ mode: "relative", durationMs: 24 * HOUR }));
+    expect(window.location.search).toBe("?range=24h");
+  });
+
+  it("開く→3 回拡大→全体監視へ→「戻る」1 回で、出る直前（3 回目の拡大）の範囲でダッシュボードに帰る", async () => {
     renderWithQueryClient(<App />);
     expect(await screen.findByText("炉の温度")).toBeInTheDocument();
     act(() => {
@@ -176,15 +215,13 @@ describe("ブラウザの「戻る」とダッシュボード", () => {
       useTimeRangeStore.getState().pushRange(zoom(3));
     });
 
-    const rail = screen.getByRole("navigation", { name: "メインメニュー" });
-    act(() => within(rail).getByRole("button", { name: "全体監視" }).click());
-    await vi.waitFor(() => expect(screen.queryByText("炉の温度")).not.toBeInTheDocument());
+    await goTo("全体監視");
 
     act(() => window.history.back());
 
     expect(await screen.findByText("炉の温度")).toBeInTheDocument();
     expect(useUiStore.getState().view).toBe("main");
-    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).toEqual(zoom(4)));
+    await vi.waitFor(() => expect(useTimeRangeStore.getState().range).toEqual(zoom(3)));
   });
 
   it("一覧に無い（消した）ダッシュボードの履歴に戻ったときは、何もしない（見つからない画面にしない）", async () => {
@@ -196,6 +233,7 @@ describe("ブラウザの「戻る」とダッシュボード", () => {
     act(() => {
       window.dispatchEvent(new PopStateEvent("popstate", { state: { factoreyeDashboard: "deleted" } }));
     });
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(useUiStore.getState().view).toBe("overview");
     expect(useUiStore.getState().selectedDashboardId).not.toBe("deleted");
