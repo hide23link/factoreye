@@ -29,6 +29,7 @@ import {
   type Aggregation,
   type AxisMode,
   type LegendPosition,
+  setRowAxisRange,
   type LineShape,
   type StackMode,
   type ThresholdMode,
@@ -836,17 +837,27 @@ function StateTimelineSettings({ widget, actions }: SectionProps) {
   );
 }
 
-/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）と、値の小数の桁（空なら目盛りの間隔から自動）。 */
+/** 計器グラフの設定。センサー（複数。1 センサーが 1 行）、値の小数の桁（空なら目盛りの間隔から自動）、行ごとの縦軸の最小・最大（空なら自動）。 */
 function TrendStackSettings({ widget, actions }: SectionProps) {
   const ids = graphSensorIds(widget);
   const removeAt = (index: number) =>
     void actions.patchFromLatest(widget, (latest) => {
       const latestIds = graphSensorIds(latest);
       const keep = latestIds.map((_, i) => i).filter((i) => i !== index);
-      return graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+      const patch = graphSensorPatch(latest, keep.map((i) => latestIds[i]), keep);
+      // 外したセンサーの縦軸の最小・最大も消す（同じセンサーを入れ直したとき、前の値が戻ってこないように）
+      const rowAxisRanges = { ...latest.config.rowAxisRanges };
+      delete rowAxisRanges[latestIds[index]];
+      return { ...patch, config: { ...patch.config, rowAxisRanges } };
     });
   const moveAt = (index: number, delta: -1 | 1) =>
     void actions.patchFromLatest(widget, (latest) => graphSensorMovePatch(latest, index, delta) ?? {});
+  const { data: sensors } = useSensors();
+  const nameOfSensor = (id: string) => sensors?.find((s) => s.id === id)?.name ?? id;
+  const rowRanges = widget.config.rowAxisRanges;
+  // 最新のウィジェットの一覧に書き足す（続けて入力したとき、前の行の入力を古い表示で上書きしないため）
+  const changeRowAxis = (id: string, side: "min" | "max", value: number | null) =>
+    void actions.patchFromLatest(widget, (latest) => ({ config: { ...latest.config, rowAxisRanges: setRowAxisRange(latest.config.rowAxisRanges, id, side, value) } }));
 
   return (
     <>
@@ -873,6 +884,19 @@ function TrendStackSettings({ widget, actions }: SectionProps) {
           unit="桁"
           onCommit={(v) => void changeConfig(actions, widget, { decimals: v ?? undefined })}
         />
+      </Section>
+      <Section title="縦軸（行ごと）" note="空欄の行は自動。値を入れた行は、その範囲で描き、値がはみ出したら広げます">
+        <div className="flex flex-col gap-2">
+          {ids.map((id) => (
+            <div key={id} className="grid grid-cols-[1fr_5.5rem_5.5rem] items-center gap-2 text-xs text-gray-500">
+              <span className="truncate" title={nameOfSensor(id)}>
+                {nameOfSensor(id)}
+              </span>
+              <NumberField label={`${nameOfSensor(id)}の縦軸の最小`} value={rowRanges?.[id]?.min ?? null} allowEmpty placeholder="最小" onCommit={(v) => changeRowAxis(id, "min", v)} />
+              <NumberField label={`${nameOfSensor(id)}の縦軸の最大`} value={rowRanges?.[id]?.max ?? null} allowEmpty placeholder="最大" onCommit={(v) => changeRowAxis(id, "max", v)} />
+            </div>
+          ))}
+        </div>
       </Section>
     </>
   );

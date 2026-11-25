@@ -13,6 +13,7 @@
  * スマホは下のメニュー。色は theme.css（画面の明るさは 設定 › 表示）。
  * リンク（?dashboard=…&graph=…&range=…m）で開いたときは、ヘッダー・メニューを出さず、そのグラフ 1 つの画面（GraphLinkView）を出す。
  */
+import { useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useState } from "react";
 
 import { LinkWhileLoggedIn } from "./components/auth/LinkWhileLoggedIn";
@@ -30,10 +31,12 @@ import { clearImpersonation, readImpersonation } from "./lib/impersonation";
 import { countDevicesAndSensors } from "./lib/overview";
 import { getStoredRefreshToken, useAuthStore } from "./store/useAuthStore";
 import { useHealthStore } from "./store/useHealthStore";
+import { followBrowserBack } from "./store/useTimeRangeStore";
 import { startThemeWatch, useThemeStore } from "./store/useThemeStore";
 import { useUiStore } from "./store/useUiStore";
 import type { AppView } from "./store/useUiStore";
 import type { LegalKind } from "./components/LegalPage";
+import type { Dashboard } from "./types";
 import { ChunkErrorBoundary } from "./components/ChunkErrorBoundary";
 import { lazyNamed } from "./lib/lazyWithRetry";
 
@@ -377,6 +380,18 @@ function OverviewCounts() {
 function MainShell({ view, selectedDashboardId }: { view: AppView; selectedDashboardId: string | null }) {
   // 画面表示モード（キオスク）では、メニューと上の帯を隠す
   const kiosk = useUiStore((s) => s.kiosk) && view === "main" && selectedDashboardId !== null;
+  // ブラウザの「戻る」で、グラフの範囲の履歴をたどる。ダッシュボードの外（設定など）から戻ったときは、そのダッシュボードを開く。
+  // 一覧に無い（消した・別の利用者の）ダッシュボードの履歴なら、何もしない（見つからない画面にしない）
+  const queryClient = useQueryClient();
+  useEffect(
+    () =>
+      followBrowserBack((dashboardId) => {
+        const dashboards = queryClient.getQueryData<Dashboard[]>(["dashboards"]);
+        if (dashboards && !dashboards.some((dashboard) => dashboard.id === dashboardId)) return;
+        useUiStore.getState().selectDashboard(dashboardId);
+      }),
+    [queryClient],
+  );
 
   return (
     <div className="flex min-h-screen bg-gray-50 text-gray-900">

@@ -53,7 +53,8 @@ function presetKeyOf(range: TimeRange): string | null {
 
 export function TimeRangeControls({ className = "mb-3" }: { className?: string } = {}) {
   const range = useTimeRangeStore((s) => s.range);
-  const setRange = useTimeRangeStore((s) => s.setRange);
+  // ここでの範囲の変更（期間のボタン・◀ ▶ ＋ －・今・一時停止・期間の指定）は、すべてブラウザの履歴に積む（「戻る」で前の範囲に戻れる）
+  const pushRange = useTimeRangeStore((s) => s.pushRange);
   // グラフと同じ間隔（30 秒）で更新する（短いと、グラフの描き直しが増えて見にくくなる）
   // 再描画の合図（30 秒ごと）。計算に使う時刻は、操作の時点の現在時刻にする
   useLiveNow(LIVE_CHART_INTERVAL_MS);
@@ -83,7 +84,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
       return;
     }
     setError(null);
-    setRange(next);
+    pushRange(next);
   };
 
   return (
@@ -92,7 +93,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
         <button
           type="button"
           aria-label="前へ"
-          onClick={() => setRange(panRange(range, -1, now, maxMs))}
+          onClick={() => pushRange(panRange(range, -1, now, maxMs))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           ◀
@@ -100,7 +101,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
         <button
           type="button"
           aria-label="今に戻る"
-          onClick={() => setRange(nowRange(range, now))}
+          onClick={() => pushRange(nowRange(range, now))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           今
@@ -110,7 +111,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
             type="button"
             aria-label="一時停止"
             // 今の表示範囲を固定して、動きを止める（再開は「今」で、直近モードに戻す）
-            onClick={() => setRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
+            onClick={() => pushRange({ mode: "absolute", from: bounds.from, to: bounds.to })}
             className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
           >
             一時停止
@@ -119,7 +120,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
         <button
           type="button"
           aria-label="後ろへ"
-          onClick={() => setRange(panRange(range, 1, now, maxMs))}
+          onClick={() => pushRange(panRange(range, 1, now, maxMs))}
           className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
         >
           ▶
@@ -128,7 +129,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
           <button
             type="button"
             aria-label="縮小"
-            onClick={() => setRange(zoomRange(range, 2, now, maxMs))}
+            onClick={() => pushRange(zoomRange(range, 2, now, maxMs))}
             className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
           >
             －
@@ -136,7 +137,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
           <button
             type="button"
             aria-label="拡大"
-            onClick={() => setRange(zoomRange(range, 0.5, now, maxMs))}
+            onClick={() => pushRange(zoomRange(range, 0.5, now, maxMs))}
             className="min-h-10 rounded border border-gray-300 px-3 py-2 hover:bg-gray-100 sm:min-h-0 sm:px-2 sm:py-1"
           >
             ＋
@@ -156,7 +157,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
               type="button"
               aria-pressed={active}
               aria-label={preset.label}
-              onClick={() => setRange({ mode: "relative", durationMs: preset.durationMs })}
+              onClick={() => pushRange({ mode: "relative", durationMs: preset.durationMs })}
               className={`min-h-10 border-r border-gray-300 px-2.5 font-num text-xs last:border-r-0 sm:min-h-0 sm:py-1 ${
                 active ? "bg-blue-50 font-bold text-blue-700 shadow-[inset_0_-2px_0_rgb(var(--blue-600))]" : "text-gray-600 hover:bg-gray-100"
               }`}
@@ -183,7 +184,7 @@ export function TimeRangeControls({ className = "mb-3" }: { className?: string }
           value={visiblePresetKey ?? "custom"}
           onChange={(event) => {
             const preset = PRESETS.find((p) => p.key === event.target.value);
-            if (preset) setRange({ mode: "relative", durationMs: preset.durationMs });
+            if (preset) pushRange({ mode: "relative", durationMs: preset.durationMs });
           }}
           className="rounded border border-gray-300 px-2 py-1"
         >

@@ -12,18 +12,28 @@
  * グラフの上でマウスを動かす（スマホはタップ・ドラッグ）と、その位置に動き、マウスが外れてもその位置に残る。時刻は、縦線の真下（時間の軸の行）に札で出す。
  * カーソルの時刻は、同じダッシュボードのすべてのグラフ（ふつうのグラフ・複数のグラフも）と共有する（useCursorTimeStore）。
  * 見出しの「今に戻す」で、現在位置に戻す。
+ * カーソルの時刻の札は、表示範囲が 1 時間より短いとき（拡大したとき）だけ秒まで出す（formatCursorTime）。
+ * マウスでの時間の操作（指の端末では、なぞるとカーソルが動くだけ）:
+ * - 押したまま横に動かす → 範囲を選び（水色の薄い帯）、離すとその範囲に拡大する。6px 未満は、ただのクリックとして無視する
+ * - Ctrl（⌘）＋ホイール → カーソルの位置を中心に拡大・縮小（useCursorZoom）
+ * - ダブルクリック → その位置を中心に 2 倍に縮小
+ * - 下の時刻の軸を横にドラッグ → 左右に移動（幅はそのまま。ドラッグ中は線をずらして見せるだけで、離したときに範囲を変えて取り直す）
+ * 操作の中身は hooks/useTrendStackZoom.ts（useSelectZoom・useAxisPan）。
+ * どれも、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる。useTimeRangeStore）。ウィジェット固有の期間・リンクの一覧の中では、期間を変えない。
+ * 縦軸は、行（センサー）ごとの最小・最大の設定（config.rowAxisRanges）があれば、その範囲で描く。データがはみ出したら広げる（soft）。
  * カーソルの時刻と各行の値は useTrendCursorStore に出し、同じ画面の警報の欄の下に「カーソルの時刻の値」として並ぶ。
  *
  * 【誰が使うか】WidgetCard.tsx が、ウィジェットの種類が "TrendStack" のときに出す。
  * 【引数（props）】widget = このウィジェット（センサーは config.sensorIds、先頭は sensorId にも入る）。WidgetCard が渡す。
  * 表示範囲は、ほかのグラフと同じく画面上部の時間の操作（useTimeRangeStore）に従う。
  */
-import { memo, useEffect, useMemo, useRef, type PointerEvent, type ReactNode } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { useDownsampledReadings, useLatestReadings, useSensors } from "../../hooks/queries";
 import { useElementSize } from "../../hooks/useElementSize";
 import { useLiveNow } from "../../hooks/useLiveNow";
-import { useWidgetRange } from "../../hooks/useWidgetRange";
+import { useAxisPan, useSelectZoom, type PlotPointerHandlers } from "../../hooks/useTrendStackZoom";
+import { LinkRangeContext, useWidgetRange } from "../../hooks/useWidgetRange";
 import { graphColor, graphDataOptions, graphSensorIds, type Aggregation } from "../../lib/graph-config";
 import { maxRangeForBuild, resolveRange, type ResolvedRange } from "../../lib/timeRange";
 import {
@@ -34,6 +44,7 @@ import {
   estimateTextWidth,
   describeSpanShort,
   formatRangeJst,
+  formatCursorTime,
   formatTick,
   formatTickTime,
   formatTrendValue,
@@ -68,7 +79,7 @@ import { compareAvailability, describeCompare, shiftPointsForward, shiftRange, t
 import { useCompareReadings } from "../../hooks/useCompareReadings";
 import { bandAt, computeBands, describeBand, toBandSamples, type AlarmBand } from "../../lib/threshold-bands";
 import { useGraphViewStore } from "../../store/useGraphViewStore";
-import { requestCursorTime, useCursorTimeStore } from "../../store/useCursorTimeStore";
+import { useCursorTimeStore } from "../../store/useCursorTimeStore";
 import { useTrendCursorStore } from "../../store/useTrendCursorStore";
 import type { Reading, Sensor, Widget } from "../../types";
 import { GraphViewControls } from "./GraphViewControls";
@@ -117,7 +128,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   const ticks = useMemo(() => timeTicks(bounds.from, bounds.to, maxTimeTicks(axisWidth)), [bounds, axisWidth]);
   // 時間の軸の行に出す、カーソルの時刻の札の位置（軸の幅が測れる前は、標準の幅 600px で決める）
   const plotWidth = axisWidth > 0 ? axisWidth : 600;
-  const timeText = formatTickTime(shownCursor, span);
+  const timeText = formatCursorTime(shownCursor, span);
   const timeLabel = placeTimeLabel(
     (xPercent(shownCursor, bounds.from, bounds.to) / 100) * plotWidth,
     estimateTextWidth(timeText, 12) + 12,
@@ -132,20 +143,14 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
   // この計器グラフが消えたら、この計器グラフの分だけ取り下げる（ほかの計器グラフの分は残す）
   useEffect(() => () => useTrendCursorStore.getState().clear(widget.id), [widget.id]);
 
-  // 動かした位置を、共有のカーソルの時刻にする（グラフの 1 区間に丸め、描画 1 回にまとめる）。
-  // マウスが外れても、指を離しても、カーソルはその位置に残す（勝手に今へ戻さない。戻すのは「今に戻す」）。
-  // 行（TrendRow）に渡すので、範囲が変わらないかぎり同じ関数を使い続ける
-  const pointer = useMemo<PlotPointerHandlers>(() => {
-    const moveCursor = (event: PointerEvent<HTMLDivElement>) => {
-      const box = event.currentTarget.getBoundingClientRect();
-      // 幅が分からない（描く前など）ときは、時刻を決められないので何もしない
-      if (box.width <= 0) return;
-      const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-      requestCursorTime(bounds.from + ratio * (bounds.to - bounds.from), (bounds.to - bounds.from) / GRAPH_BUCKETS, widget.id);
-    };
-    return { onPointerMove: moveCursor, onPointerDown: moveCursor };
-  }, [bounds, widget.id]);
-
+  // マウスでの拡大・縮小・移動（範囲を選ぶ帯・ホイール・ダブルクリック・時刻の軸のドラッグ。hooks/useTrendStackZoom.ts）。
+  // ダッシュボードの期間を変えるのは、ダッシュボードの期間で描いているときだけ。ウィジェット固有の期間・リンクの一覧の中は、カーソルだけ動く
+  const inLinkList = useContext(LinkRangeContext) !== null;
+  const hasOwnHours = (widget.config.rangeHours ?? 0) > 0;
+  const canChangeRange = !inLinkList && !hasOwnHours;
+  const zoomInput = { range, bounds, now, widgetId: widget.id, canChangeRange };
+  const select = useSelectZoom(zoomInput);
+  const pan = useAxisPan(zoomInput);
   if (ids.length === 0) {
     return <p className="text-sm text-gray-500">センサーが設定されていません（編集で、センサーをこのウィジェットに入れてください）</p>;
   }
@@ -176,7 +181,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
         {cursorIsMine && (
           <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
             <span className="rounded-sm px-1.5 font-num font-bold" style={{ background: INK, color: "var(--fe-panel)" }} aria-live="polite">
-              カーソル {formatTickTime(shownCursor, span)}
+              カーソル {timeText}
             </span>
             {/* 動かしたあとだけ出る。全グラフのカーソルを、現在位置（右端）に戻す */}
             {cursorTime !== null && (
@@ -187,7 +192,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
           </span>
         )}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div ref={select.wheelRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {ids.map((id, index) => (
           <TrendRow
             key={id}
@@ -204,16 +209,29 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
             order={index}
             lineColor={graphColor(widget, index)}
             ticks={ticks}
-            pointer={pointer}
+            pointer={select.pointer}
+            selection={select.selection}
+            shiftPx={pan.shiftPx}
             showBands={showBands}
             compareMode={compareMode}
+            axisMin={widget.config.rowAxisRanges?.[id]?.min}
+            axisMax={widget.config.rowAxisRanges?.[id]?.max}
           />
         ))}
       </div>
       <div className="trend-row border-t" style={{ borderColor: "var(--fe-line)" }} aria-hidden="true">
         <span className="trend-side" />
         <span />
-        <div ref={axisRef} className="relative h-5 font-num text-[11px]" style={{ color: MUTED }}>
+        {/* マウスで横にドラッグすると、左右に移動する（期間を変えられるときだけ、つかむ形のマウスカーソルにする） */}
+        <div
+          ref={axisRef}
+          className={`relative h-5 select-none font-num text-[11px] ${canChangeRange ? "cursor-grab active:cursor-grabbing" : ""} ${pan.shiftPx !== 0 ? "overflow-hidden" : ""}`}
+          style={{ color: MUTED }}
+          data-testid="trend-time-axis"
+          {...pan.axisPointer}
+        >
+          {/* ドラッグ中は、目盛りとカーソルの札を、線と同じだけ横にずらす */}
+          <div className="absolute inset-0" style={pan.shiftPx !== 0 ? { transform: `translateX(${pan.shiftPx}px)` } : undefined}>
           {ticks.map((time) => {
             // 時刻の札と重なる目盛りの文字は薄くする（札を優先）
             const tickText = formatTickTime(time, span);
@@ -238,6 +256,7 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
           >
             {timeText}
           </span>
+          </div>
         </div>
         <span className="pr-2 pt-0.5 text-right text-[11px]" style={{ color: MUTED }}>
           今
@@ -245,12 +264,6 @@ export function TrendStackWidget({ widget }: { widget: Widget }) {
       </div>
     </div>
   );
-}
-
-/** グラフの上の操作（マウスを動かす・指で触れる）で、カーソルの時刻を更新する */
-interface PlotPointerHandlers {
-  onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
-  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
 }
 
 interface RowProps {
@@ -273,10 +286,17 @@ interface RowProps {
   lineColor: string;
   ticks: number[];
   pointer: PlotPointerHandlers;
+  /** マウスで選んでいる範囲（離すとその範囲に拡大する）。選んでいなければ null */
+  selection: ResolvedRange | null;
+  /** 時刻の軸をドラッグしている間、線を横にずらす px（していなければ 0） */
+  shiftPx: number;
   /** 警報の帯を重ねるか */
   showBands: boolean;
   /** 重ねる比較（なし・昨日・先週）。使えない範囲のときは、呼ぶ側が「なし」にして渡す */
   compareMode: CompareMode;
+  /** この行の縦軸の最小・最大（設定の rowAxisRanges）。無ければ undefined（自動） */
+  axisMin: number | undefined;
+  axisMax: number | undefined;
 }
 
 /**
@@ -285,7 +305,7 @@ interface RowProps {
  * 線・目盛り・しきい値の絵は PlotStatic に分け、カーソルが動くだけでは描き直さない。
  * React.memo で、親の描き直しのうち、この行に関係する値（props）が変わらないものでは、行ごと飛ばす。
  */
-const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, lineColor, ticks, pointer, showBands, compareMode }: RowProps) {
+const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live, refreshMs, aggregation, decimals, cursor, widgetId, order, lineColor, ticks, pointer, selection, shiftPx, showBands, compareMode, axisMin, axisMax }: RowProps) {
   const { data, isError, refetch } = useDownsampledReadings(sensorId, bounds, GRAPH_BUCKETS, live, refreshMs);
   // 行の高さに合わせて目盛りの数を決める（1 目盛りに 22px 以上。スマホの低い行で数字が重ならないように）
   // 比較の線のデータ。同じ間引き API を、範囲をずらして取る（取れなくても、今の線には影響しない）
@@ -296,8 +316,11 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
   const name = sensor?.name ?? "センサー";
   const unit = sensor?.unit ?? "";
   const model = useMemo(
-    () => (data ? buildRowModel({ data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData: compareMode === "none" ? undefined : compareData, compareMode }) : null),
-    [data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode],
+    () =>
+      data
+        ? buildRowModel({ data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData: compareMode === "none" ? undefined : compareData, compareMode, axisMin, axisMax })
+        : null,
+    [data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode, axisMin, axisMax],
   );
 
   if (!data || !model) {
@@ -370,7 +393,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
           )}
         </RowSide>
         <YAxis scale={scale} unit={unit} />
-        <PlotBox pointer={pointer}>
+        <PlotBox pointer={pointer} shiftPx={shiftPx}>
           {(plot) => {
             // 札の位置（px）。カーソルの札を先に決め、最高・最低の札はそれと重ならないよう置く
             const cursorText = cursorPoint ? `${format(cursorPoint.value)} ${unit}` : "データなし";
@@ -423,6 +446,7 @@ const TrendRow = memo(function TrendRow({ sensorId, sensor, latest, bounds, live
                   </>
                 )}
                 <Cursor time={cursor} point={cursorPoint} scale={scale} bounds={bounds} box={cursorBox} text={cursorText} />
+                {selection && <SelectionBand selection={selection} bounds={bounds} />}
                 {notes.map((note, i) => (
                   <span
                     key={note.text}
@@ -504,8 +528,11 @@ function buildRowModel(input: {
   /** 比較側のデータ（範囲をずらして取ったもの）。比較しない・まだ取れていないときは undefined */
   compareData: RowData | undefined;
   compareMode: CompareMode;
+  /** この行の縦軸の最小・最大（soft。データがはみ出したら広げる） */
+  axisMin: number | undefined;
+  axisMax: number | undefined;
 }): RowModel {
-  const { data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode } = input;
+  const { data, aggregation, sensor, latest, bounds, live, maxIntervals, decimals, unit, compareData, compareMode, axisMin, axisMax } = input;
   // 区間の中央の時刻は、表示の右端（今）より後にしない（最後の区間は、まだ終わっていないため）
   const points = toPoints(data.buckets, data.bucketSeconds, aggregation, bounds.to);
   const stats = trendStats(data.buckets, data.bucketSeconds, points, bounds.to);
@@ -518,9 +545,11 @@ function buildRowModel(input: {
   const compareStats = compareData ? trendStats(compareData.buckets, compareData.bucketSeconds, comparePoints, bounds.to) : null;
   const compareExtra = compareStats ? [compareStats.min.value, compareStats.max.value] : [];
   const baseExtra = stats ? [stats.min.value, stats.max.value] : latest ? [latest.value] : [0, 1];
-  // 縦軸の範囲は、今日と比較の両方が入るようにそろえる
+  // 縦軸の範囲は、今日と比較の両方が入るようにそろえる。この行の最小・最大の設定があれば、その値も入れる
+  // （soft: 設定の範囲で描き、データがはみ出したら、データに合わせて広がる。線は切らない）
   const extra = [...baseExtra, ...compareExtra];
-  const scale = niceScale(Math.min(...extra, ...limitValues), Math.max(...extra, ...limitValues), maxIntervals);
+  const soft = [axisMin, axisMax].filter((value): value is number => value !== undefined);
+  const scale = niceScale(Math.min(...extra, ...limitValues, ...soft), Math.max(...extra, ...limitValues, ...soft), maxIntervals);
   const bucketMs = data.bucketSeconds * 1000;
   const now = nowPoint(stats?.last ?? null, latest, live);
   // 直近の表示で、最後の受信が古いときは「受信なし」。固定の期間（過去を見ている）ときは判定しない
@@ -628,6 +657,19 @@ function BandStripes({ bands, bounds }: { bands: ReadonlyArray<AlarmBand>; bound
         );
       })}
     </>
+  );
+}
+
+/** マウスで選んでいる範囲（離すとその範囲に拡大する）。水色の薄い帯で、全行に同じ範囲を出す */
+function SelectionBand({ selection, bounds }: { selection: ResolvedRange; bounds: ResolvedRange }) {
+  const left = xPercent(selection.from, bounds.from, bounds.to);
+  return (
+    <span
+      data-testid="zoom-selection"
+      className="pointer-events-none absolute inset-y-0"
+      style={{ left: `${left}%`, width: `${xPercent(selection.to, bounds.from, bounds.to) - left}%`, background: CYAN, opacity: 0.15 }}
+      aria-hidden="true"
+    />
   );
 }
 
@@ -836,23 +878,29 @@ function Cursor({ time, point, scale, bounds, box, text }: { time: number; point
 }
 
 /**
- * グラフの枠（マウス・指の操作を受ける）。枠の大きさ（px）を測って、中身（札の置き場所の計算）に渡す。
+ * グラフの枠（マウス・指の操作を受ける。操作の中身は hooks/useTrendStackZoom.ts の useSelectZoom）。
+ * shiftPx は、時刻の軸をドラッグしている間に、中身を横にずらす px（範囲は変えずに、動かした先を見せる）。枠の大きさ（px）を測って、中身（札の置き場所の計算）に渡す。
  * 測れない間（描く前・試験の環境）は、標準の大きさ（600×80）で計算する。
  * 枠の要素は最初から出し続ける（測るのは要素ごとに 1 回なので、あとから現れる要素は測れないため）。
  */
 function PlotBox({
   pointer,
+  shiftPx,
   children,
 }: {
   pointer: PlotPointerHandlers;
+  shiftPx: number;
   children: (plot: { width: number; height: number }) => ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
   const plot = size.width > 0 && size.height > 0 ? size : { width: 600, height: 80 };
   return (
-    <div ref={ref} className="relative min-h-[64px] cursor-crosshair overflow-hidden" style={{ touchAction: "pan-y" }} {...pointer}>
-      {children(plot)}
+    <div ref={ref} data-testid="trend-plot" className="relative min-h-[64px] cursor-crosshair select-none overflow-hidden" style={{ touchAction: "pan-y" }} {...pointer}>
+      {/* 形をいつも同じにする（ずらし始め・終わりで中身を作り直さないため） */}
+      <div className="absolute inset-0" style={shiftPx !== 0 ? { transform: `translateX(${shiftPx}px)` } : undefined}>
+        {children(plot)}
+      </div>
     </div>
   );
 }

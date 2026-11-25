@@ -408,3 +408,23 @@ export function bandEnds(config: WidgetConfig, dataValues: number[], thresholdVa
   const margin = (high - low) * 0.02 || 1;
   return { low: low - margin, high: high + margin };
 }
+
+/**
+ * 計器グラフの行（センサー）ごとの縦軸の最小・最大（config.rowAxisRanges）の 1 つを書き換えた、新しい一覧を返す。
+ * 空欄（null）にした側は消し、最小・最大の両方が空になった行は一覧から消す（その行は自動に戻る）。
+ * 例: setRowAxisRange(undefined, "s1", "min", 1000) → { s1: { min: 1000 } }
+ */
+export function setRowAxisRange(
+  ranges: WidgetConfig["rowAxisRanges"],
+  sensorId: string,
+  side: "min" | "max",
+  value: number | null,
+): NonNullable<WidgetConfig["rowAxisRanges"]> {
+  const row = { ...ranges?.[sensorId] };
+  if (value === null) delete row[side];
+  else row[side] = value;
+  const next = { ...ranges };
+  if (row.min === undefined && row.max === undefined) delete next[sensorId];
+  else next[sensorId] = row;
+  return next;
+}

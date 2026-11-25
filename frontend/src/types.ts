@@ -273,6 +273,9 @@ export interface WidgetConfig {
   floorPlacements?: FloorPlacements;
   // グラフ用: 凡例に出す系列の名前（センサーID → 名前）。未指定はセンサーの名前
   seriesNames?: Record<string, string>;
+  // 計器グラフ用: 行（センサー）ごとの縦軸の最小・最大。キーはセンサー ID。値を入れた行は、その範囲で描き、データがはみ出したら広げる（soft）。
+  // 入れていない行・片方だけ空の側は自動
+  rowAxisRanges?: Record<string, { min?: number; max?: number }>;
   // グラフ用（センサー2つ以上の面・棒）: 積み上げ。未指定は積み上げない
   stack?: "none" | "normal" | "percent";
   // しきい値の表示（線・色の帯・両方・なし）。未指定なら showThresholds に従う（true は「線」）

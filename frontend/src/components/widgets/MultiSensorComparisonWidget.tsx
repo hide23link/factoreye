@@ -36,6 +36,7 @@ import { useDragSelect } from "../../hooks/useDragSelect";
 import { useLiveNow } from "../../hooks/useLiveNow";
 import { fetchSensorReadingsDownsampled } from "../../lib/api";
 import { buildRows, normalizeRows, rawValueOf, summarizeBuckets } from "../../lib/graph-series";
+import { seriesLineRows } from "../../lib/trend-stack";
 import { formatChartTime } from "../../lib/time";
 import {
   absoluteRange,
@@ -44,7 +45,7 @@ import {
   spanHours,
   zoomAround,
 } from "../../lib/timeRange";
-import { useTimeRangeStore } from "../../store/useTimeRangeStore";
+import { setRangeByWheel, useTimeRangeStore } from "../../store/useTimeRangeStore";
 import type { Widget } from "../../types";
 import {
   effectiveRange,
@@ -94,7 +95,8 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   const range = effectiveRange(widget, dashboardRange);
   // リンクの画面では、期間の操作はリンクの画面が受ける（ダッシュボードの期間を変えない）
   const hasOwnRange = range !== dashboardRange || linkView !== undefined;
-  const setRange = useTimeRangeStore((s) => s.setRange);
+  // 拡大は、ブラウザの履歴に積む（「戻る」で前の範囲に戻れる）
+  const pushRange = useTimeRangeStore((s) => s.pushRange);
   // 直近モードでは、横軸（表示範囲）を設定の間隔（既定 30 秒）ごとに動かす
   // 描画のたびに Date.now() を読むと、取得の完了による再描画で取得のキーが毎秒変わり、毎秒取り直すため、useNow の値を使う
   const options = graphDataOptions(widget.config, sensorIds.length);
@@ -107,13 +109,13 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
   const coarse = useCoarsePointer();
   const drag = useDragSelect((from, to) => {
     const next = absoluteRange(from, to);
-    if (next && !hasOwnRange) setRange(next);
+    if (next && !hasOwnRange) pushRange(next);
   });
   // リンクの画面は、指の操作を自分で受ける（ドラッグ選択・吹き出しを付けない）
   const pointerHandlers = withSharedCursor(!linkView, (bounds.to - bounds.from) / GRAPH_BUCKETS, coarse || linkView ? {} : drag.handlers, widget.id);
   // Ctrl（⌘）＋ホイールで、カーソルの時刻を中心に拡大・縮小する
   const chartRef = useCursorZoom(drag.hoverTime, (anchor, factor) => {
-    if (!hasOwnRange) setRange(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
+    if (!hasOwnRange) setRangeByWheel(zoomAround(range, anchor, factor, now, maxRangeForBuild()));
   });
 
   // 範囲・区間数は、ウィジェットの取得と同じ queryKey の形にする（グラフ用の取得を共有する）
@@ -329,7 +331,16 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
     linkView ? null : <GraphValueProbe key="value-probe" items={valueItems} onMeasure={setValueMeasure} />,
   ];
   // 各センサーの区間は時刻が揃わないことが多いため（= 行のほとんどは自分の値が無い）、
-  // 線は connectNulls で自分の点だけを繋ぐ。5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
+  // 線・面には、センサーごとに自分の点だけの行（受信が止まった所は値の無い行で切る）を渡す（seriesLineRows）。
+  // 積み上げは、共通の行（欠けを埋めたもの）のまま、connectNulls でつなぐ（積み上げの計算に共通の行が要るため）。
+  // 5 秒ごとの更新で描き直されて見えないよう、アニメーションは止める
+  const ownRows = (sensorId: string, i: number) => {
+    if (stackId) return {};
+    // 区間の幅は、そのセンサーの取得結果から。まだ取れていなければ、表示範囲を区間の数で割った幅
+    const data = results[i]?.data;
+    const bucketMs = data ? data.bucketSeconds * 1000 : (fetchBounds.to - fetchBounds.from) / GRAPH_BUCKETS;
+    return { data: seriesLineRows(chartData, sensorId, bucketMs), connectNulls: false };
+  };
   const series = sensorIds.map((sensorId, i) => {
     const color = graphColor(widget, i);
     // 二軸のときは、センサーごとに載せる軸を指定する（指定しないと、どの軸にも載らない）
@@ -365,6 +376,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
           strokeOpacity={dim(sensorId)}
           isAnimationActive={false}
           connectNulls
+          {...ownRows(sensorId, i)}
         />
       );
     }
@@ -381,6 +393,7 @@ export function MultiSensorComparisonWidget({ widget, linkView }: { widget: Widg
         dot={style.showPoints}
         isAnimationActive={false}
         connectNulls
+        {...ownRows(sensorId, i)}
       />
     );
   });

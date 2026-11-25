@@ -195,6 +195,30 @@ describe("WidgetSettings: 計器グラフ", () => {
     await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
     expect(lastConfig().colors).toEqual([GRAPH_COLORS[1], GRAPH_COLORS[1]]);
   });
+
+  it("行ごとの縦軸の最小・最大を入れると、その行（センサー）の分だけ rowAxisRanges に保存する", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<WidgetSettings widget={trend} dashboard={dashboardOf(trend)} />);
+
+    await user.type(await screen.findByRole("spinbutton", { name: "圧力の縦軸の最小" }), "1000{Enter}");
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig().rowAxisRanges).toEqual({ s2: { min: 1000 } });
+    // 1 組の欄（縦軸の目安）は無い
+    expect(screen.queryByRole("spinbutton", { name: /縦軸の目安/ })).not.toBeInTheDocument();
+  });
+
+  it("センサーを外すと、その行の縦軸の最小・最大も消す（ほかの行は残す）", async () => {
+    const user = userEvent.setup();
+    const ranged = widget("TrendStack", { sensorId: "s1", config: { sensorIds: ["s1", "s2"], rowAxisRanges: { s1: { max: 50 }, s2: { min: 1000 } } } });
+    renderWithQueryClient(<WidgetSettings widget={ranged} dashboard={dashboardOf(ranged)} />);
+
+    await user.click(await screen.findByRole("button", { name: "圧力を外す" }));
+
+    await waitFor(() => expect(api.updateWidget).toHaveBeenCalled());
+    expect(lastConfig().sensorIds).toEqual(["s1"]);
+    expect(lastConfig().rowAxisRanges).toEqual({ s1: { max: 50 } });
+  });
 });
 
 describe("WidgetSettings: グラフ", () => {
