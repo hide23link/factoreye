@@ -38,7 +38,7 @@ flowchart LR
 |---|---|
 | Backend | Python 3.12 / FastAPI / SQLModel / Alembic |
 | Database | PostgreSQL 15 |
-| Frontend | TypeScript / React 18 / Vite / Zustand / TanStack Query / Recharts / react-grid-layout |
+| Frontend | TypeScript / React 18 / Vite / Zustand / TanStack Query / Recharts / react-grid-layout（計器グラフ・計器・状態の帯などは自前の SVG） |
 
 `docker-compose.yml` は backend（8000）・frontend（3001、nginx）・postgres（`127.0.0.1` のみ）です。
 
@@ -84,6 +84,7 @@ flowchart LR
 | GET / PUT / DELETE | `/api/sensors/{id}` | 詳細・更新・削除 |
 | GET | `/api/sensors/{id}/readings` | 測定値（`from` / `to` / `limit`）。古い分が 1 分にまとめられているときは、続けてその平均を返す |
 | GET | `/api/sensors/{id}/readings/downsampled` | グラフ用の間引き（`buckets` 既定 500・上限 1000） |
+| POST | `/api/sensors/readings/downsampled` | 間引きを複数センサー分まとめて取る（本文 `{"items": [{"sensorId", "from", "to", "buckets"}, …]}`、1 回 50 件まで。件ごとに `status` と結果を返し、1 件の失敗で全体を失敗にしない）。画面のグラフはこちらを使う（§8 グラフの時間操作） |
 | GET | `/api/sensors/{id}/readings/aggregate` | 期間の合計と件数 |
 | GET | `/api/sensors/latest` | 全センサーの最新の測定値を 1 件ずつ（受信の無いセンサーは含めない。全体監視の画面が使う）。`?before=<ISO 時刻>` を付けると、その時刻以前でいちばん新しい値（1 時間前の値を 1 回で取り、「1 時間の変化」に使う） |
 | GET | `/api/readings` | 全センサーの直近測定値 |
@@ -93,6 +94,9 @@ flowchart LR
 | GET / PUT / DELETE | `/api/dashboards/{id}` | 詳細・更新・削除 |
 | POST / PUT / DELETE | `/api/dashboards/{id}/widgets` `/api/widgets/{id}` | ウィジェット操作 |
 | GET / PUT | `/api/settings/notifications` | Discord 通知設定 |
+| GET / POST | `/api/devices` | 機器ごとのキーの一覧・発行（キーはこの応答でだけ返す）（self-hosted のみ。SaaS は 404。[`device-keys.md`](device-keys.md)） |
+| POST / DELETE | `/api/devices/{id}/sensors` `/revoke`、`/api/devices/{id}` | センサーを機器に所属させる・キーを無効にする・機器を削除する（self-hosted のみ） |
+| GET / PUT / POST | `/api/settings/runtime` `/unlock` `/password` `/reflect` | 配布版の設定ファイル（`.env`）の表示・変更（§11「配布版の設定ファイル」）。`GET` は秘密の値を返さない。変更は `unlock`（管理パスワード）で得た許可証（`X-Settings-Token`、30 分）が要る。`reflect` は `.env` を直接編集したあとの反映（self-hosted のみ） |
 | GET / PUT | `/api/settings/display` | 画面の明るさの、全員の初期値（`{"defaultTheme": "dark" \| "light" \| "system"}`。SaaS はワークスペースごと） |
 | GET / POST / PUT / DELETE | `/api/settings/webhooks` | Webhook 購読 |
 | GET / POST | `/api/settings/migration/*` | データ移行（§10.1） |
@@ -103,6 +107,7 @@ flowchart LR
 | GET / POST / DELETE | `/api/sessions/kept` | 永久ログイン（キオスク用）の端末（SaaS、§10） |
 | GET | `/api/me` | 自分の情報とログインの方法（SaaS） |
 | `/api/admin/*` | 管理者 API（SaaS、§10。利用者の「リセット」を含む） | 管理者トークン |
+| GET / POST / DELETE | `/api/admin/failback/*`（`handoffs` `preview` `apply` `r2` `r2/start` `r2/preview` `r2/apply`） | 管理者 API（SaaS）。災害時の控えが受けたデータや、バックアップから、本番に無い行だけを足す（復旧ツール `tools/recovery` を呼ぶ。[`tools/recovery/README.md`](../tools/recovery/README.md)） |
 
 - センサー一覧は `ETag` を返す（`If-None-Match` が一致すれば 304）
 - 版は件数と `updated_at` から作る。作成・更新・削除では、どちらかを必ず変える
@@ -220,17 +225,21 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 ## 8. ダッシュボード
 
 - 12 列グリッドで自由に配置・サイズ変更でき、配置はサーバーに保存する
-- ポーリングで更新する（値・アラームは 5 秒、グラフの直近モードは 30 秒）
+- ポーリングで更新する（値・アラームは 5 秒、グラフの直近モードは各グラフの設定。既定 30 秒）
+- **更新間隔**（上部の時間の操作の「ウィジェット更新」）: 各グラフの設定に従う（既定）／Off（手動）／10 秒／30 秒／1 分／5 分。選ぶと全ウィジェットの測定値の取り直し間隔を上書きする（センサー一覧・警報・全体監視は今までの間隔のまま）。10 秒は self-hosted だけ（SaaS は 30 秒以上）。選択はこの端末に覚えるが、Off は覚えない。横に最終更新時刻と手動の更新（⟳）を出す（`lib/refresh-interval.ts`・`store/useRefreshStore.ts`）
 
 | ウィジェット | 内容 |
 |---|---|
 | `SensorGraph` | 折れ線・棒・面グラフ |
 | `MultiSensorComparison` | 複数センサーを重ねた比較グラフ |
 | `StatValue` | 最新値とスパークライン（しきい値で色が変わる） |
+| `Gauge` | 半円のメーター。針で今の値、色の帯で正常・軽故障・重故障の範囲を出す（目盛りの範囲は自動、設定で手動も可） |
 | `AlarmAlert` | 発生中・確認済みのアラーム（各 100 件まで）と確認ボタン・「すべて確認」。同じ画面に計器グラフがあれば、下に「カーソルの時刻の値」と色の意味（一覧が長いときは値の一覧だけスクロールし、色の意味は切れない） |
 | `ProductionStatus` | 稼働 ON/OFF、直近 1 時間と本日の生産数、目標達成率 |
+| `ProductionPlan` | 生産管理。1 日の目標に対する実績・計画との差（先行・遅れ）・達成率・終業時の見込み・稼働率と停止時間・時間別の実績と計画（勤務時間は既定 8〜17 時・昼休み 60 分） |
 | `TargetStrip` | 達成ストリップ（下記） |
 | `TrendStack` | 計器グラフ（下記） |
+| `StateTimeline` | 状態の帯（下記） |
 | `TapeGauge` | 計器（帯の目盛り。下記） |
 | `DeviceTree` | 機器の系統図（サーバーとつながる機器の受信の様子。下記） |
 | `FloorPlan` | 配置図（部屋の枠の上に機器の札を置く。下記） |
@@ -243,9 +252,19 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 - しきい値の数値は、軽故障と重故障の両方があるとき重故障の線にだけ付ける（文字が重ならないため）。最高・最低の札は、枠の端で切れないよう内側に寄せ（上端の最高は点の下、下端の最低は点の上）、カーソルの値の札と重なるときは反対側へ逃がし、どこに置いても重なるときは薄くする（札の大きさは文字数から見積もる。`lib/trend-stack.ts` の `placeExtremeLabels`）
 - 狭い枠（560px 未満）は、左の欄の代わりに、行の上に名前・範囲・最高・最低を 1 行で出す。時間の軸の目盛りは、軸の幅に合わせて間引く（`maxTimeTicks`）
 - センサーは `config.sensorIds`（先頭は `sensorId` にも入れる）。小数の桁は `config.decimals`（未指定は目盛りの間隔から自動）
+- 縦軸の最小・最大は、行（センサー）ごとに設定できる（`config.rowAxisRanges`。設定画面に行ごとの欄）。空欄の行は自動。値を入れた行も、値がはみ出したときは広げる。線の色もセンサーごとに変えられる
 - 計算は `frontend/src/lib/trend-stack.ts`（線・目盛り・数値を同じ値から求める）
 
-**SensorGraph・MultiSensorComparison**（ふつうのグラフ）の右の「今の値」の札は、その線の最後の点の高さに置き、左の矢印で指す（重なる札は上下にずらす。`lib/graph-value-tags.ts`）。センサーが 1 つのときは札の下に、表示中の期間の最高・最低・平均を出す（複数のときは札の title）。最高＝区間 max の最大、最低＝区間 min の最小、平均＝区間 avg を件数（count）で重みづけした平均（`lib/graph-series.ts` の `summarizeBuckets`）。
+**StateTimeline**（状態の帯）: センサーごとに 1 行、表示期間の「稼働・警報・停止・受信なし」を色の帯で並べる（稼働＝落ち着いた緑、警報＝赤・橙、停止＝灰、受信なし＝橙の斜線。優先は 受信なし > 警報 > 停止 > 稼働）。停止は「停止とみなす値」（`config.stateStopValues`）を設定した行だけ。帯にカーソルを置くと区間と長さ、行の右に稼働率（%）。間引き API（約 144 区間）から `lib/state-timeline.ts` で決める。120 秒未満の欠測は前の状態を引き継ぐ。見えている行だけ取得する
+
+**SensorGraph・MultiSensorComparison**（ふつうのグラフ）の右の「今の値」の札は、その線の最後の点の高さに置き、左の矢印で指す（重なる札は上下にずらす。`lib/graph-value-tags.ts`）。センサーが 1 つのときは札の下に、表示中の期間の最高・最低・平均を出す（複数のときは札の title）。最高＝区間 max の最大、最低＝区間 min の最小、平均＝区間 avg を件数（count）で重みづけした平均（`lib/graph-series.ts` の `summarizeBuckets`）。データが無い区間（計器グラフと同じ判定）では線を切る（つながない）。
+
+### グラフの便利な機能
+- **⋮ メニュー**（グラフ系ウィジェットの右上）: 全画面で見る（`V`、Esc で戻る）・データを表で見る（`T`。新しい順）・CSV を保存（表示中の範囲。UTF-8 BOM 付き、時刻は JST の ISO 8601。取得済みのデータから作り、`=` などで始まる文字は式として動かないようにする）・この期間のリンクをコピー
+- **警報の帯**: 計器グラフの各行とセンサーグラフで、しきい値を超えている区間を縦の帯（橙・赤）で示す。判定は間引きの区間の最高・最低（1 秒だけの超過も見落とさない。`lib/threshold-bands.ts`）。警報の記録（alarms 表）は使わない。見出しで入・切
+- **昨日・先週の重ね**: 計器グラフの各行と、センサーが 1 つのセンサーグラフで「比較: なし / 昨日 / 先週」。同じ間引き API を 24 時間（7 日）前にずらして取り、灰色の点線で重ねる（`lib/compare-range.ts`。選択は端末に覚える）
+- **凡例の表**（複数センサー比較）: 名前・値（カーソルの時刻、なければ最新）・最小・最大・平均。行を押すとその 1 本だけ表示（Shift・Ctrl・⌘ で複数）。設定で入・切
+- **新センサーの通知**: この端末がまだ見ていないセンサーが届くと、画面の上にカード（直近 5 時間のミニグラフ・「ダッシュボードに追加」「あとで」）。初回は通知しない。記録は利用者ごと。代理閲覧中と画面表示モードでは出さない。一度に最大 8 件
 
 **TapeGauge**（計器）: 今の値を四角で囲んだ等幅の数字で出し、下に目盛りの帯を置く。帯には、目盛りの数字・しきい値の印（水色）・色の帯（橙＝軽故障の外、赤＝重故障の外）・今の値の印（▼）・今の傾きが 15 分続いたときの位置（桃色の線）を出す。数字の横に 1 時間あたりの変化。目盛りの範囲は、しきい値と今の値のまわり（`lib/tape-gauge.ts`）。`gaugeMin`・`gaugeMax` で固定もできる。
 
@@ -272,7 +291,7 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 - 格子をやめ、置いた位置の順（上の段から、同じ段なら左から）に縦 1 列へ積む（サーバーが返す順＝作った順にしない）。高さは、計器 168px、系統図 200px、計器グラフは行の数 × 96px + 56px、そのほか 320px。計器（TapeGauge）が続くところは 2 列に並べる（`lib/narrow-layout.ts` の `groupNarrowWidgets`）。上の帯は、期間のボタンだけを出し、ほかの操作は「操作」ボタンで開く
 
 ### 画面の外枠と明るさ
-- 操作室の計器盤にならう。パソコンは左の縦のメニュー（ダッシュボード・全体監視・設定・セットアップガイド）、上の帯に「警報・注意」の表示灯（発生中で未確認のアラームの数）、接続状態（LIVE）、時計（日本時間）。スマホは下のメニュー
+- 操作室の計器盤にならう。パソコンは左の縦のメニュー（ダッシュボード・全体監視・設定・セットアップガイド。「ダッシュボード」の下にダッシュボード名を並べ、押すとそのダッシュボードへ。「ダッシュボード」自体は最後に見たものを開く。`components/DashboardNavList.tsx`）、上の帯に「警報・注意」の表示灯（発生中で未確認のアラームの数）、接続状態（LIVE）、時計（日本時間）。スマホは下のメニュー（セットアップガイドは「ガイド」）と、ダッシュボードの上のタブで切り替える（`DashboardTabs`）。一覧の画面は無い。ダッシュボードの作成は「設定 › ダッシュボード」（作ると編集モードで開く）
 - **全体監視**: 機器ごと（機器に属さないセンサーは 1 つずつ）の札を、警報・注意・正常・未受信の欄に並べ、アラームの記録を新しい順に出す。画面の名前の横（上の帯）に「機器 N · センサー M」。値の桁は単位で決める（℃・hPa は 1 桁、% と ppm は 0 桁）。経過は 12s・5m・3h・2d。正常の欄は 4 台までで、残りは「ほか N 台」で開く。最新の値は `GET /api/sensors/latest` で 1 回で取る。受信が 15 分より古い札は「受信なし」で注意
 - **画面の明るさ**: 設定 › 表示 › 画面の明るさで、暗い（初期値）・明るい・端末に合わせる。保存先は選べる: 「この端末だけ」（既定。この端末のブラウザの `localStorage` の `factoreye.theme`）か、「全員の初期値にする」（サーバーの `display_settings`。`PUT /api/settings/display`。ほかの設定と同じ権限で、SaaS はワークスペースごと）。この端末で選んでいない画面は、ログイン後（self-hosted はすぐ）に全員の初期値を取って使う（取った値は `localStorage` の `factoreye.theme.default` に控え、次に開くときは `public/theme-init.js` が端末の選択 → 控え → 暗い の順で最初から正しい色を付ける。ちらつき防止）。全員の初期値で保存したこの端末は、自分の選択を消して、その値に従う。`GET` は行が無ければ既定（暗い）を返すだけで行を作らず、`PUT` で初めて作る（同時の最初の保存で一意制約にぶつかったら、先にできた行を更新する）
 - **画面表示モード（壁掛け）は常に暗い**: キオスクに入っている間は、選んだ明るさ（端末の選択・全員の初期値）に関係なく `<html data-theme>` を dark に固定し（`useThemeStore` の `kioskLock`）、抜けると選んだ明るさに戻る。`mode`・`saved` は変えない
@@ -293,15 +312,19 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 
 ### グラフの時間操作
 - **直近モード**（右端が常に現在）と**固定モード**（開始・終了を指定）
-- 操作: プリセット（ボタンで 15M・1H・6H・24H・7D、ほかの期間は選択で 5 分〜30 日）、任意の期間、前後へ移動、拡大・縮小、ドラッグで選択、今に戻る
-- 範囲はダッシュボードごとに 1 つ。URL（`?range=1h` / `?from=…&to=…`）に保持し、設定には保存しない
-- グラフは `readings/downsampled` で取得する
+- 操作: プリセット（ボタンで 15M・1H・6H・24H・7D、ほかの期間は選択で 5 分〜30 日）、任意の期間、前後へ移動（◀ ▶）、拡大・縮小（＋ －）、ドラッグで選択、今に戻る
+- 計器グラフ（TrendStack）のマウスの操作（`hooks/useTrendStackZoom.ts`）: 押したまま横に動かして範囲を選ぶ（水色の帯。6px 未満は無視）と、その範囲に拡大。ダブルクリックで 2 倍に縮小（拡大の直後 0.5 秒は無視）。Ctrl（⌘）＋ホイールで、マウスの位置を中心に拡大・縮小。下の時刻の軸を横にドラッグすると左右に移動する（ドラッグ中は線をずらして見せるだけで、**離したときに 1 回だけ**範囲を変えて取り直す。ドラッグ中に取り直すと、全グラフが何度も取得して DB が詰まるため）。指の端末は、カーソルを動かすだけ
+- カーソルの時刻の札は、表示範囲が 1 時間より短いときだけ秒まで出す
+- 範囲はダッシュボードごとに 1 つ。URL（`?range=1h` / `?from=…&to=…`）に保持し、設定には保存しない。ダッシュボードを開いたときも URL に書く。最後に見ていた「直近」の範囲（固定の期間は除く）はこの端末に覚え、URL に指定が無いときに使う
+- **ブラウザの「戻る」**: 範囲を変える操作（グラフの拡大・縮小・移動、上部の期間のボタン・＋ － ◀ ▶・今など）・ダッシュボードの切り替え・ほかの画面への移動は、ブラウザの履歴に 1 つずつ積む。「戻る」で 1 つ前の範囲・ダッシュボードに戻る。履歴にはどのダッシュボードのものかの印を付け、設定などへ移った後の「戻る」1 回で、出る直前の範囲のダッシュボードへ帰る（`store/useTimeRangeStore.ts`）
+- グラフは間引き（`readings/downsampled`）で取得する。画面は、短い時間に重なった取得をまとめ、2 件以上なら**まとめ取得**（`POST /api/sensors/readings/downsampled`）で送る（3 件以上ずつ・最大 4 本の並列。1 件だけ・古いバックエンドのときは単体の API。`lib/downsample-batcher.ts`）。多グラフのダッシュボードで、同時のリクエストと DB の接続の取り合いを減らすため
 - 表示はブラウザの地域時刻、保存と API は UTC
 - SaaS（Free Tier）は保持が 14 日のため、範囲は 14 日まで
 
 ### グラフを 1 画面で開くリンク
 - 形: `https://<アドレス>/?dashboard=<ダッシュボードID>&graph=<ウィジェットID>&range=<N>m`（N は 10〜10080。おかしいときは 30）。ダッシュボードの「🔗 リンク」で作る（グラフ・直近の分数を選んでコピー）
-- 開くと、そのグラフ 1 つを画面いっぱいに出す（ヘッダー・メニューなし、縦スクロールなし）。線・色・縦軸・センサーはウィジェットの設定のまま（同じウィジェットの部品で描く）
+- `graph` を付けない形（`/?dashboard=<ID>&range=<N>m`）は、**ダッシュボード全体**を縦 1 列に並べて開く（`components/link/DashboardLinkView.tsx`。スマホ向け。数値・メーターなど小さいものは 2 列。配置図・機器の系統図は出さない）。期間は上の固定帯に 1 つで全グラフ共通（ボタン 10 分〜24 時間・＋ －・🕘 時刻の指定・今に戻る）。縦はスクロール、横ドラッグで全グラフの時間移動、ピンチで拡大・縮小、タップで全グラフに同じ時刻の線と値。カードの「⤢」でそのグラフ 1 つの画面へ、「戻る」で一覧へ
+- グラフ 1 つのリンクを開くと、そのグラフ 1 つを画面いっぱいに出す（ヘッダー・メニューなし、縦スクロールなし）。線・色・縦軸・センサーはウィジェットの設定のまま（同じウィジェットの部品で描く）
 - 操作: 上下スワイプ・ピンチ・ホイールで拡大・縮小（10 分〜7 日。表示できる最長を超えない）、左右ドラッグで移動（右端は今より先に、左端は戻れる最も古い時刻より前に行かない。長さがその範囲より長ければ今を見る）、期間のボタン（30 分〜24 時間）、時刻の指定（次の項目）、タップで値、ダブルタップ・「今に戻る」でリンクの設定に戻す
 - 時刻の指定（上の期間の表示を押すと、下からシートが出る。長さは今のまま、選んだ時刻から表示する）
   - 近道（1 時間前・3 時間前・今日 8:00・昨日 8:00・昨日 13:00）は押すとすぐ移る。未来になるものは押せない
@@ -320,6 +343,7 @@ Zapier・Make・n8n などへ JSON を `POST` する。タイムアウト 10 秒
 
 - REST（JSON）が届けばどのデバイスでも使える
 - 公式クライアント（MIT）: `clients/arduino-m5stack/`（M5Stack / ESP32）、`clients/raspberry-pi/`（Python）
+- 書き込むだけで使うスケッチ: `clients/FactorEyeNode/`（M5Stack の 7 機種。WiFi・送り先・センサーを、スマホの設定画面で決める。[README](../clients/FactorEyeNode/README.md)）
 
 **送信失敗時の再試行（デバイス側）**
 - 指数バックオフ: 1・2・4・8・16 秒、上限 30 秒、±10% のジッター
@@ -398,8 +422,10 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 
 - **ヘルスチェック**: `GET /health`。DB に接続できないと `status` が `degraded`
 - **バックアップ**: `infra/backup.sh`（`pg_dump`）
-  - 毎日 3 時の cron、保持 7 日。復元は `infra/restore.sh`
-  - 配布版は cron が自動で実行する
+  - 毎日 3 時の cron、保持 7 日。復元は `infra/restore.sh`。使い方は [`infra/README.md`](../infra/README.md)
+  - 配布版は cron が自動で実行する（`./factoreye.sh backup`）
+  - クラウド版は DB を WAL-G で S3 互換の置き場へ送る（[`infra/walg/README.md`](../infra/walg/README.md)）。そのときは `BACKUP_DB=off` で、設定ファイルの暗号化バックアップだけを `backup.sh` で取る
+- **復旧ツール**（`tools/recovery`）: バックアップを今の DB と見比べ、閲覧・CSV の書き出し・無い行だけの書き戻しをする Web 画面（[`tools/recovery/README.md`](../tools/recovery/README.md)）
 - **配布版**: GHCR のイメージ（amd64 / arm64）を使う。手順は [`install/README.md`](../install/README.md)
 - **外部への公開**: 配布版の nginx（3001 番）は HTTPS 非対応。Cloudflare Tunnel・AWS・VPN・Caddy などを前段に置く。方法と注意は [`install/README.md`](../install/README.md#インターネットへの公開)
 
@@ -450,6 +476,7 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 | 変数 | 既定 | 内容 |
 |---|---|---|
 | `DATABASE_URL` | 開発用の値 | DB 接続先。本番では変更する |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `10` / `10` | DB の接続プール（通常に保つ本数と、混雑時に増やせる本数）。合計は 90 以下（PostgreSQL の `max_connections` 既定 100 に収めるため。超えると起動しない） |
 | `INGEST_API_KEY` | `change-this-in-production` | 取り込みの共有キー。本番では変更する |
 | `INGEST_AUTH` | `key` | `off` でキーなし |
 | `INGEST_AUTO_CREATE` / `_MAX_SENSORS` | `false` / `100` | センサーの自動登録とその上限 |
@@ -464,15 +491,21 @@ NaN・Infinity・数値でない値は、送る前に捨てる。
 | `ADMIN_PASSWORD_HASH` | 空 | 配布版の管理パスワード（bcrypt）。空なら画面から設定変更できない |
 | `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Webhook の社内ネットワーク送信を許可 |
 | `JWT_ACCESS_EXPIRE_MINUTES` / `JWT_REFRESH_EXPIRE_DAYS` | `15` / `180` | トークンの有効期限（リフレッシュは使うたびに延びる。永久ログインは期限なし） |
+| `ADMIN_ACCESS_EXPIRE_MINUTES` / `IMPERSONATION_EXPIRE_MINUTES` | `60` / `15` | 管理者トークンと、管理者が利用者として閲覧するときのトークンの有効期限（分。どちらもリフレッシュ不可）。SaaS のみ |
 | `RESEND_API_KEY` | 空 | 登録・ログインのメール（Resend）の API キー（送信のみ・factoreye 専用）。SaaS のみ。空ならメールを送る API は 503 |
 | `MAIL_FROM` | `FactorEye <noreply@hide23.link>` | メールの送信元（Resend で認証済みのドメイン）。SaaS のみ |
 | `EMAIL_DAILY_LIMIT` / `EMAIL_DAILY_WARN_PERCENT` | `60` / `80` | メールの 1 日（UTC）の送信数の上限（一般の依頼だけ。0 以下は上限なし）と、運用者へ知らせる割合（%）。SaaS のみ |
 | `OPS_DISCORD_WEBHOOK_URL` | 空 | 運用者用の Discord Webhook（メール送信数の通知先）。空なら通知しない。SaaS のみ |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `WEBAUTHN_RP_NAME` | 空 / 空 / `FactorEye` | パスキーの rp_id と origin。空なら `FRONTEND_URL` から決める。変えると全員が登録し直し。SaaS のみ |
 | `ADMIN_CREDENTIALS_FILE` | `admin/admins.txt` | 管理者アカウントのファイル |
-| `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（変更には再ビルド） |
+| `FAILBACK_RECOVERY_URL` / `_USERNAME` / `_PASSWORD` | `http://recovery:8090` / `admin` / 空 | 管理画面の「書き戻し」が呼ぶ復旧ツールのアドレスと Basic 認証（復旧ツールの `RECOVERY_USERNAME`・`RECOVERY_PASSWORD` と同じ値）。パスワードが空なら使えない。SaaS のみ |
+| `FAILBACK_TIMEOUT_SECONDS` | `600` | 復旧ツールの応答を待つ秒数（上限 900）。SaaS のみ |
+| `VITE_API_URL` / `VITE_AUTH_MODE` | `http://localhost:8000` / なし | frontend のビルド引数（変更には再ビルド）。`VITE_API_URL=`（空）なら同じオリジンの `/api` を呼ぶ |
+| `VITE_RECOVERY_URL` | なし | frontend のビルド引数。設定の「バックアップ」タブに出す復旧ツールの画面の URL（未設定ならリンクの代わりに案内） |
+| `FE_BIND_HOST` | `0.0.0.0` | `docker-compose.yml` の backend（8000）・frontend（3001）を公開するアドレス。ホストの nginx 経由だけで見せる機器では `127.0.0.1` |
 
 例: `.env.example`（docker compose）、`backend/.env.example`（uvicorn 直接）、`install/.env.template`（配布版）。
+`docker-compose.yml` が backend に渡すのは、`.env.example` に書いた変数だけ（`DB_POOL_SIZE` などを変えるときは、compose の `environment` に足す）。配布版は `config/.env` をそのまま読むので、どの変数も書けば効く。
 
 ### セキュリティ上の前提
 - self-hosted の API は取り込み以外に認証がない。**インターネットに直接公開せず**、LAN や VPN で守る
